@@ -29,7 +29,7 @@ export default function DirectorUpdateView() {
     return [...s];
   }, [projects]);
 
-  const list = filter === 'all' ? projects : projects.filter((p) => (p.owners || []).includes(filter));
+  const list = (filter === 'all' ? projects : projects.filter((p) => (p.owners || []).includes(filter))).filter((p) => !p.archived);
 
   const pendingDecisions = projects.filter((p) => p.update?.needDirector && p.update.dStatus === 'pending');
   const staleCount = projects.filter((p) => staleInfo(p.update).cls !== 'stale-ok' && (p.owners || []).length).length;

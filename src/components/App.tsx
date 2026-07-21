@@ -14,6 +14,7 @@ import MyTasksView from './views/MyTasksView';
 import DirectorUpdateView from './views/DirectorUpdateView';
 import StatsView from './views/StatsView';
 import UsersView from './views/UsersView';
+import TemplatesView from './views/TemplatesView';
 import ProjectDetail from './views/ProjectDetail';
 
 export default function App({ user }: { user: User }) {
@@ -32,6 +33,7 @@ const PAGE_META: Record<string, { title: [string, string]; sub: [string, string]
   dupdate: { title: ['向上汇报', 'Director Update'], sub: ['每周汇报、风险与决策闭环', 'Weekly updates, risks and decisions'] },
   stats: { title: ['统计报表', 'Reports'], sub: ['项目统计 · 按 PM 的项目数与积分', 'Projects and points by PM'] },
   users: { title: ['用户管理', 'Users'], sub: ['账号、角色与访问权限', 'Accounts, roles and access'] },
+  templates: { title: ['模板管理', 'Templates'], sub: ['编辑生产排期与信息清单模板(仅影响之后新建的项目)', 'Edit schedule & checklist templates (affects new projects only)'] },
 };
 
 function Shell() {
@@ -101,6 +103,7 @@ function Shell() {
           {navItem('dupdate', 'presentation', t('向上汇报', 'Director Update'))}
           {navItem('stats', 'trending', t('统计报表', 'Reports'))}
           {isFull(me) && navItem('users', 'settings', t('用户管理', 'Users'))}
+          {isFull(me) && navItem('templates', 'layers', t('模板管理', 'Templates'))}
         </nav>
         <div className="side-user">
           <Avatar name={user.name} size={34} />
@@ -192,12 +195,30 @@ function Shell() {
             {view.name === 'dupdate' && <DirectorUpdateView />}
             {view.name === 'stats' && <StatsView />}
             {view.name === 'users' && <UsersView />}
+            {view.name === 'templates' && <TemplatesView />}
             {view.name === 'project' && <ProjectDetail />}
           </div>
         </section>
       </main>
 
       {showNew && <NewProjectModal onClose={() => setShowNew(false)} />}
+      <Toast />
+    </div>
+  );
+}
+
+/* transient bottom banner for conflict / info messages */
+function Toast() {
+  const { toast, setToast } = useStore();
+  useEffect(() => {
+    if (!toast) return;
+    const id = setTimeout(() => setToast(''), 6000);
+    return () => clearTimeout(id);
+  }, [toast, setToast]);
+  if (!toast) return null;
+  return (
+    <div className="toast" onClick={() => setToast('')}>
+      {toast}
     </div>
   );
 }

@@ -1,6 +1,6 @@
 /* ===== Isomorphic domain logic (used by both server and client) ===== */
 
-import { GENERIC, TPL, diffPoints, STAGES, stageIdx } from './templates';
+import { GENERIC, TPL, diffPoints, STAGES, stageIdx, type Template } from './templates';
 import type {
   ChecklistGroup,
   DirectorUpdate,
@@ -45,8 +45,8 @@ export interface NewProjectInput {
   creative?: string;
 }
 
-export function buildPackage(svc: string, start: string): ServicePackage {
-  const t = TPL[svc] || GENERIC;
+export function buildPackage(svc: string, start: string, tpl?: Template): ServicePackage {
+  const t = tpl || TPL[svc] || GENERIC;
   return {
     svc,
     start: start || '',
@@ -66,7 +66,7 @@ export function buildPackage(svc: string, start: string): ServicePackage {
   };
 }
 
-export function newProject(o: NewProjectInput): Project {
+export function newProject(o: NewProjectInput, tplLookup?: (svc: string) => Template): Project {
   const services = o.services && o.services.length ? o.services : ['others'];
   const difficulty = (o.difficulty || 'medium') as Project['difficulty'];
   return {
@@ -92,7 +92,7 @@ export function newProject(o: NewProjectInput): Project {
       creative: o.creative || '',
     },
     log: [],
-    packages: services.map((svc) => buildPackage(svc, o.start || '')),
+    packages: services.map((svc) => buildPackage(svc, o.start || '', tplLookup ? tplLookup(svc) : undefined)),
   };
 }
 

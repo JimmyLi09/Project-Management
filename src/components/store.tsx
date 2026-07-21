@@ -8,7 +8,7 @@ import type { ProjectAction } from '@/server/actions';
 import type { Identity } from '@/lib/permissions';
 
 export interface View {
-  name: 'overview' | 'projects' | 'team' | 'mytasks' | 'dupdate' | 'stats' | 'users' | 'project';
+  name: 'overview' | 'projects' | 'team' | 'mytasks' | 'dupdate' | 'stats' | 'users' | 'templates' | 'project';
   pid?: string;
   tab?: 'overview' | 'schedule' | 'checklist';
   pkg?: number;
@@ -20,6 +20,8 @@ interface Store {
   projects: Project[];
   users: User[];
   view: View;
+  toast: string;
+  setToast: (s: string) => void;
   setView: (v: View) => void;
   go: (name: View['name']) => void;
   openProject: (pid: string) => void;
@@ -41,6 +43,7 @@ export function StoreProvider({ user, children }: { user: User; children: React.
   const [projects, setProjects] = useState<Project[]>([]);
   const [users, setUsers] = useState<User[]>([]);
   const [view, setView] = useState<View>({ name: 'overview' });
+  const [toast, setToast] = useState('');
 
   const refresh = useCallback(async () => {
     const res = await fetch('/api/projects');
@@ -62,20 +65,24 @@ export function StoreProvider({ user, children }: { user: User; children: React.
   }, [refresh, refreshUsers]);
 
   const dispatch = useCallback(async (pid: string, action: ProjectAction) => {
+    /* send the version we based this edit on, so the server can tell us if a
+       teammate saved in between (last-write-wins, but we surface a warning) */
+    const base = projects.find((p) => p.id === pid)?.updatedAt;
     const res = await fetch(`/api/projects/${pid}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(action),
+      body: JSON.stringify({ ...action, baseUpdatedAt: base }),
     });
     if (res.ok) {
-      const { project } = await res.json();
+      const { project, conflict } = await res.json();
       setProjects((list) => list.map((p) => (p.id === pid ? project : p)));
+      if (conflict) setToast('⚠ 此项目刚被他人同时修改,你的更改已保存(后保存者生效),请刷新核对。');
       return true;
     }
     const body = await res.json().catch(() => ({}));
     alert(body.error || '操作失败');
     return false;
-  }, []);
+  }, [projects]);
 
   const createProject = useCallback(async (input: Record<string, unknown>) => {
     const res = await fetch('/api/projects', {
@@ -110,6 +117,8 @@ export function StoreProvider({ user, children }: { user: User; children: React.
     projects,
     users,
     view,
+    toast,
+    setToast,
     setView,
     go: (name) => setView({ name }),
     openProject: (pid) => setView({ name: 'project', pid, tab: 'overview', pkg: 0 }),
@@ -118,7 +127,7 @@ export function StoreProvider({ user, children }: { user: User; children: React.
     removeProject,
     refresh,
     refreshUsers,
-  }), [user, projects, users, view, dispatch, createProject, removeProject, refresh, refreshUsers]);
+  }), [user, projects, users, view, toast, dispatch, createProject, removeProject, refresh, refreshUsers]);
 
   return <Ctx.Provider value={store}>{children}</Ctx.Provider>;
 }

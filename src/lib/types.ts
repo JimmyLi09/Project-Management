@@ -112,6 +112,8 @@ export interface Project {
   buffer: number;
   created: number;
   invoiced?: boolean;
+  archived?: boolean; // hidden from working views, kept for records/stats
+  updatedAt?: number; // server-injected on read; used for conflict detection
   update: DirectorUpdate;
   parties: Parties;
   log: LogEntry[];

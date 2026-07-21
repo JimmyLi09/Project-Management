@@ -4,6 +4,7 @@ import path from 'path';
 import crypto from 'crypto';
 import type { Project, Role, User } from '@/lib/types';
 import { migrate } from '@/lib/project';
+import { getBuiltinTemplate, SVC, type Template } from '@/lib/templates';
 
 /* On serverless platforms (Vercel) the project directory is read-only and
    ephemeral — keep the demo database in /tmp there. */
@@ -37,6 +38,20 @@ export function getDb(): Database.Database {
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS templates (
+      svc TEXT PRIMARY KEY,
+      data TEXT NOT NULL,
+      updated_at INTEGER NOT NULL,
+      updated_by TEXT NOT NULL DEFAULT ''
+    );
+    CREATE TABLE IF NOT EXISTS audit_log (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      project_id TEXT NOT NULL,
+      at INTEGER NOT NULL,
+      by TEXT NOT NULL,
+      text TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_audit_project ON audit_log(project_id, at DESC);
   `);
   migrateSchema(db);
   seedIfEmpty(db);
@@ -65,8 +80,28 @@ async function backupNow(d: Database.Database) {
   fs.mkdirSync(dir, { recursive: true });
   const today = new Date().toISOString().slice(0, 10);
   const target = path.join(dir, `audax-${today}.db`);
-  if (fs.existsSync(target)) return; // already have today's snapshot
-  await d.backup(target); // online-safe snapshot via SQLite backup API
+  if (!fs.existsSync(target)) {
+    await d.backup(target); // online-safe snapshot via SQLite backup API
+    prune(dir);
+  }
+  /* offsite copy: point AUDAX_BACKUP_DIR at a NAS / synced-drive folder and
+     every daily snapshot is mirrored there too */
+  const offsite = process.env.AUDAX_BACKUP_DIR;
+  if (offsite) {
+    try {
+      fs.mkdirSync(offsite, { recursive: true });
+      const dest = path.join(offsite, `audax-${today}.db`);
+      if (!fs.existsSync(dest)) {
+        fs.copyFileSync(target, dest);
+        prune(offsite);
+      }
+    } catch (e) {
+      console.warn('[backup] offsite copy failed:', e);
+    }
+  }
+}
+
+function prune(dir: string) {
   const cutoff = Date.now() - BACKUP_KEEP_DAYS * 86400000;
   for (const f of fs.readdirSync(dir)) {
     if (!/^audax-\d{4}-\d{2}-\d{2}\.db$/.test(f)) continue;
@@ -155,27 +190,108 @@ export function createUser(
   return { id: Number(info.lastInsertRowid), username, name, role, email, position };
 }
 
-/* ---- projects (stored as JSON documents; all mutations happen server-side) ---- */
+/* ---- projects (stored as JSON documents; all mutations happen server-side) ----
+   `updatedAt` is injected on read (from the row) for client conflict hints and
+   stripped again before persisting. */
 export function listProjects(): Project[] {
-  const rows = getDb().prepare('SELECT data FROM projects ORDER BY created_at DESC').all() as { data: string }[];
-  return rows.map((r) => migrate(JSON.parse(r.data)));
+  const rows = getDb().prepare('SELECT data, updated_at FROM projects ORDER BY created_at DESC').all() as { data: string; updated_at: number }[];
+  return rows.map((r) => {
+    const p = migrate(JSON.parse(r.data));
+    p.updatedAt = r.updated_at;
+    return p;
+  });
 }
 export function getProject(id: string): Project | undefined {
-  const row = getDb().prepare('SELECT data FROM projects WHERE id = ?').get(id) as { data: string } | undefined;
-  return row ? migrate(JSON.parse(row.data)) : undefined;
+  const row = getDb().prepare('SELECT data, updated_at FROM projects WHERE id = ?').get(id) as { data: string; updated_at: number } | undefined;
+  if (!row) return undefined;
+  const p = migrate(JSON.parse(row.data));
+  p.updatedAt = row.updated_at;
+  return p;
 }
 export function insertProject(p: Project) {
+  const { updatedAt: _drop, ...data } = p;
   getDb()
     .prepare('INSERT INTO projects (id, data, created_at, updated_at) VALUES (?, ?, ?, ?)')
-    .run(p.id, JSON.stringify(p), p.created, Date.now());
+    .run(p.id, JSON.stringify(data), p.created, Date.now());
 }
-export function saveProject(p: Project) {
+export function saveProject(p: Project): number {
+  const now = Date.now();
+  const { updatedAt: _drop, ...data } = p;
   getDb()
     .prepare('UPDATE projects SET data = ?, updated_at = ? WHERE id = ?')
-    .run(JSON.stringify(p), Date.now(), p.id);
+    .run(JSON.stringify(data), now, p.id);
+  p.updatedAt = now;
+  return now;
 }
 export function deleteProject(id: string) {
   getDb().prepare('DELETE FROM projects WHERE id = ?').run(id);
+}
+
+/* ---- permanent audit trail (project logs are capped at 200 in-document;
+        every entry is also appended here and never rotated) ---- */
+export function appendAudit(projectId: string, entries: { at: number; by: string; text: string }[]) {
+  if (!entries.length) return;
+  const ins = getDb().prepare('INSERT INTO audit_log (project_id, at, by, text) VALUES (?, ?, ?, ?)');
+  for (const e of entries) ins.run(projectId, e.at, e.by, e.text);
+}
+export function listAudit(projectId: string, limit = 1000) {
+  return getDb()
+    .prepare('SELECT at, by, text FROM audit_log WHERE project_id = ? ORDER BY at DESC LIMIT ?')
+    .all(projectId, limit) as { at: number; by: string; text: string }[];
+}
+
+/* ---- editable production templates (override built-ins; new projects only) ---- */
+export function getTemplateOverride(svc: string): Template | null {
+  const row = getDb().prepare('SELECT data FROM templates WHERE svc = ?').get(svc) as { data: string } | undefined;
+  if (!row) return null;
+  try { return JSON.parse(row.data) as Template; } catch { return null; }
+}
+export function getEffectiveTemplate(svc: string): Template {
+  return getTemplateOverride(svc) || getBuiltinTemplate(svc);
+}
+export function saveTemplateOverride(svc: string, tpl: Template, by: string) {
+  if (!SVC[svc]) throw new Error('unknown service');
+  getDb()
+    .prepare('INSERT INTO templates (svc, data, updated_at, updated_by) VALUES (?, ?, ?, ?) ON CONFLICT(svc) DO UPDATE SET data = excluded.data, updated_at = excluded.updated_at, updated_by = excluded.updated_by')
+    .run(svc, JSON.stringify(tpl), Date.now(), by);
+}
+export function resetTemplateOverride(svc: string) {
+  getDb().prepare('DELETE FROM templates WHERE svc = ?').run(svc);
+}
+export function listTemplateOverrides(): { svc: string; updated_at: number; updated_by: string }[] {
+  return getDb().prepare('SELECT svc, updated_at, updated_by FROM templates').all() as { svc: string; updated_at: number; updated_by: string }[];
+}
+
+/* ---- user editing (PD/BD); renames propagate to project ownership &
+        assignments because matching is by name ---- */
+export function updateUser(
+  id: number,
+  fields: { name?: string; email?: string; position?: string; role?: Role },
+): User | undefined {
+  const u = getUserById(id);
+  if (!u) return undefined;
+  const name = fields.name !== undefined ? fields.name : u.name;
+  const email = fields.email !== undefined ? fields.email : u.email;
+  const position = fields.position !== undefined ? fields.position : u.position;
+  const role = fields.role !== undefined ? fields.role : u.role;
+  getDb()
+    .prepare('UPDATE users SET name = ?, email = ?, position = ?, role = ? WHERE id = ?')
+    .run(name, email, position, role, id);
+  if (name !== u.name) propagateRename(u.name, name);
+  return { ...u, name, email, position, role };
+}
+
+function propagateRename(oldName: string, newName: string) {
+  for (const p of listProjects()) {
+    let changed = false;
+    if ((p.owners || []).includes(oldName)) { p.owners = p.owners.map((n) => (n === oldName ? newName : n)); changed = true; }
+    if ((p.perm || []).includes(oldName)) { p.perm = p.perm.map((n) => (n === oldName ? newName : n)); changed = true; }
+    p.packages.forEach((pk) => {
+      if (pk.owner === oldName) { pk.owner = newName; changed = true; }
+      pk.schedule.forEach((r) => { if (r.assignee === oldName) { r.assignee = newName; changed = true; } });
+    });
+    if (changed) saveProject(p);
+  }
 }
 
 /* ---- default accounts so the system is usable out of the box ---- */

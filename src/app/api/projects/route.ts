@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { insertProject, listProjects } from '@/server/db';
+import { appendAudit, getEffectiveTemplate, insertProject, listProjects } from '@/server/db';
 import { currentUser } from '@/server/session';
 import { canCreate, identityOf } from '@/lib/permissions';
 import { newProject } from '@/lib/project';
@@ -37,8 +37,9 @@ export async function POST(req: NextRequest) {
     landscape: String(body.landscape || ''),
     interior: String(body.interior || ''),
     creative: String(body.creative || ''),
-  });
+  }, getEffectiveTemplate); // use PD/BD-edited templates when present
   p.log.unshift({ at: Date.now(), by: user.name, text: '创建项目' });
   insertProject(p);
+  appendAudit(p.id, [{ at: Date.now(), by: user.name, text: '创建项目 Created' }]);
   return NextResponse.json({ project: p });
 }

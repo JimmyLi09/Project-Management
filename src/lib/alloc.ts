@@ -14,6 +14,7 @@ export interface PersonLoad {
 }
 
 const isActive = (p: Project) => {
+  if (p.archived) return false;
   const s = projStage(p);
   return s !== 'complete' && s !== 'invoice';
 };

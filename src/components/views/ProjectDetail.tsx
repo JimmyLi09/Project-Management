@@ -50,6 +50,7 @@ export default function ProjectDetail() {
             <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
               <h1 style={{ fontSize: 22, fontWeight: 600, color: 'var(--navy900)', letterSpacing: '-.01em' }}>{p.name}</h1>
               <Pill m={HM[h]} />
+              {p.archived && <span className="badge" style={{ background: '#eef1f4', color: '#51606f' }}>📦 {t('已归档', 'Archived')}</span>}
             </div>
             <div style={{ fontSize: 13.5, color: 'var(--text2)', marginTop: 4 }}>
               {p.client || '—'} · PM {(p.owners || []).join(', ') || t('未指派', 'unassigned')}
@@ -79,6 +80,11 @@ export default function ProjectDetail() {
               )}
               {p.invoiced && canCommercial(me, p) && (
                 <button className="btn-line sm" onClick={() => dispatch(p.id, { type: 'toggleInvoiced' })}>{t('撤销开票', 'Undo invoiced')}</button>
+              )}
+              {canAssign(me, p) && (
+                <button className="btn-line sm" onClick={() => dispatch(p.id, { type: 'setArchived', value: !p.archived })}>
+                  📦 {p.archived ? t('取消归档', 'Unarchive') : t('归档', 'Archive')}
+                </button>
               )}
               {isFull(me) && (
                 <button className="btn-line sm danger" onClick={async () => {
@@ -178,6 +184,7 @@ function OverviewTab({ p, onSchedule }: { p: Project; onSchedule: (pkg: number) 
   const fin = plannedFinish(p);
   const t0 = todayMid();
   const [logOpen, setLogOpen] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
   const log = p.log || [];
 
   const risks: { title: string; detail: string; color: string; icon: string }[] = [];
@@ -304,13 +311,19 @@ function OverviewTab({ p, onSchedule }: { p: Project; onSchedule: (pkg: number) 
             </div>
           ))}
           {log.length === 0 && <div style={{ fontSize: 12.5, color: 'var(--text2)', padding: '8px 0' }}>{t('暂无操作记录', 'No activity yet')}</div>}
-          {log.length > 5 && (
-            <button className="btn-line sm" style={{ marginTop: 8 }} onClick={() => setLogOpen(!logOpen)}>
-              {logOpen ? t('收起', 'Collapse') : t(`查看更多 (${log.length})`, `Show more (${log.length})`)}
+          <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+            {log.length > 5 && (
+              <button className="btn-line sm" onClick={() => setLogOpen(!logOpen)}>
+                {logOpen ? t('收起', 'Collapse') : t(`查看更多 (${log.length})`, `Show more (${log.length})`)}
+              </button>
+            )}
+            <button className="btn-line sm" onClick={() => setHistoryOpen(true)} title={t('永久审计记录(不受 200 条上限影响)', 'Permanent audit trail (not capped)')}>
+              🗂 {t('完整历史', 'Full history')}
             </button>
-          )}
+          </div>
         </div>
       </div>
+      {historyOpen && <HistoryModal pid={p.id} onClose={() => setHistoryOpen(false)} />}
     </div>
   );
 }
@@ -320,6 +333,37 @@ function Row({ k, v }: { k: string; v: string }) {
     <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10 }}>
       <span style={{ color: 'var(--text2)' }}>{k}</span>
       <span className="tnum" style={{ fontWeight: 600 }}>{v}</span>
+    </div>
+  );
+}
+
+function HistoryModal({ pid, onClose }: { pid: string; onClose: () => void }) {
+  const { t } = useLang();
+  const [entries, setEntries] = useState<{ at: number; by: string; text: string }[] | null>(null);
+  React.useEffect(() => {
+    fetch(`/api/projects/${pid}/audit`).then((r) => r.ok ? r.json() : { entries: [] }).then((d) => setEntries(d.entries));
+  }, [pid]);
+  return (
+    <div className="overlay" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="modal" style={{ maxWidth: 620 }}>
+        <div style={{ display: 'flex', alignItems: 'center', marginBottom: 6 }}>
+          <h2 style={{ margin: 0 }}>{t('完整操作历史', 'Full activity history')}</h2>
+          <div style={{ flex: 1 }} />
+          <button className="btn-line sm" onClick={onClose}>{t('关闭', 'Close')}</button>
+        </div>
+        <div className="msub">{t('永久审计记录,不受项目内 200 条上限限制。', 'Permanent audit trail — not subject to the 200-entry in-project cap.')}</div>
+        {entries === null && <div style={{ color: 'var(--text2)', fontSize: 13, padding: 12 }}>{t('加载中…', 'Loading…')}</div>}
+        {entries && entries.length === 0 && <div style={{ color: 'var(--text2)', fontSize: 13, padding: 12 }}>{t('暂无记录', 'No entries')}</div>}
+        {entries && entries.map((e, i) => (
+          <div key={i} style={{ display: 'flex', gap: 11, padding: '9px 0', borderTop: '1px solid var(--row-line2)' }}>
+            <Avatar name={e.by} size={24} />
+            <div style={{ flex: 1, lineHeight: 1.4, minWidth: 0 }}>
+              <div style={{ fontSize: 12.5 }}><b style={{ fontWeight: 600 }}>{e.by}</b> {e.text}</div>
+              <div className="tnum" style={{ fontSize: 11, color: 'var(--text2)' }}>{fmtDate(new Date(e.at))} {new Date(e.at).toTimeString().slice(0, 5)}</div>
+            </div>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

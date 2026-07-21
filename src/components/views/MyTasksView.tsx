@@ -22,6 +22,7 @@ export default function MyTasksView() {
   const items = useMemo(() => {
     const out: Item[] = [];
     projects.forEach((p) => {
+      if (p.archived) return;
       const isOwner = (p.owners || []).includes(me.name);
       p.packages.forEach((pk, pi) => {
         const pd = planDates(pk, pkgStart(p, pk));

@@ -17,7 +17,7 @@ export default function TeamView() {
   const pms = loads.filter((l) => l.isPM);
   const prod = loads.filter((l) => !l.isPM);
 
-  const activeProjects = projects.filter((p) => { const s = projStage(p); return s !== 'complete' && s !== 'invoice'; });
+  const activeProjects = projects.filter((p) => { if (p.archived) return false; const s = projStage(p); return s !== 'complete' && s !== 'invoice'; });
   const avgLoad = loads.length ? Math.round(loads.reduce((a, l) => a + l.load, 0) / loads.length) : 0;
   const overloaded = loads.filter((l) => l.load >= 85).length;
   const totalPts = projects.reduce((a, p) => a + projPoints(p), 0);

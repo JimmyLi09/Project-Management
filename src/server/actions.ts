@@ -36,6 +36,7 @@ export type ProjectAction =
   | { type: 'addOwner'; name: string }
   | { type: 'removeOwner'; name: string }
   | { type: 'transferProject'; from: string; to: string; includeTasks: boolean }
+  | { type: 'setArchived'; value: boolean }
   | { type: 'editUpdate'; field: 'done' | 'nextNodes' | 'risks' | 'needDirector' | 'clientPending' | 'budget'; value: string }
   | { type: 'setDecision'; field: 'dDecision' | 'dStatus'; value: string }
   | { type: 'toggleInvoiced' };
@@ -325,6 +326,12 @@ export function applyAction(u: Identity, p: Project, a: ProjectAction): void {
       if (!canCommercial(u, p)) throw new PermissionError('仅 PD/BD/销售可标记开票收尾');
       p.invoiced = !p.invoiced;
       logIt(p, u.name, p.invoiced ? '标记开票/收尾' : '撤销开票');
+      break;
+    }
+    case 'setArchived': {
+      if (!canAssign(u, p)) throw new PermissionError('仅 PD/BD 可归档项目');
+      p.archived = !!a.value;
+      logIt(p, u.name, p.archived ? '归档项目 Archived' : '取消归档 Unarchived');
       break;
     }
     default:

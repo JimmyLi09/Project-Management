@@ -78,7 +78,7 @@ pm2 save
 
 - **手动备份**:直接复制 `data` 整个文件夹到任何地方即可。
 - **恢复**:停止服务(`pm2 stop audax`),用备份文件覆盖 `data/audax.db`,再 `pm2 start audax`。
-- 建议:定期把 `data/backups` 拷到另一台机器/网盘(异机备份)。
+- **异机备份(推荐)**:设置环境变量 `AUDAX_BACKUP_DIR` 指向一个 NAS / 网盘同步文件夹,每日快照会自动多存一份到那里,硬盘损坏也不丢。示例(Mac/Linux):`AUDAX_BACKUP_DIR=/Volumes/NAS/audax-backup pm2 start npm --name audax -- start`。
 
 ## 七、可选环境变量
 
@@ -86,6 +86,7 @@ pm2 save
 |---|---|---|
 | `PORT` | 端口 | 3000 |
 | `AUDAX_DATA_DIR` | 数据目录位置 | 项目内 `data/` |
+| `AUDAX_BACKUP_DIR` | **异机备份目录**:指向 NAS / 网盘同步文件夹,每日快照会额外复制一份到这里 | 不复制 |
 | `AUDAX_NO_BACKUP=1` | 关闭内置自动备份 | 不关闭 |
 | `SESSION_SECRET` | 自定义会话密钥 | 自动生成并保存 |
 

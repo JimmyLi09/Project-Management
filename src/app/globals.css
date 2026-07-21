@@ -192,6 +192,15 @@ textarea.in { width: 100%; min-height: 46px; resize: vertical }
 .detail-tab:hover { color: var(--navy900) }
 .detail-tab.active { color: var(--navy900); border-color: var(--navy900) }
 
+/* ── conflict / info toast ──────────────────────────────── */
+.toast {
+  position: fixed; left: 50%; bottom: 26px; transform: translateX(-50%);
+  max-width: 560px; z-index: 80; cursor: pointer;
+  background: #10243D; color: #fff; font-size: 13px; font-weight: 500;
+  padding: 12px 18px; border-radius: 10px; box-shadow: var(--shadow-lg);
+  animation: fadeIn .2s ease;
+}
+
 @media (max-width: 1100px) {
   .kpi-grid, .kpi-grid.four { grid-template-columns: repeat(2, 1fr) }
   .grid-2col, .grid-2col-r { grid-template-columns: 1fr !important }

@@ -58,6 +58,8 @@ export interface Template {
   checklist: TplChecklistGroup[];
 }
 
+export const getBuiltinTemplate = (svc: string): Template => TPL[svc] || GENERIC;
+
 export const GENERIC: Template = {
   schedule: [
     ['1', '信息', '信息收集 / 需求确认', 'Info & brief', 'PM', 1, '—', ' ', false],

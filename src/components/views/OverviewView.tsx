@@ -18,7 +18,7 @@ export default function OverviewView() {
   const t0 = todayMid();
 
   const active = useMemo(
-    () => projects.filter((p) => { const s = projStage(p); return s !== 'complete' && s !== 'invoice'; }),
+    () => projects.filter((p) => { if (p.archived) return false; const s = projStage(p); return s !== 'complete' && s !== 'invoice'; }),
     [projects],
   );
   const monthStart = new Date(t0.getFullYear(), t0.getMonth(), 1).getTime();
@@ -45,6 +45,7 @@ export default function OverviewView() {
   const myTasks = useMemo(() => {
     const out: { title: string; titleEn: string; project: string; due: Date | null; over: boolean; status: string }[] = [];
     projects.forEach((p) => {
+      if (p.archived) return;
       const isOwner = (p.owners || []).includes(me.name);
       p.packages.forEach((pk) => {
         const pd = planDates(pk, pkgStart(p, pk));
@@ -65,6 +66,7 @@ export default function OverviewView() {
   const directorItems = useMemo(() => {
     const items: { icon: string; color: string; title: string; detail: string; pid: string }[] = [];
     projects.forEach((p) => {
+      if (p.archived) return;
       const u = p.update;
       if (u?.needDirector && u.dStatus === 'pending') {
         items.push({

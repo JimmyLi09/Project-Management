@@ -5,7 +5,7 @@ import { useStore } from '../store';
 import { ROLE_LABEL } from '@/lib/permissions';
 import { useLang } from '@/lib/i18n';
 import { Avatar } from '../ui';
-import type { Role } from '@/lib/types';
+import type { Role, User } from '@/lib/types';
 
 const ROLE_DESC: Record<Role, [string, string]> = {
   director: ['全部权限(项目/人员/积分/决策)', 'Full access (projects, people, points, decisions)'],
@@ -19,6 +19,7 @@ const ROLE_DESC: Record<Role, [string, string]> = {
 export default function UsersView() {
   const { users, refreshUsers } = useStore();
   const { lang, t } = useLang();
+  const [editUser, setEditUser] = useState<User | null>(null);
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [name, setName] = useState('');
@@ -63,6 +64,7 @@ export default function UsersView() {
               <th style={th}>Email</th>
               <th style={th}>{t('职位', 'Position')}</th>
               <th style={th}>{t('系统角色', 'Role')}</th>
+              <th style={th}></th>
             </tr>
             {users.map((u) => (
               <tr key={u.id}>
@@ -71,6 +73,7 @@ export default function UsersView() {
                 <td style={{ ...cell, color: 'var(--text2)', fontSize: 12 }}>{u.email || '—'}</td>
                 <td style={{ ...cell, fontSize: 12.5 }}>{u.position || '—'}</td>
                 <td style={cell} title={lang === 'zh' ? ROLE_DESC[u.role][0] : ROLE_DESC[u.role][1]}>{ROLE_LABEL[u.role]}</td>
+                <td style={cell}><button className="btn-line sm" onClick={() => setEditUser(u)}>{t('编辑', 'Edit')}</button></td>
               </tr>
             ))}
           </tbody>
@@ -98,6 +101,53 @@ export default function UsersView() {
         </div>
         <button className="btn-navy" disabled={busy} style={{ marginTop: 4 }}>{busy ? t('创建中…', 'Creating…') : t('创建账号', 'Create account')}</button>
       </form>
+      {editUser && <EditUserModal u={editUser} onClose={() => setEditUser(null)} onSaved={() => { setEditUser(null); refreshUsers(); }} />}
+    </div>
+  );
+}
+
+function EditUserModal({ u, onClose, onSaved }: { u: User; onClose: () => void; onSaved: () => void }) {
+  const { t, lang } = useLang();
+  const [name, setName] = useState(u.name);
+  const [email, setEmail] = useState(u.email || '');
+  const [position, setPosition] = useState(u.position || '');
+  const [role, setRole] = useState<Role>(u.role);
+  const [msg, setMsg] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  async function save() {
+    setBusy(true); setMsg('');
+    const res = await fetch('/api/users', {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: u.id, name, email, position, role }),
+    });
+    setBusy(false);
+    if (res.ok) onSaved();
+    else { const b = await res.json().catch(() => ({})); setMsg(b.error || t('保存失败', 'Save failed')); }
+  }
+
+  return (
+    <div className="overlay" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="modal" style={{ maxWidth: 440 }}>
+        <h2>{t('编辑用户', 'Edit user')} · {u.username}</h2>
+        <div className="msub">{t('改姓名会自动同步到所有项目的负责人与任务指派(按姓名匹配)。账号名与密码不在此修改。', 'Renaming propagates to all project ownership and task assignments (matched by name). Username and password are not changed here.')}</div>
+        {msg && <div className="login-err">{msg}</div>}
+        <div className="field"><label>{t('姓名', 'Name')}</label><input value={name} onChange={(e) => setName(e.target.value)} /></div>
+        <div className="field"><label>Email</label><input type="email" value={email} onChange={(e) => setEmail(e.target.value)} /></div>
+        <div className="field"><label>{t('职位', 'Position')}</label><input value={position} onChange={(e) => setPosition(e.target.value)} /></div>
+        <div className="field">
+          <label>{t('系统角色', 'Role')}</label>
+          <select value={role} onChange={(e) => setRole(e.target.value as Role)}>
+            {(Object.keys(ROLE_LABEL) as Role[]).map((r) => (
+              <option key={r} value={r}>{ROLE_LABEL[r]} — {lang === 'zh' ? ROLE_DESC[r][0] : ROLE_DESC[r][1]}</option>
+            ))}
+          </select>
+        </div>
+        <div className="modal-actions">
+          <button className="btn-line" onClick={onClose}>{t('取消', 'Cancel')}</button>
+          <button className="btn-navy" onClick={save} disabled={busy}>{busy ? t('保存中…', 'Saving…') : t('保存', 'Save')}</button>
+        </div>
+      </div>
     </div>
   );
 }

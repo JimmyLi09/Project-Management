@@ -14,7 +14,10 @@ export default function ProjectsView({ search = '' }: { search?: string }) {
   const { lang, t } = useLang();
   const [typeFilter, setTypeFilter] = useState('all');
   const [pmFilter, setPmFilter] = useState('all');
+  const [showArchived, setShowArchived] = useState(false);
   const [q, setQ] = useState(search);
+
+  const archivedCount = projects.filter((p) => p.archived).length;
 
   const pms = useMemo(() => {
     const s = new Set<string>();
@@ -29,6 +32,7 @@ export default function ProjectsView({ search = '' }: { search?: string }) {
   }, [projects]);
 
   const list = projects.filter((p) => {
+    if (!!p.archived !== showArchived) return false; // archived tab is separate
     if (typeFilter !== 'all' && !p.services.includes(typeFilter)) return false;
     if (pmFilter !== 'all' && !(p.owners || []).includes(pmFilter)) return false;
     const needle = q.trim().toLowerCase();
@@ -57,6 +61,9 @@ export default function ProjectsView({ search = '' }: { search?: string }) {
               <Avatar name={n} size={20} />{n}
             </button>
           ))}
+          <button className={`chip ${showArchived ? 'active' : ''}`} onClick={() => setShowArchived(!showArchived)} title={t('查看已归档项目', 'View archived projects')}>
+            📦 {t('已归档', 'Archived')}{archivedCount ? ` ${archivedCount}` : ''}
+          </button>
         </div>
       </div>
 
