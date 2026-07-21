@@ -6,6 +6,7 @@ import type { Project, User } from './types';
 export interface PersonLoad {
   name: string;
   role: string; // display role
+  position: string; // job title from the account, if any
   isPM: boolean;
   activeProjects: Project[];
   openTasks: number;
@@ -21,13 +22,13 @@ const isActive = (p: Project) => {
 export function teamLoads(projects: Project[], users: User[]): PersonLoad[] {
   const map = new Map<string, PersonLoad>();
   const ensure = (name: string, role: string, isPM: boolean) => {
-    if (!map.has(name)) map.set(name, { name, role, isPM, activeProjects: [], openTasks: 0, load: 0 });
+    if (!map.has(name)) map.set(name, { name, role, position: '', isPM, activeProjects: [], openTasks: 0, load: 0 });
     return map.get(name)!;
   };
 
   users.forEach((u) => {
-    if (u.role === 'pm') ensure(u.name, 'Project Manager', true);
-    else if (u.role === 'member') ensure(u.name, 'Production', false);
+    if (u.role === 'pm') ensure(u.name, 'Project Manager', true).position = u.position || '';
+    else if (u.role === 'member') ensure(u.name, 'Production', false).position = u.position || '';
   });
 
   projects.forEach((p) => {

@@ -7,6 +7,8 @@ export interface User {
   username: string;
   name: string;
   role: Role;
+  email: string;
+  position: string; // job title, e.g. "Senior PM" / "3D Artist"
 }
 
 export type ScheduleStatus = 'todo' | 'wip' | 'done' | 'block';

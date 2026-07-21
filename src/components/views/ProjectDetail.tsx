@@ -14,12 +14,14 @@ import { Avatar, HM, Icon, Pill, ProgressBar, TM } from '../ui';
 import ScheduleTab from './ScheduleTab';
 import ChecklistTab from './ChecklistTab';
 import ExportOverlay from './ExportOverlay';
+import TransferModal from '../TransferModal';
 import type { Project } from '@/lib/types';
 
 export default function ProjectDetail() {
   const { projects, view, setView, me, dispatch, removeProject, go, users } = useStore();
   const { lang, t } = useLang();
   const [showExport, setShowExport] = useState(false);
+  const [transferFrom, setTransferFrom] = useState<string | null>(null);
   const p = projects.find((x) => x.id === view.pid);
   if (!p) {
     return <div className="panel" style={{ padding: 40, textAlign: 'center', color: 'var(--text2)' }}>{t('项目加载中…', 'Loading project…')}</div>;
@@ -118,6 +120,18 @@ export default function ProjectDetail() {
               const nm = prompt(t(`指派 PM 的名字:${hint ? `\n(已有账号: ${hint})` : ''}`, `PM name to assign:${hint ? `\n(accounts: ${hint})` : ''}`));
               if (nm && nm.trim()) dispatch(p.id, { type: 'addOwner', name: nm.trim() });
             }}>+ {t('指派', 'Assign')}</button>
+            {(p.owners || []).length > 0 && (
+              <button className="btn-line sm" title={t('休假/离职时把项目移交他人', 'Hand the project to someone else')}
+                onClick={() => {
+                  let f = p.owners[0];
+                  if (p.owners.length > 1) {
+                    const pick = prompt(t(`转出哪位?(${p.owners.join(' / ')})`, `Transfer from whom? (${p.owners.join(' / ')})`), p.owners[0]);
+                    if (!pick || !p.owners.includes(pick.trim())) return;
+                    f = pick.trim();
+                  }
+                  setTransferFrom(f);
+                }}>⇄ {t('转交', 'Transfer')}</button>
+            )}
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <span className="mini-label">{t('难度', 'Difficulty')}</span>
@@ -147,6 +161,9 @@ export default function ProjectDetail() {
       {tab === 'schedule' && <ScheduleTab p={p} pkgIdx={pkgIdx} onExport={() => setShowExport(true)} onPkg={(i) => setView({ ...view, pkg: i })} />}
       {tab === 'checklist' && <ChecklistTab p={p} pkgIdx={pkgIdx} onExport={() => setShowExport(true)} onPkg={(i) => setView({ ...view, pkg: i })} />}
       {showExport && <ExportOverlay p={p} onClose={() => setShowExport(false)} />}
+      {transferFrom && (
+        <TransferModal from={transferFrom} pid={p.id} onClose={() => setTransferFrom(null)} />
+      )}
     </>
   );
 }

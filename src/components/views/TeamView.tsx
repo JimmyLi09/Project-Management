@@ -1,15 +1,18 @@
 'use client';
 
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import { useStore } from '../store';
 import { teamLoads } from '@/lib/alloc';
 import { projPoints, projStage } from '@/lib/project';
+import { canAssign } from '@/lib/permissions';
 import { useLang } from '@/lib/i18n';
 import { Avatar, ProgressBar, healthColor } from '../ui';
+import TransferModal from '../TransferModal';
 
 export default function TeamView() {
-  const { projects, users, openProject } = useStore();
+  const { projects, users, openProject, me } = useStore();
   const { t } = useLang();
+  const [transferFrom, setTransferFrom] = useState<string | null>(null);
   const loads = useMemo(() => teamLoads(projects, users), [projects, users]);
   const pms = loads.filter((l) => l.isPM);
   const prod = loads.filter((l) => !l.isPM);
@@ -52,7 +55,9 @@ export default function TeamView() {
                     <Avatar name={m.name} size={42} />
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--navy900)' }}>{m.name}</div>
-                      <div style={{ fontSize: 12.5, color: 'var(--text2)' }}>{m.isPM ? t('项目经理', 'Project Manager') : t('制作', 'Production')}</div>
+                      <div style={{ fontSize: 12.5, color: 'var(--text2)' }}>
+                        {m.position || (m.isPM ? t('项目经理', 'Project Manager') : t('制作', 'Production'))}
+                      </div>
                     </div>
                     <span className="badge" style={{ background: m.load >= 85 ? '#fbe9e7' : m.load >= 70 ? '#fbf0dc' : '#e6f2ec', color: m.load >= 85 ? '#b23a32' : m.load >= 70 ? '#a8690b' : '#0f6a48' }}>
                       {loadLabel}
@@ -71,7 +76,19 @@ export default function TeamView() {
                     <div><div className="tnum" style={{ fontSize: 20, fontWeight: 600, color: 'var(--navy900)' }}>{pts}</div><div style={{ fontSize: 11, color: 'var(--text2)' }}>{t('积分', 'Points')}</div></div>
                   </div>
                   <div style={{ borderTop: '1px solid var(--row-line)', paddingTop: 13 }}>
-                    <div className="mini-label" style={{ marginBottom: 8 }}>{t('参与项目', 'Assigned to')}</div>
+                    <div style={{ display: 'flex', alignItems: 'center', marginBottom: 8 }}>
+                      <div className="mini-label">{t('参与项目', 'Assigned to')}</div>
+                      <div style={{ flex: 1 }} />
+                      {canAssign(me) && m.activeProjects.length > 0 && (
+                        <button
+                          style={{ fontSize: 11.5, fontWeight: 600, color: 'var(--navy700)' }}
+                          title={t('休假/离职:把此人全部项目一次性移交', 'Vacation/departure: hand over all their projects at once')}
+                          onClick={() => setTransferFrom(m.name)}
+                        >
+                          ⇄ {t('转交全部', 'Transfer all')}
+                        </button>
+                      )}
+                    </div>
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
                       {m.activeProjects.length === 0 && <span style={{ fontSize: 11.5, color: 'var(--text2)', padding: '4px 2px' }}>{t('可指派', 'Available for assignment')}</span>}
                       {m.activeProjects.map((p) => (
@@ -87,6 +104,7 @@ export default function TeamView() {
           </div>
         </div>
       ))}
+      {transferFrom && <TransferModal from={transferFrom} onClose={() => setTransferFrom(null)} />}
     </>
   );
 }

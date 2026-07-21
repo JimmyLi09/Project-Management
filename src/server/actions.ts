@@ -35,12 +35,36 @@ export type ProjectAction =
   | { type: 'setPoints'; value: number }
   | { type: 'addOwner'; name: string }
   | { type: 'removeOwner'; name: string }
+  | { type: 'transferProject'; from: string; to: string; includeTasks: boolean }
   | { type: 'editUpdate'; field: 'done' | 'nextNodes' | 'risks' | 'needDirector' | 'clientPending' | 'budget'; value: string }
   | { type: 'setDecision'; field: 'dDecision' | 'dStatus'; value: string }
   | { type: 'toggleInvoiced' };
 
 export class PermissionError extends Error {}
 export class ValidationError extends Error {}
+
+/* Replace `from` with `to` in a project's ownership (and optionally task
+   assignments and per-package owners). Returns true if anything changed. */
+export function transferInProject(
+  p: Project, by: string, from: string, to: string, includeTasks: boolean,
+): boolean {
+  let changed = false;
+  if ((p.owners || []).includes(from)) {
+    p.owners = p.owners.filter((n) => n !== from);
+    if (!p.owners.includes(to)) p.owners.push(to);
+    changed = true;
+  }
+  p.packages.forEach((pk) => {
+    if (pk.owner === from) { pk.owner = to; changed = true; }
+    if (includeTasks) {
+      pk.schedule.forEach((r) => {
+        if (r.assignee === from) { r.assignee = to; changed = true; }
+      });
+    }
+  });
+  if (changed) logIt(p, by, `项目转交 Handover: ${from} → ${to}${includeTasks ? '(含任务指派)' : ''}`);
+  return changed;
+}
 
 const svcName = (k: string) => SVC[k]?.label || k;
 
@@ -266,6 +290,14 @@ export function applyAction(u: Identity, p: Project, a: ProjectAction): void {
     case 'removeOwner': {
       if (!canAssign(u, p)) throw new PermissionError('仅 PD/BD 可调整人员');
       p.owners = (p.owners || []).filter((n) => n !== a.name);
+      break;
+    }
+    case 'transferProject': {
+      if (!canAssign(u, p)) throw new PermissionError('仅 PD/BD 可转交项目');
+      const from = (a.from || '').trim(), to = (a.to || '').trim();
+      if (!from || !to) throw new ValidationError('转出人与接收人不能为空');
+      if (from === to) throw new ValidationError('转出人与接收人相同');
+      transferInProject(p, u.name, from, to, a.includeTasks);
       break;
     }
     case 'editUpdate': {

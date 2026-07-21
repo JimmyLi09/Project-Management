@@ -38,6 +38,7 @@ export function getDb(): Database.Database {
       value TEXT NOT NULL
     );
   `);
+  migrateSchema(db);
   seedIfEmpty(db);
   maybeSeedDemo(db);
   scheduleBackups(db);
@@ -82,6 +83,13 @@ function maybeSeedDemo(d: Database.Database) {
   if (n === 0) seedDemo(d);
 }
 
+/* ---- additive schema migrations for existing databases ---- */
+function migrateSchema(d: Database.Database) {
+  const cols = (d.prepare('PRAGMA table_info(users)').all() as { name: string }[]).map((c) => c.name);
+  if (!cols.includes('email')) d.exec("ALTER TABLE users ADD COLUMN email TEXT NOT NULL DEFAULT ''");
+  if (!cols.includes('position')) d.exec("ALTER TABLE users ADD COLUMN position TEXT NOT NULL DEFAULT ''");
+}
+
 /* ---- secret for session signing (persisted so sessions survive restarts) ---- */
 export function getSecret(): string {
   if (process.env.SESSION_SECRET) return process.env.SESSION_SECRET;
@@ -116,21 +124,35 @@ export function getUserByUsername(username: string) {
     .prepare('SELECT * FROM users WHERE username = ?')
     .get(username) as (User & { password_hash: string }) | undefined;
 }
+/* Sign-in accepts the username or the email address. */
+export function getUserByLogin(login: string) {
+  return getDb()
+    .prepare("SELECT * FROM users WHERE username = ? OR (email != '' AND lower(email) = ?)")
+    .get(login, login.toLowerCase()) as (User & { password_hash: string }) | undefined;
+}
+export function getUserByEmail(email: string) {
+  return getDb()
+    .prepare("SELECT * FROM users WHERE email != '' AND lower(email) = ?")
+    .get(email.toLowerCase()) as (User & { password_hash: string }) | undefined;
+}
 export function getUserById(id: number) {
   return getDb()
-    .prepare('SELECT id, username, name, role FROM users WHERE id = ?')
+    .prepare('SELECT id, username, name, role, email, position FROM users WHERE id = ?')
     .get(id) as User | undefined;
 }
 export function listUsers(): User[] {
   return getDb()
-    .prepare('SELECT id, username, name, role FROM users ORDER BY id')
+    .prepare('SELECT id, username, name, role, email, position FROM users ORDER BY id')
     .all() as User[];
 }
-export function createUser(username: string, password: string, name: string, role: Role): User {
+export function createUser(
+  username: string, password: string, name: string, role: Role,
+  email = '', position = '',
+): User {
   const info = getDb()
-    .prepare('INSERT INTO users (username, password_hash, name, role, created_at) VALUES (?, ?, ?, ?, ?)')
-    .run(username, hashPassword(password), name, role, Date.now());
-  return { id: Number(info.lastInsertRowid), username, name, role };
+    .prepare('INSERT INTO users (username, password_hash, name, role, email, position, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
+    .run(username, hashPassword(password), name, role, email, position, Date.now());
+  return { id: Number(info.lastInsertRowid), username, name, role, email, position };
 }
 
 /* ---- projects (stored as JSON documents; all mutations happen server-side) ---- */
