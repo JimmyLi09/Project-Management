@@ -33,36 +33,26 @@ export default function LoginPage() {
     <div className="login-wrap">
       <form className="login-card" onSubmit={submit}>
         <div className="login-brand">
-          <span className="dot">A</span>
+          <div className="logo-mark"><span /></div>
           <div>
-            <b>Audax · 项目协作台</b>
-            <small>Project Collaboration Platform</small>
+            <div className="logo-word">AUDAX</div>
+            <div className="logo-sub">PROJECT PLATFORM</div>
           </div>
         </div>
         {err && <div className="login-err">{err}</div>}
         <div className="field">
-          <label>账号 Username</label>
-          <input
-            value={username}
-            onChange={(e) => setUsername(e.target.value)}
-            autoComplete="username"
-            autoFocus
-          />
+          <label>Username 账号</label>
+          <input value={username} onChange={(e) => setUsername(e.target.value)} autoComplete="username" autoFocus />
         </div>
         <div className="field">
-          <label>密码 Password</label>
-          <input
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            autoComplete="current-password"
-          />
+          <label>Password 密码</label>
+          <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" />
         </div>
-        <button className="btn" style={{ width: '100%', justifyContent: 'center' }} disabled={busy}>
-          {busy ? '登录中…' : '登录 Sign in'}
+        <button className="btn-navy" style={{ width: '100%', justifyContent: 'center', marginTop: 4 }} disabled={busy}>
+          {busy ? 'Signing in…' : 'Sign in 登录'}
         </button>
         <div className="login-hint">
-          初始账号:pd / bd / sales(密码 audax123,首次使用后请让 PD 在「用户」中创建团队账号并修改密码策略)。
+          初始账号:pd / bd / sales(密码 audax123)。登录 PD 后在「Users」页为团队创建账号。
         </div>
       </form>
     </div>

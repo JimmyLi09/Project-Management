@@ -2,14 +2,17 @@
 
 import React, { useState } from 'react';
 import { useStore } from '../store';
-import {
-  fmtDate, MACRO, macroStage, parseISO, pkgStart, planDates, todayMid,
-} from '@/lib/project';
+import { fmtDate, MACRO, macroStage, parseISO, pkgStart, planDates, todayMid } from '@/lib/project';
 import { canEdit, canRowEdit } from '@/lib/permissions';
-import type { Project } from '@/lib/types';
-import { STATUS_PILL_CLS, STATUS_TXT_FULL } from './parts';
+import { svcColor, svcLabel } from '@/lib/templates';
+import { Avatar, Icon, Pill, TM } from '../ui';
+import type { Project, ScheduleStatus } from '@/lib/types';
 
-export default function ScheduleTab({ p, pkgIdx, onExport }: { p: Project; pkgIdx: number; onExport: () => void }) {
+const NEXT: Record<ScheduleStatus, ScheduleStatus> = { todo: 'wip', wip: 'done', done: 'block', block: 'todo' };
+
+export default function ScheduleTab({ p, pkgIdx, onExport, onPkg }: {
+  p: Project; pkgIdx: number; onExport: () => void; onPkg: (i: number) => void;
+}) {
   const { me, dispatch } = useStore();
   const [editMode, setEditMode] = useState(false);
   const ed = canEdit(me, p);
@@ -17,184 +20,186 @@ export default function ScheduleTab({ p, pkgIdx, onExport }: { p: Project; pkgId
   const pd = planDates(pkg, pkgStart(p, pkg));
   const t = todayMid();
 
-  /* slack for this package */
+  /* package slack */
   const del = parseISO(pkg.delivery);
   let fin: Date | null = null;
   for (let i = pd.length - 1; i >= 0; i--) { if (pd[i]) { fin = pd[i]!.end; break; } }
-  let slackNode: React.ReactNode = <span style={{ color: 'var(--faint)', fontSize: 11.5 }}>填交付日核算</span>;
+  let slackNode: React.ReactNode = <span style={{ color: 'var(--text2)', fontSize: 12 }}>填交付日核算</span>;
   if (del && fin) {
     const fb = new Date(fin);
     fb.setDate(fb.getDate() + (pkg.buffer || 0));
     const sl = Math.round((del.getTime() - fb.getTime()) / 86400000);
     slackNode = sl >= 0
-      ? <span style={{ color: 'var(--green)', fontWeight: 700, fontSize: 12 }}>✓ 富余 {sl} 天</span>
-      : <span style={{ color: 'var(--red)', fontWeight: 700, fontSize: 12 }}>⚠ 超 {-sl} 天</span>;
+      ? <span style={{ color: 'var(--success)', fontWeight: 600, fontSize: 12.5 }}>✓ 富余 {sl} 天</span>
+      : <span style={{ color: 'var(--danger)', fontWeight: 600, fontSize: 12.5 }}>⚠ 超 {-sl} 天</span>;
   }
 
-  let lastMacro = -1;
-  const rows: React.ReactNode[] = [];
+  /* group rows by macro stage */
+  const groups: { m: number; rows: { r: Project['packages'][0]['schedule'][0]; i: number }[] }[] = [];
   pkg.schedule.forEach((r, i) => {
-    const d = pd[i];
-    const over = r.status !== 'done' && d && d.end < t;
-    const done = r.status === 'done';
-    const rowEd = canRowEdit(me, p, r);
     const m = macroStage(r, i);
-    if (m !== lastMacro) {
-      rows.push(
-        <div key={`m${i}`} className="macro-h" style={{ borderLeft: `4px solid ${MACRO[m][2]}` }}>
-          <b style={{ color: MACRO[m][2] }}>{['①', '②', '③'][m]} {MACRO[m][0]}</b> <span>{MACRO[m][1]}</span>
-        </div>
-      );
-      lastMacro = m;
-    }
-    if (editMode && ed) {
-      rows.push(
-        <div key={i} className={`srow ${r.freeze ? 'freeze' : ''}`}>
-          <div>
-            <button className={`ckbox ${done ? 'on' : ''}`} onClick={() => dispatch(p.id, { type: 'toggleDone', pkg: pkgIdx, idx: i })}>
-              {done ? '✓' : ''}
-            </button>
-          </div>
-          <div><div className="phnum">{r.no}</div></div>
-          <div className="row-edit">
-            <input className="edit-in" defaultValue={r.task} placeholder="任务名 (中)"
-              onBlur={(e) => e.target.value !== r.task && dispatch(p.id, { type: 'editSched', pkg: pkgIdx, idx: i, field: 'task', value: e.target.value })} />
-            <input className="edit-in" defaultValue={r.taskEn} placeholder="Task (EN)"
-              onBlur={(e) => e.target.value !== r.taskEn && dispatch(p.id, { type: 'editSched', pkg: pkgIdx, idx: i, field: 'taskEn', value: e.target.value })} />
-            <div className="r">
-              <input className="edit-in" defaultValue={r.owner} placeholder="角色"
-                onBlur={(e) => e.target.value !== r.owner && dispatch(p.id, { type: 'editSched', pkg: pkgIdx, idx: i, field: 'owner', value: e.target.value })} />
-              <input className="edit-in wk-in" type="number" step={0.5} min={0} defaultValue={r.weeks} title="周数"
-                onBlur={(e) => (parseFloat(e.target.value) || 0) !== r.weeks && dispatch(p.id, { type: 'editSchedNum', pkg: pkgIdx, idx: i, field: 'weeks', value: parseFloat(e.target.value) || 0 })} />
-            </div>
-            <input className="edit-in" defaultValue={r.assignee} placeholder="👤 指派给(个人)"
-              onBlur={(e) => e.target.value !== r.assignee && dispatch(p.id, { type: 'editSched', pkg: pkgIdx, idx: i, field: 'assignee', value: e.target.value })} />
-            <button className="rm-btn" onClick={() => { if (confirm('删除此阶段?')) dispatch(p.id, { type: 'removeRow', pkg: pkgIdx, idx: i }); }}>✕ 删除此阶段</button>
-          </div>
-          <div className="owner">{r.owner}</div>
-          <div className="row-edit">
-            <input type="date" className="edit-in" defaultValue={r.s} title="开始(覆盖)"
-              onChange={(e) => dispatch(p.id, { type: 'editSched', pkg: pkgIdx, idx: i, field: 's', value: e.target.value })} />
-            <input type="date" className="edit-in" defaultValue={r.e} title="结束(覆盖)"
-              onChange={(e) => dispatch(p.id, { type: 'editSched', pkg: pkgIdx, idx: i, field: 'e', value: e.target.value })} />
-          </div>
-          <div>
-            <button className={`chip ${STATUS_PILL_CLS[r.status]}`} onClick={() => dispatch(p.id, { type: 'cycleStatus', pkg: pkgIdx, idx: i })}>
-              <span className="cd" />{STATUS_TXT_FULL[r.status]}
-            </button>
-          </div>
-        </div>
-      );
-    } else {
-      const gateTxt = r.gate && r.gate.trim() ? r.gate.replace(/★\s*/, '') : '';
-      rows.push(
-        <div key={i} className={`srow ${r.freeze ? 'freeze' : ''}`}>
-          <div>
-            <button
-              className={`ckbox ${done ? 'on' : ''} ${rowEd ? '' : 'locked'}`}
-              onClick={rowEd ? () => dispatch(p.id, { type: 'toggleDone', pkg: pkgIdx, idx: i }) : undefined}
-            >
-              {done ? '✓' : ''}
-            </button>
-          </div>
-          <div><div className="phnum">{r.no}</div><div className="phname">{r.phase}</div></div>
-          <div className="task">
-            <b>{r.task}</b><span className="en">{r.taskEn}</span>
-            {r.assignee && <span className="assignee">👤 {r.assignee}</span>}
-            {gateTxt && <div className={`gate ${r.freeze ? '' : 'plain'}`}>{r.freeze ? '★' : '›'} {gateTxt}</div>}
-            <div className="task-note-wrap">
-              <input
-                className="note-in" placeholder="批注 / 实际情况…" defaultValue={r.note} readOnly={!ed}
-                onBlur={(e) => { if (ed && e.target.value !== r.note) dispatch(p.id, { type: 'editSched', pkg: pkgIdx, idx: i, field: 'note', value: e.target.value }); }}
-              />
-            </div>
-          </div>
-          <div className="owner">{r.owner}</div>
-          <div className="dates">
-            {d ? (
-              <>
-                <span className="d">{fmtDate(d.start)}</span>
-                <span className="arrow">→</span>
-                <span className={`d ${over ? 'over' : ''}`}>{fmtDate(d.end)}</span>
-                <div className="typ">{r.typical}</div>
-              </>
-            ) : (
-              <><span className="gate-dash">—</span><div className="typ">{r.typical}</div></>
-            )}
-          </div>
-          <div>
-            {!done && (
-              <button
-                className={`chip ${STATUS_PILL_CLS[r.status]} ${rowEd ? '' : 'locked'}`}
-                onClick={rowEd ? () => dispatch(p.id, { type: 'cycleStatus', pkg: pkgIdx, idx: i }) : undefined}
-              >
-                <span className="cd" />{STATUS_TXT_FULL[r.status]}
-              </button>
-            )}
-          </div>
-        </div>
-      );
-    }
+    const last = groups[groups.length - 1];
+    if (!last || last.m !== m) groups.push({ m, rows: [{ r, i }] });
+    else last.rows.push({ r, i });
   });
 
   return (
     <>
-      <div className="subbar">
-        {ed && (
-          <button className="btn ghost sm" onClick={() => setEditMode(!editMode)}>
-            {editMode ? '完成编辑' : '编辑阶段 / 加减行'}
-          </button>
-        )}
-        <button className="btn ghost sm" onClick={onExport}>导出 Export</button>
-      </div>
-      <div className="pkg-bar">
-        <div>
-          <span className="k">本服务起始 Start</span>
-          {ed ? (
-            <input type="date" defaultValue={pkg.start || ''} key={`s${pkg.start}`}
-              onChange={(e) => dispatch(p.id, { type: 'setPkgField', pkg: pkgIdx, field: 'start', value: e.target.value })} />
-          ) : (
-            <b>{pkg.start ? fmtDate(parseISO(pkg.start)) : p.start ? fmtDate(parseISO(p.start)) + ' (项目)' : '—'}</b>
-          )}
+      {p.packages.length > 1 && (
+        <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap', marginBottom: 16 }}>
+          {p.packages.map((pk, i) => (
+            <button key={i} className={`chip ${i === pkgIdx ? 'active' : ''}`}
+              style={i === pkgIdx ? { background: svcColor(pk.svc), borderColor: svcColor(pk.svc) } : undefined}
+              onClick={() => onPkg(i)}>
+              {svcLabel(pk.svc)}
+            </button>
+          ))}
         </div>
-        <div>
-          <span className="k">交付 Delivery</span>
-          {ed ? (
-            <input type="date" defaultValue={pkg.delivery || ''} key={`d${pkg.delivery}`}
-              onChange={(e) => dispatch(p.id, { type: 'setPkgField', pkg: pkgIdx, field: 'delivery', value: e.target.value })} />
-          ) : (
-            <b>{pkg.delivery ? fmtDate(parseISO(pkg.delivery)) : '—'}</b>
-          )}
-        </div>
-        <div>
-          <span className="k">Buffer</span>
-          {ed ? (
-            <input type="number" min={0} style={{ width: 60 }} defaultValue={pkg.buffer || 0} key={`b${pkg.buffer}`}
-              onBlur={(e) => (parseInt(e.target.value) || 0) !== (pkg.buffer || 0) && dispatch(p.id, { type: 'setPkgBuffer', pkg: pkgIdx, value: parseInt(e.target.value) || 0 })} />
-          ) : (
-            <b>{pkg.buffer || 0}</b>
-          )}
-        </div>
-        <div>
-          <span className="k">本服务负责</span>
-          {ed ? (
-            <input defaultValue={pkg.owner || ''} key={`o${pkg.owner}`} placeholder="人"
-              onBlur={(e) => e.target.value !== (pkg.owner || '') && dispatch(p.id, { type: 'setPkgField', pkg: pkgIdx, field: 'owner', value: e.target.value })} />
-          ) : (
-            <b>{pkg.owner || '—'}</b>
-          )}
-        </div>
+      )}
+
+      {/* package bar */}
+      <div className="panel" style={{ padding: '14px 20px', marginBottom: 16, display: 'flex', gap: 20, flexWrap: 'wrap', alignItems: 'center' }}>
+        <Field label="Start 起始">
+          {ed ? <input type="date" className="in sm" defaultValue={pkg.start || ''} key={`s${pkg.start}`}
+            onChange={(e) => dispatch(p.id, { type: 'setPkgField', pkg: pkgIdx, field: 'start', value: e.target.value })} />
+            : <b className="tnum">{pkgStart(p, pkg) ? fmtDate(parseISO(pkgStart(p, pkg))) : '—'}</b>}
+        </Field>
+        <Field label="Delivery 交付">
+          {ed ? <input type="date" className="in sm" defaultValue={pkg.delivery || ''} key={`d${pkg.delivery}`}
+            onChange={(e) => dispatch(p.id, { type: 'setPkgField', pkg: pkgIdx, field: 'delivery', value: e.target.value })} />
+            : <b className="tnum">{pkg.delivery ? fmtDate(parseISO(pkg.delivery)) : '—'}</b>}
+        </Field>
+        <Field label="Buffer">
+          {ed ? <input type="number" min={0} className="in sm" style={{ width: 64 }} defaultValue={pkg.buffer || 0} key={`b${pkg.buffer}`}
+            onBlur={(e) => (parseInt(e.target.value) || 0) !== (pkg.buffer || 0) && dispatch(p.id, { type: 'setPkgBuffer', pkg: pkgIdx, value: parseInt(e.target.value) || 0 })} />
+            : <b className="tnum">{pkg.buffer || 0}</b>}
+        </Field>
+        <Field label="Owner 负责">
+          {ed ? <input className="in sm" style={{ width: 100 }} defaultValue={pkg.owner || ''} key={`o${pkg.owner}`} placeholder="人"
+            onBlur={(e) => e.target.value !== (pkg.owner || '') && dispatch(p.id, { type: 'setPkgField', pkg: pkgIdx, field: 'owner', value: e.target.value })} />
+            : <b>{pkg.owner || '—'}</b>}
+        </Field>
         <div style={{ flex: 1 }} />
         {slackNode}
-        {ed && <button className="btn ghost sm" onClick={() => dispatch(p.id, { type: 'reversePkg', pkg: pkgIdx })}>↩ 按交付日倒排</button>}
+        {ed && <button className="btn-line sm" onClick={() => dispatch(p.id, { type: 'reversePkg', pkg: pkgIdx })}>↩ 按交付日倒排</button>}
+        {ed && <button className="btn-line sm" onClick={() => setEditMode(!editMode)}>{editMode ? '完成编辑' : 'Edit 编辑阶段'}</button>}
+        <button className="btn-line sm" onClick={onExport}><Icon name="download" size={13} />Export</button>
       </div>
-      <div className="sched">{rows}</div>
+
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14, fontSize: 12.5, color: 'var(--text2)' }}>
+        <Icon name="lock" size={14} style={{ color: 'var(--navy700)' }} /> Freeze point 冻结点 — 确认后锁定,改动影响下游
+      </div>
+
+      <div className="panel clip">
+        <div style={{ overflowX: 'auto' }}>
+          <div style={{ minWidth: 720 }}>
+            {groups.map((g, gi) => (
+              <div key={gi}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 22px', background: 'var(--hover-bg)', borderBottom: '1px solid var(--border)', borderTop: gi ? '1px solid var(--border)' : 'none' }}>
+                  <span style={{ width: 8, height: 8, borderRadius: 2, background: MACRO[g.m][2] }} />
+                  <span style={{ fontSize: 12.5, fontWeight: 700, letterSpacing: '.03em', color: 'var(--navy900)', textTransform: 'uppercase' }}>
+                    {MACRO[g.m][1]} {MACRO[g.m][0]}
+                  </span>
+                  <span style={{ fontSize: 11.5, color: 'var(--text2)' }}>{g.rows.filter((x) => x.r.status === 'done').length}/{g.rows.length} done</span>
+                </div>
+                {g.rows.map(({ r, i }) => {
+                  const d = pd[i];
+                  const over = r.status !== 'done' && d && d.end < t;
+                  const done = r.status === 'done';
+                  const rowEd = canRowEdit(me, p, r);
+                  const gateTxt = r.gate && r.gate.trim() ? r.gate.replace(/★\s*/, '') : '';
+                  return (
+                    <div key={i} className="row-hover" style={{
+                      display: 'grid', gridTemplateColumns: '26px 26px minmax(220px,2fr) 40px 1.15fr 120px', gap: 13, alignItems: 'center',
+                      padding: '13px 22px', borderBottom: '1px solid var(--row-line)',
+                      borderLeft: `3px solid ${over ? 'var(--danger)' : r.freeze ? 'var(--bronze)' : 'transparent'}`,
+                    }}>
+                      <button className={`ckbox ${done ? 'on' : ''} ${rowEd ? '' : 'locked'}`}
+                        onClick={rowEd ? () => dispatch(p.id, { type: 'toggleDone', pkg: pkgIdx, idx: i }) : undefined}>
+                        {done && <Icon name="checkSm" size={13} style={{ color: '#fff' }} />}
+                      </button>
+                      <span style={{ color: 'var(--navy700)', display: 'flex', justifyContent: 'center' }}>
+                        {r.freeze ? <Icon name="lock" size={14} /> : <span className="tnum" style={{ fontSize: 11, color: 'var(--text2)' }}>{r.no}</span>}
+                      </span>
+                      <div style={{ minWidth: 0 }}>
+                        {editMode && ed ? (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                            <input className="in sm" defaultValue={r.task} placeholder="任务名(中)"
+                              onBlur={(e) => e.target.value !== r.task && dispatch(p.id, { type: 'editSched', pkg: pkgIdx, idx: i, field: 'task', value: e.target.value })} />
+                            <input className="in sm" defaultValue={r.taskEn} placeholder="Task (EN)"
+                              onBlur={(e) => e.target.value !== r.taskEn && dispatch(p.id, { type: 'editSched', pkg: pkgIdx, idx: i, field: 'taskEn', value: e.target.value })} />
+                            <div style={{ display: 'flex', gap: 6 }}>
+                              <input className="in sm" style={{ flex: 1 }} defaultValue={r.owner} placeholder="角色 Owner"
+                                onBlur={(e) => e.target.value !== r.owner && dispatch(p.id, { type: 'editSched', pkg: pkgIdx, idx: i, field: 'owner', value: e.target.value })} />
+                              <input className="in sm" type="number" step={0.5} min={0} style={{ width: 66 }} defaultValue={r.weeks} title="周数 weeks"
+                                onBlur={(e) => (parseFloat(e.target.value) || 0) !== r.weeks && dispatch(p.id, { type: 'editSchedNum', pkg: pkgIdx, idx: i, field: 'weeks', value: parseFloat(e.target.value) || 0 })} />
+                            </div>
+                            <input className="in sm" defaultValue={r.assignee} placeholder="👤 指派给 Assignee"
+                              onBlur={(e) => e.target.value !== r.assignee && dispatch(p.id, { type: 'editSched', pkg: pkgIdx, idx: i, field: 'assignee', value: e.target.value })} />
+                            <div style={{ display: 'flex', gap: 6 }}>
+                              <input type="date" className="in sm" style={{ flex: 1 }} defaultValue={r.s} title="开始(覆盖)"
+                                onChange={(e) => dispatch(p.id, { type: 'editSched', pkg: pkgIdx, idx: i, field: 's', value: e.target.value })} />
+                              <input type="date" className="in sm" style={{ flex: 1 }} defaultValue={r.e} title="结束(覆盖)"
+                                onChange={(e) => dispatch(p.id, { type: 'editSched', pkg: pkgIdx, idx: i, field: 'e', value: e.target.value })} />
+                            </div>
+                            <button style={{ color: 'var(--danger)', fontSize: 12, fontWeight: 600, alignSelf: 'flex-start' }}
+                              onClick={() => { if (confirm('删除此阶段?')) dispatch(p.id, { type: 'removeRow', pkg: pkgIdx, idx: i }); }}>✕ 删除此阶段</button>
+                          </div>
+                        ) : (
+                          <>
+                            <div style={{ fontSize: 13.5, fontWeight: 500, textDecoration: done ? 'line-through' : 'none', color: done ? 'var(--text2)' : 'var(--text)' }}>{r.task}</div>
+                            <div style={{ fontSize: 11.5, color: 'var(--text2)' }}>{r.taskEn}{r.owner ? ` · ${r.owner}` : ''}</div>
+                            {gateTxt && (
+                              <div style={{ display: 'inline-flex', gap: 5, marginTop: 5, fontSize: 11.5, color: r.freeze ? '#8f5b1d' : 'var(--text2)', background: r.freeze ? '#f6ecdd' : 'var(--row-line2)', borderRadius: 6, padding: '3px 8px' }}>
+                                {r.freeze ? '★' : '›'} {gateTxt}
+                              </div>
+                            )}
+                            <input
+                              className="in sm" placeholder="批注 / 实际情况…" defaultValue={r.note} readOnly={!ed}
+                              style={{ marginTop: 6, width: '100%', background: 'var(--hover-bg)', border: '1px solid var(--row-line)' }}
+                              onBlur={(e) => { if (ed && e.target.value !== r.note) dispatch(p.id, { type: 'editSched', pkg: pkgIdx, idx: i, field: 'note', value: e.target.value }); }}
+                            />
+                          </>
+                        )}
+                      </div>
+                      <div>{r.assignee ? <Avatar name={r.assignee} size={26} /> : null}</div>
+                      <div className="tnum" style={{ fontSize: 12, color: over ? 'var(--danger)' : 'var(--text2)', fontWeight: over ? 600 : 400 }}>
+                        {d ? <>{fmtDate(d.start).slice(0, 6)} → {fmtDate(d.end).slice(0, 6)}</> : '—'}
+                        <div style={{ fontSize: 10.5, color: 'var(--text2)', fontWeight: 400 }}>{r.typical}</div>
+                      </div>
+                      <div style={{ justifySelf: 'end' }}>
+                        <button
+                          style={{ cursor: rowEd ? 'pointer' : 'not-allowed', opacity: rowEd ? 1 : .6, background: 'none', padding: 0 }}
+                          title={rowEd ? '点击切换状态' : '无编辑权限'}
+                          onClick={rowEd ? () => dispatch(p.id, { type: 'setRowStatus', pkg: pkgIdx, idx: i, status: NEXT[r.status] }) : undefined}
+                        >
+                          <Pill m={TM[r.status]} />
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
       {editMode && ed && (
-        <button className="add-row" onClick={() => dispatch(p.id, { type: 'addRow', pkg: pkgIdx })}>+ 添加阶段 Add phase</button>
+        <button className="btn-line" style={{ width: '100%', marginTop: 12, justifyContent: 'center', borderStyle: 'dashed' }}
+          onClick={() => dispatch(p.id, { type: 'addRow', pkg: pkgIdx })}>+ Add phase 添加阶段</button>
       )}
-      <p className="sub" style={{ marginTop: 12 }}>
-        每个服务有自己的起始/交付/buffer。勾选=完成;未勾且过期=逾期。团队成员只能勾选指派给自己(👤)的任务。
+      <p style={{ marginTop: 12, fontSize: 12.5, color: 'var(--text2)' }}>
+        勾选=完成;未勾且过期=逾期(红边)。点状态徽章切换 To Do → In Progress → Done → Blocked。团队成员只能操作指派给自己(👤)的任务。
       </p>
     </>
+  );
+}
+
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+      <span className="mini-label">{label}</span>
+      <span style={{ fontSize: 13 }}>{children}</span>
+    </div>
   );
 }

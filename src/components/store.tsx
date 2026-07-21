@@ -8,7 +8,7 @@ import type { ProjectAction } from '@/server/actions';
 import type { Identity } from '@/lib/permissions';
 
 export interface View {
-  name: 'board' | 'projects' | 'mytasks' | 'dupdate' | 'stats' | 'users' | 'project';
+  name: 'overview' | 'projects' | 'team' | 'mytasks' | 'dupdate' | 'stats' | 'users' | 'project';
   pid?: string;
   tab?: 'overview' | 'schedule' | 'checklist';
   pkg?: number;
@@ -40,7 +40,7 @@ export const useStore = () => {
 export function StoreProvider({ user, children }: { user: User; children: React.ReactNode }) {
   const [projects, setProjects] = useState<Project[]>([]);
   const [users, setUsers] = useState<User[]>([]);
-  const [view, setView] = useState<View>({ name: 'board' });
+  const [view, setView] = useState<View>({ name: 'overview' });
 
   const refresh = useCallback(async () => {
     const res = await fetch('/api/projects');

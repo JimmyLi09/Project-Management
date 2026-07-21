@@ -24,10 +24,10 @@ export default function ExportOverlay({ p, onClose }: { p: Project; onClose: () 
   return (
     <div className="ex-wrap">
       <div className="ex-actions">
-        <button className="btn ghost sm" style={L === 'en' ? { borderColor: 'var(--ink)' } : undefined} onClick={() => setLang('en')}>English</button>
-        <button className="btn ghost sm" style={L === 'zh' ? { borderColor: 'var(--ink)' } : undefined} onClick={() => setLang('zh')}>中文</button>
-        <button className="btn sm" onClick={() => window.print()}>{T('打印 / 另存 PDF', 'Print / Save PDF')}</button>
-        <button className="btn ghost sm" onClick={onClose}>{T('关闭', 'Close')}</button>
+        <button className="btn-line sm" style={L === 'en' ? { borderColor: 'var(--navy900)' } : undefined} onClick={() => setLang('en')}>English</button>
+        <button className="btn-line sm" style={L === 'zh' ? { borderColor: 'var(--navy900)' } : undefined} onClick={() => setLang('zh')}>中文</button>
+        <button className="btn-navy sm" onClick={() => window.print()}>{T('打印 / 另存 PDF', 'Print / Save PDF')}</button>
+        <button className="btn-line sm" onClick={onClose}>{T('关闭', 'Close')}</button>
       </div>
       <div className="ex-colbar">
         {T('显示栏位', 'Columns')}:
