@@ -40,7 +40,38 @@ export function getDb(): Database.Database {
   `);
   seedIfEmpty(db);
   maybeSeedDemo(db);
+  scheduleBackups(db);
   return db;
+}
+
+/* ---- built-in daily backups (local/server deployments) ----
+   Snapshot data/audax.db → data/backups/audax-YYYY-MM-DD.db once per day,
+   keep the last 30. OS-independent: no cron/task scheduler needed. */
+const BACKUP_KEEP_DAYS = 30;
+let backupsScheduled = false;
+
+function scheduleBackups(d: Database.Database) {
+  if (backupsScheduled || process.env.VERCEL || process.env.AUDAX_NO_BACKUP === '1') return;
+  backupsScheduled = true;
+  const run = () => { backupNow(d).catch((e) => console.warn('[backup] failed:', e)); };
+  run(); // on startup
+  const timer = setInterval(run, 6 * 60 * 60 * 1000); // re-check every 6h
+  (timer as unknown as { unref?: () => void }).unref?.();
+}
+
+async function backupNow(d: Database.Database) {
+  const dir = path.join(DATA_DIR, 'backups');
+  fs.mkdirSync(dir, { recursive: true });
+  const today = new Date().toISOString().slice(0, 10);
+  const target = path.join(dir, `audax-${today}.db`);
+  if (fs.existsSync(target)) return; // already have today's snapshot
+  await d.backup(target); // online-safe snapshot via SQLite backup API
+  const cutoff = Date.now() - BACKUP_KEEP_DAYS * 86400000;
+  for (const f of fs.readdirSync(dir)) {
+    if (!/^audax-\d{4}-\d{2}-\d{2}\.db$/.test(f)) continue;
+    const full = path.join(dir, f);
+    if (fs.statSync(full).mtimeMs < cutoff) fs.unlinkSync(full);
+  }
 }
 
 function maybeSeedDemo(d: Database.Database) {
