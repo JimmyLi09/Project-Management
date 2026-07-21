@@ -5,7 +5,11 @@ import crypto from 'crypto';
 import type { Project, Role, User } from '@/lib/types';
 import { migrate } from '@/lib/project';
 
-const DATA_DIR = process.env.AUDAX_DATA_DIR || path.join(process.cwd(), 'data');
+/* On serverless platforms (Vercel) the project directory is read-only and
+   ephemeral — keep the demo database in /tmp there. */
+const DATA_DIR =
+  process.env.AUDAX_DATA_DIR ||
+  (process.env.VERCEL ? '/tmp/audax-data' : path.join(process.cwd(), 'data'));
 
 let db: Database.Database | null = null;
 
@@ -35,11 +39,25 @@ export function getDb(): Database.Database {
     );
   `);
   seedIfEmpty(db);
+  maybeSeedDemo(db);
   return db;
+}
+
+function maybeSeedDemo(d: Database.Database) {
+  // Lazy import to avoid a require cycle (demo.ts imports hashPassword from here).
+  const { shouldSeedDemo, seedDemo } = require('./demo') as typeof import('./demo');
+  if (!shouldSeedDemo()) return;
+  const n = (d.prepare('SELECT COUNT(*) AS c FROM projects').get() as { c: number }).c;
+  if (n === 0) seedDemo(d);
 }
 
 /* ---- secret for session signing (persisted so sessions survive restarts) ---- */
 export function getSecret(): string {
+  if (process.env.SESSION_SECRET) return process.env.SESSION_SECRET;
+  // Demo deployments run multiple ephemeral instances that each get their own
+  // /tmp database — a fixed demo secret keeps logins valid across instances.
+  // Set SESSION_SECRET in production.
+  if (process.env.VERCEL) return 'audax-demo-session-secret-set-SESSION_SECRET-in-prod';
   const d = getDb();
   const row = d.prepare('SELECT value FROM meta WHERE key = ?').get('session_secret') as { value: string } | undefined;
   if (row) return row.value;
