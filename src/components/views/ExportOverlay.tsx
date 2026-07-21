@@ -2,13 +2,15 @@
 
 import React, { useState } from 'react';
 import { fmtDate, pkgStart, planDates, projStage, todayMid } from '@/lib/project';
+import { useLang } from '@/lib/i18n';
 import { STAGES, stageIdx, SVC, svcColor, svcLabel } from '@/lib/templates';
 import type { Project } from '@/lib/types';
 
 type Cols = { owner: boolean; start: boolean; due: boolean; status: boolean; clStatus: boolean; clDate: boolean; clRemark: boolean };
 
 export default function ExportOverlay({ p, onClose }: { p: Project; onClose: () => void }) {
-  const [lang, setLang] = useState<'en' | 'zh'>('en');
+  const { lang: appLang } = useLang();
+  const [lang, setLang] = useState<'en' | 'zh'>(appLang);
   const [cols, setCols] = useState<Cols>({ owner: true, start: true, due: true, status: true, clStatus: true, clDate: true, clRemark: true });
   const L = lang;
   const T = (zh: string, en: string) => (L === 'zh' ? zh : en);

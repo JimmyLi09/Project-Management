@@ -5,6 +5,7 @@ import type { User } from '@/lib/types';
 import { StoreProvider, useStore } from './store';
 import { allOverdue, fmtDate } from '@/lib/project';
 import { canCreate, isFull, ROLE_LABEL } from '@/lib/permissions';
+import { useLang } from '@/lib/i18n';
 import { Avatar, Icon } from './ui';
 import OverviewView from './views/OverviewView';
 import ProjectsView, { NewProjectModal } from './views/ProjectsView';
@@ -23,18 +24,19 @@ export default function App({ user }: { user: User }) {
   );
 }
 
-const PAGE_META: Record<string, { title: string; sub: string }> = {
-  overview: { title: 'Overview', sub: '项目组合健康度、团队负载与优先事项' },
-  projects: { title: 'Projects', sub: '全部项目 · 按服务与负责人筛选' },
-  team: { title: 'Team Allocation', sub: '团队工作量与项目分配' },
-  mytasks: { title: 'My Tasks', sub: '你的未完成任务 · 按到期日排序' },
-  dupdate: { title: 'Director Update', sub: '每周汇报、风险与决策闭环' },
-  stats: { title: 'Reports', sub: '项目统计 · 按 PM 的项目数与积分' },
-  users: { title: 'Users', sub: '账号、角色与访问权限' },
+const PAGE_META: Record<string, { title: [string, string]; sub: [string, string] }> = {
+  overview: { title: ['总览', 'Overview'], sub: ['项目组合健康度、团队负载与优先事项', 'Portfolio health, team load and priorities'] },
+  projects: { title: ['项目', 'Projects'], sub: ['全部项目 · 按服务与负责人筛选', 'All projects · filter by service and PM'] },
+  team: { title: ['团队负载', 'Team Allocation'], sub: ['团队工作量与项目分配', 'Workload and assignments across the team'] },
+  mytasks: { title: ['我的待办', 'My Tasks'], sub: ['你的未完成任务 · 按到期日排序', 'Your open items, sorted by due date'] },
+  dupdate: { title: ['向上汇报', 'Director Update'], sub: ['每周汇报、风险与决策闭环', 'Weekly updates, risks and decisions'] },
+  stats: { title: ['统计报表', 'Reports'], sub: ['项目统计 · 按 PM 的项目数与积分', 'Projects and points by PM'] },
+  users: { title: ['用户管理', 'Users'], sub: ['账号、角色与访问权限', 'Accounts, roles and access'] },
 };
 
 function Shell() {
   const { user, me, view, go, projects, setView } = useStore();
+  const { lang, setLang, t } = useLang();
   const [showNew, setShowNew] = useState(false);
   const [notifOpen, setNotifOpen] = useState(false);
   const [search, setSearch] = useState('');
@@ -92,13 +94,13 @@ function Shell() {
           </div>
         </div>
         <nav className="side-nav">
-          {navItem('overview', 'home', 'Overview 总览')}
-          {navItem('projects', 'grid', 'Projects 项目')}
-          {navItem('team', 'users', 'Team Allocation 团队')}
-          {navItem('mytasks', 'check', 'My Tasks 待办', myOpenCount)}
-          {navItem('dupdate', 'presentation', 'Director Update 汇报')}
-          {navItem('stats', 'trending', 'Reports 统计')}
-          {isFull(me) && navItem('users', 'settings', 'Users 用户')}
+          {navItem('overview', 'home', t('总览', 'Overview'))}
+          {navItem('projects', 'grid', t('项目', 'Projects'))}
+          {navItem('team', 'users', t('团队负载', 'Team Allocation'))}
+          {navItem('mytasks', 'check', t('我的待办', 'My Tasks'), myOpenCount)}
+          {navItem('dupdate', 'presentation', t('向上汇报', 'Director Update'))}
+          {navItem('stats', 'trending', t('统计报表', 'Reports'))}
+          {isFull(me) && navItem('users', 'settings', t('用户管理', 'Users'))}
         </nav>
         <div className="side-user">
           <Avatar name={user.name} size={34} />
@@ -106,7 +108,7 @@ function Shell() {
             <div className="nm">{user.name}</div>
             <div className="rl">{ROLE_LABEL[user.role]}</div>
           </div>
-          <button title="退出登录 Sign out" onClick={logout} style={{ color: 'var(--text2)', display: 'flex' }}>
+          <button title={t('退出登录', 'Sign out')} onClick={logout} style={{ color: 'var(--text2)', display: 'flex' }}>
             <Icon name="logout" size={16} />
           </button>
         </div>
@@ -116,35 +118,42 @@ function Shell() {
         <header className="topbar">
           {isProject ? (
             <>
-              <button className="icon-btn" onClick={() => go('projects')} title="Back"><Icon name="back" /></button>
+              <button className="icon-btn" onClick={() => go('projects')} title={t('返回', 'Back')}><Icon name="back" /></button>
               <div>
-                <div className="page-title">{project?.name || 'Project'}</div>
+                <div className="page-title">{project?.name || t('项目', 'Project')}</div>
                 <div className="page-sub">{project?.client || ''}</div>
               </div>
             </>
           ) : (
             <div>
-              <div className="page-title">{meta.title}</div>
-              <div className="page-sub">{meta.sub}</div>
+              <div className="page-title">{lang === 'zh' ? meta.title[0] : meta.title[1]}</div>
+              <div className="page-sub">{lang === 'zh' ? meta.sub[0] : meta.sub[1]}</div>
             </div>
           )}
           <div style={{ flex: 1 }} />
           <div className="searchbox">
             <Icon name="search" size={16} />
             <input
-              placeholder="Search projects, people…"
+              placeholder={t('搜索项目、客户、人员…', 'Search projects, people…')}
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               onKeyDown={(e) => { if (e.key === 'Enter') go('projects'); }}
             />
           </div>
+          <button
+            className="icon-btn" title={t('切换语言', 'Switch language')}
+            style={{ width: 'auto', padding: '0 12px', fontSize: 12.5, fontWeight: 700, color: 'var(--navy700)' }}
+            onClick={() => setLang(lang === 'zh' ? 'en' : 'zh')}
+          >
+            {lang === 'zh' ? 'EN' : '中文'}
+          </button>
           <button className="icon-btn bell-btn" aria-label="Notifications" onClick={(e) => { e.stopPropagation(); setNotifOpen(!notifOpen); }}>
             <Icon name="bell" />
             {overdue.length > 0 && <span className="dot-badge" />}
           </button>
           {canCreate(me) && (
             <button className="btn-navy" onClick={() => setShowNew(true)}>
-              <Icon name="plus" size={16} /><span>New Project</span>
+              <Icon name="plus" size={16} /><span>{t('新建项目', 'New Project')}</span>
             </button>
           )}
         </header>
@@ -152,21 +161,21 @@ function Shell() {
         {notifOpen && (
           <div className="notif-pop panel" style={{ position: 'absolute', top: 86, right: 32, width: 380, maxWidth: 'calc(100vw - 40px)', zIndex: 50, boxShadow: 'var(--shadow-lg)', overflow: 'hidden' }}>
             <div className="panel-head" style={{ padding: '14px 18px' }}>
-              <span className="panel-title" style={{ fontSize: 14 }}>Overdue <span className="tnum" style={{ color: 'var(--danger)' }}>{overdue.length}</span></span>
+              <span className="panel-title" style={{ fontSize: 14 }}>{t('逾期提醒', 'Overdue')} <span className="tnum" style={{ color: 'var(--danger)' }}>{overdue.length}</span></span>
             </div>
             <div style={{ maxHeight: 340, overflow: 'auto' }}>
               {overdue.length === 0 ? (
-                <div style={{ padding: 26, textAlign: 'center', color: 'var(--text2)', fontSize: 12.5 }}>✓ All on schedule</div>
+                <div style={{ padding: 26, textAlign: 'center', color: 'var(--text2)', fontSize: 12.5 }}>✓ {t('暂无逾期项', 'All on schedule')}</div>
               ) : overdue.map((o, i) => (
                 <div
                   key={i} className="row-hover"
                   style={{ padding: '12px 18px', borderTop: '1px solid var(--row-line)', cursor: 'pointer', display: 'flex', gap: 10 }}
                   onClick={() => { setNotifOpen(false); setView({ name: 'project', pid: o.p.id, tab: 'schedule', pkg: 0 }); }}
                 >
-                  <span className="badge" style={{ background: '#fbe9e7', color: '#b23a32', flexShrink: 0 }}>{o.days}d late</span>
+                  <span className="badge" style={{ background: '#fbe9e7', color: '#b23a32', flexShrink: 0 }}>{t(`逾期 ${o.days} 天`, `${o.days}d late`)}</span>
                   <div style={{ minWidth: 0 }}>
                     <div style={{ fontSize: 13, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{o.p.name}</div>
-                    <div style={{ fontSize: 11.5, color: 'var(--text2)' }}>{o.row.task} · due {fmtDate(o.due)}</div>
+                    <div style={{ fontSize: 11.5, color: 'var(--text2)' }}>{o.row.task} · {t('应完成', 'due')} {fmtDate(o.due)}</div>
                   </div>
                 </div>
               ))}

@@ -4,12 +4,14 @@ import React, { useMemo, useState } from 'react';
 import { useStore } from '../store';
 import { fmtDate, isoDate, parseISO, projectHealth, projStage, schedProgress } from '@/lib/project';
 import { canCreate } from '@/lib/permissions';
-import { DIFF, SVC, svcColor, svcLabel } from '@/lib/templates';
+import { DIFF, SVC, svcColor, svcName } from '@/lib/templates';
+import { useLang } from '@/lib/i18n';
 import { Avatar, AvatarStack, HM, Icon, Pill, ProgressBar } from '../ui';
 import type { Project } from '@/lib/types';
 
 export default function ProjectsView({ search = '' }: { search?: string }) {
   const { projects, me, openProject } = useStore();
+  const { lang, t } = useLang();
   const [typeFilter, setTypeFilter] = useState('all');
   const [pmFilter, setPmFilter] = useState('all');
   const [q, setQ] = useState(search);
@@ -39,17 +41,17 @@ export default function ProjectsView({ search = '' }: { search?: string }) {
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginBottom: 22 }}>
         <div className="searchbox" style={{ background: 'var(--card)', width: 260 }}>
           <Icon name="search" size={16} />
-          <input placeholder="Search projects 搜索项目" value={q} onChange={(e) => setQ(e.target.value)} />
+          <input placeholder={t('搜索项目', 'Search projects')} value={q} onChange={(e) => setQ(e.target.value)} />
         </div>
         <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap' }}>
-          <button className={`chip ${typeFilter === 'all' ? 'active' : ''}`} onClick={() => setTypeFilter('all')}>All</button>
+          <button className={`chip ${typeFilter === 'all' ? 'active' : ''}`} onClick={() => setTypeFilter('all')}>{t('全部', 'All')}</button>
           {usedTypes.map((k) => (
-            <button key={k} className={`chip ${typeFilter === k ? 'active' : ''}`} onClick={() => setTypeFilter(k)}>{svcLabel(k)}</button>
+            <button key={k} className={`chip ${typeFilter === k ? 'active' : ''}`} onClick={() => setTypeFilter(k)}>{svcName(k, lang)}</button>
           ))}
         </div>
         <div style={{ flex: 1 }} />
         <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap' }}>
-          <button className={`chip ${pmFilter === 'all' ? 'active' : ''}`} onClick={() => setPmFilter('all')}>All PMs</button>
+          <button className={`chip ${pmFilter === 'all' ? 'active' : ''}`} onClick={() => setPmFilter('all')}>{t('全部负责人', 'All PMs')}</button>
           {pms.map((n) => (
             <button key={n} className={`chip ${pmFilter === n ? 'active' : ''}`} onClick={() => setPmFilter(n)}>
               <Avatar name={n} size={20} />{n}
@@ -62,7 +64,8 @@ export default function ProjectsView({ search = '' }: { search?: string }) {
         {list.map((p) => <ProjectCard key={p.id} p={p} onOpen={() => openProject(p.id)} />)}
         {list.length === 0 && (
           <div className="panel" style={{ padding: 40, textAlign: 'center', color: 'var(--text2)', gridColumn: '1 / -1' }}>
-            没有匹配的项目。{canCreate(me) ? '点右上角 New Project 创建。' : ''}
+            {t('没有匹配的项目。', 'No matching projects.')}
+            {canCreate(me) ? t('点右上角「新建项目」创建。', ' Use New Project to create one.') : ''}
           </div>
         )}
       </div>
@@ -79,13 +82,17 @@ function coverOf(p: Project): string {
 }
 
 function ProjectCard({ p, onOpen }: { p: Project; onOpen: () => void }) {
+  const { lang, t } = useLang();
   const sp = schedProgress(p);
   const stage = projStage(p);
   const done = stage === 'complete' || stage === 'invoice';
   const h = done ? 'completed' : projectHealth(p);
   const pm = (p.owners || [])[0];
   const del = parseISO(p.delivery);
-  const stageLabel = { presales: 'Presales 售前', handover: 'Handover 交接', progress: 'Production 进行中', complete: 'Complete 完成', invoice: 'Invoice 收尾' }[stage];
+  const stageLabel = {
+    presales: t('售前', 'Presales'), handover: t('交接', 'Handover'), progress: t('进行中', 'Production'),
+    complete: t('完成', 'Complete'), invoice: t('收尾', 'Invoice'),
+  }[stage];
   const team = [...new Set(p.packages.flatMap((pk) => pk.schedule.map((r) => r.assignee)).filter(Boolean))];
   return (
     <div className="panel clip" onClick={onOpen}
@@ -108,16 +115,16 @@ function ProjectCard({ p, onOpen }: { p: Project; onOpen: () => void }) {
           <div style={{ fontSize: 12.5, color: 'var(--text2)', marginTop: 2 }}>{p.client || '—'}</div>
         </div>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
-          {p.services.map((k) => <span key={k} className="svc-chip" style={{ color: svcColor(k) }}>{svcLabel(k)}</span>)}
+          {p.services.map((k) => <span key={k} className="svc-chip" style={{ color: svcColor(k) }}>{svcName(k, lang)}</span>)}
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
           {pm ? <Avatar name={pm} size={26} /> : null}
-          <span style={{ fontSize: 12.5, color: 'var(--text2)' }}>{pm || '未指派 PM'} · {stageLabel}</span>
+          <span style={{ fontSize: 12.5, color: 'var(--text2)' }}>{pm || t('未指派 PM', 'No PM assigned')} · {stageLabel}</span>
         </div>
         <ProgressBar pct={sp.pct} color={svcColor(p.services[0])} />
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderTop: '1px solid var(--row-line)', paddingTop: 12, marginTop: 2 }}>
           <span className="tnum" style={{ fontSize: 12.5, color: 'var(--text2)' }}>
-            Delivery <b style={{ color: del && del < new Date() && !done ? 'var(--danger)' : 'var(--navy900)', fontWeight: 600 }}>{del ? fmtDate(del).slice(0, 6) : '—'}</b>
+            {t('交付', 'Delivery')} <b style={{ color: del && del < new Date() && !done ? 'var(--danger)' : 'var(--navy900)', fontWeight: 600 }}>{del ? fmtDate(del).slice(0, 6) : '—'}</b>
           </span>
           {team.length > 0 && <AvatarStack names={team} size={24} />}
         </div>
@@ -129,6 +136,7 @@ function ProjectCard({ p, onOpen }: { p: Project; onOpen: () => void }) {
 /* ===== New Project modal (opened from the topbar) ===== */
 export function NewProjectModal({ onClose }: { onClose: () => void }) {
   const { me, users, createProject, openProject } = useStore();
+  const { lang, t } = useLang();
   const [name, setName] = useState('');
   const [client, setClient] = useState('');
   const [services, setServices] = useState<string[]>(['cgi']);
@@ -169,52 +177,52 @@ export function NewProjectModal({ onClose }: { onClose: () => void }) {
   return (
     <div className="overlay" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <div className="modal">
-        <h2>New Project 新建项目</h2>
-        <div className="msub">选择一个或多个服务;含模板的服务会自动生成排期与信息清单。</div>
+        <h2>{t('新建项目', 'New Project')}</h2>
+        <div className="msub">{t('选择一个或多个服务;含模板的服务会自动生成排期与信息清单。', 'Pick one or more services; templated services auto-generate a schedule and checklist.')}</div>
         <div className="field">
-          <label>Project name 项目名称</label>
-          <input value={name} onChange={(e) => setName(e.target.value)} placeholder="例:Dunearn Road Condo" autoFocus />
+          <label>{t('项目名称', 'Project name')}</label>
+          <input value={name} onChange={(e) => setName(e.target.value)} placeholder={t('例:Dunearn Road Condo', 'e.g. Dunearn Road Condo')} autoFocus />
         </div>
         <div className="field">
-          <label>Services 服务(可多选)</label>
+          <label>{t('服务(可多选)', 'Services (multi-select)')}</label>
           <div className="svc-multi">
             {Object.entries(SVC).map(([k, v]) => (
               <button key={k} className={`svc-opt ${services.includes(k) ? 'sel' : ''}`} onClick={() => toggleSvc(k)}>
-                <span className="sq" style={{ background: v.color }} />{v.label}
+                <span className="sq" style={{ background: v.color }} />{lang === 'zh' ? v.label : v.en}
               </button>
             ))}
           </div>
         </div>
         <div className="field">
-          <label>Client 客户</label>
-          <input value={client} onChange={(e) => setClient(e.target.value)} placeholder="developer / 客户" />
+          <label>{t('客户', 'Client')}</label>
+          <input value={client} onChange={(e) => setClient(e.target.value)} placeholder={t('developer / 客户', 'developer / client')} />
         </div>
         <div className="two">
-          <div className="field"><label>Main contractor 总包</label><input value={mainContractor} onChange={(e) => setMainContractor(e.target.value)} /></div>
-          <div className="field"><label>Architect 建筑师</label><input value={architect} onChange={(e) => setArchitect(e.target.value)} /></div>
-          <div className="field"><label>Landscape 景观师</label><input value={landscape} onChange={(e) => setLandscape(e.target.value)} /></div>
-          <div className="field"><label>Interior 室内设计</label><input value={interior} onChange={(e) => setInterior(e.target.value)} /></div>
-          <div className="field"><label>Creative agency 创意代理</label><input value={creative} onChange={(e) => setCreative(e.target.value)} /></div>
+          <div className="field"><label>{t('总包', 'Main contractor')}</label><input value={mainContractor} onChange={(e) => setMainContractor(e.target.value)} /></div>
+          <div className="field"><label>{t('建筑师', 'Architect')}</label><input value={architect} onChange={(e) => setArchitect(e.target.value)} /></div>
+          <div className="field"><label>{t('景观师', 'Landscape architect')}</label><input value={landscape} onChange={(e) => setLandscape(e.target.value)} /></div>
+          <div className="field"><label>{t('室内设计', 'Interior designer')}</label><input value={interior} onChange={(e) => setInterior(e.target.value)} /></div>
+          <div className="field"><label>{t('创意代理', 'Creative agency')}</label><input value={creative} onChange={(e) => setCreative(e.target.value)} /></div>
           <div className="field">
-            <label>PM(逗号分隔多人)</label>
+            <label>{t('负责 PM(逗号分隔多人)', 'PM (comma-separated)')}</label>
             <input value={owners} onChange={(e) => setOwners(e.target.value)} placeholder={pmNames.slice(0, 2).join(', ') || '张三, 李四'} list="pm-names" />
             <datalist id="pm-names">{pmNames.map((n) => <option key={n} value={n} />)}</datalist>
           </div>
         </div>
         <div className="two">
           <div className="field">
-            <label>Difficulty 难度</label>
+            <label>{t('难度', 'Difficulty')}</label>
             <select value={difficulty} onChange={(e) => setDifficulty(e.target.value)}>
-              {Object.entries(DIFF).map(([k, v]) => <option key={k} value={k}>{v[0]} · {v[1]}分</option>)}
+              {Object.entries(DIFF).map(([k, v]) => <option key={k} value={k}>{v[0]} · {v[1]}{t('分', ' pts')}</option>)}
             </select>
           </div>
-          <div className="field"><label>Start 起始日(=最终信息确认日)</label><input type="date" value={start} onChange={(e) => setStart(e.target.value)} /></div>
-          <div className="field"><label>Delivery 交付日(可空)</label><input type="date" value={delivery} onChange={(e) => setDelivery(e.target.value)} /></div>
-          <div className="field"><label>Buffer 天数</label><input type="number" min={0} value={buffer} onChange={(e) => setBuffer(parseInt(e.target.value) || 0)} /></div>
+          <div className="field"><label>{t('起始日(=最终信息确认日)', 'Start (= info confirmed date)')}</label><input type="date" value={start} onChange={(e) => setStart(e.target.value)} /></div>
+          <div className="field"><label>{t('交付日(可空)', 'Delivery (optional)')}</label><input type="date" value={delivery} onChange={(e) => setDelivery(e.target.value)} /></div>
+          <div className="field"><label>{t('Buffer 天数', 'Buffer days')}</label><input type="number" min={0} value={buffer} onChange={(e) => setBuffer(parseInt(e.target.value) || 0)} /></div>
         </div>
         <div className="modal-actions">
-          <button className="btn-line" onClick={onClose}>取消</button>
-          <button className="btn-navy" onClick={submit} disabled={busy}>{busy ? 'Creating…' : 'Create 创建'}</button>
+          <button className="btn-line" onClick={onClose}>{t('取消', 'Cancel')}</button>
+          <button className="btn-navy" onClick={submit} disabled={busy}>{busy ? t('创建中…', 'Creating…') : t('创建', 'Create')}</button>
         </div>
       </div>
     </div>

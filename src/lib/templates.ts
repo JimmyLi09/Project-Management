@@ -27,6 +27,8 @@ export const SVC: Record<string, { label: string; en: string; color: string; tpl
 };
 export const svcColor = (k: string) => SVC[k]?.color || '#7F8C8D';
 export const svcLabel = (k: string) => SVC[k]?.label || k;
+export const svcName = (k: string, lang: 'zh' | 'en') =>
+  lang === 'en' ? SVC[k]?.en || k : SVC[k]?.label || k;
 
 export const STAGES: [Stage, string, string][] = [
   ['presales', '售前', 'Presales'],

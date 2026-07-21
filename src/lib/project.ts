@@ -332,10 +332,12 @@ export function deliverySlack(p: Project): number | null {
   return Math.round((del.getTime() - finB.getTime()) / 86400000);
 }
 
-export function staleInfo(u: DirectorUpdate | undefined) {
-  if (!u || !u.at) return { cls: 'stale-bad', txt: '未更新' };
+export function staleInfo(u: DirectorUpdate | undefined, lang: 'zh' | 'en' = 'zh') {
+  const en = lang === 'en';
+  if (!u || !u.at) return { cls: 'stale-bad', txt: en ? 'never updated' : '未更新' };
   const days = Math.floor((Date.now() - u.at) / 86400000);
-  if (days > 14) return { cls: 'stale-bad', txt: `${days}天未更新` };
-  if (days > 7) return { cls: 'stale-warn', txt: `${days}天未更新` };
-  return { cls: 'stale-ok', txt: days <= 0 ? '今日更新' : `${days}天前` };
+  const staleTxt = en ? `stale ${days}d` : `${days}天未更新`;
+  if (days > 14) return { cls: 'stale-bad', txt: staleTxt };
+  if (days > 7) return { cls: 'stale-warn', txt: staleTxt };
+  return { cls: 'stale-ok', txt: days <= 0 ? (en ? 'updated today' : '今日更新') : en ? `${days}d ago` : `${days}天前` };
 }

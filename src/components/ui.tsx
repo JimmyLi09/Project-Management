@@ -3,6 +3,7 @@
 /* ===== Shared UI primitives (icons, avatars, badges, progress) — from the Audax Platform design file ===== */
 
 import React from 'react';
+import { useLang } from '@/lib/i18n';
 import type { Health } from '@/lib/project';
 import type { ChecklistStatus, ScheduleStatus } from '@/lib/types';
 
@@ -81,35 +82,38 @@ export function AvatarStack({ names, size = 24 }: { names: string[]; size?: numb
   );
 }
 
-/* ── status colour maps from the design file ── */
-export const HM: Record<Health | 'completed', { label: string; dot: string; bg: string; fg: string }> = {
-  ok: { label: 'On Track', dot: '#16865B', bg: '#e6f2ec', fg: '#0f6a48' },
-  risk: { label: 'At Risk', dot: '#D98A12', bg: '#fbf0dc', fg: '#a8690b' },
-  over: { label: 'Delayed', dot: '#D4483F', bg: '#fbe9e7', fg: '#b23a32' },
-  completed: { label: 'Completed', dot: '#6D7B8A', bg: '#eef1f4', fg: '#51606f' },
+/* ── status colour maps from the design file (bilingual labels) ── */
+export interface PillMeta { label: string; zh: string; dot: string; bg: string; fg: string }
+
+export const HM: Record<Health | 'completed', PillMeta> = {
+  ok: { label: 'On Track', zh: '正常', dot: '#16865B', bg: '#e6f2ec', fg: '#0f6a48' },
+  risk: { label: 'At Risk', zh: '预警', dot: '#D98A12', bg: '#fbf0dc', fg: '#a8690b' },
+  over: { label: 'Delayed', zh: '逾期', dot: '#D4483F', bg: '#fbe9e7', fg: '#b23a32' },
+  completed: { label: 'Completed', zh: '已完成', dot: '#6D7B8A', bg: '#eef1f4', fg: '#51606f' },
 };
 
-export const TM: Record<ScheduleStatus, { label: string; dot: string; bg: string; fg: string }> = {
-  done: { label: 'Done', dot: '#16865B', bg: '#e6f2ec', fg: '#0f6a48' },
-  wip: { label: 'In Progress', dot: '#2E63B7', bg: '#e7eefb', fg: '#234f97' },
-  block: { label: 'Blocked', dot: '#D4483F', bg: '#fbe9e7', fg: '#b23a32' },
-  todo: { label: 'To Do', dot: '#6D7B8A', bg: '#eef1f4', fg: '#51606f' },
+export const TM: Record<ScheduleStatus, PillMeta> = {
+  done: { label: 'Done', zh: '已完成', dot: '#16865B', bg: '#e6f2ec', fg: '#0f6a48' },
+  wip: { label: 'In Progress', zh: '进行中', dot: '#2E63B7', bg: '#e7eefb', fg: '#234f97' },
+  block: { label: 'Blocked', zh: '受阻', dot: '#D4483F', bg: '#fbe9e7', fg: '#b23a32' },
+  todo: { label: 'To Do', zh: '未开始', dot: '#6D7B8A', bg: '#eef1f4', fg: '#51606f' },
 };
 
-export const CM: Record<ChecklistStatus, { label: string; dot: string; bg: string; fg: string }> = {
-  confirmed: { label: 'Approved', dot: '#16865B', bg: '#e6f2ec', fg: '#0f6a48' },
-  received: { label: 'Received', dot: '#2E63B7', bg: '#e7eefb', fg: '#234f97' },
-  pending: { label: 'Pending', dot: '#D98A12', bg: '#fbf0dc', fg: '#a8690b' },
-  revision: { label: 'Revision', dot: '#D4483F', bg: '#fbe9e7', fg: '#b23a32' },
-  rejected: { label: 'Rejected', dot: '#D4483F', bg: '#fbe9e7', fg: '#b23a32' },
-  na: { label: 'N / A', dot: '#b6bfc9', bg: '#eef1f4', fg: '#6D7B8A' },
+export const CM: Record<ChecklistStatus, PillMeta> = {
+  confirmed: { label: 'Approved', zh: '已确认', dot: '#16865B', bg: '#e6f2ec', fg: '#0f6a48' },
+  received: { label: 'Received', zh: '已收到', dot: '#2E63B7', bg: '#e7eefb', fg: '#234f97' },
+  pending: { label: 'Pending', zh: '未收到', dot: '#D98A12', bg: '#fbf0dc', fg: '#a8690b' },
+  revision: { label: 'Revision', zh: '需修订', dot: '#D4483F', bg: '#fbe9e7', fg: '#b23a32' },
+  rejected: { label: 'Rejected', zh: '退回', dot: '#D4483F', bg: '#fbe9e7', fg: '#b23a32' },
+  na: { label: 'N / A', zh: 'N/A', dot: '#b6bfc9', bg: '#eef1f4', fg: '#6D7B8A' },
 };
 
-export function Pill({ m }: { m: { label: string; dot: string; bg: string; fg: string } }) {
+export function Pill({ m }: { m: PillMeta }) {
+  const { lang } = useLang();
   return (
     <span className="badge" style={{ background: m.bg, color: m.fg }}>
       <span className="bdot" style={{ background: m.dot }} />
-      {m.label}
+      {lang === 'zh' ? m.zh : m.label}
     </span>
   );
 }

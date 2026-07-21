@@ -4,7 +4,8 @@ import React, { useState } from 'react';
 import { useStore } from '../store';
 import { fmtDate, MACRO, macroStage, parseISO, pkgStart, planDates, todayMid } from '@/lib/project';
 import { canEdit, canRowEdit } from '@/lib/permissions';
-import { svcColor, svcLabel } from '@/lib/templates';
+import { svcColor, svcName } from '@/lib/templates';
+import { useLang } from '@/lib/i18n';
 import { Avatar, Icon, Pill, TM } from '../ui';
 import type { Project, ScheduleStatus } from '@/lib/types';
 
@@ -14,24 +15,25 @@ export default function ScheduleTab({ p, pkgIdx, onExport, onPkg }: {
   p: Project; pkgIdx: number; onExport: () => void; onPkg: (i: number) => void;
 }) {
   const { me, dispatch } = useStore();
+  const { lang, t } = useLang();
   const [editMode, setEditMode] = useState(false);
   const ed = canEdit(me, p);
   const pkg = p.packages[pkgIdx];
   const pd = planDates(pkg, pkgStart(p, pkg));
-  const t = todayMid();
+  const t0 = todayMid();
 
   /* package slack */
   const del = parseISO(pkg.delivery);
   let fin: Date | null = null;
   for (let i = pd.length - 1; i >= 0; i--) { if (pd[i]) { fin = pd[i]!.end; break; } }
-  let slackNode: React.ReactNode = <span style={{ color: 'var(--text2)', fontSize: 12 }}>填交付日核算</span>;
+  let slackNode: React.ReactNode = <span style={{ color: 'var(--text2)', fontSize: 12 }}>{t('填交付日核算', 'Set delivery to check')}</span>;
   if (del && fin) {
     const fb = new Date(fin);
     fb.setDate(fb.getDate() + (pkg.buffer || 0));
     const sl = Math.round((del.getTime() - fb.getTime()) / 86400000);
     slackNode = sl >= 0
-      ? <span style={{ color: 'var(--success)', fontWeight: 600, fontSize: 12.5 }}>✓ 富余 {sl} 天</span>
-      : <span style={{ color: 'var(--danger)', fontWeight: 600, fontSize: 12.5 }}>⚠ 超 {-sl} 天</span>;
+      ? <span style={{ color: 'var(--success)', fontWeight: 600, fontSize: 12.5 }}>✓ {t(`富余 ${sl} 天`, `${sl} days slack`)}</span>
+      : <span style={{ color: 'var(--danger)', fontWeight: 600, fontSize: 12.5 }}>⚠ {t(`超 ${-sl} 天`, `${-sl} days over`)}</span>;
   }
 
   /* group rows by macro stage */
@@ -51,7 +53,7 @@ export default function ScheduleTab({ p, pkgIdx, onExport, onPkg }: {
             <button key={i} className={`chip ${i === pkgIdx ? 'active' : ''}`}
               style={i === pkgIdx ? { background: svcColor(pk.svc), borderColor: svcColor(pk.svc) } : undefined}
               onClick={() => onPkg(i)}>
-              {svcLabel(pk.svc)}
+              {svcName(pk.svc, lang)}
             </button>
           ))}
         </div>
@@ -59,12 +61,12 @@ export default function ScheduleTab({ p, pkgIdx, onExport, onPkg }: {
 
       {/* package bar */}
       <div className="panel" style={{ padding: '14px 20px', marginBottom: 16, display: 'flex', gap: 20, flexWrap: 'wrap', alignItems: 'center' }}>
-        <Field label="Start 起始">
+        <Field label={t('起始', 'Start')}>
           {ed ? <input type="date" className="in sm" defaultValue={pkg.start || ''} key={`s${pkg.start}`}
             onChange={(e) => dispatch(p.id, { type: 'setPkgField', pkg: pkgIdx, field: 'start', value: e.target.value })} />
             : <b className="tnum">{pkgStart(p, pkg) ? fmtDate(parseISO(pkgStart(p, pkg))) : '—'}</b>}
         </Field>
-        <Field label="Delivery 交付">
+        <Field label={t('交付', 'Delivery')}>
           {ed ? <input type="date" className="in sm" defaultValue={pkg.delivery || ''} key={`d${pkg.delivery}`}
             onChange={(e) => dispatch(p.id, { type: 'setPkgField', pkg: pkgIdx, field: 'delivery', value: e.target.value })} />
             : <b className="tnum">{pkg.delivery ? fmtDate(parseISO(pkg.delivery)) : '—'}</b>}
@@ -74,20 +76,20 @@ export default function ScheduleTab({ p, pkgIdx, onExport, onPkg }: {
             onBlur={(e) => (parseInt(e.target.value) || 0) !== (pkg.buffer || 0) && dispatch(p.id, { type: 'setPkgBuffer', pkg: pkgIdx, value: parseInt(e.target.value) || 0 })} />
             : <b className="tnum">{pkg.buffer || 0}</b>}
         </Field>
-        <Field label="Owner 负责">
-          {ed ? <input className="in sm" style={{ width: 100 }} defaultValue={pkg.owner || ''} key={`o${pkg.owner}`} placeholder="人"
+        <Field label={t('本服务负责', 'Owner')}>
+          {ed ? <input className="in sm" style={{ width: 100 }} defaultValue={pkg.owner || ''} key={`o${pkg.owner}`} placeholder={t('人', 'name')}
             onBlur={(e) => e.target.value !== (pkg.owner || '') && dispatch(p.id, { type: 'setPkgField', pkg: pkgIdx, field: 'owner', value: e.target.value })} />
             : <b>{pkg.owner || '—'}</b>}
         </Field>
         <div style={{ flex: 1 }} />
         {slackNode}
-        {ed && <button className="btn-line sm" onClick={() => dispatch(p.id, { type: 'reversePkg', pkg: pkgIdx })}>↩ 按交付日倒排</button>}
-        {ed && <button className="btn-line sm" onClick={() => setEditMode(!editMode)}>{editMode ? '完成编辑' : 'Edit 编辑阶段'}</button>}
-        <button className="btn-line sm" onClick={onExport}><Icon name="download" size={13} />Export</button>
+        {ed && <button className="btn-line sm" onClick={() => dispatch(p.id, { type: 'reversePkg', pkg: pkgIdx })}>↩ {t('按交付日倒排', 'Back-plan from delivery')}</button>}
+        {ed && <button className="btn-line sm" onClick={() => setEditMode(!editMode)}>{editMode ? t('完成编辑', 'Done editing') : t('编辑阶段', 'Edit phases')}</button>}
+        <button className="btn-line sm" onClick={onExport}><Icon name="download" size={13} />{t('导出', 'Export')}</button>
       </div>
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14, fontSize: 12.5, color: 'var(--text2)' }}>
-        <Icon name="lock" size={14} style={{ color: 'var(--navy700)' }} /> Freeze point 冻结点 — 确认后锁定,改动影响下游
+        <Icon name="lock" size={14} style={{ color: 'var(--navy700)' }} /> {t('冻结点 — 确认后锁定,改动影响下游', 'Freeze point — locked once confirmed; changes ripple downstream')}
       </div>
 
       <div className="panel clip">
@@ -98,16 +100,18 @@ export default function ScheduleTab({ p, pkgIdx, onExport, onPkg }: {
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 22px', background: 'var(--hover-bg)', borderBottom: '1px solid var(--border)', borderTop: gi ? '1px solid var(--border)' : 'none' }}>
                   <span style={{ width: 8, height: 8, borderRadius: 2, background: MACRO[g.m][2] }} />
                   <span style={{ fontSize: 12.5, fontWeight: 700, letterSpacing: '.03em', color: 'var(--navy900)', textTransform: 'uppercase' }}>
-                    {MACRO[g.m][1]} {MACRO[g.m][0]}
+                    {lang === 'zh' ? MACRO[g.m][0] : MACRO[g.m][1]}
                   </span>
-                  <span style={{ fontSize: 11.5, color: 'var(--text2)' }}>{g.rows.filter((x) => x.r.status === 'done').length}/{g.rows.length} done</span>
+                  <span style={{ fontSize: 11.5, color: 'var(--text2)' }}>{g.rows.filter((x) => x.r.status === 'done').length}/{g.rows.length} {t('已完成', 'done')}</span>
                 </div>
                 {g.rows.map(({ r, i }) => {
                   const d = pd[i];
-                  const over = r.status !== 'done' && d && d.end < t;
+                  const over = r.status !== 'done' && d && d.end < t0;
                   const done = r.status === 'done';
                   const rowEd = canRowEdit(me, p, r);
                   const gateTxt = r.gate && r.gate.trim() ? r.gate.replace(/★\s*/, '') : '';
+                  const taskMain = lang === 'zh' ? r.task : r.taskEn || r.task;
+                  const taskSub = lang === 'zh' ? r.taskEn : r.task;
                   return (
                     <div key={i} className="row-hover" style={{
                       display: 'grid', gridTemplateColumns: '26px 26px minmax(220px,2fr) 40px 1.15fr 120px', gap: 13, alignItems: 'center',
@@ -124,38 +128,38 @@ export default function ScheduleTab({ p, pkgIdx, onExport, onPkg }: {
                       <div style={{ minWidth: 0 }}>
                         {editMode && ed ? (
                           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                            <input className="in sm" defaultValue={r.task} placeholder="任务名(中)"
+                            <input className="in sm" defaultValue={r.task} placeholder={t('任务名(中)', 'Task (ZH)')}
                               onBlur={(e) => e.target.value !== r.task && dispatch(p.id, { type: 'editSched', pkg: pkgIdx, idx: i, field: 'task', value: e.target.value })} />
                             <input className="in sm" defaultValue={r.taskEn} placeholder="Task (EN)"
                               onBlur={(e) => e.target.value !== r.taskEn && dispatch(p.id, { type: 'editSched', pkg: pkgIdx, idx: i, field: 'taskEn', value: e.target.value })} />
                             <div style={{ display: 'flex', gap: 6 }}>
-                              <input className="in sm" style={{ flex: 1 }} defaultValue={r.owner} placeholder="角色 Owner"
+                              <input className="in sm" style={{ flex: 1 }} defaultValue={r.owner} placeholder={t('角色', 'Owner role')}
                                 onBlur={(e) => e.target.value !== r.owner && dispatch(p.id, { type: 'editSched', pkg: pkgIdx, idx: i, field: 'owner', value: e.target.value })} />
-                              <input className="in sm" type="number" step={0.5} min={0} style={{ width: 66 }} defaultValue={r.weeks} title="周数 weeks"
+                              <input className="in sm" type="number" step={0.5} min={0} style={{ width: 66 }} defaultValue={r.weeks} title={t('周数', 'weeks')}
                                 onBlur={(e) => (parseFloat(e.target.value) || 0) !== r.weeks && dispatch(p.id, { type: 'editSchedNum', pkg: pkgIdx, idx: i, field: 'weeks', value: parseFloat(e.target.value) || 0 })} />
                             </div>
-                            <input className="in sm" defaultValue={r.assignee} placeholder="👤 指派给 Assignee"
+                            <input className="in sm" defaultValue={r.assignee} placeholder={t('👤 指派给(个人)', '👤 Assignee')}
                               onBlur={(e) => e.target.value !== r.assignee && dispatch(p.id, { type: 'editSched', pkg: pkgIdx, idx: i, field: 'assignee', value: e.target.value })} />
                             <div style={{ display: 'flex', gap: 6 }}>
-                              <input type="date" className="in sm" style={{ flex: 1 }} defaultValue={r.s} title="开始(覆盖)"
+                              <input type="date" className="in sm" style={{ flex: 1 }} defaultValue={r.s} title={t('开始(覆盖)', 'Start override')}
                                 onChange={(e) => dispatch(p.id, { type: 'editSched', pkg: pkgIdx, idx: i, field: 's', value: e.target.value })} />
-                              <input type="date" className="in sm" style={{ flex: 1 }} defaultValue={r.e} title="结束(覆盖)"
+                              <input type="date" className="in sm" style={{ flex: 1 }} defaultValue={r.e} title={t('结束(覆盖)', 'End override')}
                                 onChange={(e) => dispatch(p.id, { type: 'editSched', pkg: pkgIdx, idx: i, field: 'e', value: e.target.value })} />
                             </div>
                             <button style={{ color: 'var(--danger)', fontSize: 12, fontWeight: 600, alignSelf: 'flex-start' }}
-                              onClick={() => { if (confirm('删除此阶段?')) dispatch(p.id, { type: 'removeRow', pkg: pkgIdx, idx: i }); }}>✕ 删除此阶段</button>
+                              onClick={() => { if (confirm(t('删除此阶段?', 'Delete this phase?'))) dispatch(p.id, { type: 'removeRow', pkg: pkgIdx, idx: i }); }}>✕ {t('删除此阶段', 'Delete phase')}</button>
                           </div>
                         ) : (
                           <>
-                            <div style={{ fontSize: 13.5, fontWeight: 500, textDecoration: done ? 'line-through' : 'none', color: done ? 'var(--text2)' : 'var(--text)' }}>{r.task}</div>
-                            <div style={{ fontSize: 11.5, color: 'var(--text2)' }}>{r.taskEn}{r.owner ? ` · ${r.owner}` : ''}</div>
+                            <div style={{ fontSize: 13.5, fontWeight: 500, textDecoration: done ? 'line-through' : 'none', color: done ? 'var(--text2)' : 'var(--text)' }}>{taskMain}</div>
+                            <div style={{ fontSize: 11.5, color: 'var(--text2)' }}>{taskSub}{r.owner ? ` · ${r.owner}` : ''}</div>
                             {gateTxt && (
                               <div style={{ display: 'inline-flex', gap: 5, marginTop: 5, fontSize: 11.5, color: r.freeze ? '#8f5b1d' : 'var(--text2)', background: r.freeze ? '#f6ecdd' : 'var(--row-line2)', borderRadius: 6, padding: '3px 8px' }}>
                                 {r.freeze ? '★' : '›'} {gateTxt}
                               </div>
                             )}
                             <input
-                              className="in sm" placeholder="批注 / 实际情况…" defaultValue={r.note} readOnly={!ed}
+                              className="in sm" placeholder={t('批注 / 实际情况…', 'Note / actual status…')} defaultValue={r.note} readOnly={!ed}
                               style={{ marginTop: 6, width: '100%', background: 'var(--hover-bg)', border: '1px solid var(--row-line)' }}
                               onBlur={(e) => { if (ed && e.target.value !== r.note) dispatch(p.id, { type: 'editSched', pkg: pkgIdx, idx: i, field: 'note', value: e.target.value }); }}
                             />
@@ -170,7 +174,7 @@ export default function ScheduleTab({ p, pkgIdx, onExport, onPkg }: {
                       <div style={{ justifySelf: 'end' }}>
                         <button
                           style={{ cursor: rowEd ? 'pointer' : 'not-allowed', opacity: rowEd ? 1 : .6, background: 'none', padding: 0 }}
-                          title={rowEd ? '点击切换状态' : '无编辑权限'}
+                          title={rowEd ? t('点击切换状态', 'Click to change status') : t('无编辑权限', 'No edit permission')}
                           onClick={rowEd ? () => dispatch(p.id, { type: 'setRowStatus', pkg: pkgIdx, idx: i, status: NEXT[r.status] }) : undefined}
                         >
                           <Pill m={TM[r.status]} />
@@ -186,10 +190,11 @@ export default function ScheduleTab({ p, pkgIdx, onExport, onPkg }: {
       </div>
       {editMode && ed && (
         <button className="btn-line" style={{ width: '100%', marginTop: 12, justifyContent: 'center', borderStyle: 'dashed' }}
-          onClick={() => dispatch(p.id, { type: 'addRow', pkg: pkgIdx })}>+ Add phase 添加阶段</button>
+          onClick={() => dispatch(p.id, { type: 'addRow', pkg: pkgIdx })}>+ {t('添加阶段', 'Add phase')}</button>
       )}
       <p style={{ marginTop: 12, fontSize: 12.5, color: 'var(--text2)' }}>
-        勾选=完成;未勾且过期=逾期(红边)。点状态徽章切换 To Do → In Progress → Done → Blocked。团队成员只能操作指派给自己(👤)的任务。
+        {t('勾选=完成;未勾且过期=逾期(红边)。点状态徽章切换 未开始→进行中→已完成→受阻。团队成员只能操作指派给自己(👤)的任务。',
+          'Tick = done; unticked past due = overdue (red edge). Click the status pill to cycle To Do → In Progress → Done → Blocked. Members can only act on tasks assigned 👤 to them.')}
       </p>
     </>
   );
