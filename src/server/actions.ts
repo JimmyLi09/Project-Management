@@ -1,0 +1,301 @@
+/* ===== Server-side project mutations =====
+   Every mutation from the client arrives as a typed action; permission is
+   checked here against the authenticated user (never trusted from client). */
+
+import type { Identity } from '@/lib/permissions';
+import {
+  canAssign, canCommercial, canDecide, canEdit, canRowEdit,
+} from '@/lib/permissions';
+import { fitWindow, parseISO, isoDate, totalDays } from '@/lib/project';
+import { SVC } from '@/lib/templates';
+import type { ChecklistStatus, Project, ScheduleStatus } from '@/lib/types';
+
+export type ProjectAction =
+  | { type: 'toggleDone'; pkg: number; idx: number }
+  | { type: 'cycleStatus'; pkg: number; idx: number }
+  | { type: 'setRowStatus'; pkg: number; idx: number; status: ScheduleStatus }
+  | { type: 'editSched'; pkg: number; idx: number; field: 'task' | 'taskEn' | 'owner' | 'assignee' | 'note' | 's' | 'e' | 'phase'; value: string }
+  | { type: 'editSchedNum'; pkg: number; idx: number; field: 'weeks'; value: number }
+  | { type: 'addRow'; pkg: number }
+  | { type: 'removeRow'; pkg: number; idx: number }
+  | { type: 'setClStatus'; pkg: number; gi: number; ii: number; value: ChecklistStatus }
+  | { type: 'editCl'; pkg: number; gi: number; ii: number; field: 'date' | 'remark' | 'zh' | 'en'; value: string }
+  | { type: 'addItem'; pkg: number; gi: number }
+  | { type: 'removeItem'; pkg: number; gi: number; ii: number }
+  | { type: 'addGroup'; pkg: number; name: string }
+  | { type: 'attachShot'; pkg: number; gi: number; ii: number; data: string }
+  | { type: 'removeShot'; pkg: number; gi: number; ii: number }
+  | { type: 'setPkgField'; pkg: number; field: 'start' | 'delivery' | 'owner'; value: string }
+  | { type: 'setPkgBuffer'; pkg: number; value: number }
+  | { type: 'reversePkg'; pkg: number }
+  | { type: 'reverseSchedule' }
+  | { type: 'setDelivery'; value: string }
+  | { type: 'setBuffer'; value: number }
+  | { type: 'setDiff'; value: string }
+  | { type: 'setPoints'; value: number }
+  | { type: 'addOwner'; name: string }
+  | { type: 'removeOwner'; name: string }
+  | { type: 'editUpdate'; field: 'done' | 'nextNodes' | 'risks' | 'needDirector' | 'clientPending' | 'budget'; value: string }
+  | { type: 'setDecision'; field: 'dDecision' | 'dStatus'; value: string }
+  | { type: 'toggleInvoiced' };
+
+export class PermissionError extends Error {}
+export class ValidationError extends Error {}
+
+const svcName = (k: string) => SVC[k]?.label || k;
+
+function logIt(p: Project, by: string, text: string) {
+  p.log = p.log || [];
+  p.log.unshift({ at: Date.now(), by, text });
+  if (p.log.length > 200) p.log.length = 200;
+}
+
+function getRow(p: Project, pkg: number, idx: number) {
+  const pk = p.packages[pkg];
+  if (!pk) throw new ValidationError('无效的服务包');
+  const r = pk.schedule[idx];
+  if (!r) throw new ValidationError('无效的排期行');
+  return { pk, r };
+}
+function getItem(p: Project, pkg: number, gi: number, ii: number) {
+  const pk = p.packages[pkg];
+  if (!pk) throw new ValidationError('无效的服务包');
+  const g = pk.checklist[gi];
+  if (!g) throw new ValidationError('无效的清单栏目');
+  const it = g.items[ii];
+  if (!it) throw new ValidationError('无效的清单项');
+  return { pk, g, it };
+}
+
+/* Mutates p in place. Throws PermissionError / ValidationError. */
+export function applyAction(u: Identity, p: Project, a: ProjectAction): void {
+  switch (a.type) {
+    case 'toggleDone': {
+      const { pk, r } = getRow(p, a.pkg, a.idx);
+      if (!canRowEdit(u, p, r)) throw new PermissionError('无编辑权限');
+      const was = r.status;
+      r.status = r.status === 'done' ? 'todo' : 'done';
+      logIt(p, u.name, `${svcName(pk.svc)}·${r.task}: ${was}→${r.status}`);
+      break;
+    }
+    case 'cycleStatus': {
+      const { r } = getRow(p, a.pkg, a.idx);
+      if (!canRowEdit(u, p, r)) throw new PermissionError('无编辑权限');
+      const o: ScheduleStatus[] = ['todo', 'wip', 'done', 'block'];
+      const was = r.status;
+      r.status = o[(o.indexOf(r.status) + 1) % o.length];
+      logIt(p, u.name, `${r.task}: ${was}→${r.status}`);
+      break;
+    }
+    case 'setRowStatus': {
+      const { r } = getRow(p, a.pkg, a.idx);
+      if (!canRowEdit(u, p, r)) throw new PermissionError('无编辑权限');
+      const was = r.status;
+      r.status = a.status;
+      logIt(p, u.name, `${r.task}: ${was}→${r.status}`);
+      break;
+    }
+    case 'editSched': {
+      const { r } = getRow(p, a.pkg, a.idx);
+      if (!canEdit(u, p)) throw new PermissionError('无编辑权限');
+      (r as any)[a.field] = a.value;
+      if (a.field === 's' || a.field === 'e') logIt(p, u.name, `${r.task} 日期(${a.field})=${a.value || '—'}`);
+      break;
+    }
+    case 'editSchedNum': {
+      const { r } = getRow(p, a.pkg, a.idx);
+      if (!canEdit(u, p)) throw new PermissionError('无编辑权限');
+      r.weeks = Number(a.value) || 0;
+      break;
+    }
+    case 'addRow': {
+      if (!canEdit(u, p)) throw new PermissionError('无编辑权限');
+      const pk = p.packages[a.pkg];
+      if (!pk) throw new ValidationError('无效的服务包');
+      pk.schedule.push({
+        no: String(pk.schedule.length), phase: '新阶段', task: '新阶段', taskEn: 'New phase',
+        owner: '', assignee: '', weeks: 1, typical: '—', gate: '', freeze: false,
+        status: 'todo', note: '', s: '', e: '',
+      });
+      logIt(p, u.name, '新增阶段');
+      break;
+    }
+    case 'removeRow': {
+      if (!canEdit(u, p)) throw new PermissionError('无编辑权限');
+      const { pk, r } = getRow(p, a.pkg, a.idx);
+      logIt(p, u.name, `删除阶段: ${r.task}`);
+      pk.schedule.splice(a.idx, 1);
+      break;
+    }
+    case 'setClStatus': {
+      if (!canEdit(u, p)) throw new PermissionError('无编辑权限');
+      const { it } = getItem(p, a.pkg, a.gi, a.ii);
+      const was = it.status;
+      it.status = a.value;
+      logIt(p, u.name, `清单「${it.zh}」: ${was}→${a.value}`);
+      break;
+    }
+    case 'editCl': {
+      if (!canEdit(u, p)) throw new PermissionError('无编辑权限');
+      const { it } = getItem(p, a.pkg, a.gi, a.ii);
+      (it as any)[a.field] = a.value;
+      break;
+    }
+    case 'addItem': {
+      if (!canEdit(u, p)) throw new PermissionError('无编辑权限');
+      const pk = p.packages[a.pkg];
+      const g = pk?.checklist[a.gi];
+      if (!g) throw new ValidationError('无效的清单栏目');
+      g.items.push({ zh: '新信息项', en: 'New item', status: 'pending', date: '', remark: '' });
+      break;
+    }
+    case 'removeItem': {
+      if (!canEdit(u, p)) throw new PermissionError('无编辑权限');
+      const { g } = getItem(p, a.pkg, a.gi, a.ii);
+      g.items.splice(a.ii, 1);
+      break;
+    }
+    case 'addGroup': {
+      if (!canEdit(u, p)) throw new PermissionError('无编辑权限');
+      const pk = p.packages[a.pkg];
+      if (!pk) throw new ValidationError('无效的服务包');
+      pk.checklist.push({
+        group: a.name || '特殊需求', groupEn: 'Custom', color: '#607080',
+        items: [{ zh: '新信息项', en: 'New item', status: 'pending', date: '', remark: '' }],
+      });
+      break;
+    }
+    case 'attachShot': {
+      if (!canEdit(u, p)) throw new PermissionError('无编辑权限');
+      if (!/^data:image\/(jpeg|png|webp);base64,/.test(a.data)) throw new ValidationError('无效的图片数据');
+      if (a.data.length > 800_000) throw new ValidationError('图片过大,请压缩后上传');
+      const { it } = getItem(p, a.pkg, a.gi, a.ii);
+      it.shot = a.data;
+      if (!it.date) it.date = isoDate(new Date());
+      if (it.status === 'pending') it.status = 'received';
+      logIt(p, u.name, `上传资料截图: ${it.zh}`);
+      break;
+    }
+    case 'removeShot': {
+      if (!canEdit(u, p)) throw new PermissionError('无编辑权限');
+      const { it } = getItem(p, a.pkg, a.gi, a.ii);
+      it.shot = '';
+      break;
+    }
+    case 'setPkgField': {
+      if (!canEdit(u, p)) throw new PermissionError('无编辑权限');
+      const pk = p.packages[a.pkg];
+      if (!pk) throw new ValidationError('无效的服务包');
+      pk[a.field] = a.value;
+      logIt(p, u.name, `${svcName(pk.svc)} ${a.field}=${a.value || '—'}`);
+      break;
+    }
+    case 'setPkgBuffer': {
+      if (!canEdit(u, p)) throw new PermissionError('无编辑权限');
+      const pk = p.packages[a.pkg];
+      if (!pk) throw new ValidationError('无效的服务包');
+      pk.buffer = Number(a.value) || 0;
+      logIt(p, u.name, `${svcName(pk.svc)} buffer=${pk.buffer}`);
+      break;
+    }
+    case 'reversePkg': {
+      if (!canEdit(u, p)) throw new PermissionError('无编辑权限');
+      const pk = p.packages[a.pkg];
+      if (!pk) throw new ValidationError('无效的服务包');
+      const del = parseISO(pk.delivery);
+      if (!del) throw new ValidationError('请先填该服务「交付日」');
+      let startISO = pk.start || p.start;
+      if (!startISO) {
+        let d = 0;
+        pk.schedule.forEach((r) => { d += Math.round((r.weeks || 0) * 7); });
+        const ns = new Date(del);
+        ns.setDate(ns.getDate() - d - (pk.buffer || 0));
+        startISO = isoDate(ns);
+      }
+      pk.start = startISO;
+      fitWindow(pk, startISO, pk.delivery, pk.buffer || 0);
+      logIt(p, u.name, `${svcName(pk.svc)} 倒排:按起始+交付自动生成各阶段日期`);
+      break;
+    }
+    case 'reverseSchedule': {
+      if (!canEdit(u, p)) throw new PermissionError('无编辑权限');
+      const del = parseISO(p.delivery);
+      if (!del) throw new ValidationError('请先填交付日 Delivery date');
+      const total = totalDays(p) + (p.buffer || 0);
+      const ns = new Date(del);
+      ns.setDate(ns.getDate() - total);
+      p.start = isoDate(ns);
+      p.packages.forEach((pk) => {
+        if (!pk.start) pk.start = p.start;
+        if (!pk.delivery) pk.delivery = p.delivery;
+        fitWindow(pk, pk.start || p.start, pk.delivery || p.delivery, pk.buffer || p.buffer || 0);
+      });
+      logIt(p, u.name, '按交付日倒排,各服务阶段日期自动生成');
+      break;
+    }
+    case 'setDelivery': {
+      if (!canEdit(u, p)) throw new PermissionError('无编辑权限');
+      p.delivery = a.value;
+      break;
+    }
+    case 'setBuffer': {
+      if (!canEdit(u, p)) throw new PermissionError('无编辑权限');
+      p.buffer = Number(a.value) || 0;
+      break;
+    }
+    case 'setDiff': {
+      if (!canAssign(u, p)) throw new PermissionError('仅 PD/BD 可制定难度/积分');
+      p.difficulty = a.value as Project['difficulty'];
+      break;
+    }
+    case 'setPoints': {
+      if (!canAssign(u, p)) throw new PermissionError('仅 PD/BD 可制定积分');
+      p.points = Number(a.value) || 0;
+      logIt(p, u.name, `积分设为 ${p.points}`);
+      break;
+    }
+    case 'addOwner': {
+      if (!canAssign(u, p)) throw new PermissionError('仅 PD/BD 可指派 PM');
+      const nm = (a.name || '').trim();
+      if (!nm) throw new ValidationError('名字不能为空');
+      p.owners = p.owners || [];
+      if (!p.owners.includes(nm)) p.owners.push(nm);
+      logIt(p, u.name, `指派 PM: ${nm}`);
+      break;
+    }
+    case 'removeOwner': {
+      if (!canAssign(u, p)) throw new PermissionError('仅 PD/BD 可调整人员');
+      p.owners = (p.owners || []).filter((n) => n !== a.name);
+      break;
+    }
+    case 'editUpdate': {
+      if (!canEdit(u, p)) throw new PermissionError('无编辑权限');
+      p.update = p.update || ({} as Project['update']);
+      p.update[a.field] = a.value;
+      p.update.by = u.name;
+      p.update.at = Date.now();
+      break;
+    }
+    case 'setDecision': {
+      if (!canDecide(u)) throw new PermissionError('仅 PD/BD 可回批决策');
+      p.update = p.update || ({} as Project['update']);
+      if (a.field === 'dStatus') {
+        p.update.dStatus = a.value as Project['update']['dStatus'];
+        logIt(p, u.name, `Director 决定: ${a.value}`);
+      } else {
+        p.update.dDecision = a.value;
+      }
+      p.update.dBy = u.name;
+      p.update.dDate = isoDate(new Date());
+      break;
+    }
+    case 'toggleInvoiced': {
+      if (!canCommercial(u, p)) throw new PermissionError('仅 PD/BD/销售可标记开票收尾');
+      p.invoiced = !p.invoiced;
+      logIt(p, u.name, p.invoiced ? '标记开票/收尾' : '撤销开票');
+      break;
+    }
+    default:
+      throw new ValidationError('未知操作');
+  }
+}

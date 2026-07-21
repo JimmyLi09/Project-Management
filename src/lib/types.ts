@@ -1,0 +1,119 @@
+/* ===== Shared domain types (mirrors validated prototype v9 data model) ===== */
+
+export type Role = 'director' | 'bd' | 'sales' | 'pm' | 'member' | 'viewer';
+
+export interface User {
+  id: number;
+  username: string;
+  name: string;
+  role: Role;
+}
+
+export type ScheduleStatus = 'todo' | 'wip' | 'done' | 'block';
+export type ChecklistStatus =
+  | 'pending'
+  | 'received'
+  | 'confirmed'
+  | 'na'
+  | 'revision'
+  | 'rejected';
+
+export interface ScheduleRow {
+  no: string;
+  phase: string;
+  task: string;
+  taskEn: string;
+  owner: string; // role label, e.g. "Audax / Client"
+  assignee: string; // individual person name
+  weeks: number;
+  typical: string;
+  gate: string;
+  freeze: boolean;
+  status: ScheduleStatus;
+  note: string;
+  s: string; // ISO start override
+  e: string; // ISO end override
+}
+
+export interface ChecklistItem {
+  zh: string;
+  en: string;
+  status: ChecklistStatus;
+  date: string;
+  remark: string;
+  shot?: string; // dataURL thumbnail
+}
+
+export interface ChecklistGroup {
+  group: string;
+  groupEn: string;
+  color: string;
+  items: ChecklistItem[];
+}
+
+export interface ServicePackage {
+  svc: string;
+  start: string;
+  delivery: string;
+  buffer: number;
+  owner: string;
+  status: string;
+  schedule: ScheduleRow[];
+  checklist: ChecklistGroup[];
+}
+
+export type DecisionStatus = 'pending' | 'approved' | 'rejected' | 'needinfo';
+
+export interface DirectorUpdate {
+  done: string;
+  nextNodes: string;
+  risks: string;
+  needDirector: string;
+  clientPending: string;
+  budget: string;
+  by: string;
+  at: number;
+  dDecision: string;
+  dStatus: DecisionStatus;
+  dDate: string;
+  dBy: string;
+}
+
+export interface LogEntry {
+  at: number;
+  by: string;
+  text: string;
+}
+
+export interface Parties {
+  mainContractor: string;
+  architect: string;
+  landscape: string;
+  interior: string;
+  creative: string;
+}
+
+export type Difficulty = 'easy' | 'medium' | 'hard' | 'complex';
+
+export interface Project {
+  id: string;
+  name: string;
+  client: string;
+  services: string[];
+  stage: string;
+  difficulty: Difficulty;
+  points: number;
+  owners: string[]; // PM names
+  perm: string[]; // extra names with production edit permission
+  start: string;
+  delivery: string;
+  buffer: number;
+  created: number;
+  invoiced?: boolean;
+  update: DirectorUpdate;
+  parties: Parties;
+  log: LogEntry[];
+  packages: ServicePackage[];
+}
+
+export type Stage = 'presales' | 'handover' | 'progress' | 'complete' | 'invoice';

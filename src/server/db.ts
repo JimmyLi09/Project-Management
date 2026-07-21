@@ -1,0 +1,123 @@
+import Database from 'better-sqlite3';
+import fs from 'fs';
+import path from 'path';
+import crypto from 'crypto';
+import type { Project, Role, User } from '@/lib/types';
+import { migrate } from '@/lib/project';
+
+const DATA_DIR = process.env.AUDAX_DATA_DIR || path.join(process.cwd(), 'data');
+
+let db: Database.Database | null = null;
+
+export function getDb(): Database.Database {
+  if (db) return db;
+  fs.mkdirSync(DATA_DIR, { recursive: true });
+  db = new Database(path.join(DATA_DIR, 'audax.db'));
+  db.pragma('journal_mode = WAL');
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS users (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      username TEXT NOT NULL UNIQUE,
+      password_hash TEXT NOT NULL,
+      name TEXT NOT NULL,
+      role TEXT NOT NULL,
+      created_at INTEGER NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS projects (
+      id TEXT PRIMARY KEY,
+      data TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS meta (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL
+    );
+  `);
+  seedIfEmpty(db);
+  return db;
+}
+
+/* ---- secret for session signing (persisted so sessions survive restarts) ---- */
+export function getSecret(): string {
+  const d = getDb();
+  const row = d.prepare('SELECT value FROM meta WHERE key = ?').get('session_secret') as { value: string } | undefined;
+  if (row) return row.value;
+  const secret = crypto.randomBytes(32).toString('hex');
+  d.prepare('INSERT INTO meta (key, value) VALUES (?, ?)').run('session_secret', secret);
+  return secret;
+}
+
+/* ---- password hashing (scrypt, no native deps beyond node) ---- */
+export function hashPassword(pw: string): string {
+  const salt = crypto.randomBytes(16).toString('hex');
+  const hash = crypto.scryptSync(pw, salt, 64).toString('hex');
+  return `${salt}:${hash}`;
+}
+export function verifyPassword(pw: string, stored: string): boolean {
+  const [salt, hash] = stored.split(':');
+  if (!salt || !hash) return false;
+  const check = crypto.scryptSync(pw, salt, 64).toString('hex');
+  return crypto.timingSafeEqual(Buffer.from(hash, 'hex'), Buffer.from(check, 'hex'));
+}
+
+/* ---- users ---- */
+export function getUserByUsername(username: string) {
+  return getDb()
+    .prepare('SELECT * FROM users WHERE username = ?')
+    .get(username) as (User & { password_hash: string }) | undefined;
+}
+export function getUserById(id: number) {
+  return getDb()
+    .prepare('SELECT id, username, name, role FROM users WHERE id = ?')
+    .get(id) as User | undefined;
+}
+export function listUsers(): User[] {
+  return getDb()
+    .prepare('SELECT id, username, name, role FROM users ORDER BY id')
+    .all() as User[];
+}
+export function createUser(username: string, password: string, name: string, role: Role): User {
+  const info = getDb()
+    .prepare('INSERT INTO users (username, password_hash, name, role, created_at) VALUES (?, ?, ?, ?, ?)')
+    .run(username, hashPassword(password), name, role, Date.now());
+  return { id: Number(info.lastInsertRowid), username, name, role };
+}
+
+/* ---- projects (stored as JSON documents; all mutations happen server-side) ---- */
+export function listProjects(): Project[] {
+  const rows = getDb().prepare('SELECT data FROM projects ORDER BY created_at DESC').all() as { data: string }[];
+  return rows.map((r) => migrate(JSON.parse(r.data)));
+}
+export function getProject(id: string): Project | undefined {
+  const row = getDb().prepare('SELECT data FROM projects WHERE id = ?').get(id) as { data: string } | undefined;
+  return row ? migrate(JSON.parse(row.data)) : undefined;
+}
+export function insertProject(p: Project) {
+  getDb()
+    .prepare('INSERT INTO projects (id, data, created_at, updated_at) VALUES (?, ?, ?, ?)')
+    .run(p.id, JSON.stringify(p), p.created, Date.now());
+}
+export function saveProject(p: Project) {
+  getDb()
+    .prepare('UPDATE projects SET data = ?, updated_at = ? WHERE id = ?')
+    .run(JSON.stringify(p), Date.now(), p.id);
+}
+export function deleteProject(id: string) {
+  getDb().prepare('DELETE FROM projects WHERE id = ?').run(id);
+}
+
+/* ---- default accounts so the system is usable out of the box ---- */
+function seedIfEmpty(d: Database.Database) {
+  const count = (d.prepare('SELECT COUNT(*) AS c FROM users').get() as { c: number }).c;
+  if (count > 0) return;
+  const seed = d.prepare('INSERT INTO users (username, password_hash, name, role, created_at) VALUES (?, ?, ?, ?, ?)');
+  const defaults: [string, string, string, Role][] = [
+    ['pd', 'audax123', '总监 PD', 'director'],
+    ['bd', 'audax123', 'BD', 'bd'],
+    ['sales', 'audax123', '销售 Sales', 'sales'],
+  ];
+  for (const [username, pw, name, role] of defaults) {
+    seed.run(username, hashPassword(pw), name, role, Date.now());
+  }
+}
