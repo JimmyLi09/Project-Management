@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createUser, getUserByEmail, getUserById, getUserByUsername, listUsers, updateUser } from '@/server/db';
+import { createUser, getUserByEmail, getUserById, getUserByUsername, listUsers, resetPassword, setUserDisabled, updateUser } from '@/server/db';
 import { currentUser } from '@/server/session';
 import { canAdmin, identityOf } from '@/lib/permissions';
 import type { Role } from '@/lib/types';
@@ -62,6 +62,26 @@ export async function PATCH(req: NextRequest) {
   const id = Number(body.id);
   const target = getUserById(id);
   if (!target) return NextResponse.json({ error: '用户不存在' }, { status: 404 });
+
+  /* PD/BD resets someone's password (forces a change on their next login) */
+  if (body.action === 'resetPassword') {
+    const pw = String(body.newPassword || '');
+    if (pw.length < 6) return NextResponse.json({ error: '新密码至少 6 位' }, { status: 400 });
+    resetPassword(id, pw);
+    return NextResponse.json({ ok: true });
+  }
+  /* enable / disable an account (departure). Can't disable yourself or the
+     last active PD/BD. */
+  if (body.action === 'setDisabled') {
+    const disabled = !!body.disabled;
+    if (disabled && id === user.id) return NextResponse.json({ error: '不能停用你自己的账号' }, { status: 400 });
+    if (disabled && (target.role === 'director' || target.role === 'bd')) {
+      const activeAdmins = listUsers().filter((u) => (u.role === 'director' || u.role === 'bd') && !u.disabled && u.id !== id);
+      if (activeAdmins.length === 0) return NextResponse.json({ error: '不能停用唯一的 PD/BD 账号' }, { status: 400 });
+    }
+    setUserDisabled(id, disabled);
+    return NextResponse.json({ ok: true });
+  }
 
   const fields: { name?: string; email?: string; position?: string; role?: Role } = {};
   if (body.name !== undefined) {

@@ -67,8 +67,14 @@ export default function UsersView() {
               <th style={th}></th>
             </tr>
             {users.map((u) => (
-              <tr key={u.id}>
-                <td style={cell}><span style={{ display: 'inline-flex', alignItems: 'center', gap: 9, fontWeight: 600 }}><Avatar name={u.name} size={26} />{u.name}</span></td>
+              <tr key={u.id} style={u.disabled ? { opacity: 0.5 } : undefined}>
+                <td style={cell}>
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 9, fontWeight: 600 }}>
+                    <Avatar name={u.name} size={26} />{u.name}
+                    {u.disabled && <span className="badge" style={{ background: '#fbe9e7', color: '#b23a32' }}>{t('已停用', 'Disabled')}</span>}
+                    {u.mustChangePassword && !u.disabled && <span className="badge" style={{ background: '#fbf0dc', color: '#a8690b' }} title={t('下次登录须改密码', 'Must change password on next login')}>🔑</span>}
+                  </span>
+                </td>
                 <td style={{ ...cell, color: 'var(--text2)' }} className="tnum">{u.username}</td>
                 <td style={{ ...cell, color: 'var(--text2)', fontSize: 12 }}>{u.email || '—'}</td>
                 <td style={{ ...cell, fontSize: 12.5 }}>{u.position || '—'}</td>
@@ -126,12 +132,34 @@ function EditUserModal({ u, onClose, onSaved }: { u: User; onClose: () => void; 
     else { const b = await res.json().catch(() => ({})); setMsg(b.error || t('保存失败', 'Save failed')); }
   }
 
+  async function resetPw() {
+    const pw = prompt(t(`为 ${u.name} 设置新的初始密码(≥6位),对方下次登录须修改:`, `New initial password for ${u.name} (≥6 chars); they must change it on next login:`));
+    if (pw === null) return;
+    if (pw.length < 6) { setMsg(t('密码至少 6 位', 'Password must be ≥6 chars')); return; }
+    const res = await fetch('/api/users', {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: u.id, action: 'resetPassword', newPassword: pw }),
+    });
+    setMsg(res.ok ? t('✓ 密码已重置', '✓ Password reset') : ((await res.json().catch(() => ({}))).error || t('失败', 'Failed')));
+  }
+
+  async function toggleDisabled() {
+    const disabling = !u.disabled;
+    if (disabling && !confirm(t(`停用 ${u.name} 的账号?对方将无法登录(建议先转交其项目)。`, `Disable ${u.name}'s account? They won't be able to sign in (transfer their projects first).`))) return;
+    const res = await fetch('/api/users', {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: u.id, action: 'setDisabled', disabled: disabling }),
+    });
+    if (res.ok) onSaved();
+    else setMsg((await res.json().catch(() => ({}))).error || t('失败', 'Failed'));
+  }
+
   return (
     <div className="overlay" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <div className="modal" style={{ maxWidth: 440 }}>
         <h2>{t('编辑用户', 'Edit user')} · {u.username}</h2>
-        <div className="msub">{t('改姓名会自动同步到所有项目的负责人与任务指派(按姓名匹配)。账号名与密码不在此修改。', 'Renaming propagates to all project ownership and task assignments (matched by name). Username and password are not changed here.')}</div>
-        {msg && <div className="login-err">{msg}</div>}
+        <div className="msub">{t('改姓名会自动同步到所有项目的负责人与任务指派(按姓名匹配)。', 'Renaming propagates to all project ownership and task assignments (matched by name).')}</div>
+        {msg && <div className={msg.startsWith('✓') ? 'login-hint' : 'login-err'} style={msg.startsWith('✓') ? { color: 'var(--success)' } : undefined}>{msg}</div>}
         <div className="field"><label>{t('姓名', 'Name')}</label><input value={name} onChange={(e) => setName(e.target.value)} /></div>
         <div className="field"><label>Email</label><input type="email" value={email} onChange={(e) => setEmail(e.target.value)} /></div>
         <div className="field"><label>{t('职位', 'Position')}</label><input value={position} onChange={(e) => setPosition(e.target.value)} /></div>
@@ -142,6 +170,12 @@ function EditUserModal({ u, onClose, onSaved }: { u: User; onClose: () => void; 
               <option key={r} value={r}>{ROLE_LABEL[r]} — {lang === 'zh' ? ROLE_DESC[r][0] : ROLE_DESC[r][1]}</option>
             ))}
           </select>
+        </div>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', borderTop: '1px solid var(--row-line)', paddingTop: 14, marginTop: 4 }}>
+          <button className="btn-line sm" onClick={resetPw}>🔑 {t('重置密码', 'Reset password')}</button>
+          <button className={`btn-line sm ${u.disabled ? '' : 'danger'}`} onClick={toggleDisabled}>
+            {u.disabled ? '↺ ' + t('恢复账号', 'Re-enable') : '⛔ ' + t('停用账号', 'Disable')}
+          </button>
         </div>
         <div className="modal-actions">
           <button className="btn-line" onClick={onClose}>{t('取消', 'Cancel')}</button>

@@ -42,6 +42,9 @@ function Shell() {
   const [showNew, setShowNew] = useState(false);
   const [notifOpen, setNotifOpen] = useState(false);
   const [search, setSearch] = useState('');
+  const [showPw, setShowPw] = useState(false);
+  /* force a password change when the account is flagged (first login / after reset) */
+  const [mustChange, setMustChange] = useState(!!user.mustChangePassword);
   const overdue = useMemo(() => allOverdue(projects), [projects]);
 
   useEffect(() => {
@@ -109,8 +112,11 @@ function Shell() {
           <Avatar name={user.name} size={34} />
           <div style={{ flex: 1, lineHeight: 1.2, minWidth: 0 }}>
             <div className="nm">{user.name}</div>
-            <div className="rl">{ROLE_LABEL[user.role]}</div>
+            <div className="rl">{user.position || ROLE_LABEL[user.role]}</div>
           </div>
+          <button title={t('修改密码', 'Change password')} onClick={() => setShowPw(true)} style={{ color: 'var(--text2)', display: 'flex' }}>
+            <Icon name="lock" size={15} />
+          </button>
           <button title={t('退出登录', 'Sign out')} onClick={logout} style={{ color: 'var(--text2)', display: 'flex' }}>
             <Icon name="logout" size={16} />
           </button>
@@ -202,7 +208,58 @@ function Shell() {
       </main>
 
       {showNew && <NewProjectModal onClose={() => setShowNew(false)} />}
+      {(showPw || mustChange) && (
+        <ChangePasswordModal
+          forced={mustChange}
+          onClose={() => setShowPw(false)}
+          onDone={() => { setMustChange(false); setShowPw(false); }}
+        />
+      )}
       <Toast />
+    </div>
+  );
+}
+
+function ChangePasswordModal({ forced, onClose, onDone }: { forced: boolean; onClose: () => void; onDone: () => void }) {
+  const { t } = useLang();
+  const [cur, setCur] = useState('');
+  const [nw, setNw] = useState('');
+  const [nw2, setNw2] = useState('');
+  const [err, setErr] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    if (nw !== nw2) { setErr(t('两次输入的新密码不一致', 'New passwords do not match')); return; }
+    if (nw.length < 6) { setErr(t('新密码至少 6 位', 'New password must be ≥6 chars')); return; }
+    setBusy(true); setErr('');
+    const res = await fetch('/api/auth/password', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ currentPassword: cur, newPassword: nw }),
+    });
+    setBusy(false);
+    if (res.ok) onDone();
+    else { const b = await res.json().catch(() => ({})); setErr(b.error || t('修改失败', 'Failed')); }
+  }
+
+  return (
+    <div className="overlay" onClick={(e) => { if (!forced && e.target === e.currentTarget) onClose(); }}>
+      <form className="modal" style={{ maxWidth: 400 }} onSubmit={submit}>
+        <h2>{t('修改密码', 'Change password')}</h2>
+        <div className="msub">
+          {forced
+            ? t('首次登录(或密码被重置),请先设置新密码。', 'First login (or your password was reset) — please set a new password.')
+            : t('输入当前密码与新密码。', 'Enter your current and new password.')}
+        </div>
+        {err && <div className="login-err">{err}</div>}
+        <div className="field"><label>{t('当前密码', 'Current password')}</label><input type="password" value={cur} onChange={(e) => setCur(e.target.value)} autoFocus required /></div>
+        <div className="field"><label>{t('新密码(≥6位)', 'New password (≥6 chars)')}</label><input type="password" value={nw} onChange={(e) => setNw(e.target.value)} required /></div>
+        <div className="field"><label>{t('确认新密码', 'Confirm new password')}</label><input type="password" value={nw2} onChange={(e) => setNw2(e.target.value)} required /></div>
+        <div className="modal-actions">
+          {!forced && <button type="button" className="btn-line" onClick={onClose}>{t('取消', 'Cancel')}</button>}
+          <button className="btn-navy" disabled={busy}>{busy ? t('提交中…', 'Saving…') : t('确认修改', 'Change password')}</button>
+        </div>
+      </form>
     </div>
   );
 }

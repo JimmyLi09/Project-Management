@@ -123,6 +123,8 @@ function migrateSchema(d: Database.Database) {
   const cols = (d.prepare('PRAGMA table_info(users)').all() as { name: string }[]).map((c) => c.name);
   if (!cols.includes('email')) d.exec("ALTER TABLE users ADD COLUMN email TEXT NOT NULL DEFAULT ''");
   if (!cols.includes('position')) d.exec("ALTER TABLE users ADD COLUMN position TEXT NOT NULL DEFAULT ''");
+  if (!cols.includes('must_change_pw')) d.exec('ALTER TABLE users ADD COLUMN must_change_pw INTEGER NOT NULL DEFAULT 0');
+  if (!cols.includes('disabled')) d.exec('ALTER TABLE users ADD COLUMN disabled INTEGER NOT NULL DEFAULT 0');
 }
 
 /* ---- secret for session signing (persisted so sessions survive restarts) ---- */
@@ -170,24 +172,46 @@ export function getUserByEmail(email: string) {
     .prepare("SELECT * FROM users WHERE email != '' AND lower(email) = ?")
     .get(email.toLowerCase()) as (User & { password_hash: string }) | undefined;
 }
+const USER_COLS = 'id, username, name, role, email, position, must_change_pw AS mustChangePassword, disabled';
+function rowToUser(r: Record<string, unknown> | undefined): User | undefined {
+  if (!r) return undefined;
+  return {
+    id: r.id as number, username: r.username as string, name: r.name as string, role: r.role as Role,
+    email: (r.email as string) || '', position: (r.position as string) || '',
+    mustChangePassword: !!r.mustChangePassword, disabled: !!r.disabled,
+  };
+}
 export function getUserById(id: number) {
-  return getDb()
-    .prepare('SELECT id, username, name, role, email, position FROM users WHERE id = ?')
-    .get(id) as User | undefined;
+  return rowToUser(getDb().prepare(`SELECT ${USER_COLS} FROM users WHERE id = ?`).get(id) as Record<string, unknown> | undefined);
 }
 export function listUsers(): User[] {
-  return getDb()
-    .prepare('SELECT id, username, name, role, email, position FROM users ORDER BY id')
-    .all() as User[];
+  return (getDb().prepare(`SELECT ${USER_COLS} FROM users ORDER BY id`).all() as Record<string, unknown>[]).map((r) => rowToUser(r)!);
 }
 export function createUser(
   username: string, password: string, name: string, role: Role,
-  email = '', position = '',
+  email = '', position = '', mustChangePassword = false,
 ): User {
   const info = getDb()
-    .prepare('INSERT INTO users (username, password_hash, name, role, email, position, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
-    .run(username, hashPassword(password), name, role, email, position, Date.now());
-  return { id: Number(info.lastInsertRowid), username, name, role, email, position };
+    .prepare('INSERT INTO users (username, password_hash, name, role, email, position, must_change_pw, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+    .run(username, hashPassword(password), name, role, email, position, mustChangePassword ? 1 : 0, Date.now());
+  return { id: Number(info.lastInsertRowid), username, name, role, email, position, mustChangePassword, disabled: false };
+}
+
+/* Change a user's own password (verifies the current one). Clears the
+   force-change flag. */
+export function changePassword(id: number, currentPw: string, newPw: string): { ok: boolean; error?: string } {
+  const row = getDb().prepare('SELECT password_hash FROM users WHERE id = ?').get(id) as { password_hash: string } | undefined;
+  if (!row) return { ok: false, error: '用户不存在' };
+  if (!verifyPassword(currentPw, row.password_hash)) return { ok: false, error: '当前密码错误' };
+  getDb().prepare('UPDATE users SET password_hash = ?, must_change_pw = 0 WHERE id = ?').run(hashPassword(newPw), id);
+  return { ok: true };
+}
+/* PD/BD resets someone's password; forces a change on their next login. */
+export function resetPassword(id: number, newPw: string) {
+  getDb().prepare('UPDATE users SET password_hash = ?, must_change_pw = 1 WHERE id = ?').run(hashPassword(newPw), id);
+}
+export function setUserDisabled(id: number, disabled: boolean) {
+  getDb().prepare('UPDATE users SET disabled = ? WHERE id = ?').run(disabled ? 1 : 0, id);
 }
 
 /* ---- projects (stored as JSON documents; all mutations happen server-side) ----
@@ -298,13 +322,16 @@ function propagateRename(oldName: string, newName: string) {
 function seedIfEmpty(d: Database.Database) {
   const count = (d.prepare('SELECT COUNT(*) AS c FROM users').get() as { c: number }).c;
   if (count > 0) return;
-  const seed = d.prepare('INSERT INTO users (username, password_hash, name, role, created_at) VALUES (?, ?, ?, ?, ?)');
+  /* On real deployments the default accounts must change their password on
+     first login; on the throwaway demo (Vercel) skip that friction. */
+  const force = process.env.VERCEL || process.env.AUDAX_DEMO === '1' ? 0 : 1;
+  const seed = d.prepare('INSERT INTO users (username, password_hash, name, role, must_change_pw, created_at) VALUES (?, ?, ?, ?, ?, ?)');
   const defaults: [string, string, string, Role][] = [
     ['pd', 'audax123', '总监 PD', 'director'],
     ['bd', 'audax123', 'BD', 'bd'],
     ['sales', 'audax123', '销售 Sales', 'sales'],
   ];
   for (const [username, pw, name, role] of defaults) {
-    seed.run(username, hashPassword(pw), name, role, Date.now());
+    seed.run(username, hashPassword(pw), name, role, force, Date.now());
   }
 }

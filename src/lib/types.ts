@@ -9,6 +9,8 @@ export interface User {
   role: Role;
   email: string;
   position: string; // job title, e.g. "Senior PM" / "3D Artist"
+  mustChangePassword?: boolean; // forced password change on next login
+  disabled?: boolean; // account deactivated (e.g. departure) — cannot sign in
 }
 
 export type ScheduleStatus = 'todo' | 'wip' | 'done' | 'block';
