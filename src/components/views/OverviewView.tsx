@@ -3,7 +3,7 @@
 import React, { useMemo } from 'react';
 import { useStore } from '../store';
 import {
-  fmtDate, overdueItems, pkgStart, planDates, projectHealth, projStage,
+  fmtDate, isMyProject, overdueItems, pkgStart, planDates, projectHealth, projStage,
   schedProgress, staleInfo, todayMid,
 } from '@/lib/project';
 import { teamLoads } from '@/lib/alloc';
@@ -17,9 +17,10 @@ export default function OverviewView() {
   const { lang, t } = useLang();
   const t0 = todayMid();
 
+  /* Overview is personalised: PM/member see their own projects; PD/BD/Sales see all (A5) */
   const active = useMemo(
-    () => projects.filter((p) => { if (p.archived) return false; const s = projStage(p); return s !== 'complete' && s !== 'invoice'; }),
-    [projects],
+    () => projects.filter((p) => { if (p.archived || !isMyProject(p, me)) return false; const s = projStage(p); return s !== 'complete' && s !== 'invoice'; }),
+    [projects, me],
   );
   const monthStart = new Date(t0.getFullYear(), t0.getMonth(), 1).getTime();
   const newThisMonth = projects.filter((p) => p.created >= monthStart).length;
@@ -66,7 +67,7 @@ export default function OverviewView() {
   const directorItems = useMemo(() => {
     const items: { icon: string; color: string; title: string; detail: string; pid: string }[] = [];
     projects.forEach((p) => {
-      if (p.archived) return;
+      if (p.archived || !isMyProject(p, me)) return;
       const u = p.update;
       if (u?.needDirector && u.dStatus === 'pending') {
         items.push({
@@ -93,7 +94,7 @@ export default function OverviewView() {
       }
     });
     return items.slice(0, 5);
-  }, [projects, lang, t]);
+  }, [projects, me, lang, t]);
 
   const loads = useMemo(() => teamLoads(projects, users).slice(0, 5), [projects, users]);
   const boardList = [...active].sort((a, b) => b.created - a.created).slice(0, 6);

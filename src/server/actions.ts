@@ -37,6 +37,8 @@ export type ProjectAction =
   | { type: 'removeOwner'; name: string }
   | { type: 'transferProject'; from: string; to: string; includeTasks: boolean }
   | { type: 'setArchived'; value: boolean }
+  | { type: 'dismissRisk'; key: string }
+  | { type: 'restoreRisk'; key: string }
   | { type: 'editUpdate'; field: 'done' | 'nextNodes' | 'risks' | 'needDirector' | 'clientPending' | 'budget'; value: string }
   | { type: 'setDecision'; field: 'dDecision' | 'dStatus'; value: string }
   | { type: 'toggleInvoiced' };
@@ -332,6 +334,22 @@ export function applyAction(u: Identity, p: Project, a: ProjectAction): void {
       if (!canAssign(u, p)) throw new PermissionError('仅 PD/BD 可归档项目');
       p.archived = !!a.value;
       logIt(p, u.name, p.archived ? '归档项目 Archived' : '取消归档 Unarchived');
+      break;
+    }
+    case 'dismissRisk': {
+      if (!canEdit(u, p)) throw new PermissionError('无编辑权限');
+      if (!a.key) throw new ValidationError('无效的风险标识');
+      p.dismissedRisks = p.dismissedRisks || [];
+      if (!p.dismissedRisks.includes(a.key)) {
+        p.dismissedRisks.push(a.key);
+        logIt(p, u.name, `标记风险已处理 Risk dismissed: ${a.key}`);
+      }
+      break;
+    }
+    case 'restoreRisk': {
+      if (!canEdit(u, p)) throw new PermissionError('无编辑权限');
+      p.dismissedRisks = (p.dismissedRisks || []).filter((k) => k !== a.key);
+      logIt(p, u.name, `恢复风险 Risk restored: ${a.key}`);
       break;
     }
     default:

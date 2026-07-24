@@ -115,6 +115,7 @@ export interface Project {
   created: number;
   invoiced?: boolean;
   archived?: boolean; // hidden from working views, kept for records/stats
+  dismissedRisks?: string[]; // risk keys the team has marked handled/ignored
   updatedAt?: number; // server-injected on read; used for conflict detection
   update: DirectorUpdate;
   parties: Parties;

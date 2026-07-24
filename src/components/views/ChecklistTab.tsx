@@ -149,7 +149,9 @@ export default function ChecklistTab({ p, pkgIdx, onExport, onPkg }: {
                     </div>
                   </div>
                   <div>
-                    <input type="date" className="in sm" style={{ width: '100%' }} defaultValue={it.date} key={`d${it.date}`} disabled={!ed}
+                    {/* controlled (no value-based key) so the native picker doesn't
+                        remount and close after picking month/day (A3) */}
+                    <input type="date" className="in sm" style={{ width: '100%' }} value={it.date} disabled={!ed}
                       onChange={(e) => dispatch(p.id, { type: 'editCl', pkg: pkgIdx, gi, ii, field: 'date', value: e.target.value })} />
                   </div>
                   <div>

@@ -62,12 +62,14 @@ export default function ScheduleTab({ p, pkgIdx, onExport, onPkg }: {
       {/* package bar */}
       <div className="panel" style={{ padding: '14px 20px', marginBottom: 16, display: 'flex', gap: 20, flexWrap: 'wrap', alignItems: 'center' }}>
         <Field label={t('起始', 'Start')}>
-          {ed ? <input type="date" className="in sm" defaultValue={pkg.start || ''} key={`s${pkg.start}`}
+          {/* controlled (no value-based key) so picking month/day doesn't remount
+              and close the native picker mid-selection (A3) */}
+          {ed ? <input type="date" className="in sm" value={pkg.start || ''}
             onChange={(e) => dispatch(p.id, { type: 'setPkgField', pkg: pkgIdx, field: 'start', value: e.target.value })} />
             : <b className="tnum">{pkgStart(p, pkg) ? fmtDate(parseISO(pkgStart(p, pkg))) : '—'}</b>}
         </Field>
         <Field label={t('交付', 'Delivery')}>
-          {ed ? <input type="date" className="in sm" defaultValue={pkg.delivery || ''} key={`d${pkg.delivery}`}
+          {ed ? <input type="date" className="in sm" value={pkg.delivery || ''}
             onChange={(e) => dispatch(p.id, { type: 'setPkgField', pkg: pkgIdx, field: 'delivery', value: e.target.value })} />
             : <b className="tnum">{pkg.delivery ? fmtDate(parseISO(pkg.delivery)) : '—'}</b>}
         </Field>
@@ -141,9 +143,9 @@ export default function ScheduleTab({ p, pkgIdx, onExport, onPkg }: {
                             <input className="in sm" defaultValue={r.assignee} placeholder={t('👤 指派给(个人)', '👤 Assignee')}
                               onBlur={(e) => e.target.value !== r.assignee && dispatch(p.id, { type: 'editSched', pkg: pkgIdx, idx: i, field: 'assignee', value: e.target.value })} />
                             <div style={{ display: 'flex', gap: 6 }}>
-                              <input type="date" className="in sm" style={{ flex: 1 }} defaultValue={r.s} title={t('开始(覆盖)', 'Start override')}
+                              <input type="date" className="in sm" style={{ flex: 1 }} value={r.s} title={t('开始(覆盖)', 'Start override')}
                                 onChange={(e) => dispatch(p.id, { type: 'editSched', pkg: pkgIdx, idx: i, field: 's', value: e.target.value })} />
-                              <input type="date" className="in sm" style={{ flex: 1 }} defaultValue={r.e} title={t('结束(覆盖)', 'End override')}
+                              <input type="date" className="in sm" style={{ flex: 1 }} value={r.e} title={t('结束(覆盖)', 'End override')}
                                 onChange={(e) => dispatch(p.id, { type: 'editSched', pkg: pkgIdx, idx: i, field: 'e', value: e.target.value })} />
                             </div>
                             <button style={{ color: 'var(--danger)', fontSize: 12, fontWeight: 600, alignSelf: 'flex-start' }}

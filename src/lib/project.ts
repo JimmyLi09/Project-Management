@@ -246,14 +246,24 @@ export interface OverdueItem {
   due: Date;
   days: number;
 }
+/* ── risk keys & dismissal (A5) ──
+   A risk is derived from data, so we identify each by a stable key and let the
+   team mark it 已处理/忽略 — dismissed risks drop out of every risk surface
+   (overdue list, health 预警, KPIs, bell) until restored or the row moves. */
+export type RiskKind = 'od' | 'bl' | 'fz';
+export const riskKey = (kind: RiskKind, pi: number, idx: number) => `${kind}:${pi}:${idx}`;
+const dismissedSet = (p: Project) => new Set(p.dismissedRisks || []);
+export const isRiskDismissed = (p: Project, key: string) => (p.dismissedRisks || []).includes(key);
+
 export function overdueItems(p: Project): OverdueItem[] {
   const t = todayMid();
+  const dm = dismissedSet(p);
   const out: OverdueItem[] = [];
   p.packages.forEach((pk, pi) => {
     const pd = planDates(pk, pkgStart(p, pk));
     pk.schedule.forEach((r, i) => {
       const d = pd[i];
-      if (r.status !== 'done' && d && d.end < t) {
+      if (r.status !== 'done' && d && d.end < t && !dm.has(riskKey('od', pi, i))) {
         out.push({ p, pkg: pk, pi, row: r, idx: i, due: d.end, days: Math.round((t.getTime() - d.end.getTime()) / 86400000) });
       }
     });
@@ -266,19 +276,30 @@ export function allOverdue(list: Project[]): OverdueItem[] {
   return a.sort((x, y) => y.days - x.days);
 }
 
+/* Whether a project is "mine" — used to scope risk/alert surfaces so each
+   person sees only their own; PD/BD/Sales/Viewer see everything. */
+export function isMyProject(p: Project, me: { name: string; role: string }): boolean {
+  if (me.role === 'pm' || me.role === 'member') {
+    if ((p.owners || []).includes(me.name)) return true;
+    return p.packages.some((pk) => pk.schedule.some((r) => r.assignee === me.name));
+  }
+  return true; // director / bd / sales / viewer
+}
+
 export type Health = 'ok' | 'risk' | 'over';
 export function projectHealth(p: Project): Health {
   if (overdueItems(p).length) return 'over';
   const t = todayMid();
   const soon = new Date(t);
   soon.setDate(soon.getDate() + 7);
+  const dm = dismissedSet(p);
   let risk = false;
-  p.packages.forEach((pk) => {
+  p.packages.forEach((pk, pi) => {
     const pd = planDates(pk, pkgStart(p, pk));
     pk.schedule.forEach((r, i) => {
-      if (r.status === 'block') risk = true;
+      if (r.status === 'block' && !dm.has(riskKey('bl', pi, i))) risk = true;
       const d = pd[i];
-      if (r.freeze && r.status !== 'done' && d && d.start <= soon) risk = true;
+      if (r.freeze && r.status !== 'done' && d && d.start <= soon && !dm.has(riskKey('fz', pi, i))) risk = true;
     });
   });
   return risk ? 'risk' : 'ok';

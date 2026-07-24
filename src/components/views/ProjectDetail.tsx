@@ -3,9 +3,9 @@
 import React, { useState } from 'react';
 import { useStore } from '../store';
 import {
-  deliverySlack, fmtDate, infoProgress, nextFreeze, overdueItems, parseISO,
+  deliverySlack, fmtDate, infoProgress, isRiskDismissed, nextFreeze, overdueItems, parseISO,
   pkgProgress, pkgStart, planDates, plannedFinish, projectHealth, projPoints,
-  projStage, schedProgress, todayMid,
+  projStage, riskKey, schedProgress, todayMid,
 } from '@/lib/project';
 import { canAssign, canCommercial, canEdit, isFull } from '@/lib/permissions';
 import { DIFF, STAGES, stageIdx, svcColor, svcName } from '@/lib/templates';
@@ -163,9 +163,23 @@ export default function ProjectDetail() {
         </div>
       )}
 
+      {/* key by project + package + row-count so the uncontrolled inputs (notes,
+          dates, task fields) always remount with fresh values when you switch
+          service package, switch project, or add/remove a row — fixes notes
+          bleeding across packages (A2) and delete showing the wrong row (A1). */}
       {tab === 'overview' && <OverviewTab p={p} onSchedule={(pkg) => setView({ ...view, tab: 'schedule', pkg })} />}
-      {tab === 'schedule' && <ScheduleTab p={p} pkgIdx={pkgIdx} onExport={() => setShowExport(true)} onPkg={(i) => setView({ ...view, pkg: i })} />}
-      {tab === 'checklist' && <ChecklistTab p={p} pkgIdx={pkgIdx} onExport={() => setShowExport(true)} onPkg={(i) => setView({ ...view, pkg: i })} />}
+      {tab === 'schedule' && (
+        <ScheduleTab
+          key={`${p.id}:${pkgIdx}:${p.packages[pkgIdx]?.schedule.length ?? 0}`}
+          p={p} pkgIdx={pkgIdx} onExport={() => setShowExport(true)} onPkg={(i) => setView({ ...view, pkg: i })}
+        />
+      )}
+      {tab === 'checklist' && (
+        <ChecklistTab
+          key={`${p.id}:${pkgIdx}:${p.packages[pkgIdx]?.checklist.reduce((a, g) => a + g.items.length, 0) ?? 0}`}
+          p={p} pkgIdx={pkgIdx} onExport={() => setShowExport(true)} onPkg={(i) => setView({ ...view, pkg: i })}
+        />
+      )}
       {showExport && <ExportOverlay p={p} onClose={() => setShowExport(false)} />}
       {transferFrom && (
         <TransferModal from={transferFrom} pid={p.id} onClose={() => setTransferFrom(null)} />
@@ -176,9 +190,11 @@ export default function ProjectDetail() {
 
 function OverviewTab({ p, onSchedule }: { p: Project; onSchedule: (pkg: number) => void }) {
   const { lang, t } = useLang();
+  const { dispatch, me } = useStore();
+  const canEd = canEdit(me, p);
   const sp = schedProgress(p);
   const ip = infoProgress(p);
-  const od = overdueItems(p);
+  const od = overdueItems(p); // already excludes dismissed risks
   const nf = nextFreeze(p);
   const slack = deliverySlack(p);
   const fin = plannedFinish(p);
@@ -187,27 +203,32 @@ function OverviewTab({ p, onSchedule }: { p: Project; onSchedule: (pkg: number) 
   const [historyOpen, setHistoryOpen] = useState(false);
   const log = p.log || [];
 
-  const risks: { title: string; detail: string; color: string; icon: string }[] = [];
-  od.slice(0, 4).forEach((o) => risks.push({
+  /* each risk carries a stable key so it can be marked 已处理 (dismissed) */
+  const risks: { key: string; title: string; detail: string; color: string; icon: string }[] = [];
+  od.forEach((o) => risks.push({
+    key: riskKey('od', o.pi, o.idx),
     title: t(`${o.row.task} 逾期 ${o.days} 天`, `${o.row.taskEn || o.row.task} — ${o.days}d overdue`),
     detail: `${svcName(o.pkg.svc, lang)} · ${t('应完成', 'due')} ${fmtDate(o.due)}`,
     color: 'var(--danger)', icon: 'alert',
   }));
-  p.packages.forEach((pk) => pk.schedule.forEach((r) => {
-    if (r.status === 'block') risks.push({
+  p.packages.forEach((pk, pi) => pk.schedule.forEach((r, i) => {
+    if (r.status === 'block' && !isRiskDismissed(p, riskKey('bl', pi, i))) risks.push({
+      key: riskKey('bl', pi, i),
       title: t(`${r.task} 受阻`, `${r.taskEn || r.task} — blocked`),
       detail: `${svcName(pk.svc, lang)}${r.note ? ' · ' + r.note : ''}`,
       color: 'var(--warning)', icon: 'clock',
     });
   }));
   if (nf && !risks.length) risks.push({
+    key: '', // the "next freeze" hint is informational, not a clearable risk
     title: t(`下一冻结点:${nf.row.phase}`, `Next freeze point: ${nf.row.phase}`),
     detail: `${svcName(nf.svc, lang)}${nf.date ? ' · ' + fmtDate(nf.date) : ''} — ${t('冻结前须客户确认', 'client sign-off required before freeze')}`,
     color: 'var(--bronze)', icon: 'lock',
   });
 
   const team = [...new Set(p.packages.flatMap((pk) => pk.schedule.map((r) => r.assignee)).filter(Boolean))];
-  const blockCount = p.packages.reduce((a, pk) => a + pk.schedule.filter((r) => r.status === 'block').length, 0);
+  const openRiskCount = risks.filter((r) => r.key).length;
+  const dismissedKeys = p.dismissedRisks || [];
 
   return (
     <div className="grid-2col" style={{ display: 'grid', gridTemplateColumns: '1.5fr 1fr', gap: 20, alignItems: 'start' }}>
@@ -244,18 +265,32 @@ function OverviewTab({ p, onSchedule }: { p: Project; onSchedule: (pkg: number) 
         <div className="panel clip">
           <div className="panel-head" style={{ padding: '16px 22px' }}>
             <span className="panel-title" style={{ fontSize: 15 }}>{t('风险与受阻', 'Risks & Blockers')}</span>
-            <span style={{ fontSize: 12, color: 'var(--text2)' }}>{od.length + blockCount} {t('项', 'open')}</span>
+            <span style={{ fontSize: 12, color: 'var(--text2)' }}>{openRiskCount} {t('项', 'open')}</span>
           </div>
           {risks.length === 0 && <div style={{ padding: 22, textAlign: 'center', fontSize: 13, color: 'var(--text2)' }}>{t('无逾期与受阻 — 按计划进行。', 'No open risks — on track.')}</div>}
-          {risks.slice(0, 6).map((r, i) => (
-            <div key={i} style={{ display: 'flex', gap: 12, padding: '15px 22px', borderBottom: '1px solid var(--row-line)' }}>
+          {risks.slice(0, 8).map((r, i) => (
+            <div key={i} style={{ display: 'flex', gap: 12, padding: '15px 22px', borderBottom: '1px solid var(--row-line)', alignItems: 'flex-start' }}>
               <span style={{ color: r.color, flexShrink: 0, marginTop: 1, display: 'flex' }}><Icon name={r.icon} size={16} /></span>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontSize: 13.5, fontWeight: 600 }}>{r.title}</div>
                 <div style={{ fontSize: 12, color: 'var(--text2)', marginTop: 2 }}>{r.detail}</div>
               </div>
+              {canEd && r.key && (
+                <button className="btn-line sm" style={{ flexShrink: 0 }} title={t('标记为已处理,从风险列表清除', 'Mark handled and clear from the risk list')}
+                  onClick={() => dispatch(p.id, { type: 'dismissRisk', key: r.key })}>✓ {t('已处理', 'Handled')}</button>
+              )}
             </div>
           ))}
+          {dismissedKeys.length > 0 && (
+            <div style={{ padding: '10px 22px', fontSize: 12, color: 'var(--text2)', display: 'flex', alignItems: 'center', gap: 8, background: 'var(--hover-bg)' }}>
+              <span>{t(`已忽略 ${dismissedKeys.length} 项风险`, `${dismissedKeys.length} risk(s) dismissed`)}</span>
+              {canEd && (
+                <button className="btn-line sm" onClick={() => dismissedKeys.forEach((k) => dispatch(p.id, { type: 'restoreRisk', key: k }))}>
+                  ↺ {t('全部恢复', 'Restore all')}
+                </button>
+              )}
+            </div>
+          )}
         </div>
       </div>
 

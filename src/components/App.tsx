@@ -3,7 +3,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import type { User } from '@/lib/types';
 import { StoreProvider, useStore } from './store';
-import { allOverdue, fmtDate } from '@/lib/project';
+import { allOverdue, fmtDate, isMyProject } from '@/lib/project';
 import { canCreate, isFull, ROLE_LABEL } from '@/lib/permissions';
 import { useLang } from '@/lib/i18n';
 import { Avatar, Icon } from './ui';
@@ -45,7 +45,8 @@ function Shell() {
   const [showPw, setShowPw] = useState(false);
   /* force a password change when the account is flagged (first login / after reset) */
   const [mustChange, setMustChange] = useState(!!user.mustChangePassword);
-  const overdue = useMemo(() => allOverdue(projects), [projects]);
+  /* bell shows only the current person's overdue items (A5 scoping) */
+  const overdue = useMemo(() => allOverdue(projects.filter((p) => !p.archived && isMyProject(p, me))), [projects, me]);
 
   useEffect(() => {
     if (!notifOpen) return;
