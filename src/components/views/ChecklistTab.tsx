@@ -156,7 +156,7 @@ export default function ChecklistTab({ p, pkgIdx, onExport, onPkg }: {
       <div className="panel clip">
         {/* column headers (image7) */}
         <div style={{
-          display: 'grid', gridTemplateColumns: cols, gap: 12, padding: '11px 20px',
+          display: 'grid', gridTemplateColumns: cols, gap: 16, padding: '14px 24px',
           background: 'var(--hover-bg)', borderBottom: '1px solid var(--row-line)',
           fontSize: 11, fontWeight: 700, letterSpacing: '.04em', textTransform: 'uppercase', color: 'var(--text2)',
         }}>
@@ -178,7 +178,7 @@ export default function ChecklistTab({ p, pkgIdx, onExport, onPkg }: {
               {/* collapsible bold section header */}
               <button onClick={() => setCollapsed((s) => ({ ...s, [gi]: !s[gi] }))}
                 style={{
-                  width: '100%', display: 'flex', alignItems: 'center', gap: 10, padding: '13px 20px',
+                  width: '100%', display: 'flex', alignItems: 'center', gap: 10, padding: '16px 24px',
                   background: 'var(--card-bg, #fff)', borderBottom: '1px solid var(--row-line)', textAlign: 'left',
                 }}>
                 <span style={{ transform: isCol ? 'rotate(-90deg)' : 'none', transition: 'transform .15s', color: 'var(--text2)', fontSize: 12 }}>▾</span>
@@ -196,8 +196,8 @@ export default function ChecklistTab({ p, pkgIdx, onExport, onPkg }: {
                 const shots = it.shots && it.shots.length ? it.shots : (it.shot ? [it.shot] : []);
                 return (
                   <div key={it.id || ii} style={{
-                    display: 'grid', gridTemplateColumns: cols, gap: 12,
-                    alignItems: 'start', padding: '12px 20px', borderBottom: '1px solid var(--row-line)',
+                    display: 'grid', gridTemplateColumns: cols, gap: 16,
+                    alignItems: 'start', padding: '18px 24px', borderBottom: '1px solid var(--row-line)',
                   }}>
                     {/* ── Item: name, thumbnails, remark ── */}
                     <div style={{ minWidth: 0 }}>
@@ -216,7 +216,7 @@ export default function ChecklistTab({ p, pkgIdx, onExport, onPkg }: {
                       )}
 
                       {/* thumbnails (multi-image) + uploader */}
-                      <div style={{ marginTop: 7, display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+                      <div style={{ marginTop: 10, display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
                         {shots.map((s, si) => (
                           <span key={si} style={{ position: 'relative', display: 'inline-flex' }}>
                             <img src={s} alt="" title={t('点击放大', 'Click to enlarge')}
@@ -245,7 +245,7 @@ export default function ChecklistTab({ p, pkgIdx, onExport, onPkg }: {
                       </div>
 
                       {/* remark — wrapping textarea (D3), with highlight star (C3) */}
-                      <div style={{ marginTop: 7, display: 'flex', alignItems: 'flex-start', gap: 6 }}>
+                      <div style={{ marginTop: 10, display: 'flex', alignItems: 'flex-start', gap: 6 }}>
                         {ed && (
                           <button title={it.highlight ? t('取消重点', 'Unmark important') : t('标为重点', 'Mark important')}
                             onClick={() => dispatch(p.id, { type: 'toggleHighlight', pkg: pkgIdx, gi, ii })}

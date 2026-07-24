@@ -119,7 +119,7 @@ export default function ScheduleTab({ p, pkgIdx, onExport, onPkg }: {
           <div style={{ minWidth: 720 }}>
             {groups.map((g, gi) => (
               <div key={gi}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 22px', background: 'var(--hover-bg)', borderBottom: '1px solid var(--border)', borderTop: gi ? '1px solid var(--border)' : 'none' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '15px 24px', background: 'var(--hover-bg)', borderBottom: '1px solid var(--border)', borderTop: gi ? '1px solid var(--border)' : 'none' }}>
                   <span style={{ width: 8, height: 8, borderRadius: 2, background: MACRO[g.m][2] }} />
                   <span style={{ fontSize: 12.5, fontWeight: 700, letterSpacing: '.03em', color: 'var(--navy900)', textTransform: 'uppercase' }}>
                     {lang === 'zh' ? MACRO[g.m][0] : MACRO[g.m][1]}
@@ -136,8 +136,8 @@ export default function ScheduleTab({ p, pkgIdx, onExport, onPkg }: {
                   const taskSub = lang === 'zh' ? r.taskEn : r.task;
                   return (
                     <div key={r.id || i} className="row-hover" style={{
-                      display: 'grid', gridTemplateColumns: '26px 26px minmax(220px,2fr) 40px 1.15fr 120px', gap: 13, alignItems: 'center',
-                      padding: '13px 22px', borderBottom: '1px solid var(--row-line)',
+                      display: 'grid', gridTemplateColumns: '26px 26px minmax(220px,2fr) 40px 1.15fr 120px', gap: 15, alignItems: 'center',
+                      padding: '18px 24px', borderBottom: '1px solid var(--row-line)',
                       borderLeft: `3px solid ${over ? 'var(--danger)' : r.freeze ? 'var(--bronze)' : 'transparent'}`,
                     }}>
                       <button className={`ckbox ${done ? 'on' : ''} ${rowEd ? '' : 'locked'}`}
@@ -199,7 +199,7 @@ export default function ScheduleTab({ p, pkgIdx, onExport, onPkg }: {
                             )}
                             <input
                               className="in sm" placeholder={t('批注 / 实际情况…', 'Note / actual status…')} defaultValue={r.note} readOnly={!ed}
-                              style={{ marginTop: 6, width: '100%', background: 'var(--hover-bg)', border: '1px solid var(--row-line)' }}
+                              style={{ marginTop: 9, width: '100%', background: 'var(--hover-bg)', border: '1px solid var(--row-line)' }}
                               onBlur={(e) => { if (ed && e.target.value !== r.note) dispatch(p.id, { type: 'editSched', pkg: pkgIdx, idx: i, field: 'note', value: e.target.value }); }}
                             />
                           </>
