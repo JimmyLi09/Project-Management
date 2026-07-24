@@ -37,6 +37,7 @@ export interface ScheduleRow {
   note: string;
   s: string; // ISO start override
   e: string; // ISO end override
+  delayNote?: string; // reason for a delay/date adjustment (shows a red mark)
 }
 
 export interface ChecklistItem {
@@ -64,6 +65,7 @@ export interface ServicePackage {
   status: string;
   schedule: ScheduleRow[];
   checklist: ChecklistGroup[];
+  resourceLinks?: string; // free text: web links / network paths to renders, VR, drone, models
 }
 
 export type DecisionStatus = 'pending' | 'approved' | 'rejected' | 'needinfo';

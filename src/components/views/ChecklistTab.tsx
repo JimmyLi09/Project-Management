@@ -29,9 +29,11 @@ export default function ChecklistTab({ p, pkgIdx, onExport, onPkg }: {
   let doneN = 0, totalN = 0;
   pkg.checklist.forEach((g) => g.items.forEach((it) => { if (it.status === 'na') return; totalN++; if (it.status === 'confirmed') doneN++; }));
 
-  function attachShot(gi: number, ii: number, input: HTMLInputElement) {
-    const f = input.files && input.files[0];
+  /* shared image pipeline: compress to <=560px JPEG and attach.
+     reused by the file picker, clipboard paste and drag-drop (C2). */
+  function processImageFile(gi: number, ii: number, f: File | null | undefined) {
     if (!f) return;
+    if (!f.type.startsWith('image/')) { alert(t('只支持图片文件', 'Only image files are supported')); return; }
     const rd = new FileReader();
     rd.onload = (e) => {
       const img = new Image();
@@ -50,7 +52,26 @@ export default function ChecklistTab({ p, pkgIdx, onExport, onPkg }: {
       img.src = e.target!.result as string;
     };
     rd.readAsDataURL(f);
+  }
+
+  function attachShot(gi: number, ii: number, input: HTMLInputElement) {
+    processImageFile(gi, ii, input.files && input.files[0]);
     input.value = '';
+  }
+
+  /* pull the first image out of a paste/drop event */
+  function imageFromDataTransfer(dt: DataTransfer | null): File | null {
+    if (!dt) return null;
+    if (dt.files && dt.files.length) {
+      for (let i = 0; i < dt.files.length; i++) if (dt.files[i].type.startsWith('image/')) return dt.files[i];
+    }
+    if (dt.items && dt.items.length) {
+      for (let i = 0; i < dt.items.length; i++) {
+        const it = dt.items[i];
+        if (it.kind === 'file' && it.type.startsWith('image/')) { const f = it.getAsFile(); if (f) return f; }
+      }
+    }
+    return null;
   }
 
   return (
@@ -141,8 +162,15 @@ export default function ChecklistTab({ p, pkgIdx, onExport, onPkg }: {
                           )}
                         </>
                       ) : ed ? (
-                        <label style={{ fontSize: 11, color: '#234f97', background: '#e7eefb', borderRadius: 6, padding: '3px 9px', cursor: 'pointer' }}>
-                          📎 {t('上传截图', 'Attach screenshot')}
+                        <label
+                          tabIndex={0}
+                          title={t('点击选择,或拖入 / 粘贴图片', 'Click to select, or drag / paste an image')}
+                          style={{ fontSize: 11, color: '#234f97', background: '#e7eefb', borderRadius: 6, padding: '3px 9px', cursor: 'pointer', outline: 'none' }}
+                          onDragOver={(e) => { e.preventDefault(); (e.currentTarget as HTMLElement).style.background = '#c9dcff'; }}
+                          onDragLeave={(e) => { (e.currentTarget as HTMLElement).style.background = '#e7eefb'; }}
+                          onDrop={(e) => { e.preventDefault(); (e.currentTarget as HTMLElement).style.background = '#e7eefb'; processImageFile(gi, ii, imageFromDataTransfer(e.dataTransfer)); }}
+                          onPaste={(e) => { const f = imageFromDataTransfer(e.clipboardData); if (f) { e.preventDefault(); processImageFile(gi, ii, f); } }}>
+                          📎 {t('上传 / 拖入 / 粘贴', 'Upload / drag / paste')}
                           <input type="file" accept="image/*" style={{ display: 'none' }} onChange={(e) => attachShot(gi, ii, e.target)} />
                         </label>
                       ) : null}
@@ -175,11 +203,19 @@ export default function ChecklistTab({ p, pkgIdx, onExport, onPkg }: {
       </div>
 
       {editMode && ed && (
-        <button className="btn-line" style={{ width: '100%', marginTop: 16, justifyContent: 'center', borderStyle: 'dashed' }}
-          onClick={() => {
-            const nm = prompt(t('新栏目名称(中文):', 'New section name:'), t('特殊需求', 'Special requirements'));
-            if (nm) dispatch(p.id, { type: 'addGroup', pkg: pkgIdx, name: nm });
-          }}>+ {t('添加新栏目', 'Add section')}</button>
+        <div style={{ display: 'flex', gap: 10, marginTop: 16, flexWrap: 'wrap' }}>
+          <button className="btn-line" style={{ flex: 1, minWidth: 180, justifyContent: 'center', borderStyle: 'dashed' }}
+            onClick={() => {
+              const nm = prompt(t('新栏目名称(中文):', 'New section name:'), t('特殊需求', 'Special requirements'));
+              if (nm) dispatch(p.id, { type: 'addGroup', pkg: pkgIdx, name: nm });
+            }}>+ {t('添加新栏目', 'Add section')}</button>
+          <button className="btn-line" style={{ justifyContent: 'center', borderStyle: 'dashed', color: 'var(--danger)' }}
+            title={t('用模板重建本业务的清单栏目(会清空当前信息项)', 'Rebuild this package’s checklist from the template (clears current items)')}
+            onClick={() => {
+              if (confirm(t('确定用默认模板恢复本业务的清单吗?当前的信息项、状态和备注将被清空。', 'Restore this package’s checklist from the default template? Current items, statuses and notes will be cleared.')))
+                dispatch(p.id, { type: 'resetChecklist', pkg: pkgIdx });
+            }}>↺ {t('恢复默认清单', 'Restore default checklist')}</button>
+        </div>
       )}
 
       {lightbox && (

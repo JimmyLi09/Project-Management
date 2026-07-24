@@ -6,26 +6,34 @@ import type { Identity } from '@/lib/permissions';
 import {
   canAssign, canCommercial, canDecide, canEdit, canRowEdit,
 } from '@/lib/permissions';
-import { fitWindow, parseISO, isoDate, totalDays } from '@/lib/project';
-import { SVC } from '@/lib/templates';
+import { buildPackage, fitWindow, parseISO, isoDate, totalDays } from '@/lib/project';
+import { SVC, type Template } from '@/lib/templates';
 import type { ChecklistStatus, Project, ScheduleStatus } from '@/lib/types';
+
+/* Optional context the route supplies so we can rebuild from edited templates
+   without importing the DB layer here (keeps this file client-safe for types). */
+export interface ActionCtx {
+  tplForSvc?: (svc: string) => Template;
+}
 
 export type ProjectAction =
   | { type: 'toggleDone'; pkg: number; idx: number }
   | { type: 'cycleStatus'; pkg: number; idx: number }
   | { type: 'setRowStatus'; pkg: number; idx: number; status: ScheduleStatus }
-  | { type: 'editSched'; pkg: number; idx: number; field: 'task' | 'taskEn' | 'owner' | 'assignee' | 'note' | 's' | 'e' | 'phase'; value: string }
+  | { type: 'editSched'; pkg: number; idx: number; field: 'task' | 'taskEn' | 'owner' | 'assignee' | 'note' | 's' | 'e' | 'phase' | 'delayNote'; value: string }
   | { type: 'editSchedNum'; pkg: number; idx: number; field: 'weeks'; value: number }
   | { type: 'addRow'; pkg: number }
   | { type: 'removeRow'; pkg: number; idx: number }
+  | { type: 'moveRow'; pkg: number; idx: number; dir: -1 | 1 }
   | { type: 'setClStatus'; pkg: number; gi: number; ii: number; value: ChecklistStatus }
   | { type: 'editCl'; pkg: number; gi: number; ii: number; field: 'date' | 'remark' | 'zh' | 'en'; value: string }
   | { type: 'addItem'; pkg: number; gi: number }
   | { type: 'removeItem'; pkg: number; gi: number; ii: number }
   | { type: 'addGroup'; pkg: number; name: string }
+  | { type: 'resetChecklist'; pkg: number }
   | { type: 'attachShot'; pkg: number; gi: number; ii: number; data: string }
   | { type: 'removeShot'; pkg: number; gi: number; ii: number }
-  | { type: 'setPkgField'; pkg: number; field: 'start' | 'delivery' | 'owner'; value: string }
+  | { type: 'setPkgField'; pkg: number; field: 'start' | 'delivery' | 'owner' | 'resourceLinks'; value: string }
   | { type: 'setPkgBuffer'; pkg: number; value: number }
   | { type: 'reversePkg'; pkg: number }
   | { type: 'reverseSchedule' }
@@ -95,7 +103,8 @@ function getItem(p: Project, pkg: number, gi: number, ii: number) {
 }
 
 /* Mutates p in place. Throws PermissionError / ValidationError. */
-export function applyAction(u: Identity, p: Project, a: ProjectAction): void {
+export function applyAction(u: Identity, p: Project, a: ProjectAction, ctx: ActionCtx = {}): void {
+  const { tplForSvc } = ctx;
   switch (a.type) {
     case 'toggleDone': {
       const { pk, r } = getRow(p, a.pkg, a.idx);
@@ -154,6 +163,16 @@ export function applyAction(u: Identity, p: Project, a: ProjectAction): void {
       pk.schedule.splice(a.idx, 1);
       break;
     }
+    case 'moveRow': {
+      if (!canEdit(u, p)) throw new PermissionError('无编辑权限');
+      const { pk } = getRow(p, a.pkg, a.idx);
+      const j = a.idx + (a.dir === 1 ? 1 : -1);
+      if (j < 0 || j >= pk.schedule.length) break; // at an edge, no-op
+      const arr = pk.schedule;
+      [arr[a.idx], arr[j]] = [arr[j], arr[a.idx]];
+      logIt(p, u.name, `调整阶段顺序 Reorder phase`);
+      break;
+    }
     case 'setClStatus': {
       if (!canEdit(u, p)) throw new PermissionError('无编辑权限');
       const { it } = getItem(p, a.pkg, a.gi, a.ii);
@@ -190,6 +209,17 @@ export function applyAction(u: Identity, p: Project, a: ProjectAction): void {
         group: a.name || '特殊需求', groupEn: 'Custom', color: '#607080',
         items: [{ zh: '新信息项', en: 'New item', status: 'pending', date: '', remark: '' }],
       });
+      break;
+    }
+    case 'resetChecklist': {
+      if (!canEdit(u, p)) throw new PermissionError('无编辑权限');
+      const pk = p.packages[a.pkg];
+      if (!pk) throw new ValidationError('无效的服务包');
+      /* rebuild this package's checklist from the effective template for its
+         service, discarding edits — status/dates/remarks are reset too */
+      const fresh = buildPackage(pk.svc, pk.start, tplForSvc?.(pk.svc));
+      pk.checklist = fresh.checklist;
+      logIt(p, u.name, `恢复默认信息清单 Reset checklist to default`);
       break;
     }
     case 'attachShot': {

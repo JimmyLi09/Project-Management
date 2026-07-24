@@ -170,13 +170,13 @@ export default function ProjectDetail() {
       {tab === 'overview' && <OverviewTab p={p} onSchedule={(pkg) => setView({ ...view, tab: 'schedule', pkg })} />}
       {tab === 'schedule' && (
         <ScheduleTab
-          key={`${p.id}:${pkgIdx}:${p.packages[pkgIdx]?.schedule.length ?? 0}`}
+          key={`${p.id}:${pkgIdx}:${p.packages[pkgIdx]?.schedule.map((r) => r.no).join(',') ?? ''}`}
           p={p} pkgIdx={pkgIdx} onExport={() => setShowExport(true)} onPkg={(i) => setView({ ...view, pkg: i })}
         />
       )}
       {tab === 'checklist' && (
         <ChecklistTab
-          key={`${p.id}:${pkgIdx}:${p.packages[pkgIdx]?.checklist.reduce((a, g) => a + g.items.length, 0) ?? 0}`}
+          key={`${p.id}:${pkgIdx}:${p.packages[pkgIdx]?.checklist.map((g) => g.group + g.items.map((it) => it.zh).join('|')).join('~') ?? ''}`}
           p={p} pkgIdx={pkgIdx} onExport={() => setShowExport(true)} onPkg={(i) => setView({ ...view, pkg: i })}
         />
       )}

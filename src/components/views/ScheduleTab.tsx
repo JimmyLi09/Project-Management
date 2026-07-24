@@ -14,11 +14,12 @@ const NEXT: Record<ScheduleStatus, ScheduleStatus> = { todo: 'wip', wip: 'done',
 export default function ScheduleTab({ p, pkgIdx, onExport, onPkg }: {
   p: Project; pkgIdx: number; onExport: () => void; onPkg: (i: number) => void;
 }) {
-  const { me, dispatch } = useStore();
+  const { me, dispatch, users } = useStore();
   const { lang, t } = useLang();
   const [editMode, setEditMode] = useState(false);
   const ed = canEdit(me, p);
   const pkg = p.packages[pkgIdx];
+  const assigneeNames = users.filter((u) => u.role === 'pm' || u.role === 'member' || u.role === 'director' || u.role === 'bd').map((u) => u.name);
   const pd = planDates(pkg, pkgStart(p, pkg));
   const t0 = todayMid();
 
@@ -90,6 +91,25 @@ export default function ScheduleTab({ p, pkgIdx, onExport, onPkg }: {
         <button className="btn-line sm" onClick={onExport}><Icon name="download" size={13} />{t('导出', 'Export')}</button>
       </div>
 
+      {/* datalist shared by the assignee inputs (B4) */}
+      <datalist id="assignee-names">{assigneeNames.map((n) => <option key={n} value={n} />)}</datalist>
+
+      {/* C5: resource links — web links / network paths to renders, VR, drone, models */}
+      <div className="panel" style={{ padding: '12px 16px', marginBottom: 14 }}>
+        <div className="mini-label" style={{ marginBottom: 6, display: 'flex', alignItems: 'center', gap: 6 }}>
+          🔗 {t('资料链接(效果图 / VR / 航拍 / 模型 的网盘或路径)', 'Resource links (cloud/paths to renders, VR, drone, models)')}
+        </div>
+        {ed ? (
+          <textarea className="in" style={{ width: '100%', minHeight: 44, fontSize: 12.5 }}
+            defaultValue={pkg.resourceLinks || ''} placeholder={t('每行一个链接或路径,例如 \\\\NAS\\Project\\renders 或 https://drive...', 'One link/path per line, e.g. \\\\NAS\\Project\\renders or https://drive...')}
+            onBlur={(e) => e.target.value !== (pkg.resourceLinks || '') && dispatch(p.id, { type: 'setPkgField', pkg: pkgIdx, field: 'resourceLinks', value: e.target.value })} />
+        ) : (
+          <div style={{ fontSize: 12.5, color: pkg.resourceLinks ? 'var(--text)' : 'var(--text2)', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
+            {pkg.resourceLinks || t('（未填写）', '(none)')}
+          </div>
+        )}
+      </div>
+
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14, fontSize: 12.5, color: 'var(--text2)' }}>
         <Icon name="lock" size={14} style={{ color: 'var(--navy700)' }} /> {t('冻结点 — 确认后锁定,改动影响下游', 'Freeze point — locked once confirmed; changes ripple downstream')}
       </div>
@@ -140,7 +160,8 @@ export default function ScheduleTab({ p, pkgIdx, onExport, onPkg }: {
                               <input className="in sm" type="number" step={0.5} min={0} style={{ width: 66 }} defaultValue={r.weeks} title={t('周数', 'weeks')}
                                 onBlur={(e) => (parseFloat(e.target.value) || 0) !== r.weeks && dispatch(p.id, { type: 'editSchedNum', pkg: pkgIdx, idx: i, field: 'weeks', value: parseFloat(e.target.value) || 0 })} />
                             </div>
-                            <input className="in sm" defaultValue={r.assignee} placeholder={t('👤 指派给(个人)', '👤 Assignee')}
+                            {/* B4: pick assignee from accounts (still allows a free-typed name) */}
+                            <input className="in sm" list="assignee-names" defaultValue={r.assignee} placeholder={t('👤 指派给(可选账号)', '👤 Assignee (pick account)')}
                               onBlur={(e) => e.target.value !== r.assignee && dispatch(p.id, { type: 'editSched', pkg: pkgIdx, idx: i, field: 'assignee', value: e.target.value })} />
                             <div style={{ display: 'flex', gap: 6 }}>
                               <input type="date" className="in sm" style={{ flex: 1 }} value={r.s} title={t('开始(覆盖)', 'Start override')}
@@ -148,8 +169,19 @@ export default function ScheduleTab({ p, pkgIdx, onExport, onPkg }: {
                               <input type="date" className="in sm" style={{ flex: 1 }} value={r.e} title={t('结束(覆盖)', 'End override')}
                                 onChange={(e) => dispatch(p.id, { type: 'editSched', pkg: pkgIdx, idx: i, field: 'e', value: e.target.value })} />
                             </div>
-                            <button style={{ color: 'var(--danger)', fontSize: 12, fontWeight: 600, alignSelf: 'flex-start' }}
-                              onClick={() => { if (confirm(t('删除此阶段?', 'Delete this phase?'))) dispatch(p.id, { type: 'removeRow', pkg: pkgIdx, idx: i }); }}>✕ {t('删除此阶段', 'Delete phase')}</button>
+                            {/* C4: delay reason — shows a red 延期 mark on the row when set */}
+                            <input className="in sm" defaultValue={r.delayNote || ''} placeholder={t('延期原因(可空,填了显示红色标记)', 'Delay reason (optional, shows a red mark)')}
+                              onBlur={(e) => e.target.value !== (r.delayNote || '') && dispatch(p.id, { type: 'editSched', pkg: pkgIdx, idx: i, field: 'delayNote', value: e.target.value })} />
+                            <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+                              <span style={{ display: 'flex', gap: 4 }}>
+                                <button className="btn-line sm" title={t('上移', 'Move up')} disabled={i === 0}
+                                  onClick={() => dispatch(p.id, { type: 'moveRow', pkg: pkgIdx, idx: i, dir: -1 })}>↑</button>
+                                <button className="btn-line sm" title={t('下移', 'Move down')} disabled={i === pkg.schedule.length - 1}
+                                  onClick={() => dispatch(p.id, { type: 'moveRow', pkg: pkgIdx, idx: i, dir: 1 })}>↓</button>
+                              </span>
+                              <button style={{ color: 'var(--danger)', fontSize: 12, fontWeight: 600 }}
+                                onClick={() => { if (confirm(t('删除此阶段?', 'Delete this phase?'))) dispatch(p.id, { type: 'removeRow', pkg: pkgIdx, idx: i }); }}>✕ {t('删除此阶段', 'Delete phase')}</button>
+                            </div>
                           </div>
                         ) : (
                           <>
@@ -158,6 +190,11 @@ export default function ScheduleTab({ p, pkgIdx, onExport, onPkg }: {
                             {gateTxt && (
                               <div style={{ display: 'inline-flex', gap: 5, marginTop: 5, fontSize: 11.5, color: r.freeze ? '#8f5b1d' : 'var(--text2)', background: r.freeze ? '#f6ecdd' : 'var(--row-line2)', borderRadius: 6, padding: '3px 8px' }}>
                                 {r.freeze ? '★' : '›'} {gateTxt}
+                              </div>
+                            )}
+                            {r.delayNote && (
+                              <div style={{ display: 'inline-flex', gap: 5, marginTop: 5, marginLeft: gateTxt ? 6 : 0, fontSize: 11.5, color: '#b23a32', background: '#fbe9e7', borderRadius: 6, padding: '3px 8px', fontWeight: 600 }}>
+                                ⚠ {t('延期', 'Delayed')} · {r.delayNote}
                               </div>
                             )}
                             <input

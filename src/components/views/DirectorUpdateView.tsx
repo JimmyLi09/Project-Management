@@ -2,10 +2,11 @@
 
 import React, { useMemo, useState } from 'react';
 import { useStore } from '../store';
-import { overdueItems, projectHealth, projStage, staleInfo } from '@/lib/project';
+import { fmtDate, overdueItems, projectHealth, projStage, staleInfo, todayMid } from '@/lib/project';
 import { canDecide, canEdit } from '@/lib/permissions';
 import { useLang } from '@/lib/i18n';
 import { Avatar, HM, Icon, Pill } from '../ui';
+import type { Project } from '@/lib/types';
 
 const UF: [keyof UFields, string, string][] = [
   ['done', '本周完成', 'Done this week'],
@@ -21,6 +22,7 @@ export default function DirectorUpdateView() {
   const { projects, me, dispatch, openProject } = useStore();
   const { lang, t } = useLang();
   const [filter, setFilter] = useState('all');
+  const [showExport, setShowExport] = useState(false);
   const isDirector = canDecide(me);
 
   const pms = useMemo(() => {
@@ -54,7 +56,13 @@ export default function DirectorUpdateView() {
 
       <div className="grid-2col" style={{ display: 'grid', gridTemplateColumns: '1.5fr 1fr', gap: 20, alignItems: 'start' }}>
         <div className="panel clip">
-          <div className="panel-head"><span className="panel-title">{t('每周项目汇报', 'Weekly Project Updates')}</span></div>
+          <div className="panel-head">
+            <span className="panel-title">{t('每周项目汇报', 'Weekly Project Updates')}</span>
+            <button className="btn-line sm" onClick={() => setShowExport(true)} disabled={list.length === 0}
+              title={t('导出当前筛选下所有项目的周报', 'Export the weekly report for all projects in the current filter')}>
+              <Icon name="download" size={13} />{t('导出全部', 'Export all')}
+            </button>
+          </div>
           {list.length === 0 && <div style={{ padding: 30, textAlign: 'center', color: 'var(--text2)', fontSize: 13 }}>{t('没有匹配的项目。', 'No matching projects.')}</div>}
           {list.map((p) => {
             const u = p.update || ({} as typeof p.update);
@@ -115,7 +123,68 @@ export default function DirectorUpdateView() {
           ))}
         </div>
       </div>
+
+      {showExport && <WeeklyExportOverlay list={list} filter={filter} onClose={() => setShowExport(false)} />}
     </>
+  );
+}
+
+function WeeklyExportOverlay({ list, filter, onClose }: { list: Project[]; filter: string; onClose: () => void }) {
+  const { lang: appLang } = useLang();
+  const [lang, setLang] = useState<'en' | 'zh'>(appLang);
+  const L = lang;
+  const T = (zh: string, en: string) => (L === 'zh' ? zh : en);
+  const HLABEL: Record<string, [string, string]> = {
+    ontrack: ['正常', 'On track'], watch: ['关注', 'Watch'], risk: ['风险', 'At risk'], completed: ['已完成', 'Completed'],
+  };
+
+  return (
+    <div className="ex-wrap">
+      <div className="ex-actions">
+        <button className="btn-line sm" style={L === 'en' ? { borderColor: 'var(--navy900)' } : undefined} onClick={() => setLang('en')}>English</button>
+        <button className="btn-line sm" style={L === 'zh' ? { borderColor: 'var(--navy900)' } : undefined} onClick={() => setLang('zh')}>中文</button>
+        <button className="btn-navy sm" onClick={() => window.print()}>{T('打印 / 另存 PDF', 'Print / Save PDF')}</button>
+        <button className="btn-line sm" onClick={onClose}>{T('关闭', 'Close')}</button>
+      </div>
+      <div className="ex-doc">
+        <h1>{T('每周项目汇报', 'Weekly Project Updates')}</h1>
+        <div className="exsub">
+          {T('负责人', 'PM')}: {filter === 'all' ? T('全部', 'All') : filter} · {T('项目数', 'Projects')}: {list.length} · {T('导出于', 'Exported')} {fmtDate(todayMid())}
+        </div>
+        {list.map((p) => {
+          const u = p.update || {};
+          const stage = projStage(p);
+          const h = stage === 'complete' || stage === 'invoice' ? 'completed' : projectHealth(p);
+          const pm = (p.owners || [])[0] || T('未指派', 'unassigned');
+          const st = staleInfo(u, L);
+          return (
+            <React.Fragment key={p.id}>
+              <h2 style={{ marginBottom: 2 }}>{p.name}</h2>
+              <div className="exsub" style={{ marginTop: 0 }}>
+                {T('负责人', 'PM')}: {pm} · {T('客户', 'Client')}: {p.client || '—'} · {T('健康度', 'Health')}: {T(HLABEL[h]?.[0] || h, HLABEL[h]?.[1] || h)} · {st.txt}
+              </div>
+              <table>
+                <tbody>
+                  {UF.map(([f, zh, en]) => (
+                    <tr key={f}>
+                      <th style={{ width: '28%' }}>{T(zh, en)}</th>
+                      <td style={{ whiteSpace: 'pre-wrap' }}>{(u as any)[f] || '—'}</td>
+                    </tr>
+                  ))}
+                  {u.dDecision && (
+                    <tr>
+                      <th>Director</th>
+                      <td>{u.dDecision}{u.dBy ? ` · ${u.dBy} ${u.dDate || ''}` : ''}</td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </React.Fragment>
+          );
+        })}
+        <p style={{ color: '#999', fontSize: 11, marginTop: 24 }}>Audax Visuals · {T('导出于', 'Exported')} {fmtDate(todayMid())}</p>
+      </div>
+    </div>
   );
 }
 

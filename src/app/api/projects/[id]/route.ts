@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { appendAudit, deleteProject, getProject, saveProject } from '@/server/db';
+import { appendAudit, deleteProject, getEffectiveTemplate, getProject, saveProject } from '@/server/db';
 import { currentUser } from '@/server/session';
 import { identityOf, isFull } from '@/lib/permissions';
 import { applyAction, PermissionError, ValidationError, type ProjectAction } from '@/server/actions';
@@ -35,7 +35,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
 
   const logLenBefore = (p.log || []).length;
   try {
-    applyAction(identityOf(user), p, body);
+    applyAction(identityOf(user), p, body, { tplForSvc: getEffectiveTemplate });
   } catch (e) {
     if (e instanceof PermissionError) return NextResponse.json({ error: e.message }, { status: 403 });
     if (e instanceof ValidationError) return NextResponse.json({ error: e.message }, { status: 400 });
