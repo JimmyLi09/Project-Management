@@ -49,11 +49,14 @@ export default function TeamView() {
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(340px,1fr))', gap: 18 }}>
             {group.map((m) => {
               const pts = m.points;
-              const overCap = m.pointCap > 0 && pts > m.pointCap;
-              const capPct = m.pointCap > 0 ? Math.round((pts / m.pointCap) * 100) : 0;
-              const busy = overCap || m.load >= 85;
-              const lc = overCap ? '#D4483F' : healthColor(m.load);
-              const loadLabel = busy ? t('超载', 'Overloaded') : m.load >= 70 ? t('较满', 'Busy') : t('可用', 'Available');
+              const hasCap = m.pointCap > 0;
+              /* D13: when a cap is set, workload % is driven by points/cap;
+                 otherwise fall back to the project/task heuristic. */
+              const loadPct = hasCap ? Math.round((pts / m.pointCap) * 100) : m.load;
+              const overCap = hasCap && pts > m.pointCap;
+              const busy = loadPct >= 85;
+              const lc = overCap ? '#D4483F' : healthColor(loadPct);
+              const loadLabel = overCap ? t('超载', 'Overloaded') : busy ? t('较满', 'Busy') : loadPct >= 70 ? t('较满', 'Busy') : t('可用', 'Available');
               return (
                 <div key={m.name} className="panel" style={{ padding: 20, ...(overCap ? { boxShadow: 'inset 0 0 0 1.5px #e7a19b' } : {}) }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 13, marginBottom: 16 }}>
@@ -64,25 +67,19 @@ export default function TeamView() {
                         {m.position || (m.isPM ? t('项目经理', 'Project Manager') : t('制作', 'Production'))}
                       </div>
                     </div>
-                    <span className="badge" style={{ background: busy ? '#fbe9e7' : m.load >= 70 ? '#fbf0dc' : '#e6f2ec', color: busy ? '#b23a32' : m.load >= 70 ? '#a8690b' : '#0f6a48' }}>
+                    <span className="badge" style={{ background: overCap || busy ? '#fbe9e7' : loadPct >= 70 ? '#fbf0dc' : '#e6f2ec', color: overCap || busy ? '#b23a32' : loadPct >= 70 ? '#a8690b' : '#0f6a48' }}>
                       {loadLabel}
                     </span>
                   </div>
-                  {m.pointCap > 0 && (
-                    <div style={{ marginBottom: 16 }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11.5, color: 'var(--text2)', marginBottom: 6 }}>
-                        <span>{t('积分负载', 'Points load')}</span>
-                        <span className="tnum" style={{ fontWeight: 600, color: overCap ? '#D4483F' : 'var(--navy900)' }}>{pts} / {m.pointCap}{overCap ? t(' · 超上限', ' · over cap') : ''}</span>
-                      </div>
-                      <ProgressBar pct={Math.min(100, capPct)} color={overCap ? '#D4483F' : capPct >= 85 ? '#D98A12' : '#16865B'} showPct={false} />
-                    </div>
-                  )}
                   <div style={{ marginBottom: 16 }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11.5, color: 'var(--text2)', marginBottom: 6 }}>
-                      <span>{t('工作量', 'Workload')}</span>
-                      <span className="tnum" style={{ fontWeight: 600, color: lc }}>{m.load}%</span>
+                      <span>{hasCap ? t('积分负载', 'Points load') : t('工作量', 'Workload')}</span>
+                      <span className="tnum" style={{ fontWeight: 600, color: lc }}>
+                        {hasCap ? <>{pts} / {m.pointCap} {t('积分', 'pts')} · {loadPct}%</> : <>{loadPct}%</>}
+                      </span>
                     </div>
-                    <ProgressBar pct={m.load} color={lc} showPct={false} />
+                    <ProgressBar pct={Math.min(100, loadPct)} color={lc} showPct={false} />
+                    {hasCap && <div style={{ fontSize: 11, color: 'var(--text2)', marginTop: 4 }}>{t('按积分上限计算', 'measured against point cap')}</div>}
                   </div>
                   <div style={{ display: 'flex', gap: 22, marginBottom: 16 }}>
                     <div><div className="tnum" style={{ fontSize: 20, fontWeight: 600, color: 'var(--navy900)' }}>{m.activeProjects.length}</div><div style={{ fontSize: 11, color: 'var(--text2)' }}>{t('进行中项目', 'Active projects')}</div></div>

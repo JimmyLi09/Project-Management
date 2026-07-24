@@ -56,8 +56,32 @@ export function getDb(): Database.Database {
   migrateSchema(db);
   seedIfEmpty(db);
   maybeSeedDemo(db);
+  backfillIds(db);
   scheduleBackups(db);
   return db;
+}
+
+/* One-time pass so migrate()'s freshly-assigned item/row ids get persisted;
+   otherwise every read would mint new random ids and break stable React keys
+   (edit mode would drop on the 30s poll). Runs cheaply — only saves rows that
+   actually gained ids. */
+let idsBackfilled = false;
+function backfillIds(d: Database.Database) {
+  if (idsBackfilled) return;
+  idsBackfilled = true;
+  const rows = d.prepare('SELECT id, data FROM projects').all() as { id: string; data: string }[];
+  const upd = d.prepare('UPDATE projects SET data = ? WHERE id = ?');
+  for (const r of rows) {
+    let obj: any;
+    try { obj = JSON.parse(r.data); } catch { continue; }
+    const need = (obj.packages || []).some((pk: any) =>
+      (pk.schedule || []).some((x: any) => !x.id) ||
+      (pk.checklist || []).some((g: any) => (g.items || []).some((it: any) => !it.id || it.shot !== undefined || !Array.isArray(it.shots))));
+    if (!need) continue;
+    const m = migrate(obj);
+    const { updatedAt: _drop, ...data } = m as any;
+    upd.run(JSON.stringify(data), r.id);
+  }
 }
 
 /* ---- built-in daily backups (local/server deployments) ----

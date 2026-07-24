@@ -2,7 +2,7 @@
 
 import React, { useState } from 'react';
 import { useStore } from '../store';
-import { fmtDate, MACRO, macroStage, parseISO, pkgStart, planDates, todayMid } from '@/lib/project';
+import { fmtDate, isoDate, MACRO, macroStage, parseISO, pkgStart, planDates, todayMid } from '@/lib/project';
 import { canEdit, canRowEdit } from '@/lib/permissions';
 import { svcColor, svcName } from '@/lib/templates';
 import { useLang } from '@/lib/i18n';
@@ -96,7 +96,7 @@ export default function ScheduleTab({ p, pkgIdx, onExport, onPkg }: {
 
       {/* C5: resource links — web links / network paths to renders, VR, drone, models */}
       <div className="panel" style={{ padding: '12px 16px', marginBottom: 14 }}>
-        <div className="mini-label" style={{ marginBottom: 6, display: 'flex', alignItems: 'center', gap: 6 }}>
+        <div className="mini-label" style={{ marginBottom: 6, display: 'flex', alignItems: 'center', gap: 6, fontWeight: 700, color: 'var(--navy900)' }}>
           🔗 {t('资料链接(效果图 / VR / 航拍 / 模型 的网盘或路径)', 'Resource links (cloud/paths to renders, VR, drone, models)')}
         </div>
         {ed ? (
@@ -135,7 +135,7 @@ export default function ScheduleTab({ p, pkgIdx, onExport, onPkg }: {
                   const taskMain = lang === 'zh' ? r.task : r.taskEn || r.task;
                   const taskSub = lang === 'zh' ? r.taskEn : r.task;
                   return (
-                    <div key={i} className="row-hover" style={{
+                    <div key={r.id || i} className="row-hover" style={{
                       display: 'grid', gridTemplateColumns: '26px 26px minmax(220px,2fr) 40px 1.15fr 120px', gap: 13, alignItems: 'center',
                       padding: '13px 22px', borderBottom: '1px solid var(--row-line)',
                       borderLeft: `3px solid ${over ? 'var(--danger)' : r.freeze ? 'var(--bronze)' : 'transparent'}`,
@@ -206,10 +206,24 @@ export default function ScheduleTab({ p, pkgIdx, onExport, onPkg }: {
                         )}
                       </div>
                       <div>{r.assignee ? <Avatar name={r.assignee} size={26} /> : null}</div>
-                      <div className="tnum" style={{ fontSize: 12, color: over ? 'var(--danger)' : 'var(--text2)', fontWeight: over ? 600 : 400 }}>
-                        {d ? <>{fmtDate(d.start).slice(0, 6)} → {fmtDate(d.end).slice(0, 6)}</> : '—'}
-                        <div style={{ fontSize: 10.5, color: 'var(--text2)', fontWeight: 400 }}>{r.typical}</div>
-                      </div>
+                      {/* D6: dates editable inline (not only in edit mode). Editing sets
+                          a start/end override; blank falls back to the planned date. */}
+                      {ed && !editMode ? (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+                          <input type="date" className="in sm" style={{ fontSize: 11, padding: '2px 5px', ...(over ? { borderColor: '#e7a19b', color: '#b23a32' } : {}) }}
+                            title={t('开始(可改)', 'Start (editable)')} value={r.s || (d ? isoDate(d.start) : '')}
+                            onChange={(e) => dispatch(p.id, { type: 'editSched', pkg: pkgIdx, idx: i, field: 's', value: e.target.value })} />
+                          <input type="date" className="in sm" style={{ fontSize: 11, padding: '2px 5px', ...(over ? { borderColor: '#e7a19b', color: '#b23a32' } : {}) }}
+                            title={t('结束(可改)', 'End (editable)')} value={r.e || (d ? isoDate(d.end) : '')}
+                            onChange={(e) => dispatch(p.id, { type: 'editSched', pkg: pkgIdx, idx: i, field: 'e', value: e.target.value })} />
+                          <div style={{ fontSize: 10.5, color: 'var(--text2)' }}>{r.typical}</div>
+                        </div>
+                      ) : (
+                        <div className="tnum" style={{ fontSize: 12, color: over ? 'var(--danger)' : 'var(--text2)', fontWeight: over ? 600 : 400 }}>
+                          {d ? <>{fmtDate(d.start).slice(0, 6)} → {fmtDate(d.end).slice(0, 6)}</> : '—'}
+                          <div style={{ fontSize: 10.5, color: 'var(--text2)', fontWeight: 400 }}>{r.typical}</div>
+                        </div>
+                      )}
                       <div style={{ justifySelf: 'end' }}>
                         <button
                           style={{ cursor: rowEd ? 'pointer' : 'not-allowed', opacity: rowEd ? 1 : .6, background: 'none', padding: 0 }}
@@ -242,7 +256,8 @@ export default function ScheduleTab({ p, pkgIdx, onExport, onPkg }: {
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-      <span className="mini-label">{label}</span>
+      {/* D5: bolder / darker header labels */}
+      <span className="mini-label" style={{ fontWeight: 700, color: 'var(--navy900)', letterSpacing: '.02em' }}>{label}</span>
       <span style={{ fontSize: 13 }}>{children}</span>
     </div>
   );

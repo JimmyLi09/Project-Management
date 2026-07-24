@@ -6,7 +6,7 @@ import type { Identity } from '@/lib/permissions';
 import {
   canAssign, canCommercial, canDecide, canEdit, canRowEdit,
 } from '@/lib/permissions';
-import { buildPackage, fitWindow, parseISO, isoDate, totalDays } from '@/lib/project';
+import { buildPackage, fitWindow, newId, parseISO, isoDate, totalDays } from '@/lib/project';
 import { SVC, type Template } from '@/lib/templates';
 import type { ChecklistStatus, Project, ScheduleStatus } from '@/lib/types';
 
@@ -26,14 +26,15 @@ export type ProjectAction =
   | { type: 'removeRow'; pkg: number; idx: number }
   | { type: 'moveRow'; pkg: number; idx: number; dir: -1 | 1 }
   | { type: 'setClStatus'; pkg: number; gi: number; ii: number; value: ChecklistStatus }
-  | { type: 'editCl'; pkg: number; gi: number; ii: number; field: 'date' | 'remark' | 'zh' | 'en'; value: string }
+  | { type: 'editCl'; pkg: number; gi: number; ii: number; field: 'date' | 'remark' | 'zh' | 'en' | 'owner'; value: string }
   | { type: 'toggleHighlight'; pkg: number; gi: number; ii: number }
   | { type: 'addItem'; pkg: number; gi: number; items?: { zh: string; en: string }[] }
   | { type: 'removeItem'; pkg: number; gi: number; ii: number }
+  | { type: 'moveItem'; pkg: number; gi: number; ii: number; dir: -1 | 1 }
   | { type: 'addGroup'; pkg: number; name: string }
   | { type: 'resetChecklist'; pkg: number }
   | { type: 'attachShot'; pkg: number; gi: number; ii: number; data: string }
-  | { type: 'removeShot'; pkg: number; gi: number; ii: number }
+  | { type: 'removeShot'; pkg: number; gi: number; ii: number; shotIdx?: number }
   | { type: 'setPkgField'; pkg: number; field: 'start' | 'delivery' | 'owner' | 'resourceLinks'; value: string }
   | { type: 'setPkgBuffer'; pkg: number; value: number }
   | { type: 'reversePkg'; pkg: number }
@@ -179,6 +180,7 @@ export function applyAction(u: Identity, p: Project, a: ProjectAction, ctx: Acti
       const { it } = getItem(p, a.pkg, a.gi, a.ii);
       const was = it.status;
       it.status = a.value;
+      it.updatedAt = Date.now();
       logIt(p, u.name, `清单「${it.zh}」: ${was}→${a.value}`);
       break;
     }
@@ -186,12 +188,14 @@ export function applyAction(u: Identity, p: Project, a: ProjectAction, ctx: Acti
       if (!canEdit(u, p)) throw new PermissionError('无编辑权限');
       const { it } = getItem(p, a.pkg, a.gi, a.ii);
       (it as any)[a.field] = a.value;
+      it.updatedAt = Date.now();
       break;
     }
     case 'toggleHighlight': {
       if (!canEdit(u, p)) throw new PermissionError('无编辑权限');
       const { it } = getItem(p, a.pkg, a.gi, a.ii);
       it.highlight = !it.highlight;
+      it.updatedAt = Date.now();
       break;
     }
     case 'addItem': {
@@ -205,7 +209,7 @@ export function applyAction(u: Identity, p: Project, a: ProjectAction, ctx: Acti
         .map((x) => ({ zh: String(x.zh || '').slice(0, 200), en: String(x.en || '').slice(0, 200) }))
         .filter((x) => x.zh || x.en);
       if (!toAdd.length) toAdd.push({ zh: '新信息项', en: 'New item' });
-      for (const x of toAdd) g.items.push({ zh: x.zh, en: x.en, status: 'pending', date: '', remark: '' });
+      for (const x of toAdd) g.items.push({ id: newId(), zh: x.zh, en: x.en, status: 'pending', date: '', remark: '', owner: '', shots: [] });
       break;
     }
     case 'removeItem': {
@@ -214,13 +218,21 @@ export function applyAction(u: Identity, p: Project, a: ProjectAction, ctx: Acti
       g.items.splice(a.ii, 1);
       break;
     }
+    case 'moveItem': {
+      if (!canEdit(u, p)) throw new PermissionError('无编辑权限');
+      const { g } = getItem(p, a.pkg, a.gi, a.ii);
+      const j = a.ii + (a.dir === 1 ? 1 : -1);
+      if (j < 0 || j >= g.items.length) break; // at an edge, no-op
+      [g.items[a.ii], g.items[j]] = [g.items[j], g.items[a.ii]];
+      break;
+    }
     case 'addGroup': {
       if (!canEdit(u, p)) throw new PermissionError('无编辑权限');
       const pk = p.packages[a.pkg];
       if (!pk) throw new ValidationError('无效的服务包');
       pk.checklist.push({
         group: a.name || '特殊需求', groupEn: 'Custom', color: '#607080',
-        items: [{ zh: '新信息项', en: 'New item', status: 'pending', date: '', remark: '' }],
+        items: [{ id: newId(), zh: '新信息项', en: 'New item', status: 'pending', date: '', remark: '', owner: '', shots: [] }],
       });
       break;
     }
@@ -240,7 +252,11 @@ export function applyAction(u: Identity, p: Project, a: ProjectAction, ctx: Acti
       if (!/^data:image\/(jpeg|png|webp);base64,/.test(a.data)) throw new ValidationError('无效的图片数据');
       if (a.data.length > 800_000) throw new ValidationError('图片过大,请压缩后上传');
       const { it } = getItem(p, a.pkg, a.gi, a.ii);
-      it.shot = a.data;
+      if (!Array.isArray(it.shots)) it.shots = it.shot ? [it.shot] : [];
+      if (it.shots.length >= 8) throw new ValidationError('每项最多 8 张图片');
+      it.shots.push(a.data);
+      it.shot = undefined;
+      it.updatedAt = Date.now();
       if (!it.date) it.date = isoDate(new Date());
       if (it.status === 'pending') it.status = 'received';
       logIt(p, u.name, `上传资料截图: ${it.zh}`);
@@ -249,7 +265,11 @@ export function applyAction(u: Identity, p: Project, a: ProjectAction, ctx: Acti
     case 'removeShot': {
       if (!canEdit(u, p)) throw new PermissionError('无编辑权限');
       const { it } = getItem(p, a.pkg, a.gi, a.ii);
-      it.shot = '';
+      if (!Array.isArray(it.shots)) it.shots = it.shot ? [it.shot] : [];
+      if (typeof a.shotIdx === 'number' && a.shotIdx >= 0 && a.shotIdx < it.shots.length) it.shots.splice(a.shotIdx, 1);
+      else it.shots = []; // no index → clear all (back-compat)
+      it.shot = undefined;
+      it.updatedAt = Date.now();
       break;
     }
     case 'setPkgField': {

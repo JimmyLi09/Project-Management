@@ -66,8 +66,8 @@ export default function MyTasksView() {
       </div>
 
       <div className="panel clip">
-        <div className="table-head" style={{ display: 'grid', gridTemplateColumns: '26px 1fr 170px 40px 120px 118px 40px', gap: 14 }}>
-          <div /><div>{t('任务', 'Task')}</div><div>{t('项目', 'Project')}</div><div /><div>{t('到期', 'Due')}</div><div>{t('状态', 'Status')}</div><div />
+        <div className="table-head" style={{ display: 'grid', gridTemplateColumns: '26px 1fr 160px 150px 110px 118px 40px', gap: 14 }}>
+          <div /><div>{t('任务', 'Task')}</div><div>{t('项目', 'Project')}</div><div>{t('负责人', 'Owner')}</div><div>{t('到期', 'Due')}</div><div>{t('状态', 'Status')}</div><div />
         </div>
         {shown.length === 0 && (
           <div style={{ padding: 36, textAlign: 'center', color: 'var(--text2)', fontSize: 13 }}>
@@ -80,7 +80,7 @@ export default function MyTasksView() {
           const rowEd = canRowEdit(me, x.p, x.r);
           return (
             <div key={xi} className="row-hover" style={{
-              display: 'grid', gridTemplateColumns: '26px 1fr 170px 40px 120px 118px 40px', gap: 14, alignItems: 'center',
+              display: 'grid', gridTemplateColumns: '26px 1fr 160px 150px 110px 118px 40px', gap: 14, alignItems: 'center',
               padding: '15px 22px', borderBottom: '1px solid var(--row-line)',
               borderLeft: `3px solid ${over ? 'var(--danger)' : 'transparent'}`,
             }}>
@@ -95,7 +95,16 @@ export default function MyTasksView() {
                 {x.p.packages.length > 1 && <div style={{ fontSize: 11, color: 'var(--text2)' }}>{svcName(x.svc, lang)}</div>}
               </div>
               <div style={{ fontSize: 12.5, color: 'var(--text2)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{x.p.name}</div>
-              <div>{x.r.assignee ? <Avatar name={x.r.assignee} size={26} /> : null}</div>
+              <div style={{ minWidth: 0 }}>
+                {x.r.assignee ? (
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7, minWidth: 0 }}>
+                    <Avatar name={x.r.assignee} size={26} />
+                    <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--navy900)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{x.r.assignee}</span>
+                  </span>
+                ) : (
+                  <span style={{ fontSize: 12, color: '#b6bfc9' }}>{t('未指派', 'Unassigned')}</span>
+                )}
+              </div>
               <div className="tnum" style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12.5, fontWeight: 500, color: over ? 'var(--danger)' : 'var(--text2)' }}>
                 {over && <Icon name="alert" size={13} />}
                 {x.d ? fmtDate(x.d.end).slice(0, 6) : '—'}

@@ -22,6 +22,7 @@ export default function ProjectDetail() {
   const { lang, t } = useLang();
   const [showExport, setShowExport] = useState(false);
   const [transferFrom, setTransferFrom] = useState<string | null>(null);
+  const [assignOpen, setAssignOpen] = useState(false);
   const p = projects.find((x) => x.id === view.pid);
   if (!p) {
     return <div className="panel" style={{ padding: 40, textAlign: 'center', color: 'var(--text2)' }}>{t('项目加载中…', 'Loading project…')}</div>;
@@ -39,7 +40,6 @@ export default function ProjectDetail() {
   const daysLeft = del ? Math.round((del.getTime() - t0.getTime()) / 86400000) : null;
 
   const setTab = (tb: 'overview' | 'schedule' | 'checklist') => setView({ ...view, tab: tb });
-  const pmUsers = users.filter((u) => u.role === 'pm' || u.role === 'member');
 
   return (
     <>
@@ -121,11 +121,7 @@ export default function ProjectDetail() {
                 <button style={{ color: 'var(--text2)', fontWeight: 700 }} onClick={() => dispatch(p.id, { type: 'removeOwner', name: n })}>✕</button>
               </span>
             ))}
-            <button className="btn-line sm" onClick={() => {
-              const hint = pmUsers.map((u) => u.name).join(' / ');
-              const nm = prompt(t(`指派 PM 的名字:${hint ? `\n(已有账号: ${hint})` : ''}`, `PM name to assign:${hint ? `\n(accounts: ${hint})` : ''}`));
-              if (nm && nm.trim()) dispatch(p.id, { type: 'addOwner', name: nm.trim() });
-            }}>+ {t('指派', 'Assign')}</button>
+            <button className="btn-line sm" onClick={() => setAssignOpen(true)}>+ {t('指派', 'Assign')}</button>
             {(p.owners || []).length > 0 && (
               <button className="btn-line sm" title={t('休假/离职时把项目移交他人', 'Hand the project to someone else')}
                 onClick={() => {
@@ -163,20 +159,20 @@ export default function ProjectDetail() {
         </div>
       )}
 
-      {/* key by project + package + row-count so the uncontrolled inputs (notes,
-          dates, task fields) always remount with fresh values when you switch
-          service package, switch project, or add/remove a row — fixes notes
-          bleeding across packages (A2) and delete showing the wrong row (A1). */}
+      {/* key by project + package only. Rows/items carry stable ids and are keyed
+          individually inside each tab, so adding/removing/reordering no longer
+          remounts the whole tab (which was resetting edit mode — D9) yet still
+          avoids the DOM-reuse bugs A1/A2. Switching package/project remounts fresh. */}
       {tab === 'overview' && <OverviewTab p={p} onSchedule={(pkg) => setView({ ...view, tab: 'schedule', pkg })} />}
       {tab === 'schedule' && (
         <ScheduleTab
-          key={`${p.id}:${pkgIdx}:${p.packages[pkgIdx]?.schedule.map((r) => r.no).join(',') ?? ''}`}
+          key={`${p.id}:${pkgIdx}`}
           p={p} pkgIdx={pkgIdx} onExport={() => setShowExport(true)} onPkg={(i) => setView({ ...view, pkg: i })}
         />
       )}
       {tab === 'checklist' && (
         <ChecklistTab
-          key={`${p.id}:${pkgIdx}:${p.packages[pkgIdx]?.checklist.map((g) => g.group + g.items.map((it) => it.zh).join('|')).join('~') ?? ''}`}
+          key={`${p.id}:${pkgIdx}`}
           p={p} pkgIdx={pkgIdx} onExport={() => setShowExport(true)} onPkg={(i) => setView({ ...view, pkg: i })}
         />
       )}
@@ -184,7 +180,41 @@ export default function ProjectDetail() {
       {transferFrom && (
         <TransferModal from={transferFrom} pid={p.id} onClose={() => setTransferFrom(null)} />
       )}
+      {assignOpen && (
+        <AssignModal
+          candidates={users.filter((u) => u.role !== 'viewer' && !(p.owners || []).includes(u.name)).map((u) => u.name)}
+          onClose={() => setAssignOpen(false)}
+          onAssign={(name) => { dispatch(p.id, { type: 'addOwner', name }); setAssignOpen(false); }}
+        />
+      )}
     </>
+  );
+}
+
+/* D15: assign PM via an account dropdown (same shape as the transfer modal),
+   instead of a raw prompt() that made you type the name. */
+function AssignModal({ candidates, onClose, onAssign }: { candidates: string[]; onClose: () => void; onAssign: (name: string) => void }) {
+  const { t } = useLang();
+  const [name, setName] = useState('');
+  return (
+    <div className="overlay" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="modal" style={{ maxWidth: 420 }}>
+        <h2>{t('指派 PM', 'Assign PM')}</h2>
+        <div className="msub">{t('从账号中选择负责人加入本项目。', 'Pick an account to add as a PM on this project.')}</div>
+        <div className="field">
+          <label>{t('选择账号', 'Choose account')}</label>
+          <select className="in" value={name} onChange={(e) => setName(e.target.value)} autoFocus>
+            <option value="">{t('— 请选择 —', '— select —')}</option>
+            {candidates.map((n) => <option key={n} value={n}>{n}</option>)}
+          </select>
+        </div>
+        {candidates.length === 0 && <div style={{ fontSize: 12.5, color: 'var(--text2)' }}>{t('没有可指派的账号(都已在项目中)。', 'No accounts left to assign (all already on the project).')}</div>}
+        <div className="modal-actions">
+          <button className="btn-line" onClick={onClose}>{t('取消', 'Cancel')}</button>
+          <button className="btn-navy" disabled={!name} onClick={() => onAssign(name)}>{t('确认指派', 'Assign')}</button>
+        </div>
+      </div>
+    </div>
   );
 }
 

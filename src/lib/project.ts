@@ -55,13 +55,13 @@ export function buildPackage(svc: string, start: string, tpl?: Template): Servic
     owner: '',
     status: 'active',
     schedule: t.schedule.map((p) => ({
-      no: p[0], phase: p[1], task: p[2], taskEn: p[3], owner: p[4], assignee: '',
+      id: newId(), no: p[0], phase: p[1], task: p[2], taskEn: p[3], owner: p[4], assignee: '',
       weeks: p[5], typical: p[6], gate: p[7], freeze: p[8], status: 'todo' as const,
       note: '', s: '', e: '',
     })),
     checklist: t.checklist.map((g) => ({
       group: g[0], groupEn: g[1], color: g[2],
-      items: g[3].map((i) => ({ zh: i[0], en: i[1], status: 'pending' as const, date: '', remark: '' })),
+      items: g[3].map((i) => ({ id: newId(), zh: i[0], en: i[1], status: 'pending' as const, date: '', remark: '', owner: '', shots: [] as string[] })),
     })),
   };
 }
@@ -109,6 +109,13 @@ export function projPoints(p: Project): number {
     : diffPoints(p.difficulty) * ((p.services && p.services.length) || 1);
 }
 
+let _idc = 0;
+/* short unique id; stable once assigned & persisted (see migrate + backfillIds) */
+export function newId(): string {
+  _idc = (_idc + 1) % 1e6;
+  return 'i' + Date.now().toString(36) + _idc.toString(36) + Math.random().toString(36).slice(2, 6);
+}
+
 export function migrate(p: any): Project {
   if (!p.packages) {
     p.packages = [{ svc: (p.services && p.services[0]) || 'others', schedule: p.schedule || [], checklist: p.checklist || [] }];
@@ -119,7 +126,17 @@ export function migrate(p: any): Project {
     if (pk.buffer === undefined) pk.buffer = 0;
     if (pk.owner === undefined) pk.owner = '';
     if (pk.status === undefined) pk.status = 'active';
-    (pk.schedule || []).forEach((r: any) => { if (r.assignee === undefined) r.assignee = ''; });
+    (pk.schedule || []).forEach((r: any) => {
+      if (r.assignee === undefined) r.assignee = '';
+      if (!r.id) r.id = newId();
+    });
+    (pk.checklist || []).forEach((g: any) => (g.items || []).forEach((it: any) => {
+      if (!it.id) it.id = newId();
+      if (it.owner === undefined) it.owner = '';
+      /* fold a legacy single shot into the shots[] array */
+      if (!Array.isArray(it.shots)) it.shots = it.shot ? [it.shot] : [];
+      if (it.shot) delete it.shot;
+    }));
   });
   if (!p.update) p.update = {};
   (['done', 'nextNodes', 'risks', 'needDirector', 'clientPending', 'budget'] as const).forEach((f) => {

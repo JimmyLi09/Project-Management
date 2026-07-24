@@ -138,12 +138,42 @@ function WeeklyExportOverlay({ list, filter, onClose }: { list: Project[]; filte
     ontrack: ['正常', 'On track'], watch: ['关注', 'Watch'], risk: ['风险', 'At risk'], completed: ['已完成', 'Completed'],
   };
 
+  /* D14: export the same data as a CSV that opens in Excel / WPS */
+  function downloadCsv() {
+    const esc = (v: string) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+    const header = [
+      T('项目', 'Project'), T('负责人', 'PM'), T('客户', 'Client'), T('健康度', 'Health'), T('更新状态', 'Update state'),
+      ...UF.map(([, zh, en]) => T(zh, en)), 'Director',
+    ];
+    const rows = list.map((p) => {
+      const u: any = p.update || {};
+      const stage = projStage(p);
+      const h = stage === 'complete' || stage === 'invoice' ? 'completed' : projectHealth(p);
+      const pm = (p.owners || [])[0] || T('未指派', 'unassigned');
+      const st = staleInfo(u, L);
+      return [
+        p.name, pm, p.client || '', T(HLABEL[h]?.[0] || h, HLABEL[h]?.[1] || h), st.txt,
+        ...UF.map(([f]) => (u[f] || '').replace(/\n/g, ' ')),
+        u.dDecision ? `${u.dDecision}${u.dBy ? ` (${u.dBy} ${u.dDate || ''})` : ''}` : '',
+      ];
+    });
+    const csv = [header, ...rows].map((r) => r.map(esc).join(',')).join('\r\n');
+    const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' }); // BOM so Excel reads UTF-8
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `weekly-updates-${fmtDate(todayMid())}.csv`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
   return (
     <div className="ex-wrap">
       <div className="ex-actions">
         <button className="btn-line sm" style={L === 'en' ? { borderColor: 'var(--navy900)' } : undefined} onClick={() => setLang('en')}>English</button>
         <button className="btn-line sm" style={L === 'zh' ? { borderColor: 'var(--navy900)' } : undefined} onClick={() => setLang('zh')}>中文</button>
         <button className="btn-navy sm" onClick={() => window.print()}>{T('打印 / 另存 PDF', 'Print / Save PDF')}</button>
+        <button className="btn-line sm" onClick={downloadCsv}>⬇ {T('导出 Excel (CSV)', 'Export Excel (CSV)')}</button>
         <button className="btn-line sm" onClick={onClose}>{T('关闭', 'Close')}</button>
       </div>
       <div className="ex-doc">

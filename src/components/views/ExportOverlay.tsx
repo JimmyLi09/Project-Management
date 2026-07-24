@@ -15,7 +15,7 @@ export default function ExportOverlay({ p, onClose }: { p: Project; onClose: () 
   const L = lang;
   const T = (zh: string, en: string) => (L === 'zh' ? zh : en);
   const svcNames = p.services.map((k) => (SVC[k] ? (L === 'zh' ? SVC[k].label : SVC[k].en) : k)).join(', ');
-  const clSpan = 1 + (cols.clStatus ? 1 : 0) + (cols.clDate ? 1 : 0) + (cols.clRemark ? 1 : 0);
+  const clSpan = 2 + (cols.clStatus ? 1 : 0) + (cols.clDate ? 1 : 0) + (cols.clRemark ? 1 : 0);
 
   const colToggle = (c: keyof Cols, zh: string, en: string) => (
     <label className="ex-col" key={c}>
@@ -92,6 +92,7 @@ export default function ExportOverlay({ p, onClose }: { p: Project; onClose: () 
                     <tr className="grp-h"><td colSpan={clSpan}>{L === 'zh' ? g.group : g.groupEn}</td></tr>
                     <tr>
                       <th>{T('信息项', 'Item')}</th>
+                      <th>{T('负责人', 'Owner')}</th>
                       {cols.clStatus && <th>{T('状态', 'Status')}</th>}
                       {cols.clDate && <th>{T('收到日期', 'Date received')}</th>}
                       {cols.clRemark && <th>{T('备注', 'Remark')}</th>}
@@ -99,6 +100,7 @@ export default function ExportOverlay({ p, onClose }: { p: Project; onClose: () 
                     {items.map((it, ii) => (
                       <tr key={ii}>
                         <td>{L === 'zh' ? it.zh : it.en}</td>
+                        <td>{it.owner || '—'}</td>
                         {cols.clStatus && <td>{clStat[it.status] || it.status}</td>}
                         {cols.clDate && <td>{it.date || '—'}</td>}
                         {cols.clRemark && <td>{it.remark || '—'}</td>}

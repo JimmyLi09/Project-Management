@@ -25,6 +25,7 @@ export type ChecklistStatus =
   | 'rejected';
 
 export interface ScheduleRow {
+  id?: string; // stable key so reorder/delete don't remount the wrong DOM row
   no: string;
   phase: string;
   task: string;
@@ -43,13 +44,17 @@ export interface ScheduleRow {
 }
 
 export interface ChecklistItem {
+  id?: string; // stable key (survives add/remove/reorder without remounting)
   zh: string;
   en: string;
   status: ChecklistStatus;
   date: string;
   remark: string;
-  shot?: string; // dataURL thumbnail
+  shot?: string; // legacy single dataURL thumbnail (migrated into shots)
+  shots?: string[]; // multiple dataURL thumbnails per item
+  owner?: string; // responsible person (name), shown with an avatar
   highlight?: boolean; // mark this item's remark as important (bright colour)
+  updatedAt?: number; // last time this item changed (for "last update" column)
 }
 
 export interface ChecklistGroup {
