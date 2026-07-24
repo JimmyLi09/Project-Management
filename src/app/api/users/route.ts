@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createUser, getUserByEmail, getUserById, getUserByUsername, listUsers, resetPassword, setUserDisabled, updateUser } from '@/server/db';
+import { createUser, getUserByEmail, getUserById, getUserByUsername, listUsers, resetPassword, setUserAvatar, setUserDisabled, updateUser } from '@/server/db';
 import { currentUser } from '@/server/session';
 import { canAdmin, identityOf } from '@/lib/permissions';
 import type { Role } from '@/lib/types';
@@ -55,13 +55,29 @@ export async function POST(req: NextRequest) {
 export async function PATCH(req: NextRequest) {
   const user = await currentUser();
   if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
-  if (!canAdmin(identityOf(user))) {
-    return NextResponse.json({ error: '仅 PD/BD 可管理用户' }, { status: 403 });
-  }
   const body = await req.json().catch(() => ({}));
   const id = Number(body.id);
   const target = getUserById(id);
   if (!target) return NextResponse.json({ error: '用户不存在' }, { status: 404 });
+
+  /* C6: avatar upload — you may set your own; PD/BD may set anyone's.
+     Guarded before the admin gate so ordinary users can update their photo. */
+  if (body.action === 'setAvatar') {
+    if (id !== user.id && !canAdmin(identityOf(user))) {
+      return NextResponse.json({ error: '只能修改自己的头像' }, { status: 403 });
+    }
+    const avatar = String(body.avatar || '');
+    if (avatar) {
+      if (!/^data:image\/(jpeg|png|webp);base64,/.test(avatar)) return NextResponse.json({ error: '无效的图片数据' }, { status: 400 });
+      if (avatar.length > 400_000) return NextResponse.json({ error: '头像过大,请压缩后上传' }, { status: 400 });
+    }
+    const updated = setUserAvatar(id, avatar);
+    return NextResponse.json({ user: updated });
+  }
+
+  if (!canAdmin(identityOf(user))) {
+    return NextResponse.json({ error: '仅 PD/BD 可管理用户' }, { status: 403 });
+  }
 
   /* PD/BD resets someone's password (forces a change on their next login) */
   if (body.action === 'resetPassword') {
@@ -83,7 +99,12 @@ export async function PATCH(req: NextRequest) {
     return NextResponse.json({ ok: true });
   }
 
-  const fields: { name?: string; email?: string; position?: string; role?: Role } = {};
+  const fields: { name?: string; email?: string; position?: string; role?: Role; pointCap?: number } = {};
+  if (body.pointCap !== undefined) {
+    const cap = Number(body.pointCap);
+    if (!Number.isFinite(cap) || cap < 0 || cap > 999) return NextResponse.json({ error: '积分上限应为 0–999(0 表示不限)' }, { status: 400 });
+    fields.pointCap = cap;
+  }
   if (body.name !== undefined) {
     const name = String(body.name).trim();
     if (!name) return NextResponse.json({ error: '姓名不能为空' }, { status: 400 });

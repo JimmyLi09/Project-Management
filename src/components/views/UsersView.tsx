@@ -118,18 +118,61 @@ function EditUserModal({ u, onClose, onSaved }: { u: User; onClose: () => void; 
   const [email, setEmail] = useState(u.email || '');
   const [position, setPosition] = useState(u.position || '');
   const [role, setRole] = useState<Role>(u.role);
+  const [pointCap, setPointCap] = useState<string>(u.pointCap ? String(u.pointCap) : '');
+  const [avatar, setAvatar] = useState<string | undefined>(u.avatar);
   const [msg, setMsg] = useState('');
   const [busy, setBusy] = useState(false);
 
   async function save() {
     setBusy(true); setMsg('');
+    const cap = pointCap.trim() === '' ? 0 : Number(pointCap);
     const res = await fetch('/api/users', {
       method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id: u.id, name, email, position, role }),
+      body: JSON.stringify({ id: u.id, name, email, position, role, pointCap: cap }),
     });
     setBusy(false);
     if (res.ok) onSaved();
     else { const b = await res.json().catch(() => ({})); setMsg(b.error || t('保存失败', 'Save failed')); }
+  }
+
+  /* C6: compress to a ~200px square-ish JPEG and upload the avatar */
+  function uploadAvatar(input: HTMLInputElement) {
+    const f = input.files && input.files[0];
+    input.value = '';
+    if (!f) return;
+    if (!f.type.startsWith('image/')) { setMsg(t('只支持图片文件', 'Only image files')); return; }
+    const rd = new FileReader();
+    rd.onload = (e) => {
+      const img = new Image();
+      img.onload = async () => {
+        const mx = 200;
+        let w = img.width, h = img.height;
+        if (w > mx || h > mx) { const s = mx / Math.max(w, h); w = Math.round(w * s); h = Math.round(h * s); }
+        const c = document.createElement('canvas');
+        c.width = w; c.height = h;
+        c.getContext('2d')!.drawImage(img, 0, 0, w, h);
+        let data: string;
+        try { data = c.toDataURL('image/jpeg', 0.72); } catch { setMsg(t('图片处理失败', 'Failed to process image')); return; }
+        const res = await fetch('/api/users', {
+          method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id: u.id, action: 'setAvatar', avatar: data }),
+        });
+        if (res.ok) { setAvatar(data); setMsg(t('✓ 头像已更新', '✓ Avatar updated')); onSaved(); }
+        else setMsg((await res.json().catch(() => ({}))).error || t('上传失败', 'Upload failed'));
+      };
+      img.onerror = () => setMsg(t('无法读取图片', 'Could not read image'));
+      img.src = e.target!.result as string;
+    };
+    rd.readAsDataURL(f);
+  }
+
+  async function removeAvatar() {
+    const res = await fetch('/api/users', {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: u.id, action: 'setAvatar', avatar: '' }),
+    });
+    if (res.ok) { setAvatar(undefined); setMsg(t('✓ 已恢复首字母头像', '✓ Reverted to initials')); onSaved(); }
+    else setMsg((await res.json().catch(() => ({}))).error || t('失败', 'Failed'));
   }
 
   async function resetPw() {
@@ -160,6 +203,16 @@ function EditUserModal({ u, onClose, onSaved }: { u: User; onClose: () => void; 
         <h2>{t('编辑用户', 'Edit user')} · {u.username}</h2>
         <div className="msub">{t('改姓名会自动同步到所有项目的负责人与任务指派(按姓名匹配)。', 'Renaming propagates to all project ownership and task assignments (matched by name).')}</div>
         {msg && <div className={msg.startsWith('✓') ? 'login-hint' : 'login-err'} style={msg.startsWith('✓') ? { color: 'var(--success)' } : undefined}>{msg}</div>}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 14 }}>
+          <Avatar name={u.name} size={54} src={avatar} />
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <label className="btn-line sm" style={{ cursor: 'pointer' }}>
+              📷 {t('上传头像', 'Upload photo')}
+              <input type="file" accept="image/*" style={{ display: 'none' }} onChange={(e) => uploadAvatar(e.target)} />
+            </label>
+            {avatar && <button className="btn-line sm danger" onClick={removeAvatar}>{t('移除', 'Remove')}</button>}
+          </div>
+        </div>
         <div className="field"><label>{t('姓名', 'Name')}</label><input value={name} onChange={(e) => setName(e.target.value)} /></div>
         <div className="field"><label>Email</label><input type="email" value={email} onChange={(e) => setEmail(e.target.value)} /></div>
         <div className="field"><label>{t('职位', 'Position')}</label><input value={position} onChange={(e) => setPosition(e.target.value)} /></div>
@@ -170,6 +223,10 @@ function EditUserModal({ u, onClose, onSaved }: { u: User; onClose: () => void; 
               <option key={r} value={r}>{ROLE_LABEL[r]} — {lang === 'zh' ? ROLE_DESC[r][0] : ROLE_DESC[r][1]}</option>
             ))}
           </select>
+        </div>
+        <div className="field">
+          <label>{t('积分上限(负载预警,0 或留空=不限)', 'Point cap (overload warning; 0 or blank = no limit)')}</label>
+          <input type="number" min={0} max={999} value={pointCap} onChange={(e) => setPointCap(e.target.value)} placeholder={t('例如 8', 'e.g. 8')} />
         </div>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', borderTop: '1px solid var(--row-line)', paddingTop: 14, marginTop: 4 }}>
           <button className="btn-line sm" onClick={resetPw}>🔑 {t('重置密码', 'Reset password')}</button>

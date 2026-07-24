@@ -2,10 +2,17 @@
 
 /* ===== Shared UI primitives (icons, avatars, badges, progress) — from the Audax Platform design file ===== */
 
-import React from 'react';
+import React, { createContext, useContext } from 'react';
 import { useLang } from '@/lib/i18n';
 import type { Health } from '@/lib/project';
 import type { ChecklistStatus, ScheduleStatus } from '@/lib/types';
+
+/* C6: global name→avatar-photo map so <Avatar> can show real photos everywhere
+   without threading a src prop through every call site. App fills it from users. */
+const AvatarSrcCtx = createContext<Record<string, string>>({});
+export function AvatarSrcProvider({ map, children }: { map: Record<string, string>; children: React.ReactNode }) {
+  return <AvatarSrcCtx.Provider value={map}>{children}</AvatarSrcCtx.Provider>;
+}
 
 /* Lucide icon paths from the design file */
 const PATHS: Record<string, string> = {
@@ -60,7 +67,20 @@ export function avatarColor(name: string): string {
   return AV_COLORS[h % AV_COLORS.length];
 }
 
-export function Avatar({ name, size = 28, title }: { name: string; size?: number; title?: string }) {
+export function Avatar({ name, size = 28, title, src }: { name: string; size?: number; title?: string; src?: string }) {
+  const map = useContext(AvatarSrcCtx);
+  const photo = src || map[name];
+  if (photo) {
+    return (
+      <span
+        className="avatar"
+        title={title || name}
+        style={{ width: size, height: size, padding: 0, overflow: 'hidden', background: 'transparent' }}
+      >
+        <img src={photo} alt={name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+      </span>
+    );
+  }
   const init = initialsOf(name);
   const fs = init.length > 1 ? size * 0.36 : size * 0.44;
   return (

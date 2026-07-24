@@ -125,6 +125,8 @@ function migrateSchema(d: Database.Database) {
   if (!cols.includes('position')) d.exec("ALTER TABLE users ADD COLUMN position TEXT NOT NULL DEFAULT ''");
   if (!cols.includes('must_change_pw')) d.exec('ALTER TABLE users ADD COLUMN must_change_pw INTEGER NOT NULL DEFAULT 0');
   if (!cols.includes('disabled')) d.exec('ALTER TABLE users ADD COLUMN disabled INTEGER NOT NULL DEFAULT 0');
+  if (!cols.includes('avatar')) d.exec("ALTER TABLE users ADD COLUMN avatar TEXT NOT NULL DEFAULT ''");
+  if (!cols.includes('point_cap')) d.exec('ALTER TABLE users ADD COLUMN point_cap INTEGER NOT NULL DEFAULT 0');
 }
 
 /* ---- secret for session signing (persisted so sessions survive restarts) ---- */
@@ -172,13 +174,15 @@ export function getUserByEmail(email: string) {
     .prepare("SELECT * FROM users WHERE email != '' AND lower(email) = ?")
     .get(email.toLowerCase()) as (User & { password_hash: string }) | undefined;
 }
-const USER_COLS = 'id, username, name, role, email, position, must_change_pw AS mustChangePassword, disabled';
+const USER_COLS = 'id, username, name, role, email, position, must_change_pw AS mustChangePassword, disabled, avatar, point_cap AS pointCap';
 function rowToUser(r: Record<string, unknown> | undefined): User | undefined {
   if (!r) return undefined;
   return {
     id: r.id as number, username: r.username as string, name: r.name as string, role: r.role as Role,
     email: (r.email as string) || '', position: (r.position as string) || '',
     mustChangePassword: !!r.mustChangePassword, disabled: !!r.disabled,
+    avatar: (r.avatar as string) || undefined,
+    pointCap: (r.pointCap as number) || 0,
   };
 }
 export function getUserById(id: number) {
@@ -290,7 +294,7 @@ export function listTemplateOverrides(): { svc: string; updated_at: number; upda
         assignments because matching is by name ---- */
 export function updateUser(
   id: number,
-  fields: { name?: string; email?: string; position?: string; role?: Role },
+  fields: { name?: string; email?: string; position?: string; role?: Role; pointCap?: number },
 ): User | undefined {
   const u = getUserById(id);
   if (!u) return undefined;
@@ -298,11 +302,20 @@ export function updateUser(
   const email = fields.email !== undefined ? fields.email : u.email;
   const position = fields.position !== undefined ? fields.position : u.position;
   const role = fields.role !== undefined ? fields.role : u.role;
+  const pointCap = fields.pointCap !== undefined ? Math.max(0, Math.round(fields.pointCap)) : (u.pointCap || 0);
   getDb()
-    .prepare('UPDATE users SET name = ?, email = ?, position = ?, role = ? WHERE id = ?')
-    .run(name, email, position, role, id);
+    .prepare('UPDATE users SET name = ?, email = ?, position = ?, role = ?, point_cap = ? WHERE id = ?')
+    .run(name, email, position, role, pointCap, id);
   if (name !== u.name) propagateRename(u.name, name);
-  return { ...u, name, email, position, role };
+  return { ...u, name, email, position, role, pointCap };
+}
+
+/* C6: store a compressed avatar dataURL (or clear it with ''). */
+export function setUserAvatar(id: number, avatar: string): User | undefined {
+  const u = getUserById(id);
+  if (!u) return undefined;
+  getDb().prepare('UPDATE users SET avatar = ? WHERE id = ?').run(avatar, id);
+  return { ...u, avatar: avatar || undefined };
 }
 
 function propagateRename(oldName: string, newName: string) {

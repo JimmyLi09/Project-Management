@@ -3,7 +3,7 @@
 import React, { useState } from 'react';
 import { useStore } from '../store';
 import { canEdit } from '@/lib/permissions';
-import { svcColor, svcName } from '@/lib/templates';
+import { getBuiltinTemplate, svcColor, svcName } from '@/lib/templates';
 import { useLang } from '@/lib/i18n';
 import { CM, Icon, Pill } from '../ui';
 import type { ChecklistStatus, Project } from '@/lib/types';
@@ -28,6 +28,15 @@ export default function ChecklistTab({ p, pkgIdx, onExport, onPkg }: {
 
   let doneN = 0, totalN = 0;
   pkg.checklist.forEach((g) => g.items.forEach((it) => { if (it.status === 'na') return; totalN++; if (it.status === 'confirmed') doneN++; }));
+
+  /* B3: the default-item library for this package's service, so "add item"
+     can offer commonly-used entries to tick instead of typing from blank */
+  const tpl = getBuiltinTemplate(pkg.svc);
+  function defaultsForGroup(group: string, groupEn: string): { zh: string; en: string }[] {
+    const tg = tpl.checklist.find((g) => g[0] === group || g[1] === groupEn);
+    if (!tg) return [];
+    return tg[3].map(([zh, en]) => ({ zh, en }));
+  }
 
   /* shared image pipeline: compress to <=560px JPEG and attach.
      reused by the file picker, clipboard paste and drag-drop (C2). */
@@ -114,8 +123,10 @@ export default function ChecklistTab({ p, pkgIdx, onExport, onPkg }: {
               </div>
               {g.items.map((it, ii) => (
                 <div key={ii} style={{
-                  display: 'grid', gridTemplateColumns: editMode && ed ? '132px minmax(160px,1.8fr) 128px 1.3fr 28px' : '132px minmax(160px,1.8fr) 128px 1.3fr', gap: 14,
-                  alignItems: 'center', padding: '13px 22px', borderBottom: '1px solid var(--row-line)',
+                  /* B6: narrower status/name columns, wider note input, tighter gaps
+                     so the row fills the width instead of leaving a middle gap */
+                  display: 'grid', gridTemplateColumns: editMode && ed ? '104px minmax(150px,1fr) 122px minmax(220px,2.1fr) 26px' : '104px minmax(150px,1fr) 122px minmax(220px,2.1fr)', gap: 10,
+                  alignItems: 'center', padding: '11px 20px', borderBottom: '1px solid var(--row-line)',
                 }}>
                   <div>
                     {ed ? (
@@ -182,8 +193,19 @@ export default function ChecklistTab({ p, pkgIdx, onExport, onPkg }: {
                     <input type="date" className="in sm" style={{ width: '100%' }} value={it.date} disabled={!ed}
                       onChange={(e) => dispatch(p.id, { type: 'editCl', pkg: pkgIdx, gi, ii, field: 'date', value: e.target.value })} />
                   </div>
-                  <div>
-                    <input className="in sm" style={{ width: '100%' }} placeholder={t('下一步 / 备注…', 'Next step / note…')} defaultValue={it.remark} readOnly={!ed}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    {/* C3: mark a remark as important — star toggle + bright highlight */}
+                    {ed && (
+                      <button title={it.highlight ? t('取消重点', 'Unmark important') : t('标为重点', 'Mark important')}
+                        onClick={() => dispatch(p.id, { type: 'toggleHighlight', pkg: pkgIdx, gi, ii })}
+                        style={{ flex: '0 0 auto', fontSize: 15, lineHeight: 1, padding: '2px 3px', background: 'none', color: it.highlight ? '#D98A12' : '#c2cad3' }}>
+                        {it.highlight ? '★' : '☆'}
+                      </button>
+                    )}
+                    <input className="in sm" style={{
+                      width: '100%',
+                      ...(it.highlight ? { background: '#fff6e2', borderColor: '#e6b657', color: '#8a5a0f', fontWeight: 600 } : {}),
+                    }} placeholder={t('下一步 / 备注…', 'Next step / note…')} defaultValue={it.remark} readOnly={!ed}
                       onBlur={(e) => { if (ed && e.target.value !== it.remark) dispatch(p.id, { type: 'editCl', pkg: pkgIdx, gi, ii, field: 'remark', value: e.target.value }); }} />
                   </div>
                   {editMode && ed && (
@@ -193,9 +215,12 @@ export default function ChecklistTab({ p, pkgIdx, onExport, onPkg }: {
                 </div>
               ))}
               {editMode && ed && (
-                <div style={{ padding: '12px 22px' }}>
-                  <button className="btn-line sm" onClick={() => dispatch(p.id, { type: 'addItem', pkg: pkgIdx, gi })}>+ {t('添加信息项', 'Add item')}</button>
-                </div>
+                <AddItemPanel
+                  defaults={defaultsForGroup(g.group, g.groupEn)}
+                  present={g.items.map((it) => it.zh)}
+                  onAdd={(items) => dispatch(p.id, { type: 'addItem', pkg: pkgIdx, gi, items })}
+                  onBlank={() => dispatch(p.id, { type: 'addItem', pkg: pkgIdx, gi })}
+                />
               )}
             </div>
           );
@@ -224,5 +249,62 @@ export default function ChecklistTab({ p, pkgIdx, onExport, onPkg }: {
         </div>
       )}
     </>
+  );
+}
+
+/* B3: add-item panel — pick from the service's default library (unchecked = not
+   added), or add a blank custom item. Defaults already present are hidden. */
+function AddItemPanel({ defaults, present, onAdd, onBlank }: {
+  defaults: { zh: string; en: string }[];
+  present: string[];
+  onAdd: (items: { zh: string; en: string }[]) => void;
+  onBlank: () => void;
+}) {
+  const { lang, t } = useLang();
+  const [open, setOpen] = useState(false);
+  const [picked, setPicked] = useState<Record<string, boolean>>({});
+  const presentSet = new Set(present);
+  const avail = defaults.filter((d) => !presentSet.has(d.zh));
+
+  if (!open) {
+    return (
+      <div style={{ padding: '12px 20px' }}>
+        <button className="btn-line sm" onClick={() => { setPicked({}); setOpen(true); }}>+ {t('添加信息项', 'Add item')}</button>
+      </div>
+    );
+  }
+  const chosen = avail.filter((d) => picked[d.zh]);
+  return (
+    <div style={{ padding: '12px 20px', background: 'var(--hover-bg)', borderTop: '1px solid var(--row-line)' }}>
+      {avail.length > 0 ? (
+        <>
+          <div className="mini-label" style={{ marginBottom: 8, color: 'var(--text2)', fontSize: 11.5 }}>
+            {t('从常用默认项勾选(可多选):', 'Tick common default items (multi-select):')}
+          </div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 12 }}>
+            {avail.map((d) => (
+              <label key={d.zh} style={{
+                display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12.5, cursor: 'pointer',
+                border: '1px solid var(--border)', borderRadius: 7, padding: '5px 10px',
+                background: picked[d.zh] ? '#e7eefb' : 'var(--card-bg, #fff)', borderColor: picked[d.zh] ? '#8fb0e8' : 'var(--border)',
+              }}>
+                <input type="checkbox" checked={!!picked[d.zh]} onChange={() => setPicked((s) => ({ ...s, [d.zh]: !s[d.zh] }))} />
+                {lang === 'zh' ? d.zh : d.en || d.zh}
+              </label>
+            ))}
+          </div>
+        </>
+      ) : (
+        <div style={{ fontSize: 12, color: 'var(--text2)', marginBottom: 10 }}>{t('默认项已全部添加。', 'All default items are already added.')}</div>
+      )}
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+        <button className="btn-navy sm" disabled={!chosen.length}
+          onClick={() => { onAdd(chosen); setOpen(false); }}>
+          + {t('添加所选', 'Add selected')}{chosen.length ? ` (${chosen.length})` : ''}
+        </button>
+        <button className="btn-line sm" onClick={() => { onBlank(); setOpen(false); }}>+ {t('自定义空白项', 'Blank custom item')}</button>
+        <button className="btn-line sm" onClick={() => setOpen(false)}>{t('取消', 'Cancel')}</button>
+      </div>
+    </div>
   );
 }

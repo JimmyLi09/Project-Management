@@ -6,7 +6,7 @@ import { StoreProvider, useStore } from './store';
 import { allOverdue, fmtDate, isMyProject } from '@/lib/project';
 import { canCreate, isFull, ROLE_LABEL } from '@/lib/permissions';
 import { useLang } from '@/lib/i18n';
-import { Avatar, Icon } from './ui';
+import { Avatar, AvatarSrcProvider, Icon } from './ui';
 import OverviewView from './views/OverviewView';
 import ProjectsView, { NewProjectModal } from './views/ProjectsView';
 import TeamView from './views/TeamView';
@@ -37,7 +37,13 @@ const PAGE_META: Record<string, { title: [string, string]; sub: [string, string]
 };
 
 function Shell() {
-  const { user, me, view, go, projects, setView } = useStore();
+  const { user, me, view, go, projects, users, setView } = useStore();
+  /* C6: name→photo map so every <Avatar> shows real uploaded photos */
+  const avatarMap = useMemo(() => {
+    const m: Record<string, string> = {};
+    users.forEach((u) => { if (u.avatar) m[u.name] = u.avatar; });
+    return m;
+  }, [users]);
   const { lang, setLang, t } = useLang();
   const [showNew, setShowNew] = useState(false);
   const [notifOpen, setNotifOpen] = useState(false);
@@ -90,6 +96,7 @@ function Shell() {
   }, [projects, me]);
 
   return (
+    <AvatarSrcProvider map={avatarMap}>
     <div className="layout">
       <aside className="sidebar">
         <div className="side-logo">
@@ -218,6 +225,7 @@ function Shell() {
       )}
       <Toast />
     </div>
+    </AvatarSrcProvider>
   );
 }
 

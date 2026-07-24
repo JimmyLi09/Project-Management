@@ -19,7 +19,9 @@ export default function TeamView() {
 
   const activeProjects = projects.filter((p) => { if (p.archived) return false; const s = projStage(p); return s !== 'complete' && s !== 'invoice'; });
   const avgLoad = loads.length ? Math.round(loads.reduce((a, l) => a + l.load, 0) / loads.length) : 0;
-  const overloaded = loads.filter((l) => l.load >= 85).length;
+  /* B5: overload is measured by points against each person's cap (when set) */
+  const isOverCap = (l: typeof loads[number]) => l.pointCap > 0 && l.points > l.pointCap;
+  const overloaded = loads.filter((l) => isOverCap(l) || l.load >= 85).length;
   const totalPts = projects.reduce((a, p) => a + projPoints(p), 0);
 
   const groups: [string, typeof loads][] = [
@@ -46,11 +48,14 @@ export default function TeamView() {
           )}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(340px,1fr))', gap: 18 }}>
             {group.map((m) => {
-              const pts = m.activeProjects.reduce((a, p) => a + projPoints(p), 0);
-              const lc = healthColor(m.load);
-              const loadLabel = m.load >= 85 ? t('超载', 'Overloaded') : m.load >= 70 ? t('较满', 'Busy') : t('可用', 'Available');
+              const pts = m.points;
+              const overCap = m.pointCap > 0 && pts > m.pointCap;
+              const capPct = m.pointCap > 0 ? Math.round((pts / m.pointCap) * 100) : 0;
+              const busy = overCap || m.load >= 85;
+              const lc = overCap ? '#D4483F' : healthColor(m.load);
+              const loadLabel = busy ? t('超载', 'Overloaded') : m.load >= 70 ? t('较满', 'Busy') : t('可用', 'Available');
               return (
-                <div key={m.name} className="panel" style={{ padding: 20 }}>
+                <div key={m.name} className="panel" style={{ padding: 20, ...(overCap ? { boxShadow: 'inset 0 0 0 1.5px #e7a19b' } : {}) }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 13, marginBottom: 16 }}>
                     <Avatar name={m.name} size={42} />
                     <div style={{ flex: 1, minWidth: 0 }}>
@@ -59,10 +64,19 @@ export default function TeamView() {
                         {m.position || (m.isPM ? t('项目经理', 'Project Manager') : t('制作', 'Production'))}
                       </div>
                     </div>
-                    <span className="badge" style={{ background: m.load >= 85 ? '#fbe9e7' : m.load >= 70 ? '#fbf0dc' : '#e6f2ec', color: m.load >= 85 ? '#b23a32' : m.load >= 70 ? '#a8690b' : '#0f6a48' }}>
+                    <span className="badge" style={{ background: busy ? '#fbe9e7' : m.load >= 70 ? '#fbf0dc' : '#e6f2ec', color: busy ? '#b23a32' : m.load >= 70 ? '#a8690b' : '#0f6a48' }}>
                       {loadLabel}
                     </span>
                   </div>
+                  {m.pointCap > 0 && (
+                    <div style={{ marginBottom: 16 }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11.5, color: 'var(--text2)', marginBottom: 6 }}>
+                        <span>{t('积分负载', 'Points load')}</span>
+                        <span className="tnum" style={{ fontWeight: 600, color: overCap ? '#D4483F' : 'var(--navy900)' }}>{pts} / {m.pointCap}{overCap ? t(' · 超上限', ' · over cap') : ''}</span>
+                      </div>
+                      <ProgressBar pct={Math.min(100, capPct)} color={overCap ? '#D4483F' : capPct >= 85 ? '#D98A12' : '#16865B'} showPct={false} />
+                    </div>
+                  )}
                   <div style={{ marginBottom: 16 }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11.5, color: 'var(--text2)', marginBottom: 6 }}>
                       <span>{t('工作量', 'Workload')}</span>

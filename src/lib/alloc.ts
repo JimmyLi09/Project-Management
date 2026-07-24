@@ -1,6 +1,6 @@
 /* ===== Team allocation / workload derived from live project data ===== */
 
-import { projStage } from './project';
+import { projPoints, projStage } from './project';
 import type { Project, User } from './types';
 
 export interface PersonLoad {
@@ -11,6 +11,8 @@ export interface PersonLoad {
   activeProjects: Project[];
   openTasks: number;
   load: number; // 0-100+
+  points: number; // B5: sum of active-project points assigned to this person
+  pointCap: number; // B5: workload ceiling in points (0 = no limit set)
 }
 
 const isActive = (p: Project) => {
@@ -22,8 +24,10 @@ const isActive = (p: Project) => {
 /* Load heuristic: each active project 20%, each open task 7%, capped at 100. */
 export function teamLoads(projects: Project[], users: User[]): PersonLoad[] {
   const map = new Map<string, PersonLoad>();
+  const capByName = new Map<string, number>();
+  users.forEach((u) => { if (u.pointCap) capByName.set(u.name, u.pointCap); });
   const ensure = (name: string, role: string, isPM: boolean) => {
-    if (!map.has(name)) map.set(name, { name, role, position: '', isPM, activeProjects: [], openTasks: 0, load: 0 });
+    if (!map.has(name)) map.set(name, { name, role, position: '', isPM, activeProjects: [], openTasks: 0, load: 0, points: 0, pointCap: capByName.get(name) || 0 });
     return map.get(name)!;
   };
 
@@ -56,6 +60,7 @@ export function teamLoads(projects: Project[], users: User[]): PersonLoad[] {
   const out = [...map.values()];
   out.forEach((pl) => {
     pl.load = Math.min(100, pl.activeProjects.length * 20 + pl.openTasks * 7);
+    pl.points = pl.activeProjects.reduce((a, p) => a + projPoints(p), 0);
   });
   return out.sort((a, b) => (a.isPM === b.isPM ? b.load - a.load : a.isPM ? -1 : 1));
 }

@@ -11,6 +11,8 @@ export interface User {
   position: string; // job title, e.g. "Senior PM" / "3D Artist"
   mustChangePassword?: boolean; // forced password change on next login
   disabled?: boolean; // account deactivated (e.g. departure) — cannot sign in
+  avatar?: string; // dataURL of an uploaded profile photo (else initials fallback)
+  pointCap?: number; // workload ceiling in points; overload shows a red warning
 }
 
 export type ScheduleStatus = 'todo' | 'wip' | 'done' | 'block';
@@ -47,6 +49,7 @@ export interface ChecklistItem {
   date: string;
   remark: string;
   shot?: string; // dataURL thumbnail
+  highlight?: boolean; // mark this item's remark as important (bright colour)
 }
 
 export interface ChecklistGroup {

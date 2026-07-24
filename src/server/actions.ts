@@ -27,7 +27,8 @@ export type ProjectAction =
   | { type: 'moveRow'; pkg: number; idx: number; dir: -1 | 1 }
   | { type: 'setClStatus'; pkg: number; gi: number; ii: number; value: ChecklistStatus }
   | { type: 'editCl'; pkg: number; gi: number; ii: number; field: 'date' | 'remark' | 'zh' | 'en'; value: string }
-  | { type: 'addItem'; pkg: number; gi: number }
+  | { type: 'toggleHighlight'; pkg: number; gi: number; ii: number }
+  | { type: 'addItem'; pkg: number; gi: number; items?: { zh: string; en: string }[] }
   | { type: 'removeItem'; pkg: number; gi: number; ii: number }
   | { type: 'addGroup'; pkg: number; name: string }
   | { type: 'resetChecklist'; pkg: number }
@@ -187,12 +188,24 @@ export function applyAction(u: Identity, p: Project, a: ProjectAction, ctx: Acti
       (it as any)[a.field] = a.value;
       break;
     }
+    case 'toggleHighlight': {
+      if (!canEdit(u, p)) throw new PermissionError('无编辑权限');
+      const { it } = getItem(p, a.pkg, a.gi, a.ii);
+      it.highlight = !it.highlight;
+      break;
+    }
     case 'addItem': {
       if (!canEdit(u, p)) throw new PermissionError('无编辑权限');
       const pk = p.packages[a.pkg];
       const g = pk?.checklist[a.gi];
       if (!g) throw new ValidationError('无效的清单栏目');
-      g.items.push({ zh: '新信息项', en: 'New item', status: 'pending', date: '', remark: '' });
+      /* B3: add one or more preset items chosen from the default library,
+         or a single blank item when none are supplied */
+      const toAdd = (a.items && a.items.length ? a.items : [{ zh: '新信息项', en: 'New item' }])
+        .map((x) => ({ zh: String(x.zh || '').slice(0, 200), en: String(x.en || '').slice(0, 200) }))
+        .filter((x) => x.zh || x.en);
+      if (!toAdd.length) toAdd.push({ zh: '新信息项', en: 'New item' });
+      for (const x of toAdd) g.items.push({ zh: x.zh, en: x.en, status: 'pending', date: '', remark: '' });
       break;
     }
     case 'removeItem': {
