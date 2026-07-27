@@ -48,6 +48,8 @@ export type ProjectAction =
   | { type: 'transferProject'; from: string; to: string; includeTasks: boolean }
   | { type: 'submitHandover'; salesBrief: string; assignedPmId: string }
   | { type: 'acceptHandover' }
+  | { type: 'submitCompletion'; summary: string; links: string }
+  | { type: 'decideCompletion'; decision: 'approved' | 'rejected' | 'changes_requested'; note: string }
   | { type: 'addContact' }
   | { type: 'editContact'; idx: number; field: 'role' | 'company' | 'person' | 'phone' | 'email'; value: string }
   | { type: 'removeContact'; idx: number }
@@ -426,6 +428,43 @@ export function applyAction(u: Identity, p: Project, a: ProjectAction, ctx: Acti
       h.status = 'accepted';
       h.briefingAt = Date.now();
       logIt(p, u.name, `接受交接,进入生产 Accept handover`);
+      break;
+    }
+    /* ===== S3 — PM completion package + PD approval ===== */
+    case 'submitCompletion': {
+      if (!canEdit(u, p)) throw new PermissionError('仅项目 PM(或 PD/BD)可提交完成包');
+      const cr = p.completionReview!;
+      if (cr.status === 'submitted') throw new ValidationError('完成包已提交,等待 PD 审批');
+      if (cr.approval?.status === 'approved') throw new ValidationError('完成包已批准');
+      cr.status = 'submitted';
+      cr.summary = String(a.summary || '');
+      cr.links = String(a.links || '');
+      cr.submittedBy = u.name;
+      cr.submittedAt = Date.now();
+      cr.approval = { pdId: '', status: 'pending', note: '', decidedAt: 0 }; // fresh review
+      logIt(p, u.name, `提交完成包 Submit completion package`);
+      break;
+    }
+    case 'decideCompletion': {
+      if (!canDecide(u)) throw new PermissionError('仅 PD/BD 可审批完成包');
+      const cr = p.completionReview!;
+      if (cr.status !== 'submitted') throw new ValidationError('当前没有待审批的完成包');
+      cr.approval.pdId = u.name;
+      cr.approval.note = String(a.note || '');
+      cr.approval.decidedAt = Date.now();
+      if (a.decision === 'approved') {
+        cr.approval.status = 'approved';
+        cr.status = 'approved';
+        logIt(p, u.name, `批准完成包 PD approved`);
+      } else {
+        /* §10.2 reject / changes → bounce back to production; PM reworks and
+           resubmits. Bump the workflow version so the next submit is a new
+           idempotency key (allows re-submission). */
+        cr.approval.status = a.decision;
+        cr.status = 'changes_requested';
+        p.workflowVersion = (p.workflowVersion || 1) + 1;
+        logIt(p, u.name, `${a.decision === 'rejected' ? '驳回' : '要求修改'}完成包,退回生产 ${a.decision}${a.note ? ' — ' + a.note : ''}`);
+      }
       break;
     }
     case 'addContact': {

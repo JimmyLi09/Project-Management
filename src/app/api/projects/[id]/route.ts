@@ -11,6 +11,8 @@ type Params = { params: Promise<{ id: string }> };
 const WORKFLOW_ACTIONS: Record<string, string> = {
   submitHandover: 'submit_handover',
   acceptHandover: 'accept_handover',
+  submitCompletion: 'submit_completion',
+  decideCompletion: 'pd_decide',
 };
 
 export async function GET(_req: NextRequest, { params }: Params) {
@@ -41,6 +43,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   const conflict = typeof baseUpdatedAt === 'number' && baseUpdatedAt > 0 && baseUpdatedAt < serverUpdatedAt;
 
   const expectedVersion = p.version || 0;
+  const wfVersionForKey = p.workflowVersion || 1; // capture before the action may bump it (§10 rollback)
   const logLenBefore = (p.log || []).length;
   try {
     applyAction(identityOf(user), p, body, { tplForSvc: getEffectiveTemplate });
@@ -56,7 +59,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
      version); the strict global CAS switch is scheduled for S5. */
   const wfType = WORKFLOW_ACTIONS[body.type];
   if (wfType) {
-    const r = commitWorkflowAction(p, wfType, user.name, expectedVersion);
+    const r = commitWorkflowAction(p, wfType, user.name, expectedVersion, wfVersionForKey);
     if (r === 'duplicate') return NextResponse.json({ error: '该动作已提交,请勿重复提交。' }, { status: 409 });
     if (r === 'stale') return NextResponse.json({ error: '此项目刚被他人修改,请刷新后重新提交。', stale: true }, { status: 409 });
     appendAudit(id, newEntries);

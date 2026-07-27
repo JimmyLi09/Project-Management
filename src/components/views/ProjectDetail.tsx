@@ -7,7 +7,7 @@ import {
   pkgProgress, pkgStart, planDates, plannedFinish, projectHealth, projPoints,
   projStage, riskKey, schedProgress, todayMid,
 } from '@/lib/project';
-import { canAssign, canCommercial, canEdit, isFull } from '@/lib/permissions';
+import { canAssign, canCommercial, canDecide, canEdit, isFull } from '@/lib/permissions';
 import { DIFF, STAGES, stageIdx, svcColor, svcName } from '@/lib/templates';
 import { useLang } from '@/lib/i18n';
 import { Avatar, HM, Icon, Pill, ProgressBar, TM } from '../ui';
@@ -458,6 +458,12 @@ function WorkflowPanel({ p, users, me, dispatch }: {
   const [brief, setBrief] = useState('');
   const [pm, setPm] = useState('');
   const [busy, setBusy] = useState(false);
+  const cr = p.completionReview;
+  const canEd = canEdit(me, p);
+  const canApprove = canDecide(me);
+  const [cSummary, setCSummary] = useState('');
+  const [cLinks, setCLinks] = useState('');
+  const [pdNote, setPdNote] = useState('');
 
   const prod = PROD_LABEL[p.productionStatus || 'in_progress'];
   const comm = COMM_LABEL[p.commercialStatus || 'not_ready'];
@@ -533,8 +539,69 @@ function WorkflowPanel({ p, users, me, dispatch }: {
         )}
       </div>
 
+      {/* Step 2 — PM completion package + PD approval (unlocks after handover accepted) */}
+      {h && h.status === 'accepted' && cr && (
+        <div style={{ border: '1px solid var(--row-line)', borderRadius: 10, padding: 14, marginTop: 12 }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--navy900)', marginBottom: 8 }}>
+            ② {t('完成包 + PD 审批', 'Completion package + PD approval')}
+          </div>
+
+          {cr.status !== 'submitted' && cr.approval?.status !== 'approved' && (
+            canEd ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
+                {cr.approval?.status === 'changes_requested' || cr.approval?.status === 'rejected' ? (
+                  <div style={{ fontSize: 12.5, color: 'var(--danger)', background: '#fbe9e7', borderRadius: 8, padding: '8px 11px' }}>
+                    {t('PD 退回', 'Returned by PD')}{cr.approval.note ? ' — ' + cr.approval.note : ''} · {t('请修正后重新提交', 'fix and resubmit')}
+                  </div>
+                ) : null}
+                <textarea className="in" placeholder={t('完成说明:交付了什么 / 版本 / 备注…', 'What was delivered / version / notes…')}
+                  value={cSummary} onChange={(e) => setCSummary(e.target.value)} style={{ minHeight: 56 }} />
+                <input className="in sm" placeholder={t('成品链接 / 路径(可多行)', 'Deliverable links / paths')}
+                  value={cLinks} onChange={(e) => setCLinks(e.target.value)} />
+                <button className="btn-navy sm" style={{ alignSelf: 'flex-start' }} disabled={busy}
+                  onClick={async () => { setBusy(true); await dispatch(p.id, { type: 'submitCompletion', summary: cSummary, links: cLinks }); setBusy(false); }}>
+                  {t('提交完成包', 'Submit completion package')}
+                </button>
+              </div>
+            ) : (
+              <div style={{ fontSize: 12.5, color: 'var(--text2)' }}>{t('等待 PM 提交完成包。', 'Waiting for the PM to submit the completion package.')}</div>
+            )
+          )}
+
+          {cr.status === 'submitted' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <div style={{ fontSize: 12.5 }}>
+                <span style={{ color: 'var(--warning)' }}>{t('待 PD 审批', 'Awaiting PD approval')}</span>
+                <span style={{ color: 'var(--text2)' }}> · {cr.submittedBy} {fmtDate(new Date(cr.submittedAt))}</span>
+              </div>
+              {cr.summary && <div style={{ fontSize: 12.5, whiteSpace: 'pre-wrap', background: 'var(--hover-bg)', borderRadius: 8, padding: '9px 11px' }}>{cr.summary}</div>}
+              {cr.links && <div style={{ fontSize: 12, color: 'var(--navy700)', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>🔗 {cr.links}</div>}
+              {canApprove && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 7, borderTop: '1px solid var(--row-line)', paddingTop: 10 }}>
+                  <input className="in sm" placeholder={t('批复 / 退回原因(退回时必填)', 'Decision note (required when returning)')} value={pdNote} onChange={(e) => setPdNote(e.target.value)} />
+                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                    <button className="btn-navy sm" onClick={() => dispatch(p.id, { type: 'decideCompletion', decision: 'approved', note: pdNote })}>{t('批准', 'Approve')}</button>
+                    <button className="btn-line sm" onClick={() => { if (!pdNote.trim()) { alert(t('请填写退回原因', 'Please add a reason')); return; } dispatch(p.id, { type: 'decideCompletion', decision: 'changes_requested', note: pdNote }); }}>{t('要求修改', 'Request changes')}</button>
+                    <button className="btn-line sm danger" onClick={() => { if (!pdNote.trim()) { alert(t('请填写退回原因', 'Please add a reason')); return; } dispatch(p.id, { type: 'decideCompletion', decision: 'rejected', note: pdNote }); }}>{t('驳回', 'Reject')}</button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {cr.approval?.status === 'approved' && (
+            <div style={{ fontSize: 12.5, color: 'var(--success)', fontWeight: 600 }}>
+              ✓ {t('PD 已批准 · 制作完成', 'PD approved · production completed')}
+              <span style={{ color: 'var(--text2)', fontWeight: 400 }}> · {cr.approval.pdId} {cr.approval.decidedAt ? fmtDate(new Date(cr.approval.decidedAt)) : ''}</span>
+              {cr.approval.note ? <span style={{ color: 'var(--text2)', fontWeight: 400 }}> — {cr.approval.note}</span> : null}
+              <div style={{ fontSize: 11.5, color: 'var(--text2)', fontWeight: 400, marginTop: 4 }}>{t('等待 Sales 核对后开票(下一阶段)。', 'Awaiting Sales verification before invoicing (next stage).')}</div>
+            </div>
+          )}
+        </div>
+      )}
+
       <div style={{ fontSize: 11, color: 'var(--text2)', marginTop: 10 }}>
-        {t('后续步骤(完成包审批 / Sales 核对 / 开票收款)将在下一阶段上线。', 'Next steps (completion approval / Sales verify / invoicing) arrive in the next stage.')}
+        {t('后续步骤(Sales 核对 / 开票收款)将在下一阶段上线。', 'Next steps (Sales verify / invoicing) arrive in the next stage.')}
       </div>
     </div>
   );

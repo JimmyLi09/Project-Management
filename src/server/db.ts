@@ -334,10 +334,10 @@ export function listWorkflowActions(projectId: string) {
    idempotency key AND save projects.data with a version CAS, in one
    transaction. Returns 'ok', 'duplicate' (already submitted) or 'stale'
    (someone else wrote in between → caller re-reads and reconfirms). */
-export function commitWorkflowAction(p: Project, actionType: string, actorId: string, expectedVersion: number): 'ok' | 'duplicate' | 'stale' {
+export function commitWorkflowAction(p: Project, actionType: string, actorId: string, expectedVersion: number, workflowVersion: number): 'ok' | 'duplicate' | 'stale' {
   const d = getDb();
   const now = Date.now();
-  const wfv = p.workflowVersion || 1;
+  const wfv = workflowVersion; // the version the action acted on (before any rollback bump)
   const { updatedAt: _u, version: _v, ...data } = p;
   const json = JSON.stringify(data);
   const tx = d.transaction(() => {
