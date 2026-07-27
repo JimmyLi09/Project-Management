@@ -4,26 +4,30 @@
    of the server's local timezone. 1A only needs "weekends + SG public
    holidays"; company rest days / ad-hoc leave are deferred to v2. */
 
-/* Singapore public holidays — observed dates (holidays falling on Sunday are
-   observed the following Monday, which is what MOM gazettes). Maintained here
-   as a simple config; refresh once a year from MOM / data.gov.sg.
-   §8.1 seeds 2026 (11 days). */
+/* Singapore public holidays, from the official MOM gazette (per §8.1). Every
+   date here — the gazetted day plus each in-lieu Monday (when a holiday falls
+   on a Sunday) — counts as a non-working day for SLA.
+
+   MAINTENANCE: refresh once a year from MOM's official list
+   (mom.gov.sg → Public Holidays / data.gov.sg dataset). Just add the next
+   year's block below; nothing else needs to change. Movable holidays (Hari
+   Raya Puasa / Haji) are subject to moon sighting — always take MOM's gazette. */
 export const SG_PUBLIC_HOLIDAYS: Record<string, string> = {
-  // 2026 (observed)
-  '2026-01-01': "New Year's Day",
-  '2026-02-17': 'Chinese New Year',
-  '2026-02-18': 'Chinese New Year',
-  '2026-04-03': 'Good Friday',
-  '2026-05-01': 'Labour Day',
-  '2026-05-27': 'Hari Raya Puasa',
-  '2026-05-31': 'Vesak Day', // falls Sun 31 May; observed Mon 1 Jun
-  '2026-06-01': 'Vesak Day (observed)',
-  '2026-08-04': 'Hari Raya Haji',
-  '2026-08-09': 'National Day', // Sun; observed Mon 10 Aug
-  '2026-08-10': 'National Day (observed)',
-  '2026-11-08': 'Deepavali', // Sun; observed Mon 9 Nov
-  '2026-11-09': 'Deepavali (observed)',
-  '2026-12-25': 'Christmas Day',
+  // ===== 2026 — MOM gazette (11 gazetted days + 3 in-lieu Mondays) =====
+  '2026-01-01': "New Year's Day",       // Thu
+  '2026-02-17': 'Chinese New Year',     // Tue
+  '2026-02-18': 'Chinese New Year',     // Wed
+  '2026-03-21': 'Hari Raya Puasa',      // Sat
+  '2026-04-03': 'Good Friday',          // Fri
+  '2026-05-01': 'Labour Day',           // Fri
+  '2026-05-27': 'Hari Raya Haji',       // Wed
+  '2026-05-31': 'Vesak Day',            // Sun → in-lieu Mon 1 Jun
+  '2026-06-01': 'Vesak Day (in lieu)',
+  '2026-08-09': 'National Day',         // Sun → in-lieu Mon 10 Aug
+  '2026-08-10': 'National Day (in lieu)',
+  '2026-11-08': 'Deepavali',            // Sun → in-lieu Mon 9 Nov
+  '2026-11-09': 'Deepavali (in lieu)',
+  '2026-12-25': 'Christmas Day',        // Fri
 };
 
 /* the Asia/Singapore calendar date (YYYY-MM-DD) for a given instant */
