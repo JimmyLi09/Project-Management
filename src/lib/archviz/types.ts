@@ -89,6 +89,8 @@ export interface ShotLighting {
 export interface Shot {
   id: string;
   runId: string;
+  /** GET /api/archviz/frames/:frameId/image — absent only for legacy client-only mock shots */
+  imageUrl?: string;
   rank: number;
   /** shots sharing a camGroup are the same camera under different lighting presets (Relight variants) */
   camGroup: string;

@@ -1,44 +1,39 @@
 'use client';
 
-/* ===== AI ArchViz Director — Model-Direct: self-contained client-only store =====
+/* ===== AI ArchViz Director — Model-Direct: client store backed by the real
+   API (src/app/api/archviz/**) =====
    Sibling to LangProvider (src/lib/i18n.tsx), not wired into the project/user
-   StoreProvider (src/components/store.tsx) — this feature has no server
-   persistence or permission-system hook (see plan). State + a simulated
-   render/AI pipeline live entirely here, with a light localStorage cache so
-   a reload doesn't lose the last run. */
+   StoreProvider (src/components/store.tsx) — this feature has its own
+   backend (a separate archviz.db) and no permission-system hook, matching
+   the Phase-1 plan's "self-contained module" decision. All fabrication
+   (mockData.generateShots/newModel) is gone — a real upload creates a real
+   `models` row, a real analysis run queues real render_jobs that a real
+   worker process (scripts/archviz/stub-worker.mjs today, dcc-scripts/ once
+   deployed) fulfills over HTTP, and this store just polls server state. */
 
 import React, {
   createContext, useCallback, useContext, useEffect, useMemo, useRef, useState,
 } from 'react';
 import type {
-  AnalysisRun, ArchModel, ArchvizScreen, DesignerAction, DesignerActionType, DesignerLabel,
-  RunStage, Shot,
+  AnalysisRun, ArchModel, ArchvizScreen, DesignerActionType, DesignerLabel, RunStage, Shot,
 } from '@/lib/archviz/types';
 import { RUN_STAGES } from '@/lib/archviz/types';
-import { generateShots, newModel } from '@/lib/archviz/mockData';
 
-const LS_KEY = 'audax:archviz:v1';
-
-interface Persisted {
-  models: ArchModel[];
-  runs: AnalysisRun[];
-  shots: Shot[];
-  actions: DesignerAction[];
-}
-
-interface ArchvizStore extends Persisted {
+interface ArchvizStore {
   screen: ArchvizScreen;
-  activeRunId?: string;
+  shots: Shot[];
   activeShotId?: string;
   compareIds: string[];
+  error?: string;
+  busy: boolean;
 
   activeRun?: AnalysisRun;
   activeModel?: ArchModel;
-  runShots: Shot[]; // shots belonging to activeRunId, sorted by rank
+  runShots: Shot[]; // sorted by rank
   boardShots: Shot[]; // runShots deduped to the best-scoring shot per camGroup
   activeShot?: Shot;
 
-  startAnalysis: (modelName: string, dcc: ArchModel['dcc'], presetIds: string[]) => void;
+  startAnalysis: (file: File, name: string, presetIds: string[]) => Promise<void>;
   goNew: () => void;
   goBoard: () => void;
   openDetail: (shotId: string) => void;
@@ -47,7 +42,7 @@ interface ArchvizStore extends Persisted {
   clearCompare: () => void;
 
   setFavorite: (shotId: string, val: boolean) => void;
-  setLabel: (shotId: string, label: DesignerLabel) => void;
+  setLabel: (shotId: string, label: Exclude<DesignerLabel, 'none'>) => void;
   requestRecapture: (shotId: string) => void;
   logAction: (shotId: string, type: DesignerActionType) => void;
   variantsOf: (camGroup: string) => Shot[];
@@ -60,121 +55,91 @@ export const useArchviz = () => {
   return s;
 };
 
-function loadPersisted(): Persisted {
-  if (typeof localStorage === 'undefined') return { models: [], runs: [], shots: [], actions: [] };
-  try {
-    const raw = localStorage.getItem(LS_KEY);
-    if (!raw) return { models: [], runs: [], shots: [], actions: [] };
-    const p = JSON.parse(raw);
-    return {
-      models: p.models || [], runs: p.runs || [], shots: p.shots || [], actions: p.actions || [],
-    };
-  } catch {
-    return { models: [], runs: [], shots: [], actions: [] };
-  }
+const LABEL_TO_ACTION: Record<Exclude<DesignerLabel, 'none'>, DesignerActionType> = {
+  promoted: 'promote', demoted: 'demote', rejected: 'reject', hero: 'mark_hero',
+};
+
+async function readError(res: Response): Promise<string> {
+  const body = await res.json().catch(() => ({}));
+  return body.error || `请求失败 (${res.status})`;
 }
 
 export function ArchvizProvider({ children }: { children: React.ReactNode }) {
-  const [models, setModels] = useState<ArchModel[]>([]);
-  const [runs, setRuns] = useState<AnalysisRun[]>([]);
-  const [shots, setShots] = useState<Shot[]>([]);
-  const [actions, setActions] = useState<DesignerAction[]>([]);
   const [screen, setScreen] = useState<ArchvizScreen>('new');
-  const [activeRunId, setActiveRunId] = useState<string>();
+  const [model, setModel] = useState<ArchModel>();
+  const [run, setRun] = useState<AnalysisRun>();
+  const [shots, setShots] = useState<Shot[]>([]);
   const [activeShotId, setActiveShotId] = useState<string>();
   const [compareIds, setCompareIds] = useState<string[]>([]);
-  const timers = useRef<ReturnType<typeof setTimeout>[]>([]);
-  const hydrated = useRef(false);
+  const [error, setError] = useState<string>();
+  const [busy, setBusy] = useState(false);
+  const pollTimer = useRef<ReturnType<typeof setInterval> | undefined>(undefined);
 
-  useEffect(() => {
-    const p = loadPersisted();
-    setModels(p.models); setRuns(p.runs); setShots(p.shots); setActions(p.actions);
-    if (p.runs.length) {
-      const last = p.runs[p.runs.length - 1];
-      setActiveRunId(last.id);
-      setScreen(last.stage === 'completed' ? 'board' : 'new');
+  const stopPolling = useCallback(() => {
+    if (pollTimer.current) { clearInterval(pollTimer.current); pollTimer.current = undefined; }
+  }, []);
+
+  const startPolling = useCallback((runId: string) => {
+    stopPolling();
+    const tick = async () => {
+      try {
+        const [runRes, shotsRes] = await Promise.all([
+          fetch(`/api/archviz/runs/${runId}`),
+          fetch(`/api/archviz/runs/${runId}/shots`),
+        ]);
+        if (runRes.ok) {
+          const { run: r } = await runRes.json();
+          setRun(r);
+          if (r.stage === 'completed') stopPolling();
+        }
+        if (shotsRes.ok) {
+          const { shots: s } = await shotsRes.json();
+          setShots(s);
+        }
+      } catch {
+        // transient network hiccup — next tick retries; don't stop polling
+      }
+    };
+    tick();
+    pollTimer.current = setInterval(tick, 1000);
+  }, [stopPolling]);
+
+  useEffect(() => stopPolling, [stopPolling]);
+
+  const startAnalysis = useCallback(async (file: File, name: string, presetIds: string[]) => {
+    setError(undefined);
+    setBusy(true);
+    try {
+      const form = new FormData();
+      form.append('file', file);
+      form.append('name', name);
+      const modelRes = await fetch('/api/archviz/models', { method: 'POST', body: form });
+      if (!modelRes.ok) throw new Error(await readError(modelRes));
+      const { model: newModel } = await modelRes.json() as { model: ArchModel };
+
+      const runRes = await fetch('/api/archviz/runs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ modelId: newModel.id, lightingPresetIds: presetIds }),
+      });
+      if (!runRes.ok) throw new Error(await readError(runRes));
+      const { run: newRun } = await runRes.json() as { run: AnalysisRun };
+
+      setModel(newModel);
+      setRun(newRun);
+      setShots([]);
+      setScreen('progress');
+      startPolling(newRun.id);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
     }
-    hydrated.current = true;
-  }, []);
-
-  useEffect(() => {
-    if (!hydrated.current) return;
-    try { localStorage.setItem(LS_KEY, JSON.stringify({ models, runs, shots, actions })); } catch { /* ignore */ }
-  }, [models, runs, shots, actions]);
-
-  useEffect(() => () => { timers.current.forEach(clearTimeout); }, []);
-
-  const startAnalysis = useCallback((modelName: string, dcc: ArchModel['dcc'], presetIds: string[]) => {
-    timers.current.forEach(clearTimeout);
-    timers.current = [];
-
-    const model = newModel(modelName || '未命名模型', dcc);
-    const cameraCount = 12 + Math.floor(Math.random() * 6);
-    const total = cameraCount * Math.max(1, presetIds.length);
-    const run: AnalysisRun = {
-      id: 'run_' + Math.random().toString(36).slice(2, 9),
-      modelId: model.id,
-      lightingPresetIds: presetIds,
-      stage: 'queued',
-      rendered: 0,
-      total,
-      createdAt: Date.now(),
-    };
-    const fullShots = generateShots(run.id, presetIds, Math.floor(Math.random() * 1e9), cameraCount);
-    // reveal order: as-generated (camera turntable order), not final rank —
-    // mirrors "已渲染+评分的角度即时上屏" (partial results stream in before ranking)
-    const revealOrder = [...fullShots].sort((a, b) => a.id.localeCompare(b.id));
-
-    setModels((m) => [...m, model]);
-    setRuns((r) => [...r, run]);
-    setShots((s) => s.filter((sh) => sh.runId !== run.id));
-    setActiveRunId(run.id);
-    setScreen('progress');
-
-    const setRunStage = (stage: RunStage, rendered?: number) => {
-      setRuns((rs) => rs.map((r) => (r.id === run.id ? { ...r, stage, rendered: rendered ?? r.rendered } : r)));
-    };
-    const schedule = (fn: () => void, delay: number) => {
-      const id = setTimeout(fn, delay);
-      timers.current.push(id);
-      return id;
-    };
-
-    let t = 0;
-    const preStages: RunStage[] = ['queued', 'sampling', 'lighting'];
-    preStages.forEach((stage) => {
-      t += 450;
-      schedule(() => setRunStage(stage), t);
-    });
-
-    t += 500;
-    schedule(() => setRunStage('rendering', 0), t);
-    revealOrder.forEach((shot, i) => {
-      t += 180 + Math.random() * 140;
-      schedule(() => {
-        setShots((s) => [...s, shot]);
-        setRunStage('rendering', i + 1);
-      }, t);
-    });
-
-    t += 500;
-    schedule(() => setRunStage('pre_scoring'), t);
-    t += 700;
-    schedule(() => setRunStage('vision_eval'), t);
-    t += 800;
-    schedule(() => setRunStage('ranking'), t);
-    t += 500;
-    schedule(() => {
-      setRuns((rs) => rs.map((r) => (r.id === run.id ? { ...r, stage: 'completed', completedAt: Date.now() } : r)));
-    }, t);
-  }, []);
+  }, [startPolling]);
 
   const goNew = useCallback(() => { setScreen('new'); }, []);
   const goBoard = useCallback(() => { setScreen('board'); setCompareIds([]); }, []);
-  const openDetail = useCallback((shotId: string) => {
-    setActiveShotId(shotId); setScreen('detail');
-    setActions((a) => [...a, { id: 'act_' + Math.random().toString(36).slice(2, 8), shotId, type: 'view_detail', at: Date.now() }]);
-  }, []);
+  const openDetail = useCallback((shotId: string) => { setActiveShotId(shotId); setScreen('detail'); }, []);
   const goCompare = useCallback((ids?: string[]) => {
     if (ids) setCompareIds(ids);
     setScreen('compare');
@@ -184,31 +149,29 @@ export function ArchvizProvider({ children }: { children: React.ReactNode }) {
   }, []);
   const clearCompare = useCallback(() => setCompareIds([]), []);
 
-  const logAction = useCallback((shotId: string, type: DesignerActionType) => {
-    setActions((a) => [...a, { id: 'act_' + Math.random().toString(36).slice(2, 8), shotId, type, at: Date.now() }]);
+  const postAction = useCallback(async (shotId: string, type: DesignerActionType) => {
+    try {
+      const res = await fetch(`/api/archviz/shots/${shotId}/actions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type }),
+      });
+      if (res.ok) {
+        const { shot } = await res.json() as { shot: Shot };
+        setShots((ss) => ss.map((s) => (s.id === shotId ? shot : s)));
+      }
+    } catch {
+      // best-effort — designer actions aren't safety-critical, don't surface a toast per click
+    }
   }, []);
 
-  const setFavorite = useCallback((shotId: string, val: boolean) => {
-    setShots((ss) => ss.map((s) => (s.id === shotId ? { ...s, favorite: val } : s)));
-    logAction(shotId, val ? 'favorite' : 'unfavorite');
-  }, [logAction]);
+  const logAction = useCallback((shotId: string, type: DesignerActionType) => { void postAction(shotId, type); }, [postAction]);
+  const setFavorite = useCallback((shotId: string, val: boolean) => { void postAction(shotId, val ? 'favorite' : 'unfavorite'); }, [postAction]);
+  // re-sending the same label action toggles it back to 'none' server-side (src/app/api/archviz/shots/[id]/actions)
+  const setLabel = useCallback((shotId: string, label: Exclude<DesignerLabel, 'none'>) => { void postAction(shotId, LABEL_TO_ACTION[label]); }, [postAction]);
+  const requestRecapture = useCallback((shotId: string) => { void postAction(shotId, 'request_recapture'); }, [postAction]);
 
-  const setLabel = useCallback((shotId: string, label: DesignerLabel) => {
-    setShots((ss) => ss.map((s) => (s.id === shotId ? { ...s, label } : s)));
-    const map: Partial<Record<DesignerLabel, DesignerActionType>> = {
-      promoted: 'promote', demoted: 'demote', rejected: 'reject', hero: 'mark_hero',
-    };
-    if (map[label]) logAction(shotId, map[label]!);
-  }, [logAction]);
-
-  const requestRecapture = useCallback((shotId: string) => {
-    logAction(shotId, 'request_recapture');
-  }, [logAction]);
-
-  const runShots = useMemo(
-    () => shots.filter((s) => s.runId === activeRunId).sort((a, b) => a.rank - b.rank),
-    [shots, activeRunId],
-  );
+  const runShots = useMemo(() => [...shots].sort((a, b) => a.rank - b.rank), [shots]);
   const boardShots = useMemo(() => {
     const bestPerGroup = new Map<string, Shot>();
     runShots.forEach((s) => {
@@ -221,15 +184,13 @@ export function ArchvizProvider({ children }: { children: React.ReactNode }) {
   const variantsOf = useCallback((camGroup: string) => shots.filter((s) => s.camGroup === camGroup), [shots]);
 
   const store = useMemo<ArchvizStore>(() => ({
-    models, runs, shots, actions, screen, activeRunId, activeShotId, compareIds,
-    activeRun: runs.find((r) => r.id === activeRunId),
-    activeModel: models.find((m) => m.id === runs.find((r) => r.id === activeRunId)?.modelId),
-    runShots, boardShots,
+    screen, shots, activeShotId, compareIds, error, busy,
+    activeRun: run, activeModel: model, runShots, boardShots,
     activeShot: shots.find((s) => s.id === activeShotId),
     startAnalysis, goNew, goBoard, openDetail, goCompare, toggleCompareSelect, clearCompare,
     setFavorite, setLabel, requestRecapture, logAction, variantsOf,
   }), [
-    models, runs, shots, actions, screen, activeRunId, activeShotId, compareIds, runShots, boardShots,
+    screen, shots, activeShotId, compareIds, error, busy, run, model, runShots, boardShots,
     startAnalysis, goNew, goBoard, openDetail, goCompare, toggleCompareSelect, clearCompare,
     setFavorite, setLabel, requestRecapture, logAction, variantsOf,
   ]);
@@ -238,3 +199,4 @@ export function ArchvizProvider({ children }: { children: React.ReactNode }) {
 }
 
 export { RUN_STAGES };
+export type { RunStage };

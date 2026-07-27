@@ -6,7 +6,7 @@ import { LIGHTING_PRESETS } from '@/lib/archviz/mockData';
 import { buildCameraExport, downloadFile } from '@/lib/archviz/export';
 import type { DimensionScores } from '@/lib/archviz/types';
 import { useArchviz } from '../store';
-import { ShotThumb } from '../ShotThumb';
+import { ShotImage } from '../ShotImage';
 
 const DIM_LABEL: Record<keyof DimensionScores, [string, string]> = {
   composition: ['构图', 'Composition'],
@@ -47,7 +47,7 @@ export default function CompareView() {
           return (
             <div key={s.id} className={`avd-compare-col ${s.overallScore === best ? 'best' : ''}`}>
               <div className="avd-compare-thumb">
-                <ShotThumb shot={s} className="avd-thumb-svg" />
+                <ShotImage shot={s} className="avd-thumb-svg" />
                 {s.overallScore === best && <span className="avd-badge-pill accent avd-compare-best-tag">{t('最高分', 'Highest')}</span>}
               </div>
               <div className="avd-compare-score">{s.overallScore} <span className="avd-muted">/ Hero {s.heroScore}</span></div>

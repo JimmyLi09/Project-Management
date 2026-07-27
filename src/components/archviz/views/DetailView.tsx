@@ -6,7 +6,7 @@ import { LIGHTING_PRESETS } from '@/lib/archviz/mockData';
 import { buildCameraExport, buildReportText, downloadFile } from '@/lib/archviz/export';
 import type { DimensionScores } from '@/lib/archviz/types';
 import { useArchviz } from '../store';
-import { ShotThumb } from '../ShotThumb';
+import { ShotImage } from '../ShotImage';
 
 const DIM_LABEL: Record<keyof DimensionScores, [string, string]> = {
   composition: ['构图 Composition', 'Composition'],
@@ -53,7 +53,7 @@ export default function DetailView() {
       <div className="avd-detail-layout">
         <div className="avd-detail-main">
           <div className="avd-detail-hero">
-            <ShotThumb shot={shot} className="avd-thumb-svg" />
+            <ShotImage shot={shot} className="avd-thumb-svg" />
             <div className="avd-detail-badges">
               <span className="avd-badge-pill">#{shot.rank}</span>
               <span className="avd-badge-pill accent">{shot.overallScore}</span>
@@ -72,7 +72,7 @@ export default function DetailView() {
               <div className="avd-relight-row">
                 {variants.map((v) => (
                   <button key={v.id} className={`avd-relight-thumb ${v.id === shot.id ? 'active' : ''}`} onClick={() => openDetail(v.id)}>
-                    <ShotThumb shot={v} className="avd-thumb-svg" />
+                    <ShotImage shot={v} className="avd-thumb-svg" />
                     <span>{t(LIGHTING_PRESETS.find((p) => p.id === v.lighting.presetId)?.name[0] || '', LIGHTING_PRESETS.find((p) => p.id === v.lighting.presetId)?.name[1] || '')}</span>
                   </button>
                 ))}
@@ -139,16 +139,16 @@ export default function DetailView() {
               <button className={`avd-btn-line ${shot.favorite ? 'active' : ''}`} onClick={() => setFavorite(shot.id, !shot.favorite)}>
                 {shot.favorite ? '★' : '☆'} {t('收藏', 'Favorite')}
               </button>
-              <button className={`avd-btn-line ${shot.label === 'hero' ? 'active' : ''}`} onClick={() => setLabel(shot.id, shot.label === 'hero' ? 'none' : 'hero')}>
+              <button className={`avd-btn-line ${shot.label === 'hero' ? 'active' : ''}`} onClick={() => setLabel(shot.id, 'hero')}>
                 {t('标为 Hero', 'Mark as Hero')}
               </button>
-              <button className={`avd-btn-line ${shot.label === 'promoted' ? 'active' : ''}`} onClick={() => setLabel(shot.id, shot.label === 'promoted' ? 'none' : 'promoted')}>
+              <button className={`avd-btn-line ${shot.label === 'promoted' ? 'active' : ''}`} onClick={() => setLabel(shot.id, 'promoted')}>
                 {t('提升', 'Promote')}
               </button>
-              <button className={`avd-btn-line ${shot.label === 'demoted' ? 'active' : ''}`} onClick={() => setLabel(shot.id, shot.label === 'demoted' ? 'none' : 'demoted')}>
+              <button className={`avd-btn-line ${shot.label === 'demoted' ? 'active' : ''}`} onClick={() => setLabel(shot.id, 'demoted')}>
                 {t('降级', 'Demote')}
               </button>
-              <button className={`avd-btn-line danger ${shot.label === 'rejected' ? 'active' : ''}`} onClick={() => setLabel(shot.id, shot.label === 'rejected' ? 'none' : 'rejected')}>
+              <button className={`avd-btn-line danger ${shot.label === 'rejected' ? 'active' : ''}`} onClick={() => setLabel(shot.id, 'rejected')}>
                 {t('拒绝', 'Reject')}
               </button>
               <button className="avd-btn-line" onClick={() => requestRecapture(shot.id)}>{t('请求重拍', 'Request Re-capture')}</button>

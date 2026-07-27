@@ -4,7 +4,7 @@ import React from 'react';
 import { useLang } from '@/lib/i18n';
 import { LIGHTING_PRESETS } from '@/lib/archviz/mockData';
 import type { Shot } from '@/lib/archviz/types';
-import { ShotThumb } from './ShotThumb';
+import { ShotImage } from './ShotImage';
 
 const LABEL_TAG: Record<string, [string, string, string]> = {
   hero: ['★ Hero', '★ Hero', '#FF8000'],
@@ -30,7 +30,7 @@ export function ShotCard({
   return (
     <div className={`avd-shot-card ${selected ? 'selected' : ''}`}>
       <button className="avd-shot-thumb" onClick={onOpen} title={t('查看详情', 'View detail')}>
-        <ShotThumb shot={shot} className="avd-thumb-svg" />
+        <ShotImage shot={shot} className="avd-thumb-svg" />
         <span className="avd-shot-rank">#{shot.rank}</span>
         {labelTag && <span className="avd-shot-label" style={{ background: labelTag[2] }}>{t(labelTag[0], labelTag[1])}</span>}
         {showSelect && (
