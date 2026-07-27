@@ -46,6 +46,9 @@ export interface NewProjectInput {
   clientPerson?: string; // R5-2: optional client contact captured on create
   clientPhone?: string;
   clientEmail?: string;
+  mainConPerson?: string; // optional main-contractor contact captured on create
+  mainConPhone?: string;
+  mainConEmail?: string;
 }
 
 export function buildPackage(svc: string, start: string, tpl?: Template): ServicePackage {
@@ -98,7 +101,8 @@ export function newProject(o: NewProjectInput, tplLookup?: (svc: string) => Temp
        Contacts module has data from day one (R5-2/R5-4) */
     contacts: [
       { role: '客户 Client', company: o.client || '', person: o.clientPerson || '', phone: o.clientPhone || '', email: o.clientEmail || '' },
-      ...(o.mainContractor ? [{ role: '总包 Main Con', company: o.mainContractor, person: '', phone: '', email: '' }] : []),
+      ...(o.mainContractor || o.mainConPerson || o.mainConPhone || o.mainConEmail
+        ? [{ role: '总包 Main Con', company: o.mainContractor || '', person: o.mainConPerson || '', phone: o.mainConPhone || '', email: o.mainConEmail || '' }] : []),
       ...(o.architect ? [{ role: '建筑师 Architect', company: o.architect, person: '', phone: '', email: '' }] : []),
       ...(o.landscape ? [{ role: '景观 Landscape', company: o.landscape, person: '', phone: '', email: '' }] : []),
       ...(o.interior ? [{ role: '室内 Interior', company: o.interior, person: '', phone: '', email: '' }] : []),

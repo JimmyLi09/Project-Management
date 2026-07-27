@@ -40,6 +40,9 @@ export async function POST(req: NextRequest) {
     clientPerson: String(body.clientPerson || ''),
     clientPhone: String(body.clientPhone || ''),
     clientEmail: String(body.clientEmail || ''),
+    mainConPerson: String(body.mainConPerson || ''),
+    mainConPhone: String(body.mainConPhone || ''),
+    mainConEmail: String(body.mainConEmail || ''),
   }, getEffectiveTemplate); // use PD/BD-edited templates when present
   p.log.unshift({ at: Date.now(), by: user.name, text: '创建项目' });
   insertProject(p);

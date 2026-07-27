@@ -117,7 +117,8 @@ export default function ProjectDetail() {
             <span className="mini-label">PM</span>
             {(p.owners || []).map((n) => (
               <span key={n} className="chip" style={{ height: 30 }}>
-                <Avatar name={n} size={18} />{n}
+                {/* 重点人员:PM 姓名加粗突出 (名字加粗) */}
+                <Avatar name={n} size={18} /><b style={{ fontWeight: 700, color: 'var(--navy900)' }}>{n}</b>
                 <button style={{ color: 'var(--text2)', fontWeight: 700 }} onClick={() => dispatch(p.id, { type: 'removeOwner', name: n })}>✕</button>
               </span>
             ))}

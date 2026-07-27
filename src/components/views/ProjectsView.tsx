@@ -256,6 +256,9 @@ export function NewProjectModal({ onClose }: { onClose: () => void }) {
   const [clientPerson, setClientPerson] = useState('');
   const [clientPhone, setClientPhone] = useState('');
   const [clientEmail, setClientEmail] = useState('');
+  const [mainConPerson, setMainConPerson] = useState('');
+  const [mainConPhone, setMainConPhone] = useState('');
+  const [mainConEmail, setMainConEmail] = useState('');
   const [busy, setBusy] = useState(false);
 
   function toggleSvc(k: string) {
@@ -274,6 +277,7 @@ export function NewProjectModal({ onClose }: { onClose: () => void }) {
       difficulty, start, delivery, buffer,
       mainContractor, architect, landscape, interior, creative,
       clientPerson, clientPhone, clientEmail,
+      mainConPerson, mainConPhone, mainConEmail,
     });
     setBusy(false);
     if (p) { onClose(); openProject(p.id); }
@@ -300,18 +304,24 @@ export function NewProjectModal({ onClose }: { onClose: () => void }) {
             ))}
           </div>
         </div>
-        <div className="field">
-          <label>{t('客户', 'Client')}</label>
-          <input value={client} onChange={(e) => setClient(e.target.value)} placeholder={t('developer / 客户', 'developer / client')} />
-        </div>
-        {/* R5-2: optional client contact — 每个公司可选填联系人/电话/邮箱 */}
-        <div className="two">
-          <div className="field"><label>{t('客户联系人(可选)', 'Client contact (optional)')}</label><input value={clientPerson} onChange={(e) => setClientPerson(e.target.value)} placeholder={t('姓名', 'name')} /></div>
+        {/* 客户 — 公司 + 可选联系人/电话/邮箱 (每个公司几个基础信息) */}
+        <div className="field" style={{ marginBottom: 6 }}><label>{t('客户 公司', 'Client company')}</label>
+          <input value={client} onChange={(e) => setClient(e.target.value)} placeholder={t('developer / 客户', 'developer / client')} /></div>
+        <div className="two" style={{ marginBottom: 4 }}>
+          <div className="field"><label>{t('客户联系人(可选)', 'Contact person (optional)')}</label><input value={clientPerson} onChange={(e) => setClientPerson(e.target.value)} placeholder={t('姓名', 'name')} /></div>
           <div className="field"><label>{t('电话(可选)', 'Phone (optional)')}</label><input value={clientPhone} onChange={(e) => setClientPhone(e.target.value)} placeholder="+65 ..." /></div>
           <div className="field"><label>{t('邮箱(可选)', 'Email (optional)')}</label><input value={clientEmail} onChange={(e) => setClientEmail(e.target.value)} placeholder="name@company.com" /></div>
         </div>
+        {/* 总包 — 公司 + 可选联系人/电话/邮箱 */}
+        <div className="field" style={{ marginBottom: 6 }}><label>{t('总包 公司', 'Main contractor company')}</label>
+          <input value={mainContractor} onChange={(e) => setMainContractor(e.target.value)} /></div>
+        <div className="two" style={{ marginBottom: 4 }}>
+          <div className="field"><label>{t('总包联系人(可选)', 'Contact person (optional)')}</label><input value={mainConPerson} onChange={(e) => setMainConPerson(e.target.value)} placeholder={t('姓名', 'name')} /></div>
+          <div className="field"><label>{t('电话(可选)', 'Phone (optional)')}</label><input value={mainConPhone} onChange={(e) => setMainConPhone(e.target.value)} placeholder="+65 ..." /></div>
+          <div className="field"><label>{t('邮箱(可选)', 'Email (optional)')}</label><input value={mainConEmail} onChange={(e) => setMainConEmail(e.target.value)} placeholder="name@company.com" /></div>
+        </div>
+        <div className="msub" style={{ margin: '2px 0 10px' }}>{t('其他公司(建筑师/景观等)可先填公司名,联系人可创建后在项目「联系人」里补充。', 'Other companies: enter the name here; contact details can be added later in the project’s Contacts panel.')}</div>
         <div className="two">
-          <div className="field"><label>{t('总包', 'Main contractor')}</label><input value={mainContractor} onChange={(e) => setMainContractor(e.target.value)} /></div>
           <div className="field"><label>{t('建筑师', 'Architect')}</label><input value={architect} onChange={(e) => setArchitect(e.target.value)} /></div>
           <div className="field"><label>{t('景观师', 'Landscape architect')}</label><input value={landscape} onChange={(e) => setLandscape(e.target.value)} /></div>
           <div className="field"><label>{t('室内设计', 'Interior designer')}</label><input value={interior} onChange={(e) => setInterior(e.target.value)} /></div>
