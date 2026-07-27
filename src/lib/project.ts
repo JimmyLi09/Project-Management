@@ -167,7 +167,49 @@ export function migrate(p: any): Project {
   if (!p.perm) p.perm = [];
   if (!Array.isArray(p.contacts)) p.contacts = [];
   p.packages.forEach((pk: any) => { if (!Array.isArray(pk.scopeItems)) pk.scopeItems = []; });
+  migrateWorkflow(p);
   return p as Project;
+}
+
+/* v2.2 Version 1A: default the post-sales workflow blocks, then (re)derive the
+   Production/Commercial status so reads always carry fresh values. */
+function migrateWorkflow(p: any) {
+  if (p.workflowVersion === undefined) p.workflowVersion = 1;
+  if (!p.handover) p.handover = { status: 'not_started', salesBrief: '', assignedPmId: '', submittedBy: '', submittedAt: 0, briefingAt: 0 };
+  if (!p.completionReview) p.completionReview = { status: 'not_started', summary: '', links: '', submittedBy: '', submittedAt: 0, approval: { pdId: '', status: 'pending', note: '', decidedAt: 0 } };
+  if (!p.salesVerification) p.salesVerification = { status: 'not_started', scopeMatches: false, jobOrderUpdated: false, variationStatus: 'none', finalInvoiceAllowed: false, by: '', at: 0 };
+  if (!p.invoiceClose) p.invoiceClose = { invoiceRef: '', issuedDate: '', dueDate: '', invoiceStatus: 'pending_finance', paymentStatus: 'pending', financeNote: '' };
+  if (!p.paymentRisk) p.paymentRisk = { depositRequired: false, depositStatus: 'none', level: 'none', resolvedAt: 0 };
+  const d = deriveStatuses(p as Project);
+  p.productionStatus = d.productionStatus;
+  p.commercialStatus = d.commercialStatus;
+}
+
+/* §5.1/§5.2 — central derivation. Production and Commercial are computed only
+   from the workflow block states, never edited page-by-page. */
+export function deriveStatuses(p: Project): { productionStatus: import('./types').ProductionStatus; commercialStatus: import('./types').CommercialStatus } {
+  const cr = p.completionReview;
+  const sv = p.salesVerification;
+  const inv = p.invoiceClose;
+
+  let productionStatus: import('./types').ProductionStatus = 'in_progress';
+  if (cr?.approval?.status === 'approved') productionStatus = 'production_completed';
+  else if (cr?.status === 'submitted') productionStatus = 'completion_review';
+
+  let commercialStatus: import('./types').CommercialStatus = 'not_ready';
+  if (productionStatus === 'production_completed') {
+    const allowed = !!sv && sv.status === 'verified' && sv.finalInvoiceAllowed;
+    commercialStatus = allowed ? 'pending_invoice' : 'not_ready';
+    if (inv && inv.invoiceStatus === 'issued') {
+      if (inv.paymentStatus === 'received') commercialStatus = 'payment_received';
+      else {
+        const due = parseISO(inv.dueDate);
+        const overdue = inv.paymentStatus === 'overdue' || (!!due && due < todayMid());
+        commercialStatus = overdue ? 'overdue' : (inv.paymentStatus === 'partial' ? 'payment_pending' : 'invoiced');
+      }
+    }
+  }
+  return { productionStatus, commercialStatus };
 }
 
 export const pkgStart = (p: Project, pk: ServicePackage) => (pk && pk.start) || p.start || '';

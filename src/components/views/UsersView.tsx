@@ -14,6 +14,7 @@ const ROLE_DESC: Record<Role, [string, string]> = {
   pm: ['被指派项目的生产内容', 'Production content of assigned projects'],
   member: ['仅指派给自己的任务', 'Only tasks assigned to them'],
   viewer: ['只读', 'Read-only'],
+  finance: ['开票/收款状态跟踪(不改生产)', 'Invoice/payment status tracking (no production edits)'],
 };
 
 export default function UsersView() {

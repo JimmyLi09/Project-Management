@@ -21,6 +21,11 @@ export const canEdit = (u: Identity, p: Project) =>
 
 export const canCommercial = (u: Identity, _p?: Project) => isFull(u) || u.role === 'sales';
 
+/* v2.2 §6/§7: Finance may edit invoice/payment status only (not production).
+   PD/BD can view finance info but only Finance may change it (§7.2). */
+export const isFinance = (u: Identity) => u.role === 'finance';
+export const canEditFinance = (u: Identity) => u.role === 'finance';
+
 export const canAssign = (u: Identity, _p?: Project) => isFull(u);
 
 export const canStageTo = (u: Identity, p: Project, s: string) =>
@@ -44,4 +49,5 @@ export const ROLE_LABEL: Record<Role, string> = {
   pm: 'PM',
   member: '成员',
   viewer: '只读',
+  finance: 'Finance',
 };

@@ -4,7 +4,7 @@ import { currentUser } from '@/server/session';
 import { canAdmin, identityOf } from '@/lib/permissions';
 import type { Role } from '@/lib/types';
 
-const ROLES: Role[] = ['director', 'bd', 'sales', 'pm', 'member', 'viewer'];
+const ROLES: Role[] = ['director', 'bd', 'sales', 'pm', 'member', 'viewer', 'finance'];
 
 /* All signed-in users may list users (needed for PM assignment pickers). */
 export async function GET() {

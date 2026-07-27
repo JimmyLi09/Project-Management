@@ -1,6 +1,63 @@
 /* ===== Shared domain types (mirrors validated prototype v9 data model) ===== */
 
-export type Role = 'director' | 'bd' | 'sales' | 'pm' | 'member' | 'viewer';
+export type Role = 'director' | 'bd' | 'sales' | 'pm' | 'member' | 'viewer' | 'finance';
+
+/* ===== Post-sales workflow (v2.2 Version 1A) ===== */
+/* Production track: how far the production work has got (KPIs read this). */
+export type ProductionStatus = 'in_progress' | 'completion_review' | 'production_completed';
+/* Commercial track: invoicing / payment (board Payment Risk reads this). */
+export type CommercialStatus =
+  | 'not_ready' | 'pending_invoice' | 'invoiced' | 'payment_pending' | 'payment_received' | 'overdue';
+
+export type HandoverStatus = 'not_started' | 'submitted' | 'accepted';
+export interface Handover {
+  status: HandoverStatus;
+  salesBrief: string; // scope / commercials brief written by Sales
+  assignedPmId: string; // PM (name) the project is handed to
+  submittedBy: string;
+  submittedAt: number;
+  briefingAt: number; // when PM accepted/was briefed
+}
+
+export type CompletionStatus = 'not_started' | 'submitted' | 'approved' | 'rejected' | 'changes_requested';
+export interface CompletionReview {
+  status: CompletionStatus;
+  summary: string; // what was delivered (the "completion package")
+  links: string; // final deliverable links / paths
+  submittedBy: string;
+  submittedAt: number;
+  approval: { pdId: string; status: 'pending' | 'approved' | 'rejected' | 'changes_requested'; note: string; decidedAt: number };
+}
+
+export type VariationStatus = 'none' | 'pending' | 'reapproval' | 'resolved';
+export interface SalesVerification {
+  status: 'not_started' | 'verified' | 'variation';
+  scopeMatches: boolean;
+  jobOrderUpdated: boolean;
+  variationStatus: VariationStatus;
+  finalInvoiceAllowed: boolean;
+  by: string;
+  at: number;
+}
+
+export type InvoiceStatus = 'pending_finance' | 'issued' | 'cancelled';
+export type PaymentStatus = 'pending' | 'partial' | 'received' | 'overdue';
+export interface InvoiceClose {
+  invoiceRef: string;
+  issuedDate: string; // ISO
+  dueDate: string; // ISO — Payment Due Date
+  invoiceStatus: InvoiceStatus;
+  paymentStatus: PaymentStatus;
+  financeNote: string;
+}
+
+export type RiskLevel = 'none' | 'watch' | 'high';
+export interface PaymentRisk {
+  depositRequired: boolean;
+  depositStatus: 'none' | 'pending' | 'received';
+  level: RiskLevel;
+  resolvedAt: number;
+}
 
 export interface User {
   id: number;
@@ -150,6 +207,16 @@ export interface Project {
   contacts?: ProjectContact[]; // R5-2/R5-4: company contact directory for this project
   log: LogEntry[];
   packages: ServicePackage[];
+  /* ===== v2.2 Version 1A post-sales workflow ===== */
+  version?: number; // server-injected optimistic-lock counter (CAS)
+  workflowVersion?: number; // schema version of the workflow blocks below (1)
+  handover?: Handover;
+  completionReview?: CompletionReview;
+  salesVerification?: SalesVerification;
+  invoiceClose?: InvoiceClose;
+  paymentRisk?: PaymentRisk;
+  productionStatus?: ProductionStatus; // derived server-side
+  commercialStatus?: CommercialStatus; // derived server-side
 }
 
 export type Stage = 'presales' | 'handover' | 'progress' | 'complete' | 'invoice';

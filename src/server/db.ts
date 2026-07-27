@@ -52,6 +52,17 @@ export function getDb(): Database.Database {
       text TEXT NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_audit_project ON audit_log(project_id, at DESC);
+    /* v2.2 §4.4 [P0-1]: idempotency ledger — one row per (project, action,
+       workflow version). The UNIQUE constraint blocks duplicate submissions. */
+    CREATE TABLE IF NOT EXISTS workflow_actions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      project_id TEXT NOT NULL,
+      action_type TEXT NOT NULL,
+      workflow_version INTEGER NOT NULL,
+      actor_id TEXT NOT NULL DEFAULT '',
+      created_at INTEGER NOT NULL,
+      UNIQUE(project_id, action_type, workflow_version)
+    );
   `);
   migrateSchema(db);
   seedIfEmpty(db);
@@ -151,6 +162,9 @@ function migrateSchema(d: Database.Database) {
   if (!cols.includes('disabled')) d.exec('ALTER TABLE users ADD COLUMN disabled INTEGER NOT NULL DEFAULT 0');
   if (!cols.includes('avatar')) d.exec("ALTER TABLE users ADD COLUMN avatar TEXT NOT NULL DEFAULT ''");
   if (!cols.includes('point_cap')) d.exec('ALTER TABLE users ADD COLUMN point_cap INTEGER NOT NULL DEFAULT 0');
+  /* v2.2 §4.2 [P0-3]: optimistic-lock version on projects */
+  const pcols = (d.prepare('PRAGMA table_info(projects)').all() as { name: string }[]).map((c) => c.name);
+  if (!pcols.includes('version')) d.exec('ALTER TABLE projects ADD COLUMN version INTEGER NOT NULL DEFAULT 0');
 }
 
 /* ---- secret for session signing (persisted so sessions survive restarts) ---- */
@@ -246,34 +260,74 @@ export function setUserDisabled(id: number, disabled: boolean) {
    `updatedAt` is injected on read (from the row) for client conflict hints and
    stripped again before persisting. */
 export function listProjects(): Project[] {
-  const rows = getDb().prepare('SELECT data, updated_at FROM projects ORDER BY created_at DESC').all() as { data: string; updated_at: number }[];
+  const rows = getDb().prepare('SELECT data, updated_at, version FROM projects ORDER BY created_at DESC').all() as { data: string; updated_at: number; version: number }[];
   return rows.map((r) => {
     const p = migrate(JSON.parse(r.data));
     p.updatedAt = r.updated_at;
+    p.version = r.version;
     return p;
   });
 }
 export function getProject(id: string): Project | undefined {
-  const row = getDb().prepare('SELECT data, updated_at FROM projects WHERE id = ?').get(id) as { data: string; updated_at: number } | undefined;
+  const row = getDb().prepare('SELECT data, updated_at, version FROM projects WHERE id = ?').get(id) as { data: string; updated_at: number; version: number } | undefined;
   if (!row) return undefined;
   const p = migrate(JSON.parse(row.data));
   p.updatedAt = row.updated_at;
+  p.version = row.version;
   return p;
 }
 export function insertProject(p: Project) {
-  const { updatedAt: _drop, ...data } = p;
+  const { updatedAt: _u, version: _v, ...data } = p;
   getDb()
-    .prepare('INSERT INTO projects (id, data, created_at, updated_at) VALUES (?, ?, ?, ?)')
+    .prepare('INSERT INTO projects (id, data, created_at, updated_at, version) VALUES (?, ?, ?, ?, 1)')
     .run(p.id, JSON.stringify(data), p.created, Date.now());
+  p.version = 1;
 }
 export function saveProject(p: Project): number {
   const now = Date.now();
-  const { updatedAt: _drop, ...data } = p;
+  const { updatedAt: _u, version: _v, ...data } = p;
+  /* keep bumping version so the optimistic-lock counter stays meaningful even
+     for the legacy (non-CAS) save path */
   getDb()
-    .prepare('UPDATE projects SET data = ?, updated_at = ? WHERE id = ?')
+    .prepare('UPDATE projects SET data = ?, updated_at = ?, version = version + 1 WHERE id = ?')
     .run(JSON.stringify(data), now, p.id);
   p.updatedAt = now;
   return now;
+}
+
+/* v2.2 §4.5 [P0-3]: compare-and-swap save. Writes only if the row's version
+   still equals `expectedVersion`; returns the new version on success or null
+   on a stale write (caller re-reads and asks the user to reconfirm). */
+export function saveProjectCAS(p: Project, expectedVersion: number): number | null {
+  const now = Date.now();
+  const { updatedAt: _u, version: _v, ...data } = p;
+  const info = getDb()
+    .prepare('UPDATE projects SET data = ?, updated_at = ?, version = version + 1 WHERE id = ? AND version = ?')
+    .run(JSON.stringify(data), now, p.id, expectedVersion);
+  if (info.changes === 0) return null; // stale — someone else wrote in between
+  p.updatedAt = now;
+  p.version = expectedVersion + 1;
+  return p.version;
+}
+
+/* v2.2 §4.4 [P0-1]: record a workflow action's idempotency key. Returns false
+   if this (project, action, workflowVersion) was already recorded — the caller
+   must then abort (don't create a second task/notification). */
+export function recordWorkflowAction(projectId: string, actionType: string, workflowVersion: number, actorId: string): boolean {
+  try {
+    getDb()
+      .prepare('INSERT INTO workflow_actions (project_id, action_type, workflow_version, actor_id, created_at) VALUES (?, ?, ?, ?, ?)')
+      .run(projectId, actionType, workflowVersion, actorId, Date.now());
+    return true;
+  } catch (e: any) {
+    if (String(e?.code || '').includes('CONSTRAINT') || /UNIQUE/.test(String(e?.message))) return false;
+    throw e;
+  }
+}
+export function listWorkflowActions(projectId: string) {
+  return getDb()
+    .prepare('SELECT action_type, workflow_version, actor_id, created_at FROM workflow_actions WHERE project_id = ? ORDER BY created_at')
+    .all(projectId) as { action_type: string; workflow_version: number; actor_id: string; created_at: number }[];
 }
 export function deleteProject(id: string) {
   getDb().prepare('DELETE FROM projects WHERE id = ?').run(id);
