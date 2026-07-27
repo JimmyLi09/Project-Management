@@ -3,8 +3,11 @@ REM Audax 项目协作台 — 一键更新 (Windows)
 REM 用法: 双击此文件,或在项目目录命令行执行 scripts\update.bat
 cd /d "%~dp0.."
 
-echo ==^> 拉取最新代码 Pulling latest code...
-git pull || goto :err
+echo ==^> 拉取最新代码 Pulling latest code (branch: main)...
+REM data\ 在 .gitignore 里,git 操作不会动它 —— 数据库安全。
+git fetch origin main || goto :err
+git checkout main 2>nul || git checkout -b main origin/main
+git reset --hard origin/main || goto :err
 
 echo ==^> 安装依赖 Installing dependencies...
 call npm install || goto :err

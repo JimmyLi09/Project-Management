@@ -4,8 +4,11 @@
 set -e
 cd "$(dirname "$0")/.."
 
-echo "==> 拉取最新代码 Pulling latest code…"
-git pull
+echo "==> 拉取最新代码 Pulling latest code (branch: main)…"
+# data/ 是 .gitignore 里的,git 操作不会动它 —— 数据库安全。
+git fetch origin main
+git checkout main 2>/dev/null || git checkout -b main origin/main
+git reset --hard origin/main
 
 echo "==> 安装依赖 Installing dependencies…"
 npm install
