@@ -39,6 +39,7 @@ const PATHS: Record<string, string> = {
   layers: '<path d="m12.83 2.18 8.72 4.36a1 1 0 0 1 0 1.79L12.83 12.7a1.85 1.85 0 0 1-1.66 0L2.45 8.33a1 1 0 0 1 0-1.79l8.72-4.36a1.85 1.85 0 0 1 1.66 0Z"/><path d="m22 12-9.17 4.58a1.85 1.85 0 0 1-1.66 0L2 12"/><path d="m22 17-9.17 4.58a1.85 1.85 0 0 1-1.66 0L2 17"/>',
   logout: '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="m16 17 5-5-5-5"/><path d="M21 12H9"/>',
   download: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/><path d="M12 15V3"/>',
+  camera: '<path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3Z"/><circle cx="12" cy="13" r="3.5"/>',
 };
 
 export function Icon({ name, size = 17, style }: { name: string; size?: number; style?: React.CSSProperties }) {

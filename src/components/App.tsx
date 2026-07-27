@@ -16,6 +16,7 @@ import StatsView from './views/StatsView';
 import UsersView from './views/UsersView';
 import TemplatesView from './views/TemplatesView';
 import ProjectDetail from './views/ProjectDetail';
+import ArchvizApp from './archviz/ArchvizApp';
 
 export default function App({ user }: { user: User }) {
   return (
@@ -34,6 +35,7 @@ const PAGE_META: Record<string, { title: [string, string]; sub: [string, string]
   stats: { title: ['统计报表', 'Reports'], sub: ['项目统计 · 按 PM 的项目数与积分', 'Projects and points by PM'] },
   users: { title: ['用户管理', 'Users'], sub: ['账号、角色与访问权限', 'Accounts, roles and access'] },
   templates: { title: ['模板管理', 'Templates'], sub: ['编辑生产排期与信息清单模板(仅影响之后新建的项目)', 'Edit schedule & checklist templates (affects new projects only)'] },
+  archviz: { title: ['AI ArchViz Director', 'AI ArchViz Director'], sub: ['Model-Direct 白模带灯光 · AI 辅助选角', 'Model-Direct lit white-model · AI-assisted shot picking'] },
 };
 
 function Shell() {
@@ -113,6 +115,7 @@ function Shell() {
           {navItem('mytasks', 'check', t('我的待办', 'My Tasks'), myOpenCount)}
           {navItem('dupdate', 'presentation', t('向上汇报', 'Director Update'))}
           {navItem('stats', 'trending', t('统计报表', 'Reports'))}
+          {navItem('archviz', 'camera', t('AI 选角 · Model-Direct', 'AI ArchViz · Model-Direct'))}
           {isFull(me) && navItem('users', 'settings', t('用户管理', 'Users'))}
           {isFull(me) && navItem('templates', 'layers', t('模板管理', 'Templates'))}
         </nav>
@@ -210,6 +213,7 @@ function Shell() {
             {view.name === 'stats' && <StatsView />}
             {view.name === 'users' && <UsersView />}
             {view.name === 'templates' && <TemplatesView />}
+            {view.name === 'archviz' && <ArchvizApp />}
             {view.name === 'project' && <ProjectDetail />}
           </div>
         </section>
