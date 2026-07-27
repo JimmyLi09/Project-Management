@@ -221,7 +221,7 @@ function AssignModal({ candidates, onClose, onAssign }: { candidates: string[]; 
 
 function OverviewTab({ p, onSchedule }: { p: Project; onSchedule: (pkg: number) => void }) {
   const { lang, t } = useLang();
-  const { dispatch, me } = useStore();
+  const { dispatch, me, users } = useStore();
   const canEd = canEdit(me, p);
   const sp = schedProgress(p);
   const ip = infoProgress(p);
@@ -264,6 +264,7 @@ function OverviewTab({ p, onSchedule }: { p: Project; onSchedule: (pkg: number) 
   return (
     <div className="grid-2col" style={{ display: 'grid', gridTemplateColumns: '1.5fr 1fr', gap: 20, alignItems: 'start' }}>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 20, minWidth: 0 }}>
+        <WorkflowPanel p={p} users={users} me={me} dispatch={dispatch} />
         <div className="panel clip">
           <div className="panel-head" style={{ padding: '16px 22px' }}>
             <span className="panel-title" style={{ fontSize: 15 }}>{t('服务包', 'Service Packages')}</span>
@@ -425,6 +426,116 @@ function OverviewTab({ p, onSchedule }: { p: Project; onSchedule: (pkg: number) 
         </div>
       </div>
       {historyOpen && <HistoryModal pid={p.id} onClose={() => setHistoryOpen(false)} />}
+    </div>
+  );
+}
+
+/* v2.2 Version 1A · S2 — post-sales workflow panel (handover step live;
+   completion / approval / finance land in later stages). */
+const PROD_LABEL: Record<string, [string, string, string]> = {
+  in_progress: ['进行中', 'In progress', 'var(--info)'],
+  completion_review: ['完成审核中', 'Completion review', 'var(--warning)'],
+  production_completed: ['制作完成', 'Production completed', 'var(--success)'],
+};
+const COMM_LABEL: Record<string, [string, string, string]> = {
+  not_ready: ['未就绪', 'Not ready', 'var(--text2)'],
+  pending_invoice: ['待开票', 'Pending invoice', 'var(--warning)'],
+  invoiced: ['已开票', 'Invoiced', 'var(--info)'],
+  payment_pending: ['收款中', 'Payment pending', 'var(--warning)'],
+  payment_received: ['已收款', 'Payment received', 'var(--success)'],
+  overdue: ['逾期', 'Overdue', 'var(--danger)'],
+};
+
+function WorkflowPanel({ p, users, me, dispatch }: {
+  p: Project; users: import('@/lib/types').User[]; me: import('@/lib/permissions').Identity;
+  dispatch: (pid: string, a: import('@/server/actions').ProjectAction) => Promise<boolean>;
+}) {
+  const { lang, t } = useLang();
+  const h = p.handover;
+  const canSubmit = canCommercial(me, p);
+  const isAssignedPm = !!h && me.name === h.assignedPmId;
+  const pmNames = users.filter((u) => u.role === 'pm' || u.role === 'member' || u.role === 'director' || u.role === 'bd').map((u) => u.name);
+  const [brief, setBrief] = useState('');
+  const [pm, setPm] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  const prod = PROD_LABEL[p.productionStatus || 'in_progress'];
+  const comm = COMM_LABEL[p.commercialStatus || 'not_ready'];
+  const badge = (l: [string, string, string]) => (
+    <span className="badge" style={{ background: 'var(--hover-bg)', color: l[2] }}>
+      <span className="bdot" style={{ background: l[2] }} />{lang === 'zh' ? l[0] : l[1]}
+    </span>
+  );
+
+  async function submit() {
+    if (!pm) return;
+    setBusy(true);
+    await dispatch(p.id, { type: 'submitHandover', salesBrief: brief, assignedPmId: pm });
+    setBusy(false);
+  }
+
+  return (
+    <div className="panel" style={{ padding: 20 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 14 }}>
+        <span className="panel-title" style={{ fontSize: 15 }}>{t('售后工作流', 'Post-sales workflow')}</span>
+        <div style={{ flex: 1 }} />
+        <span style={{ fontSize: 11, color: 'var(--text2)' }}>{t('制作', 'Production')}</span>{badge(prod)}
+        <span style={{ fontSize: 11, color: 'var(--text2)' }}>{t('商业', 'Commercial')}</span>{badge(comm)}
+      </div>
+
+      {/* Step 1 — Sales → PM handover */}
+      <div style={{ border: '1px solid var(--row-line)', borderRadius: 10, padding: 14 }}>
+        <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--navy900)', marginBottom: 8 }}>
+          ① {t('交接:Sales → PM', 'Handover: Sales → PM')}
+        </div>
+
+        {(!h || h.status === 'not_started') && (
+          canSubmit ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
+              <textarea className="in" placeholder={t('交接简报:范围 / 商务要点 / 客户注意事项…', 'Handover brief: scope / commercials / client notes…')}
+                value={brief} onChange={(e) => setBrief(e.target.value)} style={{ minHeight: 64 }} />
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                <select className="in sm" value={pm} onChange={(e) => setPm(e.target.value)} style={{ minWidth: 180 }}>
+                  <option value="">{t('— 指派接单 PM —', '— assign PM —')}</option>
+                  {pmNames.map((n) => <option key={n} value={n}>{n}</option>)}
+                </select>
+                <button className="btn-navy sm" disabled={busy || !pm} onClick={submit}>{t('提交交接', 'Submit handover')}</button>
+              </div>
+            </div>
+          ) : (
+            <div style={{ fontSize: 12.5, color: 'var(--text2)' }}>{t('等待 Sales 发起交接。', 'Waiting for Sales to start the handover.')}</div>
+          )
+        )}
+
+        {h && h.status === 'submitted' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <div style={{ fontSize: 12.5 }}>
+              {t('已交接给', 'Handed to')} <b style={{ color: 'var(--navy900)' }}>{h.assignedPmId}</b> · <span style={{ color: 'var(--warning)' }}>{t('待接单', 'awaiting acceptance')}</span>
+              <span style={{ color: 'var(--text2)' }}> · {h.submittedBy} {fmtDate(new Date(h.submittedAt))}</span>
+            </div>
+            {h.salesBrief && <div style={{ fontSize: 12.5, whiteSpace: 'pre-wrap', background: 'var(--hover-bg)', borderRadius: 8, padding: '9px 11px' }}>{h.salesBrief}</div>}
+            {(isAssignedPm || isFull(me)) && (
+              <button className="btn-navy sm" style={{ alignSelf: 'flex-start' }} onClick={() => dispatch(p.id, { type: 'acceptHandover' })}>
+                ✓ {t('接受交接,进入生产', 'Accept handover → Production')}
+              </button>
+            )}
+          </div>
+        )}
+
+        {h && h.status === 'accepted' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <div style={{ fontSize: 12.5, color: 'var(--success)', fontWeight: 600 }}>
+              ✓ {t('已接单 · 进入生产', 'Accepted · in production')}
+              <span style={{ color: 'var(--text2)', fontWeight: 400 }}> · {h.assignedPmId} {h.briefingAt ? fmtDate(new Date(h.briefingAt)) : ''}</span>
+            </div>
+            {h.salesBrief && <div style={{ fontSize: 12.5, whiteSpace: 'pre-wrap', background: 'var(--hover-bg)', borderRadius: 8, padding: '9px 11px' }}>{h.salesBrief}</div>}
+          </div>
+        )}
+      </div>
+
+      <div style={{ fontSize: 11, color: 'var(--text2)', marginTop: 10 }}>
+        {t('后续步骤(完成包审批 / Sales 核对 / 开票收款)将在下一阶段上线。', 'Next steps (completion approval / Sales verify / invoicing) arrive in the next stage.')}
+      </div>
     </div>
   );
 }

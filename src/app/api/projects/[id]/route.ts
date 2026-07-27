@@ -1,10 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { appendAudit, deleteProject, getEffectiveTemplate, getProject, saveProject } from '@/server/db';
+import { appendAudit, commitWorkflowAction, deleteProject, getEffectiveTemplate, getProject, saveProject } from '@/server/db';
 import { currentUser } from '@/server/session';
 import { identityOf, isFull } from '@/lib/permissions';
 import { applyAction, PermissionError, ValidationError, type ProjectAction } from '@/server/actions';
 
 type Params = { params: Promise<{ id: string }> };
+
+/* v2.2 §4.4: workflow submissions that must be idempotent + committed under a
+   version CAS. Maps the client action type → the workflow_actions action_type. */
+const WORKFLOW_ACTIONS: Record<string, string> = {
+  submitHandover: 'submit_handover',
+  acceptHandover: 'accept_handover',
+};
 
 export async function GET(_req: NextRequest, { params }: Params) {
   const user = await currentUser();
@@ -33,6 +40,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   const serverUpdatedAt = p.updatedAt || 0;
   const conflict = typeof baseUpdatedAt === 'number' && baseUpdatedAt > 0 && baseUpdatedAt < serverUpdatedAt;
 
+  const expectedVersion = p.version || 0;
   const logLenBefore = (p.log || []).length;
   try {
     applyAction(identityOf(user), p, body, { tplForSvc: getEffectiveTemplate });
@@ -41,8 +49,20 @@ export async function PATCH(req: NextRequest, { params }: Params) {
     if (e instanceof ValidationError) return NextResponse.json({ error: e.message }, { status: 400 });
     throw e;
   }
-  /* mirror any new log entries into the permanent audit table */
   const newEntries = (p.log || []).slice(0, Math.max(0, (p.log || []).length - logLenBefore));
+
+  /* Workflow submissions go through the transactional idempotency + CAS commit
+     (§4.4/§4.5). Everything else keeps the existing save (which still bumps
+     version); the strict global CAS switch is scheduled for S5. */
+  const wfType = WORKFLOW_ACTIONS[body.type];
+  if (wfType) {
+    const r = commitWorkflowAction(p, wfType, user.name, expectedVersion);
+    if (r === 'duplicate') return NextResponse.json({ error: '该动作已提交,请勿重复提交。' }, { status: 409 });
+    if (r === 'stale') return NextResponse.json({ error: '此项目刚被他人修改,请刷新后重新提交。', stale: true }, { status: 409 });
+    appendAudit(id, newEntries);
+    return NextResponse.json({ project: p, conflict: false });
+  }
+
   appendAudit(id, newEntries);
   saveProject(p);
   return NextResponse.json({ project: p, conflict });

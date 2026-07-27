@@ -236,7 +236,23 @@ export function planDates(pkg: ServicePackage, start: string): (PlanDate | null)
 export const statusPct = (s: string) => (s === 'done' ? 100 : s === 'wip' ? 50 : s === 'block' ? 25 : 0);
 
 /* Project lifecycle stage is DERIVED from progress, not set manually */
+/* v2.2 §5.1/§5.2: once the post-sales workflow is active, stage is derived from
+   business actions (not from schedule progress). Returns null when the workflow
+   hasn't started, so legacy projects keep the heuristic below. */
+export function workflowStage(p: Project): Stage | null {
+  const h = p.handover, cr = p.completionReview, sv = p.salesVerification, inv = p.invoiceClose;
+  const invoiced = !!inv && inv.invoiceStatus === 'issued';
+  const approved = cr?.approval?.status === 'approved';
+  if (invoiced || (approved && sv?.status === 'verified' && sv?.finalInvoiceAllowed)) return 'invoice'; // 已收款仍归入 invoice；归档为独立操作
+  if (cr?.status === 'submitted' || approved) return 'complete'; // PD 批准但 Sales 未核对 → 仍在 complete
+  if (h?.status === 'accepted') return 'progress';
+  if (h?.status === 'submitted') return 'handover';
+  return null;
+}
+
 export function projStage(p: Project): Stage {
+  const ws = workflowStage(p);
+  if (ws) return ws;
   if (p.invoiced) return 'invoice';
   const sp = schedProgress(p);
   if (sp.total > 0 && sp.done === sp.total) return 'complete';

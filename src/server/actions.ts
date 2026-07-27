@@ -4,9 +4,9 @@
 
 import type { Identity } from '@/lib/permissions';
 import {
-  canAssign, canCommercial, canDecide, canEdit, canRowEdit,
+  canAssign, canCommercial, canDecide, canEdit, canRowEdit, isFull,
 } from '@/lib/permissions';
-import { buildPackage, fitWindow, newId, parseISO, isoDate, totalDays } from '@/lib/project';
+import { buildPackage, deriveStatuses, fitWindow, newId, parseISO, isoDate, totalDays } from '@/lib/project';
 import { SVC, type Template } from '@/lib/templates';
 import type { ChecklistStatus, Project, ScheduleStatus } from '@/lib/types';
 
@@ -46,6 +46,8 @@ export type ProjectAction =
   | { type: 'addOwner'; name: string }
   | { type: 'removeOwner'; name: string }
   | { type: 'transferProject'; from: string; to: string; includeTasks: boolean }
+  | { type: 'submitHandover'; salesBrief: string; assignedPmId: string }
+  | { type: 'acceptHandover' }
   | { type: 'addContact' }
   | { type: 'editContact'; idx: number; field: 'role' | 'company' | 'person' | 'phone' | 'email'; value: string }
   | { type: 'removeContact'; idx: number }
@@ -399,6 +401,33 @@ export function applyAction(u: Identity, p: Project, a: ProjectAction, ctx: Acti
       logIt(p, u.name, p.invoiced ? '标记开票/收尾' : '撤销开票');
       break;
     }
+    /* ===== v2.2 Version 1A · S2 — Sales → PM handover ===== */
+    case 'submitHandover': {
+      if (!canCommercial(u, p)) throw new PermissionError('仅 Sales / PD / BD 可提交交接');
+      const pm = String(a.assignedPmId || '').trim();
+      if (!pm) throw new ValidationError('请指定接单 PM');
+      const h = p.handover!;
+      if (h.status === 'accepted') throw new ValidationError('该项目已被 PM 接单,无法重复交接');
+      h.status = 'submitted';
+      h.salesBrief = String(a.salesBrief || '');
+      h.assignedPmId = pm;
+      h.submittedBy = u.name;
+      h.submittedAt = Date.now();
+      /* make sure the assigned PM owns the project so it flows to My Tasks */
+      if (!(p.owners || []).includes(pm)) p.owners = [...(p.owners || []), pm];
+      logIt(p, u.name, `提交交接给 PM「${pm}」Submit handover`);
+      break;
+    }
+    case 'acceptHandover': {
+      const h = p.handover!;
+      if (h.status !== 'submitted') throw new ValidationError('当前没有待接收的交接');
+      const isAssignedPm = u.name === h.assignedPmId;
+      if (!isAssignedPm && !isFull(u)) throw new PermissionError('仅被指派的 PM(或 PD/BD)可接单');
+      h.status = 'accepted';
+      h.briefingAt = Date.now();
+      logIt(p, u.name, `接受交接,进入生产 Accept handover`);
+      break;
+    }
     case 'addContact': {
       if (!canEdit(u, p)) throw new PermissionError('无编辑权限');
       if (!Array.isArray(p.contacts)) p.contacts = [];
@@ -464,4 +493,9 @@ export function applyAction(u: Identity, p: Project, a: ProjectAction, ctx: Acti
     default:
       throw new ValidationError('未知操作');
   }
+  /* v2.2 §5.1/§5.2: keep the derived Production/Commercial status fresh after
+     every mutation (stage is derived at read time via projStage). */
+  const d = deriveStatuses(p);
+  p.productionStatus = d.productionStatus;
+  p.commercialStatus = d.commercialStatus;
 }

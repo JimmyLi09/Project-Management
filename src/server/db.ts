@@ -329,6 +329,39 @@ export function listWorkflowActions(projectId: string) {
     .prepare('SELECT action_type, workflow_version, actor_id, created_at FROM workflow_actions WHERE project_id = ? ORDER BY created_at')
     .all(projectId) as { action_type: string; workflow_version: number; actor_id: string; created_at: number }[];
 }
+
+/* v2.2 §4.4+§4.5: commit a workflow submission atomically — insert the
+   idempotency key AND save projects.data with a version CAS, in one
+   transaction. Returns 'ok', 'duplicate' (already submitted) or 'stale'
+   (someone else wrote in between → caller re-reads and reconfirms). */
+export function commitWorkflowAction(p: Project, actionType: string, actorId: string, expectedVersion: number): 'ok' | 'duplicate' | 'stale' {
+  const d = getDb();
+  const now = Date.now();
+  const wfv = p.workflowVersion || 1;
+  const { updatedAt: _u, version: _v, ...data } = p;
+  const json = JSON.stringify(data);
+  const tx = d.transaction(() => {
+    try {
+      d.prepare('INSERT INTO workflow_actions (project_id, action_type, workflow_version, actor_id, created_at) VALUES (?, ?, ?, ?, ?)')
+        .run(p.id, actionType, wfv, actorId, now);
+    } catch (e: any) {
+      if (String(e?.code || '').includes('CONSTRAINT') || /UNIQUE/.test(String(e?.message))) throw new Error('__DUP__');
+      throw e;
+    }
+    const info = d.prepare('UPDATE projects SET data = ?, updated_at = ?, version = version + 1 WHERE id = ? AND version = ?')
+      .run(json, now, p.id, expectedVersion);
+    if (info.changes === 0) throw new Error('__STALE__');
+  });
+  try {
+    tx();
+    p.updatedAt = now; p.version = expectedVersion + 1;
+    return 'ok';
+  } catch (e: any) {
+    if (e?.message === '__DUP__') return 'duplicate';
+    if (e?.message === '__STALE__') return 'stale';
+    throw e;
+  }
+}
 export function deleteProject(id: string) {
   getDb().prepare('DELETE FROM projects WHERE id = ?').run(id);
 }
