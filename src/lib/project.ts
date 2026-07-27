@@ -43,6 +43,9 @@ export interface NewProjectInput {
   landscape?: string;
   interior?: string;
   creative?: string;
+  clientPerson?: string; // R5-2: optional client contact captured on create
+  clientPhone?: string;
+  clientEmail?: string;
 }
 
 export function buildPackage(svc: string, start: string, tpl?: Template): ServicePackage {
@@ -91,6 +94,16 @@ export function newProject(o: NewProjectInput, tplLookup?: (svc: string) => Temp
       interior: o.interior || '',
       creative: o.creative || '',
     },
+    /* seed the contact directory: a client row (+ any parties given), so the
+       Contacts module has data from day one (R5-2/R5-4) */
+    contacts: [
+      { role: '客户 Client', company: o.client || '', person: o.clientPerson || '', phone: o.clientPhone || '', email: o.clientEmail || '' },
+      ...(o.mainContractor ? [{ role: '总包 Main Con', company: o.mainContractor, person: '', phone: '', email: '' }] : []),
+      ...(o.architect ? [{ role: '建筑师 Architect', company: o.architect, person: '', phone: '', email: '' }] : []),
+      ...(o.landscape ? [{ role: '景观 Landscape', company: o.landscape, person: '', phone: '', email: '' }] : []),
+      ...(o.interior ? [{ role: '室内 Interior', company: o.interior, person: '', phone: '', email: '' }] : []),
+      ...(o.creative ? [{ role: '创意 Creative', company: o.creative, person: '', phone: '', email: '' }] : []),
+    ].filter((c) => c.company || c.person || c.phone || c.email),
     log: [],
     packages: services.map((svc) => buildPackage(svc, o.start || '', tplLookup ? tplLookup(svc) : undefined)),
   };
@@ -148,6 +161,8 @@ export function migrate(p: any): Project {
   if (p.points === undefined) p.points = diffPoints(p.difficulty) * ((p.services && p.services.length) || 1);
   if (!p.log) p.log = [];
   if (!p.perm) p.perm = [];
+  if (!Array.isArray(p.contacts)) p.contacts = [];
+  p.packages.forEach((pk: any) => { if (!Array.isArray(pk.scopeItems)) pk.scopeItems = []; });
   return p as Project;
 }
 

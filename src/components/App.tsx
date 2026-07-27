@@ -13,6 +13,7 @@ import TeamView from './views/TeamView';
 import MyTasksView from './views/MyTasksView';
 import DirectorUpdateView from './views/DirectorUpdateView';
 import StatsView from './views/StatsView';
+import ContactsView from './views/ContactsView';
 import UsersView from './views/UsersView';
 import TemplatesView from './views/TemplatesView';
 import ProjectDetail from './views/ProjectDetail';
@@ -32,6 +33,7 @@ const PAGE_META: Record<string, { title: [string, string]; sub: [string, string]
   mytasks: { title: ['我的待办', 'My Tasks'], sub: ['你的未完成任务 · 按到期日排序', 'Your open items, sorted by due date'] },
   dupdate: { title: ['向上汇报', 'Director Update'], sub: ['每周汇报、风险与决策闭环', 'Weekly updates, risks and decisions'] },
   stats: { title: ['统计报表', 'Reports'], sub: ['项目统计 · 按 PM 的项目数与积分', 'Projects and points by PM'] },
+  contacts: { title: ['通讯录', 'Contacts'], sub: ['所有客户、总包与联系人 · 可导出', 'All clients, contractors and contacts · exportable'] },
   users: { title: ['用户管理', 'Users'], sub: ['账号、角色与访问权限', 'Accounts, roles and access'] },
   templates: { title: ['模板管理', 'Templates'], sub: ['编辑生产排期与信息清单模板(仅影响之后新建的项目)', 'Edit schedule & checklist templates (affects new projects only)'] },
 };
@@ -113,6 +115,7 @@ function Shell() {
           {navItem('mytasks', 'check', t('我的待办', 'My Tasks'), myOpenCount)}
           {navItem('dupdate', 'presentation', t('向上汇报', 'Director Update'))}
           {navItem('stats', 'trending', t('统计报表', 'Reports'))}
+          {navItem('contacts', 'users', t('通讯录', 'Contacts'))}
           {isFull(me) && navItem('users', 'settings', t('用户管理', 'Users'))}
           {isFull(me) && navItem('templates', 'layers', t('模板管理', 'Templates'))}
         </nav>
@@ -208,6 +211,7 @@ function Shell() {
             {view.name === 'mytasks' && <MyTasksView />}
             {view.name === 'dupdate' && <DirectorUpdateView />}
             {view.name === 'stats' && <StatsView />}
+            {view.name === 'contacts' && <ContactsView />}
             {view.name === 'users' && <UsersView />}
             {view.name === 'templates' && <TemplatesView />}
             {view.name === 'project' && <ProjectDetail />}

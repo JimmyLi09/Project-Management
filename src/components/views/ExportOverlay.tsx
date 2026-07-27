@@ -83,6 +83,19 @@ export default function ExportOverlay({ p, onClose }: { p: Project; onClose: () 
                   })}
                 </tbody>
               </table>
+              {(pkg.scopeItems && pkg.scopeItems.length > 0) && (
+                <>
+                  <h3 style={{ fontSize: 12.5, margin: '12px 0 6px' }}>{T('服务内容 / 交付清单', 'Service Scope / Deliverables')}</h3>
+                  <table>
+                    <tbody>
+                      <tr><th>{T('服务项', 'Service item')}</th><th>{T('数量', 'Detail')}</th><th>{T('特别说明', 'Special notes')}</th></tr>
+                      {pkg.scopeItems.map((s, si) => (
+                        <tr key={si}><td>{s.item || '—'}</td><td>{s.qty || '—'}</td><td>{s.note || '—'}</td></tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </>
+              )}
               <h3 style={{ fontSize: 12.5, margin: '12px 0 6px' }}>{T('信息清单(仅含已填写)', 'Information Checklist (filled only)')}</h3>
               {groups.length === 0 ? (
                 <p style={{ color: '#888' }}>{T('暂无已填写的信息项。', 'No filled-in items yet.')}</p>

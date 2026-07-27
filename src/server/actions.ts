@@ -46,6 +46,12 @@ export type ProjectAction =
   | { type: 'addOwner'; name: string }
   | { type: 'removeOwner'; name: string }
   | { type: 'transferProject'; from: string; to: string; includeTasks: boolean }
+  | { type: 'addContact' }
+  | { type: 'editContact'; idx: number; field: 'role' | 'company' | 'person' | 'phone' | 'email'; value: string }
+  | { type: 'removeContact'; idx: number }
+  | { type: 'addScopeItem'; pkg: number }
+  | { type: 'editScopeItem'; pkg: number; idx: number; field: 'item' | 'qty' | 'note'; value: string }
+  | { type: 'removeScopeItem'; pkg: number; idx: number }
   | { type: 'setArchived'; value: boolean }
   | { type: 'dismissRisk'; key: string }
   | { type: 'restoreRisk'; key: string }
@@ -391,6 +397,46 @@ export function applyAction(u: Identity, p: Project, a: ProjectAction, ctx: Acti
       if (!canCommercial(u, p)) throw new PermissionError('仅 PD/BD/销售可标记开票收尾');
       p.invoiced = !p.invoiced;
       logIt(p, u.name, p.invoiced ? '标记开票/收尾' : '撤销开票');
+      break;
+    }
+    case 'addContact': {
+      if (!canEdit(u, p)) throw new PermissionError('无编辑权限');
+      if (!Array.isArray(p.contacts)) p.contacts = [];
+      p.contacts.push({ role: '', company: '', person: '', phone: '', email: '' });
+      break;
+    }
+    case 'editContact': {
+      if (!canEdit(u, p)) throw new PermissionError('无编辑权限');
+      if (!Array.isArray(p.contacts)) p.contacts = [];
+      const c = p.contacts[a.idx];
+      if (!c) throw new ValidationError('无效的联系人');
+      (c as any)[a.field] = String(a.value).slice(0, 200);
+      break;
+    }
+    case 'removeContact': {
+      if (!canEdit(u, p)) throw new PermissionError('无编辑权限');
+      if (Array.isArray(p.contacts) && p.contacts[a.idx]) p.contacts.splice(a.idx, 1);
+      break;
+    }
+    case 'addScopeItem': {
+      if (!canEdit(u, p)) throw new PermissionError('无编辑权限');
+      const pk = p.packages[a.pkg];
+      if (!pk) throw new ValidationError('无效的服务包');
+      if (!Array.isArray(pk.scopeItems)) pk.scopeItems = [];
+      pk.scopeItems.push({ item: '', qty: '', note: '' });
+      break;
+    }
+    case 'editScopeItem': {
+      if (!canEdit(u, p)) throw new PermissionError('无编辑权限');
+      const pk = p.packages[a.pkg];
+      if (!pk || !Array.isArray(pk.scopeItems) || !pk.scopeItems[a.idx]) throw new ValidationError('无效的服务内容项');
+      (pk.scopeItems[a.idx] as any)[a.field] = String(a.value).slice(0, 500);
+      break;
+    }
+    case 'removeScopeItem': {
+      if (!canEdit(u, p)) throw new PermissionError('无编辑权限');
+      const pk = p.packages[a.pkg];
+      if (pk && Array.isArray(pk.scopeItems) && pk.scopeItems[a.idx]) pk.scopeItems.splice(a.idx, 1);
       break;
     }
     case 'setArchived': {

@@ -9,6 +9,8 @@ import { useLang } from '@/lib/i18n';
 import { Avatar, AvatarStack, HM, Icon, Pill, ProgressBar } from '../ui';
 import type { Project } from '@/lib/types';
 
+type ViewMode = 'cards' | 'compact' | 'list';
+
 export default function ProjectsView({ search = '' }: { search?: string }) {
   const { projects, me, openProject } = useStore();
   const { lang, t } = useLang();
@@ -16,6 +18,12 @@ export default function ProjectsView({ search = '' }: { search?: string }) {
   const [pmFilter, setPmFilter] = useState('all');
   const [showArchived, setShowArchived] = useState(false);
   const [q, setQ] = useState(search);
+  /* R5-1: view/density switcher (大卡片 / 紧凑 / 列表) — persisted per browser */
+  const [viewMode, setViewMode] = useState<ViewMode>(() => {
+    if (typeof window === 'undefined') return 'cards';
+    return (localStorage.getItem('audax.projectsView') as ViewMode) || 'cards';
+  });
+  const setView2 = (m: ViewMode) => { setViewMode(m); try { localStorage.setItem('audax.projectsView', m); } catch {} };
 
   const archivedCount = projects.filter((p) => p.archived).length;
 
@@ -64,19 +72,107 @@ export default function ProjectsView({ search = '' }: { search?: string }) {
           <button className={`chip ${showArchived ? 'active' : ''}`} onClick={() => setShowArchived(!showArchived)} title={t('查看已归档项目', 'View archived projects')}>
             📦 {t('已归档', 'Archived')}{archivedCount ? ` ${archivedCount}` : ''}
           </button>
+          {/* R5-1: 查看 — switch how much of each project is shown */}
+          <div style={{ display: 'inline-flex', border: '1px solid var(--border)', borderRadius: 8, overflow: 'hidden' }} title={t('查看方式', 'View')}>
+            {([['cards', '🔲', t('大卡片', 'Cards')], ['compact', '▦', t('紧凑', 'Compact')], ['list', '≣', t('列表', 'List')]] as [ViewMode, string, string][]).map(([m, ic, lb]) => (
+              <button key={m} onClick={() => setView2(m)}
+                style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '7px 11px', fontSize: 12.5, fontWeight: 600, background: viewMode === m ? 'var(--navy900)' : 'var(--card)', color: viewMode === m ? '#fff' : 'var(--text2)' }}>
+                <span>{ic}</span>{lb}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(320px,1fr))', gap: 22 }}>
-        {list.map((p) => <ProjectCard key={p.id} p={p} onOpen={() => openProject(p.id)} />)}
-        {list.length === 0 && (
-          <div className="panel" style={{ padding: 40, textAlign: 'center', color: 'var(--text2)', gridColumn: '1 / -1' }}>
-            {t('没有匹配的项目。', 'No matching projects.')}
-            {canCreate(me) ? t('点右上角「新建项目」创建。', ' Use New Project to create one.') : ''}
-          </div>
-        )}
-      </div>
+      {list.length === 0 ? (
+        <div className="panel" style={{ padding: 40, textAlign: 'center', color: 'var(--text2)' }}>
+          {t('没有匹配的项目。', 'No matching projects.')}
+          {canCreate(me) ? t('点右上角「新建项目」创建。', ' Use New Project to create one.') : ''}
+        </div>
+      ) : viewMode === 'list' ? (
+        <ProjectList list={list} onOpen={openProject} />
+      ) : (
+        <div style={{ display: 'grid', gridTemplateColumns: viewMode === 'compact' ? 'repeat(auto-fill,minmax(230px,1fr))' : 'repeat(auto-fill,minmax(320px,1fr))', gap: viewMode === 'compact' ? 14 : 22 }}>
+          {list.map((p) => viewMode === 'compact'
+            ? <CompactCard key={p.id} p={p} onOpen={() => openProject(p.id)} />
+            : <ProjectCard key={p.id} p={p} onOpen={() => openProject(p.id)} />)}
+        </div>
+      )}
     </>
+  );
+}
+
+/* R5-1: compact card — no cover image, condensed to fit more per row */
+function CompactCard({ p, onOpen }: { p: Project; onOpen: () => void }) {
+  const { lang, t } = useLang();
+  const sp = schedProgress(p);
+  const stage = projStage(p);
+  const done = stage === 'complete' || stage === 'invoice';
+  const h = done ? 'completed' : projectHealth(p);
+  const pm = (p.owners || [])[0];
+  const del = parseISO(p.delivery);
+  return (
+    <div className="panel" onClick={onOpen} style={{ cursor: 'pointer', padding: 15, display: 'flex', flexDirection: 'column', gap: 10 }}
+      onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.boxShadow = 'var(--shadow-lg)'; }}
+      onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.boxShadow = 'var(--shadow)'; }}>
+      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8 }}>
+        <div style={{ minWidth: 0 }}>
+          <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--navy900)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.name}</div>
+          <div style={{ fontSize: 11.5, color: 'var(--text2)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.client || '—'}</div>
+        </div>
+        <Pill m={HM[h]} />
+      </div>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+        {p.services.slice(0, 3).map((k) => <span key={k} className="svc-chip" style={{ color: svcColor(k), fontSize: 10.5 }}>{svcName(k, lang)}</span>)}
+        {p.services.length > 3 && <span className="svc-chip" style={{ fontSize: 10.5 }}>+{p.services.length - 3}</span>}
+      </div>
+      <ProgressBar pct={sp.pct} color={svcColor(p.services[0])} />
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: 11.5, color: 'var(--text2)' }}>
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>{pm ? <Avatar name={pm} size={20} /> : null}{pm || t('未指派', 'No PM')}</span>
+        <span className="tnum">{del ? fmtDate(del).slice(0, 6) : '—'}</span>
+      </div>
+    </div>
+  );
+}
+
+/* R5-1: list/details view — a dense table, most projects visible at once */
+function ProjectList({ list, onOpen }: { list: Project[]; onOpen: (id: string) => void }) {
+  const { lang, t } = useLang();
+  const th: React.CSSProperties = { padding: '11px 16px', fontSize: 11, fontWeight: 700, letterSpacing: '.04em', textTransform: 'uppercase', color: 'var(--text2)', textAlign: 'left', whiteSpace: 'nowrap' };
+  const cols = '2fr 1.4fr 90px 120px 1.1fr 96px 96px';
+  return (
+    <div className="panel clip">
+      <div style={{ display: 'grid', gridTemplateColumns: cols, gap: 12, background: 'var(--hover-bg)', borderBottom: '1px solid var(--row-line)' }}>
+        <div style={th}>{t('项目', 'Project')}</div><div style={th}>{t('服务', 'Services')}</div><div style={th}>PM</div>
+        <div style={th}>{t('阶段', 'Stage')}</div><div style={th}>{t('进度', 'Progress')}</div><div style={th}>{t('交付', 'Delivery')}</div><div style={th}>{t('健康', 'Health')}</div>
+      </div>
+      {list.map((p) => {
+        const sp = schedProgress(p);
+        const stage = projStage(p);
+        const done = stage === 'complete' || stage === 'invoice';
+        const h = done ? 'completed' : projectHealth(p);
+        const pm = (p.owners || [])[0];
+        const del = parseISO(p.delivery);
+        const stageLabel = { presales: t('售前', 'Presales'), handover: t('交接', 'Handover'), progress: t('进行中', 'Production'), complete: t('完成', 'Complete'), invoice: t('收尾', 'Invoice') }[stage];
+        return (
+          <div key={p.id} className="row-hover" style={{ display: 'grid', gridTemplateColumns: cols, gap: 12, alignItems: 'center', padding: '13px 16px', borderBottom: '1px solid var(--row-line)', cursor: 'pointer' }} onClick={() => onOpen(p.id)}>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--navy900)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.name}</div>
+              <div style={{ fontSize: 11.5, color: 'var(--text2)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.client || '—'}</div>
+            </div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, minWidth: 0 }}>
+              {p.services.slice(0, 2).map((k) => <span key={k} className="svc-chip" style={{ color: svcColor(k), fontSize: 10.5 }}>{svcName(k, lang)}</span>)}
+              {p.services.length > 2 && <span className="svc-chip" style={{ fontSize: 10.5 }}>+{p.services.length - 2}</span>}
+            </div>
+            <div>{pm ? <Avatar name={pm} size={26} title={pm} /> : <span style={{ fontSize: 12, color: '#b6bfc9' }}>—</span>}</div>
+            <div style={{ fontSize: 12.5, color: 'var(--text2)' }}>{stageLabel}</div>
+            <div><ProgressBar pct={sp.pct} color={svcColor(p.services[0])} /></div>
+            <div className="tnum" style={{ fontSize: 12.5, color: del && del < new Date() && !done ? 'var(--danger)' : 'var(--text)', fontWeight: 600 }}>{del ? fmtDate(del).slice(0, 6) : '—'}</div>
+            <div><Pill m={HM[h]} /></div>
+          </div>
+        );
+      })}
+    </div>
   );
 }
 
@@ -157,6 +253,9 @@ export function NewProjectModal({ onClose }: { onClose: () => void }) {
   const [landscape, setLandscape] = useState('');
   const [interior, setInterior] = useState('');
   const [creative, setCreative] = useState('');
+  const [clientPerson, setClientPerson] = useState('');
+  const [clientPhone, setClientPhone] = useState('');
+  const [clientEmail, setClientEmail] = useState('');
   const [busy, setBusy] = useState(false);
 
   function toggleSvc(k: string) {
@@ -174,6 +273,7 @@ export function NewProjectModal({ onClose }: { onClose: () => void }) {
       owners: owners.split(',').map((s) => s.trim()).filter(Boolean),
       difficulty, start, delivery, buffer,
       mainContractor, architect, landscape, interior, creative,
+      clientPerson, clientPhone, clientEmail,
     });
     setBusy(false);
     if (p) { onClose(); openProject(p.id); }
@@ -203,6 +303,12 @@ export function NewProjectModal({ onClose }: { onClose: () => void }) {
         <div className="field">
           <label>{t('客户', 'Client')}</label>
           <input value={client} onChange={(e) => setClient(e.target.value)} placeholder={t('developer / 客户', 'developer / client')} />
+        </div>
+        {/* R5-2: optional client contact — 每个公司可选填联系人/电话/邮箱 */}
+        <div className="two">
+          <div className="field"><label>{t('客户联系人(可选)', 'Client contact (optional)')}</label><input value={clientPerson} onChange={(e) => setClientPerson(e.target.value)} placeholder={t('姓名', 'name')} /></div>
+          <div className="field"><label>{t('电话(可选)', 'Phone (optional)')}</label><input value={clientPhone} onChange={(e) => setClientPhone(e.target.value)} placeholder="+65 ..." /></div>
+          <div className="field"><label>{t('邮箱(可选)', 'Email (optional)')}</label><input value={clientEmail} onChange={(e) => setClientEmail(e.target.value)} placeholder="name@company.com" /></div>
         </div>
         <div className="two">
           <div className="field"><label>{t('总包', 'Main contractor')}</label><input value={mainContractor} onChange={(e) => setMainContractor(e.target.value)} /></div>

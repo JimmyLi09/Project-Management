@@ -110,6 +110,44 @@ export default function ScheduleTab({ p, pkgIdx, onExport, onPkg }: {
         )}
       </div>
 
+      {/* R5-3: service scope / deliverables (like the sales job record: item · qty · notes) */}
+      <div className="panel" style={{ padding: '12px 16px', marginBottom: 14 }}>
+        <div className="mini-label" style={{ marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6, fontWeight: 700, color: 'var(--navy900)' }}>
+          📋 {t('服务内容 / 交付清单', 'Service scope / deliverables')}
+          <span style={{ fontWeight: 400, color: 'var(--text2)' }}>{t('（项目 · 数量 · 说明）', '(item · qty · notes)')}</span>
+        </div>
+        {(pkg.scopeItems && pkg.scopeItems.length > 0) || ed ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: ed ? 'minmax(160px,1.6fr) 90px minmax(200px,2.4fr) 28px' : 'minmax(160px,1.6fr) 90px minmax(200px,2.4fr)', gap: 10, padding: '6px 0', borderBottom: '1px solid var(--row-line)', fontSize: 11, fontWeight: 700, letterSpacing: '.03em', textTransform: 'uppercase', color: 'var(--text2)' }}>
+              <div>{t('服务项', 'Service item')}</div><div>{t('数量', 'Detail')}</div><div>{t('特别说明', 'Special notes')}</div>{ed && <div />}
+            </div>
+            {(pkg.scopeItems || []).map((s, si) => (
+              <div key={si} style={{ display: 'grid', gridTemplateColumns: ed ? 'minmax(160px,1.6fr) 90px minmax(200px,2.4fr) 28px' : 'minmax(160px,1.6fr) 90px minmax(200px,2.4fr)', gap: 10, alignItems: 'start', padding: '8px 0', borderBottom: '1px solid var(--row-line)' }}>
+                {ed ? <>
+                  <input className="in sm" defaultValue={s.item} placeholder={t('如 Hero Shot', 'e.g. Hero Shot')}
+                    onBlur={(e) => e.target.value !== s.item && dispatch(p.id, { type: 'editScopeItem', pkg: pkgIdx, idx: si, field: 'item', value: e.target.value })} />
+                  <input className="in sm" defaultValue={s.qty} placeholder={t('数量', 'qty')}
+                    onBlur={(e) => e.target.value !== s.qty && dispatch(p.id, { type: 'editScopeItem', pkg: pkgIdx, idx: si, field: 'qty', value: e.target.value })} />
+                  <textarea className="in sm" rows={1} defaultValue={s.note} placeholder={t('分辨率 / 包含项 / 备注…', 'resolution / inclusions / notes…')} style={{ minHeight: 30, resize: 'vertical', lineHeight: 1.5 }}
+                    onBlur={(e) => e.target.value !== s.note && dispatch(p.id, { type: 'editScopeItem', pkg: pkgIdx, idx: si, field: 'note', value: e.target.value })} />
+                  <button style={{ color: 'var(--danger)', fontWeight: 700 }} title={t('删除', 'Delete')} onClick={() => dispatch(p.id, { type: 'removeScopeItem', pkg: pkgIdx, idx: si })}>✕</button>
+                </> : <>
+                  <div style={{ fontSize: 13, fontWeight: 500 }}>{s.item || '—'}</div>
+                  <div className="tnum" style={{ fontSize: 13 }}>{s.qty || '—'}</div>
+                  <div style={{ fontSize: 12.5, color: 'var(--text2)', whiteSpace: 'pre-wrap' }}>{s.note || '—'}</div>
+                </>}
+              </div>
+            ))}
+            {ed && (
+              <button className="btn-line sm" style={{ marginTop: 10, alignSelf: 'flex-start', borderStyle: 'dashed' }}
+                onClick={() => dispatch(p.id, { type: 'addScopeItem', pkg: pkgIdx })}>+ {t('添加服务项', 'Add item')}</button>
+            )}
+          </div>
+        ) : (
+          <div style={{ fontSize: 12.5, color: 'var(--text2)' }}>{t('（未填写）', '(none)')}</div>
+        )}
+      </div>
+
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14, fontSize: 12.5, color: 'var(--text2)' }}>
         <Icon name="lock" size={14} style={{ color: 'var(--navy700)' }} /> {t('冻结点 — 确认后锁定,改动影响下游', 'Freeze point — locked once confirmed; changes ripple downstream')}
       </div>

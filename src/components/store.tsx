@@ -8,7 +8,7 @@ import type { ProjectAction } from '@/server/actions';
 import type { Identity } from '@/lib/permissions';
 
 export interface View {
-  name: 'overview' | 'projects' | 'team' | 'mytasks' | 'dupdate' | 'stats' | 'users' | 'templates' | 'project';
+  name: 'overview' | 'projects' | 'team' | 'mytasks' | 'dupdate' | 'stats' | 'contacts' | 'users' | 'templates' | 'project';
   pid?: string;
   tab?: 'overview' | 'schedule' | 'checklist';
   pkg?: number;

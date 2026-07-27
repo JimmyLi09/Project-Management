@@ -361,6 +361,41 @@ function OverviewTab({ p, onSchedule }: { p: Project; onSchedule: (pkg: number) 
           {(p.owners || []).length === 0 && team.length === 0 && <div style={{ fontSize: 12.5, color: 'var(--text2)', padding: '8px 0' }}>{t('尚未指派人员', 'No one assigned yet')}</div>}
         </div>
 
+        {/* R5-2: company contacts (client / main con / architect …) */}
+        <div className="panel" style={{ padding: 20 }}>
+          <div className="panel-title" style={{ fontSize: 15, marginBottom: 12 }}>{t('联系人', 'Contacts')}</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            {(p.contacts || []).map((c, ci) => (
+              <div key={ci} style={{ borderTop: ci ? '1px solid var(--row-line2)' : 'none', paddingTop: ci ? 12 : 0 }}>
+                {canEd ? (
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 7 }}>
+                    <input className="in sm" defaultValue={c.role} placeholder={t('角色(如 客户/总包)', 'Role (e.g. Client)')}
+                      onBlur={(e) => e.target.value !== c.role && dispatch(p.id, { type: 'editContact', idx: ci, field: 'role', value: e.target.value })} />
+                    <input className="in sm" defaultValue={c.company} placeholder={t('公司', 'Company')}
+                      onBlur={(e) => e.target.value !== c.company && dispatch(p.id, { type: 'editContact', idx: ci, field: 'company', value: e.target.value })} />
+                    <input className="in sm" defaultValue={c.person} placeholder={t('联系人', 'Contact person')}
+                      onBlur={(e) => e.target.value !== c.person && dispatch(p.id, { type: 'editContact', idx: ci, field: 'person', value: e.target.value })} />
+                    <input className="in sm" defaultValue={c.phone} placeholder={t('电话', 'Phone')}
+                      onBlur={(e) => e.target.value !== c.phone && dispatch(p.id, { type: 'editContact', idx: ci, field: 'phone', value: e.target.value })} />
+                    <input className="in sm" style={{ gridColumn: '1 / -1' }} defaultValue={c.email} placeholder={t('邮箱', 'Email')}
+                      onBlur={(e) => e.target.value !== c.email && dispatch(p.id, { type: 'editContact', idx: ci, field: 'email', value: e.target.value })} />
+                    <button className="btn-line sm danger" style={{ justifySelf: 'start' }} onClick={() => dispatch(p.id, { type: 'removeContact', idx: ci })}>✕ {t('删除', 'Remove')}</button>
+                  </div>
+                ) : (
+                  <div>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--navy900)' }}>{c.company || c.person || '—'} {c.role && <span style={{ fontSize: 11, fontWeight: 500, color: 'var(--text2)' }}>· {c.role}</span>}</div>
+                    <div style={{ fontSize: 12, color: 'var(--text2)' }}>
+                      {[c.person, c.phone, c.email].filter(Boolean).join(' · ') || t('无联系方式', 'no contact details')}
+                    </div>
+                  </div>
+                )}
+              </div>
+            ))}
+            {(p.contacts || []).length === 0 && <div style={{ fontSize: 12.5, color: 'var(--text2)' }}>{t('暂无联系人', 'No contacts yet')}</div>}
+          </div>
+          {canEd && <button className="btn-line sm" style={{ marginTop: 12, borderStyle: 'dashed' }} onClick={() => dispatch(p.id, { type: 'addContact' })}>+ {t('添加联系人', 'Add contact')}</button>}
+        </div>
+
         <div className="panel" style={{ padding: 20 }}>
           <div className="panel-title" style={{ fontSize: 15, marginBottom: 8, cursor: 'pointer' }} onClick={() => setLogOpen(!logOpen)}>
             {t('操作记录', 'Recent Activity')}

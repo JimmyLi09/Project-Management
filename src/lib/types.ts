@@ -64,6 +64,13 @@ export interface ChecklistGroup {
   items: ChecklistItem[];
 }
 
+/* R5-3: a scope / quotation line for a service package (from the sales job record) */
+export interface ScopeItem {
+  item: string; // e.g. "Hero Shot", "Indoor Facility Views"
+  qty: string; // e.g. "4" (free text so "1 No." etc. is allowed)
+  note: string; // special notes: resolution, inclusions, etc.
+}
+
 export interface ServicePackage {
   svc: string;
   start: string;
@@ -74,6 +81,7 @@ export interface ServicePackage {
   schedule: ScheduleRow[];
   checklist: ChecklistGroup[];
   resourceLinks?: string; // free text: web links / network paths to renders, VR, drone, models
+  scopeItems?: ScopeItem[]; // R5-3: deliverables breakdown (item / qty / notes)
 }
 
 export type DecisionStatus = 'pending' | 'approved' | 'rejected' | 'needinfo';
@@ -107,6 +115,16 @@ export interface Parties {
   creative: string;
 }
 
+/* R5-2: optional contact details for a company on the project (client, main
+   contractor, etc.). All fields optional — captured on create or later. */
+export interface ProjectContact {
+  role: string; // 客户 Client / 总包 Main Con / 建筑师 Architect / ...
+  company: string;
+  person: string; // contact person name
+  phone: string;
+  email: string;
+}
+
 export type Difficulty = 'easy' | 'medium' | 'hard' | 'complex';
 
 export interface Project {
@@ -129,6 +147,7 @@ export interface Project {
   updatedAt?: number; // server-injected on read; used for conflict detection
   update: DirectorUpdate;
   parties: Parties;
+  contacts?: ProjectContact[]; // R5-2/R5-4: company contact directory for this project
   log: LogEntry[];
   packages: ServicePackage[];
 }
