@@ -37,13 +37,51 @@ export default function DirectorUpdateView() {
   const staleCount = projects.filter((p) => staleInfo(p.update).cls !== 'stale-ok' && (p.owners || []).length).length;
   const overdueProjects = projects.filter((p) => overdueItems(p).length).length;
 
+  /* v2.2 §5.2: commercial overdue collections — production done, money not in.
+     Reads derived Commercial status so PM delivery is never blamed for late payment. */
+  const overdueCollections = useMemo(
+    () => projects.filter((p) => !p.archived && (p.commercialStatus === 'overdue' || p.paymentRisk?.level === 'high')),
+    [projects],
+  );
+
   return (
     <>
-      <div className="kpi-grid">
+      <div className="kpi-grid four">
         <MiniKpi label={t('待决策', 'Awaiting decision')} value={String(pendingDecisions.length)} color={pendingDecisions.length ? 'var(--bronze)' : 'var(--navy900)'} sub={t('需 Director 批复的事项', 'items needing a Director decision')} />
         <MiniKpi label={t('周报未更新', 'Stale updates')} value={String(staleCount)} color={staleCount ? 'var(--warning)' : 'var(--navy900)'} sub={t('超过 7 天未更新的项目', 'projects not updated for 7+ days')} />
         <MiniKpi label={t('有逾期的项目', 'Projects overdue')} value={String(overdueProjects)} color={overdueProjects ? 'var(--danger)' : 'var(--navy900)'} sub={t('存在逾期阶段的项目', 'projects with overdue phases')} />
+        <MiniKpi label={t('逾期收款', 'Overdue collections')} value={String(overdueCollections.length)} color={overdueCollections.length ? 'var(--danger)' : 'var(--success)'} sub={t('已交付但逾期未收款 / 收款高风险', 'delivered but payment overdue / high risk')} />
       </div>
+
+      {overdueCollections.length > 0 && (
+        <div className="panel clip" style={{ marginBottom: 20, borderColor: 'var(--danger)' }}>
+          <div className="panel-head" style={{ background: '#fdecec' }}>
+            <span className="panel-title"><Icon name="alert" style={{ color: 'var(--danger)' }} />{t('逾期收款提醒', 'Overdue collection alerts')} <span className="badge" style={{ background: 'var(--danger)', color: '#fff', marginLeft: 6 }}>{overdueCollections.length}</span></span>
+          </div>
+          {overdueCollections.map((p) => {
+            const inv = p.invoiceClose;
+            const high = p.paymentRisk?.level === 'high';
+            return (
+              <div key={p.id} className="row-hover" style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 22px', borderTop: '1px solid var(--row-line)', cursor: 'pointer' }} onClick={() => openProject(p.id)}>
+                <span className="badge" style={{ background: '#fbe0e0', color: 'var(--danger)', flexShrink: 0 }}>
+                  {p.commercialStatus === 'overdue' ? t('逾期未收款', 'Payment overdue') : t('收款高风险', 'High risk')}
+                </span>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--navy900)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.name}</div>
+                  <div style={{ fontSize: 11.5, color: 'var(--text2)' }}>
+                    {p.client || '—'}
+                    {inv?.invoiceRef ? ` · ${t('发票', 'Inv')} ${inv.invoiceRef}` : ''}
+                    {inv?.dueDate ? ` · ${t('到期', 'Due')} ${inv.dueDate}` : ''}
+                    {high && p.commercialStatus !== 'overdue' ? ` · ${t('需先收订金', 'deposit due')}` : ''}
+                  </div>
+                </div>
+                <div style={{ flex: 1 }} />
+                <Icon name="back" size={15} style={{ transform: 'rotate(180deg)', color: 'var(--text2)' }} />
+              </div>
+            );
+          })}
+        </div>
+      )}
 
       <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap', marginBottom: 20 }}>
         <button className={`chip ${filter === 'all' ? 'active' : ''}`} onClick={() => setFilter('all')}>{t('全部负责人', 'All PMs')}</button>

@@ -2,7 +2,7 @@
 
 import React, { useMemo, useState } from 'react';
 import { useStore } from '../store';
-import { fmtDate, pkgStart, planDates, todayMid } from '@/lib/project';
+import { fmtDate, pendingWorkflowAction, pkgStart, planDates, todayMid } from '@/lib/project';
 import { canRowEdit } from '@/lib/permissions';
 import { svcName } from '@/lib/templates';
 import { useLang } from '@/lib/i18n';
@@ -18,6 +18,13 @@ export default function MyTasksView() {
   const [filter, setFilter] = useState<'all' | 'overdue' | 'wip'>('all');
   const t0 = todayMid();
   const seesAll = me.role === 'director' || me.role === 'bd' || me.role === 'sales';
+
+  /* v2.2 workflow inbox: projects waiting on THIS user to act */
+  const workflowTodos = useMemo(() => {
+    const out: { p: Project; label: string; labelEn: string }[] = [];
+    projects.forEach((p) => { if (p.archived) return; const a = pendingWorkflowAction(p, me); if (a) out.push({ p, label: a.label, labelEn: a.labelEn }); });
+    return out;
+  }, [projects, me]);
 
   const items = useMemo(() => {
     const out: Item[] = [];
@@ -64,6 +71,27 @@ export default function MyTasksView() {
           <button className={`chip ${filter === 'wip' ? 'active' : ''}`} onClick={() => setFilter('wip')}>{t('进行中', 'In Progress')}</button>
         </div>
       </div>
+
+      {/* v2.2 workflow inbox — what needs my action right now */}
+      {workflowTodos.length > 0 && (
+        <div className="panel clip" style={{ marginBottom: 20, borderColor: 'var(--bronze)' }}>
+          <div className="panel-head" style={{ background: '#fbf3e6' }}>
+            <span className="panel-title"><Icon name="flag" style={{ color: 'var(--bronze)' }} />{t('需要我处理(工作流)', 'Waiting on me (workflow)')} <span className="badge" style={{ background: 'var(--bronze)', color: '#fff', marginLeft: 6 }}>{workflowTodos.length}</span></span>
+          </div>
+          {workflowTodos.slice(0, 8).map(({ p, label, labelEn }) => (
+            <div key={p.id} className="row-hover" style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 22px', borderTop: '1px solid var(--row-line)', cursor: 'pointer' }} onClick={() => openProject(p.id)}>
+              <span className="badge" style={{ background: '#fbf0dc', color: '#a8690b', flexShrink: 0 }}>{lang === 'zh' ? label : labelEn}</span>
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--navy900)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.name}</div>
+                <div style={{ fontSize: 11.5, color: 'var(--text2)' }}>{p.client || '—'}</div>
+              </div>
+              <div style={{ flex: 1 }} />
+              <Icon name="back" size={15} style={{ transform: 'rotate(180deg)', color: 'var(--text2)' }} />
+            </div>
+          ))}
+          {workflowTodos.length > 8 && <div style={{ padding: '10px 22px', fontSize: 12, color: 'var(--text2)', borderTop: '1px solid var(--row-line)' }}>{t(`还有 ${workflowTodos.length - 8} 项…`, `+${workflowTodos.length - 8} more…`)}</div>}
+        </div>
+      )}
 
       <div className="panel clip">
         <div className="table-head" style={{ display: 'grid', gridTemplateColumns: '26px 1fr 160px 150px 110px 118px 40px', gap: 14 }}>
