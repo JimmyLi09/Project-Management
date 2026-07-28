@@ -13,6 +13,7 @@ const WORKFLOW_ACTIONS: Record<string, string> = {
   acceptHandover: 'accept_handover',
   submitCompletion: 'submit_completion',
   decideCompletion: 'pd_decide',
+  salesVerify: 'sales_verify',
 };
 
 export async function GET(_req: NextRequest, { params }: Params) {

@@ -4,7 +4,7 @@
 
 import type { Identity } from '@/lib/permissions';
 import {
-  canAssign, canCommercial, canDecide, canEdit, canRowEdit, isFull,
+  canAssign, canCommercial, canDecide, canEdit, canEditFinance, canRowEdit, isFull,
 } from '@/lib/permissions';
 import { buildPackage, deriveStatuses, fitWindow, newId, parseISO, isoDate, totalDays } from '@/lib/project';
 import { SVC, type Template } from '@/lib/templates';
@@ -50,6 +50,12 @@ export type ProjectAction =
   | { type: 'acceptHandover' }
   | { type: 'submitCompletion'; summary: string; links: string }
   | { type: 'decideCompletion'; decision: 'approved' | 'rejected' | 'changes_requested'; note: string }
+  | { type: 'salesVerify'; scopeMatches: boolean; jobOrderUpdated: boolean; finalInvoiceAllowed: boolean }
+  | { type: 'raiseVariation'; affectsQuote: boolean; note: string }
+  | { type: 'editFinance'; field: 'invoiceRef' | 'issuedDate' | 'dueDate' | 'financeNote'; value: string }
+  | { type: 'setInvoiceStatus'; value: 'pending_finance' | 'issued' | 'cancelled'; reason: string }
+  | { type: 'setPaymentStatus'; value: 'pending' | 'partial' | 'received' | 'overdue' }
+  | { type: 'setPaymentRisk'; depositRequired: boolean; depositStatus: 'none' | 'pending' | 'received'; level: 'none' | 'watch' | 'high' }
   | { type: 'addContact' }
   | { type: 'editContact'; idx: number; field: 'role' | 'company' | 'person' | 'phone' | 'email'; value: string }
   | { type: 'removeContact'; idx: number }
@@ -465,6 +471,89 @@ export function applyAction(u: Identity, p: Project, a: ProjectAction, ctx: Acti
         p.workflowVersion = (p.workflowVersion || 1) + 1;
         logIt(p, u.name, `${a.decision === 'rejected' ? '驳回' : '要求修改'}完成包,退回生产 ${a.decision}${a.note ? ' — ' + a.note : ''}`);
       }
+      break;
+    }
+    /* ===== S4 — Sales verify + Finance status + Payment Risk ===== */
+    case 'salesVerify': {
+      if (!canCommercial(u, p)) throw new PermissionError('仅 Sales / PD / BD 可核对');
+      if (p.completionReview?.approval?.status !== 'approved') throw new ValidationError('完成包尚未 PD 批准,无法核对');
+      const sv = p.salesVerification!;
+      sv.status = 'verified';
+      sv.scopeMatches = !!a.scopeMatches;
+      sv.jobOrderUpdated = !!a.jobOrderUpdated;
+      sv.finalInvoiceAllowed = !!a.finalInvoiceAllowed;
+      sv.variationStatus = 'none';
+      sv.by = u.name;
+      sv.at = Date.now();
+      logIt(p, u.name, `Sales 核对完成${a.finalInvoiceAllowed ? '(允许开票)' : '(暂不开票)'} Sales verified`);
+      break;
+    }
+    case 'raiseVariation': {
+      if (!canCommercial(u, p) && !canEdit(u, p)) throw new PermissionError('无权限提出 Variation');
+      const sv = p.salesVerification!;
+      if (a.affectsQuote) {
+        /* §10.1: 影响报价/范围/交付日 → 必须重新走 PD 审批 → 退回生产重做 */
+        sv.variationStatus = 'reapproval';
+        sv.status = 'not_started';
+        sv.finalInvoiceAllowed = false;
+        const cr = p.completionReview!;
+        cr.status = 'changes_requested';
+        cr.approval.status = 'changes_requested';
+        cr.approval.note = `Variation:${a.note || ''}`;
+        p.workflowVersion = (p.workflowVersion || 1) + 1;
+        logIt(p, u.name, `Variation(影响报价)→ 退回重走 PD 审批 ${a.note ? '— ' + a.note : ''}`);
+      } else {
+        /* 仅修正文字/附件/JD 引用 → 不重审,只记录 */
+        sv.variationStatus = 'resolved';
+        logIt(p, u.name, `Variation(不影响报价,仅记录)${a.note ? '— ' + a.note : ''}`);
+      }
+      break;
+    }
+    case 'editFinance': {
+      if (!canEditFinance(u)) throw new PermissionError('仅 Finance 可编辑开票/收款信息');
+      const inv = p.invoiceClose!;
+      (inv as any)[a.field] = String(a.value || '').slice(0, 300);
+      logIt(p, u.name, `Finance 改单 ${a.field}=${a.value || '—'}${inv.invoiceStatus === 'issued' ? '(已开票后修改)' : ''}`);
+      break;
+    }
+    case 'setInvoiceStatus': {
+      if (!canEditFinance(u)) throw new PermissionError('仅 Finance 可变更开票状态');
+      const inv = p.invoiceClose!;
+      const from = inv.invoiceStatus;
+      const ok = (from === 'pending_finance' && (a.value === 'issued' || a.value === 'cancelled'))
+        || (from === 'issued' && a.value === 'cancelled')
+        || (from === 'cancelled' && a.value === 'pending_finance')
+        || (from === a.value);
+      if (!ok) throw new ValidationError(`开票状态不能从 ${from} 变为 ${a.value}`);
+      if (a.value === 'issued' && !inv.invoiceRef.trim()) throw new ValidationError('开票前请先填写 Invoice Reference');
+      if (from === 'issued' && a.value !== 'issued' && !String(a.reason || '').trim()) throw new ValidationError('修改已开票状态必须填写原因');
+      if (a.value === 'issued' && !inv.issuedDate) inv.issuedDate = isoDate(new Date());
+      inv.invoiceStatus = a.value;
+      logIt(p, u.name, `开票状态 ${from}→${a.value}${a.reason ? ' — ' + a.reason : ''}`);
+      break;
+    }
+    case 'setPaymentStatus': {
+      if (!canEditFinance(u)) throw new PermissionError('仅 Finance 可变更收款状态');
+      const inv = p.invoiceClose!;
+      if (inv.invoiceStatus !== 'issued') throw new ValidationError('未开票,无法更新收款状态');
+      const from = inv.paymentStatus;
+      const ok = (from === 'pending' && (a.value === 'partial' || a.value === 'received' || a.value === 'overdue'))
+        || (from === 'partial' && (a.value === 'received' || a.value === 'overdue'))
+        || (from === 'overdue' && (a.value === 'partial' || a.value === 'received'))
+        || (from === a.value);
+      if (!ok) throw new ValidationError(`收款状态不能从 ${from} 变为 ${a.value}`);
+      inv.paymentStatus = a.value;
+      logIt(p, u.name, `收款状态 ${from}→${a.value}`);
+      break;
+    }
+    case 'setPaymentRisk': {
+      if (!canCommercial(u, p)) throw new PermissionError('仅 Sales / PD / BD 可设置 Payment Risk');
+      const pr = p.paymentRisk!;
+      pr.depositRequired = !!a.depositRequired;
+      pr.depositStatus = a.depositStatus;
+      pr.level = a.level;
+      if (a.level === 'none') pr.resolvedAt = Date.now();
+      logIt(p, u.name, `Payment Risk: ${a.level}${a.depositRequired ? ` · 定金 ${a.depositStatus}` : ''}`);
       break;
     }
     case 'addContact': {

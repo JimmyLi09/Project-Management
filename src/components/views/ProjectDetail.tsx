@@ -7,7 +7,7 @@ import {
   pkgProgress, pkgStart, planDates, plannedFinish, projectHealth, projPoints,
   projStage, riskKey, schedProgress, todayMid,
 } from '@/lib/project';
-import { canAssign, canCommercial, canDecide, canEdit, isFull } from '@/lib/permissions';
+import { canAssign, canCommercial, canDecide, canEdit, canEditFinance, isFull } from '@/lib/permissions';
 import { DIFF, STAGES, stageIdx, svcColor, svcName } from '@/lib/templates';
 import { useLang } from '@/lib/i18n';
 import { Avatar, HM, Icon, Pill, ProgressBar, TM } from '../ui';
@@ -459,11 +459,21 @@ function WorkflowPanel({ p, users, me, dispatch }: {
   const [pm, setPm] = useState('');
   const [busy, setBusy] = useState(false);
   const cr = p.completionReview;
+  const sv = p.salesVerification;
+  const inv = p.invoiceClose;
+  const pr = p.paymentRisk;
   const canEd = canEdit(me, p);
   const canApprove = canDecide(me);
+  const canFin = canEditFinance(me);
   const [cSummary, setCSummary] = useState('');
   const [cLinks, setCLinks] = useState('');
   const [pdNote, setPdNote] = useState('');
+  const [scopeOk, setScopeOk] = useState(true);
+  const [jobOk, setJobOk] = useState(true);
+  const [invAllowed, setInvAllowed] = useState(true);
+  const [varNote, setVarNote] = useState('');
+  const [varAffects, setVarAffects] = useState(false);
+  const prodDone = p.productionStatus === 'production_completed';
 
   const prod = PROD_LABEL[p.productionStatus || 'in_progress'];
   const comm = COMM_LABEL[p.commercialStatus || 'not_ready'];
@@ -600,10 +610,101 @@ function WorkflowPanel({ p, users, me, dispatch }: {
         </div>
       )}
 
-      <div style={{ fontSize: 11, color: 'var(--text2)', marginTop: 10 }}>
-        {t('后续步骤(Sales 核对 / 开票收款)将在下一阶段上线。', 'Next steps (Sales verify / invoicing) arrive in the next stage.')}
-      </div>
+      {/* Step 3 — Sales verify (unlocks once production completed) */}
+      {prodDone && sv && (
+        <div style={{ border: '1px solid var(--row-line)', borderRadius: 10, padding: 14, marginTop: 12 }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--navy900)', marginBottom: 8 }}>③ {t('Sales 核对', 'Sales verification')}</div>
+          {sv.status === 'verified' ? (
+            <div style={{ fontSize: 12.5, color: 'var(--success)', fontWeight: 600 }}>
+              ✓ {t('已核对', 'Verified')} · {sv.finalInvoiceAllowed ? t('允许开票', 'invoice allowed') : t('暂不开票', 'invoice held')}
+              <span style={{ color: 'var(--text2)', fontWeight: 400 }}> · {sv.by} {sv.at ? fmtDate(new Date(sv.at)) : ''}</span>
+            </div>
+          ) : canCommercial(me, p) ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {sv.variationStatus === 'reapproval' && <div style={{ fontSize: 12, color: 'var(--danger)' }}>{t('有 Variation 待重新审批,核对暂不可用。', 'A variation needs re-approval before verifying.')}</div>}
+              <label style={{ fontSize: 12.5, display: 'flex', gap: 7, alignItems: 'center' }}><input type="checkbox" checked={scopeOk} onChange={(e) => setScopeOk(e.target.checked)} /> {t('交付范围与报价一致', 'Scope matches quote')}</label>
+              <label style={{ fontSize: 12.5, display: 'flex', gap: 7, alignItems: 'center' }}><input type="checkbox" checked={jobOk} onChange={(e) => setJobOk(e.target.checked)} /> {t('Job Order 已更新', 'Job order updated')}</label>
+              <label style={{ fontSize: 12.5, display: 'flex', gap: 7, alignItems: 'center', fontWeight: 600 }}><input type="checkbox" checked={invAllowed} onChange={(e) => setInvAllowed(e.target.checked)} /> {t('允许开具最终发票', 'Allow final invoice')}</label>
+              <button className="btn-navy sm" style={{ alignSelf: 'flex-start' }} disabled={sv.variationStatus === 'reapproval'}
+                onClick={() => dispatch(p.id, { type: 'salesVerify', scopeMatches: scopeOk, jobOrderUpdated: jobOk, finalInvoiceAllowed: invAllowed })}>{t('确认核对', 'Confirm verification')}</button>
+              <div style={{ borderTop: '1px dashed var(--row-line)', paddingTop: 8, marginTop: 2 }}>
+                <div className="mini-label" style={{ marginBottom: 5 }}>{t('提出 Variation(范围/报价变更)', 'Raise a Variation')}</div>
+                <input className="in sm" placeholder={t('变更说明', 'Variation note')} value={varNote} onChange={(e) => setVarNote(e.target.value)} style={{ marginBottom: 6 }} />
+                <label style={{ fontSize: 12, display: 'flex', gap: 7, alignItems: 'center', marginBottom: 6 }}><input type="checkbox" checked={varAffects} onChange={(e) => setVarAffects(e.target.checked)} /> {t('影响报价/范围/交付日(需重走 PD 审批)', 'Affects quote/scope/date (re-approval)')}</label>
+                <button className="btn-line sm" onClick={() => { if (!varNote.trim()) { alert(t('请填写变更说明', 'Add a note')); return; } dispatch(p.id, { type: 'raiseVariation', affectsQuote: varAffects, note: varNote }); }}>{t('提交 Variation', 'Submit variation')}</button>
+              </div>
+            </div>
+          ) : (
+            <div style={{ fontSize: 12.5, color: 'var(--text2)' }}>{t('等待 Sales 核对。', 'Waiting for Sales to verify.')}</div>
+          )}
+        </div>
+      )}
+
+      {/* Step 4 — Finance: invoice + payment status (ref-only, §7) */}
+      {sv && sv.status === 'verified' && sv.finalInvoiceAllowed && inv && (
+        <div style={{ border: '1px solid var(--row-line)', borderRadius: 10, padding: 14, marginTop: 12 }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--navy900)', marginBottom: 4 }}>④ {t('Finance 开票 / 收款', 'Finance: invoice / payment')}</div>
+          <div style={{ fontSize: 11, color: 'var(--text2)', marginBottom: 10 }}>{t('仅记录状态与单号,不记金额(以现有 Finance 系统为准)。', 'Status & reference only — no amounts (source of truth is your Finance system).')}</div>
+          {canFin ? (
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+              <FinIn label={t('发票号 Invoice Ref', 'Invoice Ref')} v={inv.invoiceRef} onSave={(x) => dispatch(p.id, { type: 'editFinance', field: 'invoiceRef', value: x })} />
+              <FinIn label={t('开票日期', 'Issued date')} v={inv.issuedDate} type="date" onSave={(x) => dispatch(p.id, { type: 'editFinance', field: 'issuedDate', value: x })} />
+              <FinIn label={t('到期日 Due date', 'Payment due')} v={inv.dueDate} type="date" onSave={(x) => dispatch(p.id, { type: 'editFinance', field: 'dueDate', value: x })} />
+              <FinIn label={t('备注 Finance note', 'Finance note')} v={inv.financeNote} onSave={(x) => dispatch(p.id, { type: 'editFinance', field: 'financeNote', value: x })} />
+              <div style={{ gridColumn: '1 / -1', display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', borderTop: '1px solid var(--row-line)', paddingTop: 9 }}>
+                <span className="mini-label">{t('开票', 'Invoice')}: <b>{inv.invoiceStatus}</b></span>
+                {inv.invoiceStatus !== 'issued' && <button className="btn-navy sm" onClick={() => dispatch(p.id, { type: 'setInvoiceStatus', value: 'issued', reason: '' })}>{t('开票 Issue', 'Issue')}</button>}
+                {inv.invoiceStatus === 'issued' && <button className="btn-line sm danger" onClick={() => { const r = prompt(t('作废原因', 'Cancellation reason')); if (r) dispatch(p.id, { type: 'setInvoiceStatus', value: 'cancelled', reason: r }); }}>{t('作废', 'Cancel')}</button>}
+              </div>
+              {inv.invoiceStatus === 'issued' && (
+                <div style={{ gridColumn: '1 / -1', display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                  <span className="mini-label">{t('收款', 'Payment')}: <b>{inv.paymentStatus}</b></span>
+                  {['partial', 'received', 'overdue'].map((s) => (
+                    <button key={s} className="btn-line sm" onClick={() => dispatch(p.id, { type: 'setPaymentStatus', value: s as any })}>{s}</button>
+                  ))}
+                </div>
+              )}
+            </div>
+          ) : (
+            <div style={{ fontSize: 12.5, color: 'var(--text2)' }}>
+              {t('发票', 'Invoice')}: <b>{inv.invoiceRef || '—'}</b> · {inv.invoiceStatus} · {t('收款', 'Payment')}: {inv.paymentStatus}
+              {inv.dueDate ? ` · ${t('到期', 'due')} ${inv.dueDate}` : ''}
+              <div style={{ fontSize: 11, color: 'var(--text2)', marginTop: 4 }}>{t('仅 Finance 可编辑。', 'Finance only can edit.')}</div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Payment Risk — non-blocking banner + control */}
+      {pr && (pr.level !== 'none' || canCommercial(me, p)) && (
+        <div style={{ borderRadius: 10, padding: '10px 14px', marginTop: 12, background: pr.level === 'high' ? '#fbe9e7' : pr.level === 'watch' ? '#fbf0dc' : 'var(--hover-bg)', border: '1px solid var(--row-line)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+            <span style={{ fontSize: 12.5, fontWeight: 700, color: pr.level === 'high' ? '#b23a32' : pr.level === 'watch' ? '#a8690b' : 'var(--text2)' }}>
+              {t('收款风险', 'Payment risk')}: {pr.level === 'none' ? t('无', 'none') : pr.level === 'watch' ? t('关注', 'watch') : t('高', 'high')}
+              {pr.depositRequired ? ` · ${t('定金', 'deposit')} ${pr.depositStatus}` : ''}
+            </span>
+            <div style={{ flex: 1 }} />
+            {canCommercial(me, p) && (
+              <select className="in sm" style={{ width: 'auto' }} value={pr.level} onChange={(e) => dispatch(p.id, { type: 'setPaymentRisk', depositRequired: pr.depositRequired, depositStatus: pr.depositStatus, level: e.target.value as any })}>
+                <option value="none">{t('无风险', 'none')}</option><option value="watch">{t('关注', 'watch')}</option><option value="high">{t('高风险', 'high')}</option>
+              </select>
+            )}
+          </div>
+          <div style={{ fontSize: 11, color: 'var(--text2)', marginTop: 3 }}>{t('提示用,不阻断流程。', 'Advisory only — does not block the workflow.')}</div>
+        </div>
+      )}
     </div>
+  );
+}
+
+/* small finance field with blur-to-save */
+function FinIn({ label, v, type, onSave }: { label: string; v: string; type?: string; onSave: (x: string) => void }) {
+  return (
+    <label style={{ display: 'flex', flexDirection: 'column', gap: 3, fontSize: 11, color: 'var(--text2)' }}>
+      {label}
+      <input className="in sm" type={type || 'text'} defaultValue={v} key={v}
+        onBlur={(e) => e.target.value !== v && onSave(e.target.value)} />
+    </label>
   );
 }
 
