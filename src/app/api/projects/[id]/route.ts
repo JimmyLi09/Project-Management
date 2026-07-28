@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { appendAudit, commitWorkflowAction, deleteProject, getEffectiveTemplate, getProject, saveProject } from '@/server/db';
+import { appendAudit, commitWorkflowAction, deleteProject, getEffectiveTemplate, getProject, saveProject, saveProjectCAS } from '@/server/db';
 import { currentUser } from '@/server/session';
 import { identityOf, isFull } from '@/lib/permissions';
 import { applyAction, PermissionError, ValidationError, type ProjectAction } from '@/server/actions';
@@ -35,15 +35,20 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   const p = getProject(id);
   if (!p) return NextResponse.json({ error: '项目不存在' }, { status: 404 });
 
-  const body = (await req.json().catch(() => null)) as (ProjectAction & { baseUpdatedAt?: number }) | null;
+  const body = (await req.json().catch(() => null)) as (ProjectAction & { baseUpdatedAt?: number; baseVersion?: number }) | null;
   if (!body || typeof body.type !== 'string') {
     return NextResponse.json({ error: '无效请求' }, { status: 400 });
   }
-  const baseUpdatedAt = body.baseUpdatedAt;
-  const serverUpdatedAt = p.updatedAt || 0;
-  const conflict = typeof baseUpdatedAt === 'number' && baseUpdatedAt > 0 && baseUpdatedAt < serverUpdatedAt;
 
   const expectedVersion = p.version || 0;
+  /* v2.2 §4.5/§9 [P0-3]: strict optimistic lock. If the client based its edit on
+     an older version than what's now stored, reject instead of silently
+     overwriting — the client re-reads and asks the user to reconfirm. */
+  const clientBase = body.baseVersion;
+  if (typeof clientBase === 'number' && clientBase !== expectedVersion) {
+    return NextResponse.json({ error: '此项目刚被他人修改,已为你刷新,请核对后重新操作。', stale: true }, { status: 409 });
+  }
+
   const wfVersionForKey = p.workflowVersion || 1; // capture before the action may bump it (§10 rollback)
   const logLenBefore = (p.log || []).length;
   try {
@@ -67,9 +72,14 @@ export async function PATCH(req: NextRequest, { params }: Params) {
     return NextResponse.json({ project: p, conflict: false });
   }
 
+  /* every other write also goes through the version CAS (§9): rejects a race
+     between our read and save instead of clobbering. */
+  const saved = saveProjectCAS(p, expectedVersion);
+  if (saved === null) {
+    return NextResponse.json({ error: '此项目刚被他人修改,已为你刷新,请核对后重新操作。', stale: true }, { status: 409 });
+  }
   appendAudit(id, newEntries);
-  saveProject(p);
-  return NextResponse.json({ project: p, conflict });
+  return NextResponse.json({ project: p, conflict: false });
 }
 
 export async function DELETE(_req: NextRequest, { params }: Params) {
