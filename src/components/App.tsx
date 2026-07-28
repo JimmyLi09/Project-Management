@@ -3,7 +3,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import type { User } from '@/lib/types';
 import { StoreProvider, useStore } from './store';
-import { allOverdue, fmtDate, isMyProject } from '@/lib/project';
+import { allOverdue, fmtDate, isMyProject, pendingWorkflowAction } from '@/lib/project';
 import { canCreate, isFull, ROLE_LABEL } from '@/lib/permissions';
 import { useLang } from '@/lib/i18n';
 import { Avatar, AvatarSrcProvider, Icon } from './ui';
@@ -97,6 +97,12 @@ function Shell() {
     return n;
   }, [projects, me]);
 
+  /* v2.2 workflow inbox count — projects awaiting this user's workflow action */
+  const workflowCount = useMemo(
+    () => projects.reduce((n, p) => n + (pendingWorkflowAction(p, me) ? 1 : 0), 0),
+    [projects, me],
+  );
+
   return (
     <AvatarSrcProvider map={avatarMap}>
     <div className="layout">
@@ -109,7 +115,7 @@ function Shell() {
           </div>
         </div>
         <nav className="side-nav">
-          {navItem('overview', 'home', t('总览', 'Overview'))}
+          {navItem('overview', 'home', t('总览', 'Overview'), workflowCount)}
           {navItem('projects', 'grid', t('项目', 'Projects'))}
           {navItem('team', 'users', t('团队负载', 'Team Allocation'))}
           {navItem('mytasks', 'check', t('我的待办', 'My Tasks'), myOpenCount)}

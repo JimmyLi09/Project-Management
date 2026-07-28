@@ -236,6 +236,32 @@ export function planDates(pkg: ServicePackage, start: string): (PlanDate | null)
 export const statusPct = (s: string) => (s === 'done' ? 100 : s === 'wip' ? 50 : s === 'block' ? 25 : 0);
 
 /* Project lifecycle stage is DERIVED from progress, not set manually */
+/* v2.2 §1.1 workflow tasks: what (if anything) this project is waiting on THIS
+   user to do right now. Drives the "工作流待办" inbox so people know when to act. */
+export function pendingWorkflowAction(p: Project, me: { name: string; role: string }): { key: string; label: string; labelEn: string } | null {
+  if (p.archived) return null;
+  const full = me.role === 'director' || me.role === 'bd';
+  const commercial = full || me.role === 'sales';
+  const owns = (p.owners || []).includes(me.name) || (p.perm || []).includes(me.name);
+  const h = p.handover, cr = p.completionReview, sv = p.salesVerification, inv = p.invoiceClose;
+
+  if (h) {
+    if (h.status === 'not_started' && commercial) return { key: 'handover', label: '发起交接', labelEn: 'Start handover' };
+    if (h.status === 'submitted' && (me.name === h.assignedPmId || full)) return { key: 'accept', label: '接受交接', labelEn: 'Accept handover' };
+    if (h.status === 'accepted') {
+      const crDone = cr?.approval?.status === 'approved';
+      if (!crDone && (cr?.status === 'not_started' || cr?.status === 'changes_requested') && (owns || full)) return { key: 'submit', label: '提交完成包', labelEn: 'Submit completion' };
+      if (cr?.status === 'submitted' && full) return { key: 'approve', label: '审批完成包', labelEn: 'Approve completion' };
+      if (crDone && sv?.status !== 'verified' && commercial) return { key: 'verify', label: 'Sales 核对', labelEn: 'Sales verify' };
+      if (sv?.status === 'verified' && sv.finalInvoiceAllowed && me.role === 'finance') {
+        if (inv?.invoiceStatus !== 'issued') return { key: 'invoice', label: '开具发票', labelEn: 'Issue invoice' };
+        if (inv?.paymentStatus !== 'received' && inv?.invoiceStatus === 'issued') return { key: 'payment', label: '更新收款状态', labelEn: 'Update payment' };
+      }
+    }
+  }
+  return null;
+}
+
 /* v2.2 §5.1/§5.2: once the post-sales workflow is active, stage is derived from
    business actions (not from schedule progress). Returns null when the workflow
    hasn't started, so legacy projects keep the heuristic below. */

@@ -3,7 +3,7 @@
 import React, { useMemo } from 'react';
 import { useStore } from '../store';
 import {
-  fmtDate, isMyProject, overdueItems, pkgStart, planDates, projectHealth, projStage,
+  fmtDate, isMyProject, overdueItems, pendingWorkflowAction, pkgStart, planDates, projectHealth, projStage,
   schedProgress, staleInfo, todayMid,
 } from '@/lib/project';
 import { teamLoads } from '@/lib/alloc';
@@ -24,6 +24,13 @@ export default function OverviewView() {
   );
   const monthStart = new Date(t0.getFullYear(), t0.getMonth(), 1).getTime();
   const newThisMonth = projects.filter((p) => p.created >= monthStart).length;
+
+  /* v2.2 workflow inbox: projects waiting on THIS user to act */
+  const workflowTodos = useMemo(() => {
+    const out: { p: Project; label: string; labelEn: string }[] = [];
+    projects.forEach((p) => { const a = pendingWorkflowAction(p, me); if (a) out.push({ p, label: a.label, labelEn: a.labelEn }); });
+    return out;
+  }, [projects, me]);
 
   const healths = active.map((p) => projectHealth(p));
   const onTimeRate = active.length ? Math.round((healths.filter((h) => h === 'ok').length / active.length) * 100) : 100;
@@ -109,6 +116,27 @@ export default function OverviewView() {
         <Kpi label={t('未解决风险', 'Open Risks')} value={String(openRisks)} icon="alert" tint="#D4483F" tintBg="#fbe9e7"
           delta={t(`本周到期 ${dueThisWeek} 项`, `${dueThisWeek} due this week`)} deltaColor={openRisks ? 'var(--danger)' : 'var(--text2)'} />
       </div>
+
+      {/* v2.2 workflow inbox — what needs my action right now */}
+      {workflowTodos.length > 0 && (
+        <div className="panel clip" style={{ marginBottom: 20, borderColor: 'var(--bronze)' }}>
+          <div className="panel-head" style={{ background: '#fbf3e6' }}>
+            <span className="panel-title"><Icon name="flag" style={{ color: 'var(--bronze)' }} />{t('需要我处理(工作流)', 'Waiting on me (workflow)')} <span className="badge" style={{ background: 'var(--bronze)', color: '#fff', marginLeft: 6 }}>{workflowTodos.length}</span></span>
+          </div>
+          {workflowTodos.slice(0, 8).map(({ p, label, labelEn }) => (
+            <div key={p.id} className="row-hover" style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 22px', borderTop: '1px solid var(--row-line)', cursor: 'pointer' }} onClick={() => openProject(p.id)}>
+              <span className="badge" style={{ background: '#fbf0dc', color: '#a8690b', flexShrink: 0 }}>{lang === 'zh' ? label : labelEn}</span>
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--navy900)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.name}</div>
+                <div style={{ fontSize: 11.5, color: 'var(--text2)' }}>{p.client || '—'}</div>
+              </div>
+              <div style={{ flex: 1 }} />
+              <Icon name="back" size={15} style={{ transform: 'rotate(180deg)', color: 'var(--text2)' }} />
+            </div>
+          ))}
+          {workflowTodos.length > 8 && <div style={{ padding: '10px 22px', fontSize: 12, color: 'var(--text2)', borderTop: '1px solid var(--row-line)' }}>{t(`还有 ${workflowTodos.length - 8} 项…`, `+${workflowTodos.length - 8} more…`)}</div>}
+        </div>
+      )}
 
       <div className="grid-2col" style={{ display: 'grid', gridTemplateColumns: '1.55fr 1fr', gap: 20, alignItems: 'start' }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 20, minWidth: 0 }}>
