@@ -1,8 +1,9 @@
 'use client';
 
-import React from 'react';
+import React, { useMemo } from 'react';
 import { useStore } from '../store';
 import { allOverdue, projPoints, projStage } from '@/lib/project';
+import { workflowMetrics } from '@/lib/metrics';
 import { STAGES } from '@/lib/templates';
 import { useLang } from '@/lib/i18n';
 import { Avatar } from '../ui';
@@ -10,6 +11,9 @@ import { Avatar } from '../ui';
 export default function StatsView() {
   const { projects } = useStore();
   const { lang, t } = useLang();
+  const wf = useMemo(() => workflowMetrics(projects), [projects]);
+  const pct = (r: number | null) => (r == null ? '—' : `${Math.round(r * 100)}%`);
+  const rateColor = (r: number | null) => (r == null ? 'var(--text2)' : r >= 0.9 ? 'var(--success)' : r >= 0.7 ? 'var(--warning)' : 'var(--danger)');
   const byPM: Record<string, { count: number; pts: number; active: number }> = {};
   let totalPts = 0;
   projects.forEach((p) => {
@@ -71,6 +75,70 @@ export default function StatsView() {
               ))}
             </tbody>
           </table>
+        </div>
+      </div>
+
+      {/* v2.2 §8 — post-sales workflow turnaround & SLA on-time rate */}
+      <div className="panel clip" style={{ marginTop: 20 }}>
+        <div className="panel-head" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <span className="panel-title">{t('售后工作流 · 耗时与 SLA 达标率', 'Workflow turnaround & SLA')}</span>
+          <div style={{ flex: 1 }} />
+          {wf.overallSamples > 0 && (
+            <span style={{ fontSize: 12, color: 'var(--text2)' }}>
+              {t('总体达标率', 'Overall on-time')}
+              <b className="tnum" style={{ marginLeft: 6, fontSize: 15, color: rateColor(wf.overallRate) }}>{pct(wf.overallRate)}</b>
+              <span className="tnum" style={{ marginLeft: 5, color: 'var(--text2)' }}>({wf.overallOnTime}/{wf.overallSamples})</span>
+            </span>
+          )}
+        </div>
+        {wf.overallSamples === 0 && wf.steps.every((s) => s.samples === 0) ? (
+          <div style={{ padding: 26, textAlign: 'center', color: 'var(--text2)', fontSize: 13 }}>
+            {t('暂无工作流数据 — 有项目走完交接/审批/开票后即会统计。', 'No workflow data yet — appears once projects move through handover / review / invoicing.')}
+          </div>
+        ) : (
+          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <tbody>
+              <tr>
+                <th style={th}>{t('步骤', 'Step')}</th>
+                <th style={{ ...th, textAlign: 'right' }}>{t('样本', 'Samples')}</th>
+                <th style={{ ...th, textAlign: 'right' }}>{t('平均耗时', 'Avg')}</th>
+                <th style={{ ...th, textAlign: 'right' }}>{t('最长', 'Max')}</th>
+                <th style={{ ...th, textAlign: 'right' }}>{t('SLA 目标', 'Target')}</th>
+                <th style={{ ...th, width: 180 }}>{t('达标率', 'On-time')}</th>
+              </tr>
+              {wf.steps.map((s) => (
+                <tr key={s.key}>
+                  <td style={cell}>{lang === 'zh' ? s.zh : s.en}</td>
+                  <td style={{ ...cell, textAlign: 'right' }} className="tnum">{s.samples || '—'}</td>
+                  <td style={{ ...cell, textAlign: 'right', fontWeight: 600 }} className="tnum">
+                    {s.avgDays == null ? '—' : t(`${s.avgDays.toFixed(1)} 天`, `${s.avgDays.toFixed(1)}d`)}
+                  </td>
+                  <td style={{ ...cell, textAlign: 'right', color: 'var(--text2)' }} className="tnum">
+                    {s.maxDays == null ? '—' : t(`${s.maxDays} 天`, `${s.maxDays}d`)}
+                  </td>
+                  <td style={{ ...cell, textAlign: 'right', color: 'var(--text2)' }} className="tnum">
+                    {s.target == null ? t('参考', 'ref') : t(`${s.target} 天`, `${s.target}d`)}
+                  </td>
+                  <td style={cell}>
+                    {s.onTimeRate == null ? (
+                      <span style={{ fontSize: 12, color: 'var(--text2)' }}>{t('不计 SLA', 'no SLA')}</span>
+                    ) : (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
+                        <div style={{ flex: 1, height: 7, borderRadius: 4, background: 'var(--row-line)', overflow: 'hidden', minWidth: 60 }}>
+                          <div style={{ width: `${Math.round(s.onTimeRate * 100)}%`, height: '100%', background: rateColor(s.onTimeRate), borderRadius: 4 }} />
+                        </div>
+                        <span className="tnum" style={{ fontSize: 12.5, fontWeight: 600, color: rateColor(s.onTimeRate), minWidth: 34, textAlign: 'right' }}>{pct(s.onTimeRate)}</span>
+                      </div>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+        <div style={{ padding: '10px 22px', fontSize: 11, color: 'var(--text2)', borderTop: '1px solid var(--row-line)' }}>
+          {t('耗时按新加坡工作日计(跳周末与 MOM 公共假期)。SLA 目标可在 src/lib/metrics.ts 调整。生产制作耗时因范围而异,仅作参考不计达标。',
+             'Durations count Singapore working days (skipping weekends & MOM holidays). SLA targets are set in src/lib/metrics.ts. Production time varies by scope — shown for reference, not scored.')}
         </div>
       </div>
     </>
