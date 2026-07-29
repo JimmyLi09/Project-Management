@@ -366,6 +366,56 @@ export function deleteProject(id: string) {
   getDb().prepare('DELETE FROM projects WHERE id = ?').run(id);
 }
 
+/* §6: cross-project register CSV import — ALL-OR-NOTHING. Each row identifies an
+   existing project by name; we ensure a package of `svc` and merge the record
+   patch. Runs in one transaction: if ANY row fails to resolve a project, the
+   whole batch rolls back and nothing is written (no partial/corrupt import). */
+export function importRegisterRecords(
+  svc: string,
+  rows: { project: string; patch: Record<string, string> }[],
+  actor: string,
+): { updated: number } {
+  const d = getDb();
+  const now = Date.now();
+  const run = d.transaction(() => {
+    const all = d.prepare('SELECT id, data FROM projects').all() as { id: string; data: string }[];
+    const byName = new Map<string, { id: string; p: Project }>();
+    for (const r of all) {
+      const p = migrate(JSON.parse(r.data));
+      if (p.archived) continue;
+      const key = (p.name || '').trim().toLowerCase();
+      if (key && !byName.has(key)) byName.set(key, { id: r.id, p });
+    }
+    const upd = d.prepare('UPDATE projects SET data = ?, updated_at = ?, version = version + 1 WHERE id = ?');
+    let updated = 0;
+    rows.forEach((row, i) => {
+      const key = String(row.project || '').trim().toLowerCase();
+      if (!key) throw new Error(`第 ${i + 1} 行:缺少项目名称`);
+      const hit = byName.get(key);
+      if (!hit) throw new Error(`第 ${i + 1} 行:未找到项目「${row.project}」(导入已全部撤销)`);
+      const p = hit.p;
+      let pk = p.packages.find((x) => x.svc === svc);
+      if (!pk) {
+        pk = { svc, start: '', delivery: '', buffer: 0, owner: '', status: 'active', schedule: [], checklist: [] };
+        p.packages.push(pk);
+        if (!Array.isArray(p.services)) p.services = [];
+        if (!p.services.includes(svc)) p.services.push(svc);
+      }
+      const rec: Record<string, string | number | undefined> = { ...(pk.record || {}) };
+      for (const [k, v] of Object.entries(row.patch || {})) { if (k === 'updatedAt') continue; rec[k] = String(v ?? '').slice(0, 2000); }
+      rec.updatedAt = now;
+      pk.record = rec;
+      p.log = [{ at: now, by: actor, text: `导入登记记录 Import: ${svc}` }, ...((p.log as { at: number; by: string; text: string }[]) || [])].slice(0, 200);
+      const { updatedAt: _u, version: _v, ...pdata } = p;
+      upd.run(JSON.stringify(pdata), now, hit.id);
+      updated++;
+    });
+    return updated;
+  });
+  const updated = run();
+  return { updated };
+}
+
 /* ---- permanent audit trail (project logs are capped at 200 in-document;
         every entry is also appended here and never rotated) ---- */
 export function appendAudit(projectId: string, entries: { at: number; by: string; text: string }[]) {

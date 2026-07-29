@@ -2,7 +2,7 @@
 
 import React, { useMemo, useState } from 'react';
 import { useStore } from '../store';
-import { canEdit } from '@/lib/permissions';
+import { canEdit, isFull } from '@/lib/permissions';
 import { svcName, svcColor } from '@/lib/templates';
 import { todayMid, fmtDate } from '@/lib/project';
 import { useLang } from '@/lib/i18n';
@@ -24,7 +24,7 @@ function mainDate(def: RegisterDef, pk: ServicePackage): string {
 }
 
 export default function RegistersView() {
-  const { projects, me, dispatch, openProject } = useStore();
+  const { projects, me, dispatch, openProject, refresh, setToast } = useStore();
   const { lang, t } = useLang();
   const [svc, setSvc] = useState(REGISTERS[0].svc);
   const [q, setQ] = useState('');
@@ -33,6 +33,9 @@ export default function RegistersView() {
   const [year, setYear] = useState('');
   const [page, setPage] = useState(0);
   const [edit, setEdit] = useState<Row | null>(null);
+  const [adding, setAdding] = useState(false);
+  const [imp, setImp] = useState<ImportPreview | null>(null);
+  const canImport = isFull(me);
 
   const def = registerDef(svc)!;
   const t0 = todayMid();
@@ -152,6 +155,11 @@ export default function RegistersView() {
         </select>
         <div style={{ flex: 1 }} />
         <span style={{ fontSize: 12, color: 'var(--text2)' }}>{t(`${rows.length} 条`, `${rows.length} rows`)}</span>
+        {canEdit(me, projects[0] || ({} as Project)) || isFull(me) ? (
+          <button className="btn-line sm" onClick={() => setAdding(true)}><Icon name="plus" size={13} />{t('新增记录', 'Add record')}</button>
+        ) : null}
+        {canImport && <button className="btn-line sm" onClick={() => fileInput(def, (pv) => setImp(pv))}>{t('导入 CSV', 'Import CSV')}</button>}
+        <button className="btn-line sm" onClick={() => downloadTemplate(def, lang)} title={t('下载导入模板', 'Download import template')}>{t('模板', 'Template')}</button>
         <button className="btn-line sm" onClick={exportCsv} disabled={rows.length === 0}><Icon name="download" size={13} />{t('导出 CSV', 'Export CSV')}</button>
       </div>
 
@@ -225,7 +233,212 @@ export default function RegistersView() {
         const ok = await dispatch(edit.p.id, { type: 'setRecord', pkg: edit.pi, patch });
         if (ok) setEdit(null);
       }} />}
+
+      {adding && <AddModal def={def} projects={projects.filter((p) => !p.archived)} onClose={() => setAdding(false)}
+        onSave={async (projectId, patch) => {
+          const ok = await dispatch(projectId, { type: 'addServicePackage', svc: def.svc, patch });
+          if (ok) { setAdding(false); setToast(t('已新增记录', 'Record added')); }
+        }} />}
+
+      {imp && <ImportModal preview={imp} def={def} onClose={() => setImp(null)}
+        onConfirm={async () => {
+          try {
+            const res = await fetch(`/api/registers/${def.svc}/import`, {
+              method: 'POST', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ rows: imp.rows }),
+            });
+            const data = await res.json();
+            if (!res.ok) { setToast((lang === 'zh' ? '导入失败:' : 'Import failed: ') + (data.error || '')); return; }
+            setImp(null);
+            await refresh();
+            setToast(t(`已导入 ${data.updated} 条`, `Imported ${data.updated}`));
+          } catch { setToast(t('导入失败', 'Import failed')); }
+        }} />}
     </>
+  );
+}
+
+interface ImportPreview { rows: { project: string; patch: Record<string, string> }[]; unmatched: string[]; total: number; }
+
+/* open a file picker, parse CSV, resolve headers against the register def */
+function fileInput(def: RegisterDef, onReady: (pv: ImportPreview) => void) {
+  const el = document.createElement('input');
+  el.type = 'file';
+  el.accept = '.csv,text/csv';
+  el.onchange = () => {
+    const f = el.files?.[0];
+    if (!f) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const grid = parseCsv(String(reader.result || ''));
+      if (grid.length < 2) { onReady({ rows: [], unmatched: [], total: 0 }); return; }
+      const map = resolveHeaders(def, grid[0]);
+      const rows: { project: string; patch: Record<string, string> }[] = [];
+      for (let i = 1; i < grid.length; i++) {
+        const cols = grid[i];
+        let project = '';
+        const patch: Record<string, string> = {};
+        Object.entries(map).forEach(([idx, m]) => {
+          const v = (cols[+idx] || '').trim();
+          if (m.kind === 'project') project = v;
+          else if (m.kind === 'status') { const k = resolveStatus(def, v); if (k) patch.status = k; }
+          else if (m.kind === 'field' && v) patch[m.key!] = v;
+        });
+        if (project) rows.push({ project, patch });
+      }
+      onReady({ rows, unmatched: [], total: rows.length });
+    };
+    reader.readAsText(f);
+  };
+  el.click();
+}
+
+/* minimal RFC-4180-ish CSV parser (handles quotes, escaped quotes, CRLF) */
+function parseCsv(text: string): string[][] {
+  text = text.replace(/^﻿/, '');
+  const rows: string[][] = [];
+  let field = '', row: string[] = [], inQ = false, i = 0;
+  while (i < text.length) {
+    const c = text[i];
+    if (inQ) {
+      if (c === '"') { if (text[i + 1] === '"') { field += '"'; i += 2; continue; } inQ = false; i++; continue; }
+      field += c; i++; continue;
+    }
+    if (c === '"') { inQ = true; i++; continue; }
+    if (c === ',') { row.push(field); field = ''; i++; continue; }
+    if (c === '\r') { i++; continue; }
+    if (c === '\n') { row.push(field); rows.push(row); row = []; field = ''; i++; continue; }
+    field += c; i++;
+  }
+  if (field.length || row.length) { row.push(field); rows.push(row); }
+  return rows.filter((r) => r.some((c) => c.trim() !== ''));
+}
+
+function resolveHeaders(def: RegisterDef, headers: string[]): Record<number, { kind: 'project' | 'status' | 'field'; key?: string }> {
+  const byLabel: Record<string, string> = {};
+  def.fields.forEach((f) => { byLabel[f.zh.toLowerCase()] = f.key; byLabel[f.en.toLowerCase()] = f.key; byLabel[f.key.toLowerCase()] = f.key; });
+  const map: Record<number, { kind: 'project' | 'status' | 'field'; key?: string }> = {};
+  headers.forEach((h, idx) => {
+    const hl = h.trim().toLowerCase();
+    if (['项目', 'project', '项目名称'].includes(hl)) map[idx] = { kind: 'project' };
+    else if (['状态', 'status'].includes(hl)) map[idx] = { kind: 'status' };
+    else if (byLabel[hl]) map[idx] = { kind: 'field', key: byLabel[hl] };
+  });
+  return map;
+}
+
+function resolveStatus(def: RegisterDef, v: string): string {
+  const vl = v.trim().toLowerCase();
+  if (!vl) return '';
+  const s = statusFamily(def.kind).find((x) => x[0] === vl || x[1].toLowerCase() === vl || x[2].toLowerCase() === vl);
+  return s ? s[0] : '';
+}
+
+function downloadTemplate(def: RegisterDef, lang: 'zh' | 'en') {
+  const esc = (v: string) => `"${v.replace(/"/g, '""')}"`;
+  const head = [lang === 'zh' ? '项目' : 'Project', lang === 'zh' ? '状态' : 'Status', ...def.fields.map((f) => (lang === 'zh' ? f.zh : f.en))];
+  const example = [lang === 'zh' ? '（填已有项目名称）' : '(existing project name)', statusFamily(def.kind)[0][lang === 'zh' ? 1 : 2], ...def.fields.map(() => '')];
+  const csv = [head, example].map((r) => r.map(esc).join(',')).join('\r\n');
+  const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' });
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+  a.download = `register-${def.svc}-template.csv`; a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+
+function AddModal({ def, projects, onClose, onSave }: { def: RegisterDef; projects: Project[]; onClose: () => void; onSave: (projectId: string, patch: Record<string, string>) => void }) {
+  const { lang, t } = useLang();
+  const [pid, setPid] = useState('');
+  const [draft, setDraft] = useState<Record<string, string>>({ status: defaultStatus(def.kind) });
+  const [busy, setBusy] = useState(false);
+  const set = (k: string, v: string) => setDraft((x) => ({ ...x, [k]: v }));
+  const withSvc = new Set(projects.filter((p) => p.packages.some((pk) => pk.svc === def.svc)).map((p) => p.id));
+
+  return (
+    <div className="overlay" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="modal" style={{ maxWidth: 560 }}>
+        <div style={{ display: 'flex', alignItems: 'center', marginBottom: 4 }}>
+          <h2 style={{ margin: 0 }}>{t('新增记录', 'Add record')} · {svcName(def.svc, lang)}</h2>
+          <div style={{ flex: 1 }} />
+          <button className="btn-line sm" onClick={onClose}>{t('关闭', 'Close')}</button>
+        </div>
+        <div className="msub">{t('选择项目并填写资料;若该项目还没有此业务,会自动为其建立。', 'Pick a project and fill the record; the service is created for it if missing.')}</div>
+        <div style={{ display: 'grid', gridTemplateColumns: '120px 1fr', gap: '10px 12px', alignItems: 'center', margin: '10px 0 16px' }}>
+          <label style={lbl}>{t('项目', 'Project')} <span style={{ color: 'var(--danger)' }}>*</span></label>
+          <select className="in sm" value={pid} onChange={(e) => setPid(e.target.value)}>
+            <option value="">{t('— 选择项目 —', '— select project —')}</option>
+            {projects.map((p) => <option key={p.id} value={p.id}>{p.name}{withSvc.has(p.id) ? t('（已有此业务·将更新）', ' (has service · updates)') : ''}</option>)}
+          </select>
+          <label style={lbl}>{t('状态', 'Status')}</label>
+          <select className="in sm" value={draft.status} onChange={(e) => set('status', e.target.value)}>
+            {statusFamily(def.kind).map((s) => <option key={s[0]} value={s[0]}>{lang === 'zh' ? s[1] : s[2]}</option>)}
+          </select>
+          {def.fields.map((f) => (
+            <React.Fragment key={f.key}>
+              <label style={lbl}>{lang === 'zh' ? f.zh : f.en}{f.required && <span style={{ color: 'var(--danger)' }}> *</span>}</label>
+              {f.type === 'textarea'
+                ? <textarea className="in sm" value={draft[f.key] || ''} onChange={(e) => set(f.key, e.target.value)} style={{ minHeight: 46 }} />
+                : f.type === 'select'
+                  ? <select className="in sm" value={draft[f.key] || ''} onChange={(e) => set(f.key, e.target.value)}><option value="">—</option>{(f.options || []).map((o) => <option key={o[0]} value={o[0]}>{lang === 'zh' ? o[1] : o[2]}</option>)}</select>
+                  : <input className="in sm" type={f.type === 'date' ? 'date' : 'text'} value={draft[f.key] || ''} onChange={(e) => set(f.key, e.target.value)} />}
+            </React.Fragment>
+          ))}
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+          <button className="btn-line sm" onClick={onClose} disabled={busy}>{t('取消', 'Cancel')}</button>
+          <button className="btn-navy sm" disabled={busy || !pid} onClick={async () => { setBusy(true); await onSave(pid, draft); setBusy(false); }}>{busy ? t('保存中…', 'Saving…') : t('新增', 'Add')}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ImportModal({ preview, def, onClose, onConfirm }: { preview: ImportPreview; def: RegisterDef; onClose: () => void; onConfirm: () => void }) {
+  const { projects } = useStore();
+  const { lang, t } = useLang();
+  const [busy, setBusy] = useState(false);
+  const names = new Set(projects.filter((p) => !p.archived).map((p) => (p.name || '').trim().toLowerCase()));
+  const unmatched = [...new Set(preview.rows.filter((r) => !names.has(r.project.trim().toLowerCase())).map((r) => r.project))];
+  const matched = preview.rows.length - preview.rows.filter((r) => !names.has(r.project.trim().toLowerCase())).length;
+
+  return (
+    <div className="overlay" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="modal" style={{ maxWidth: 560 }}>
+        <div style={{ display: 'flex', alignItems: 'center', marginBottom: 4 }}>
+          <h2 style={{ margin: 0 }}>{t('导入预览', 'Import preview')} · {svcName(def.svc, lang)}</h2>
+          <div style={{ flex: 1 }} />
+          <button className="btn-line sm" onClick={onClose}>{t('关闭', 'Close')}</button>
+        </div>
+        <div className="msub">{t('按项目名称匹配现有项目;全有或全无——任一行匹配不到,整批不写入。', 'Matched by project name. All-or-nothing — one unmatched row aborts the whole import.')}</div>
+        <div style={{ display: 'flex', gap: 20, margin: '14px 0' }}>
+          <Stat label={t('总行数', 'Rows')} value={preview.rows.length} />
+          <Stat label={t('可匹配', 'Matched')} value={matched} color="var(--success)" />
+          <Stat label={t('未匹配', 'Unmatched')} value={unmatched.length} color={unmatched.length ? 'var(--danger)' : 'var(--text2)'} />
+        </div>
+        {unmatched.length > 0 && (
+          <div style={{ fontSize: 12, color: 'var(--danger)', background: '#fdecec', borderRadius: 8, padding: '9px 12px', marginBottom: 12 }}>
+            {t('以下项目名称在系统中找不到,请先核对(导入会整批失败):', 'These project names were not found — fix them first (the import will fail as a batch):')}
+            <div style={{ marginTop: 5, fontWeight: 600 }}>{unmatched.slice(0, 12).join(' · ')}{unmatched.length > 12 ? ' …' : ''}</div>
+          </div>
+        )}
+        {preview.rows.length === 0 && <div style={{ fontSize: 12.5, color: 'var(--text2)' }}>{t('没有可导入的行(检查表头是否与模板一致)。', 'No importable rows — check headers match the template.')}</div>}
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 6 }}>
+          <button className="btn-line sm" onClick={onClose} disabled={busy}>{t('取消', 'Cancel')}</button>
+          <button className="btn-navy sm" disabled={busy || preview.rows.length === 0 || unmatched.length > 0}
+            onClick={async () => { setBusy(true); await onConfirm(); setBusy(false); }}>
+            {busy ? t('导入中…', 'Importing…') : t(`确认导入 ${matched} 条`, `Import ${matched}`)}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function Stat({ label, value, color }: { label: string; value: number; color?: string }) {
+  return (
+    <div>
+      <div style={{ fontSize: 11.5, color: 'var(--text2)' }}>{label}</div>
+      <div className="tnum" style={{ fontSize: 24, fontWeight: 600, color: color || 'var(--navy900)' }}>{value}</div>
+    </div>
   );
 }
 

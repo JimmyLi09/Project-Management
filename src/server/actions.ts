@@ -68,6 +68,7 @@ export type ProjectAction =
   | { type: 'editUpdate'; field: 'done' | 'nextNodes' | 'risks' | 'needDirector' | 'clientPending' | 'budget'; value: string }
   | { type: 'setDecision'; field: 'dDecision' | 'dStatus'; value: string }
   | { type: 'setRecord'; pkg: number; patch: Record<string, string> }
+  | { type: 'addServicePackage'; svc: string; patch: Record<string, string> }
   | { type: 'addCustomNode'; pkg: number; name: string; date: string; owner: string; atIdx?: number }
   | { type: 'toggleInvoiced' };
 
@@ -613,6 +614,26 @@ export function applyAction(u: Identity, p: Project, a: ProjectAction, ctx: Acti
       rec.updatedAt = Date.now();
       pk.record = rec;
       logIt(p, u.name, `更新资料 Record: ${pk.svc}`);
+      break;
+    }
+    case 'addServicePackage': {
+      // §3: "新增记录" from a register — ensure the project has a package of this
+      // svc and set its record. If the svc already exists, merge into it (no dup).
+      if (!canEdit(u, p)) throw new PermissionError('无编辑权限');
+      const svc = String(a.svc || '').trim();
+      if (!svc) throw new ValidationError('无效的业务类型');
+      let pk = p.packages.find((x) => x.svc === svc);
+      if (!pk) {
+        pk = { svc, start: '', delivery: '', buffer: 0, owner: '', status: 'active', schedule: [], checklist: [] };
+        p.packages.push(pk);
+        if (!Array.isArray(p.services)) p.services = [];
+        if (!p.services.includes(svc)) p.services.push(svc);
+      }
+      const rec: Record<string, string | number | undefined> = { ...(pk.record || {}) };
+      for (const [k, v] of Object.entries(a.patch || {})) { if (k === 'updatedAt') continue; rec[k] = String(v ?? '').slice(0, 2000); }
+      rec.updatedAt = Date.now();
+      pk.record = rec;
+      logIt(p, u.name, `新增登记记录 Add record: ${svc}`);
       break;
     }
     case 'addCustomNode': {
