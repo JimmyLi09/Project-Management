@@ -98,6 +98,7 @@ export interface ScheduleRow {
   s: string; // ISO start override
   e: string; // ISO end override
   delayNote?: string; // reason for a delay/date adjustment (shows a red mark)
+  custom?: boolean; // §5: manually-inserted node (ad-hoc sample / extra request)
 }
 
 export interface ChecklistItem {
@@ -139,6 +140,16 @@ export interface ServicePackage {
   checklist: ChecklistGroup[];
   resourceLinks?: string; // free text: web links / network paths to renders, VR, drone, models
   scopeItems?: ScopeItem[]; // R5-3: deliverables breakdown (item / qty / notes)
+  record?: ServiceRecord; // business "资料 record" — single source for Job Record & Registers
+}
+
+/* business record attached to a service package (Job Record / Project Registers).
+   status + updatedAt are structural; the rest are svc-specific string fields
+   defined in lib/records.ts. */
+export interface ServiceRecord {
+  status?: string;
+  updatedAt?: number;
+  [k: string]: string | number | undefined;
 }
 
 export type DecisionStatus = 'pending' | 'approved' | 'rejected' | 'needinfo';

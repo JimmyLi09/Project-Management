@@ -14,6 +14,7 @@ import MyTasksView from './views/MyTasksView';
 import DirectorUpdateView from './views/DirectorUpdateView';
 import StatsView from './views/StatsView';
 import ContactsView from './views/ContactsView';
+import RegistersView from './views/RegistersView';
 import FinanceView from './views/FinanceView';
 import UsersView from './views/UsersView';
 import TemplatesView from './views/TemplatesView';
@@ -35,6 +36,7 @@ const PAGE_META: Record<string, { title: [string, string]; sub: [string, string]
   dupdate: { title: ['向上汇报', 'Director Update'], sub: ['每周汇报、风险与决策闭环', 'Weekly updates, risks and decisions'] },
   stats: { title: ['统计报表', 'Reports'], sub: ['项目统计 · 按 PM 的项目数与积分', 'Projects and points by PM'] },
   contacts: { title: ['通讯录', 'Contacts'], sub: ['所有客户、总包与联系人 · 可导出', 'All clients, contractors and contacts · exportable'] },
+  registers: { title: ['项目档案', 'Registers'], sub: ['按业务类型的跨项目登记表 · 7 类 · 可筛选导出', 'Cross-project registers by business type · 7 tables · filter & export'] },
   finance: { title: ['收款看板', 'Collections'], sub: ['开票与收款全局视图 · 逾期预警 · 可导出', 'Invoicing & payment across projects · overdue alerts · exportable'] },
   users: { title: ['用户管理', 'Users'], sub: ['账号、角色与访问权限', 'Accounts, roles and access'] },
   templates: { title: ['模板管理', 'Templates'], sub: ['编辑生产排期与信息清单模板(仅影响之后新建的项目)', 'Edit schedule & checklist templates (affects new projects only)'] },
@@ -130,6 +132,7 @@ function Shell() {
           {navItem('dupdate', 'presentation', t('向上汇报', 'Director Update'))}
           {navItem('stats', 'trending', t('统计报表', 'Reports'))}
           {navItem('contacts', 'users', t('通讯录', 'Contacts'))}
+          {navItem('registers', 'layers', t('项目档案', 'Registers'))}
           {(isFull(me) || me.role === 'finance') && navItem('finance', 'trending', t('收款看板', 'Collections'), financeAlertCount)}
           {isFull(me) && navItem('users', 'settings', t('用户管理', 'Users'))}
           {isFull(me) && navItem('templates', 'layers', t('模板管理', 'Templates'))}
@@ -227,6 +230,7 @@ function Shell() {
             {view.name === 'dupdate' && <DirectorUpdateView />}
             {view.name === 'stats' && <StatsView />}
             {view.name === 'contacts' && <ContactsView />}
+            {view.name === 'registers' && <RegistersView />}
             {view.name === 'finance' && <FinanceView />}
             {view.name === 'users' && <UsersView />}
             {view.name === 'templates' && <TemplatesView />}

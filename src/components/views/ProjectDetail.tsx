@@ -13,6 +13,7 @@ import { useLang } from '@/lib/i18n';
 import { Avatar, HM, Icon, Pill, ProgressBar, TM } from '../ui';
 import ScheduleTab from './ScheduleTab';
 import ChecklistTab from './ChecklistTab';
+import JobRecordTab from './JobRecordTab';
 import ExportOverlay from './ExportOverlay';
 import TransferModal from '../TransferModal';
 import type { Project } from '@/lib/types';
@@ -39,7 +40,7 @@ export default function ProjectDetail() {
   const t0 = todayMid();
   const daysLeft = del ? Math.round((del.getTime() - t0.getTime()) / 86400000) : null;
 
-  const setTab = (tb: 'overview' | 'schedule' | 'checklist') => setView({ ...view, tab: tb });
+  const setTab = (tb: 'overview' | 'schedule' | 'checklist' | 'jobrecord') => setView({ ...view, tab: tb });
 
   return (
     <>
@@ -98,6 +99,7 @@ export default function ProjectDetail() {
           <button className={`detail-tab ${tab === 'overview' ? 'active' : ''}`} onClick={() => setTab('overview')}>{t('概览', 'Overview')}</button>
           <button className={`detail-tab ${tab === 'schedule' ? 'active' : ''}`} onClick={() => setTab('schedule')}>{t('排期', 'Schedule')}</button>
           <button className={`detail-tab ${tab === 'checklist' ? 'active' : ''}`} onClick={() => setTab('checklist')}>{t('信息清单', 'Checklist')}</button>
+          <button className={`detail-tab ${tab === 'jobrecord' ? 'active' : ''}`} onClick={() => setTab('jobrecord')}>{t('Job Record', 'Job Record')}</button>
         </div>
       </div>
 
@@ -177,6 +179,7 @@ export default function ProjectDetail() {
           p={p} pkgIdx={pkgIdx} onExport={() => setShowExport(true)} onPkg={(i) => setView({ ...view, pkg: i })}
         />
       )}
+      {tab === 'jobrecord' && <JobRecordTab key={p.id} p={p} />}
       {showExport && <ExportOverlay p={p} onClose={() => setShowExport(false)} />}
       {transferFrom && (
         <TransferModal from={transferFrom} pid={p.id} onClose={() => setTransferFrom(null)} />
