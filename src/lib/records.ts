@@ -59,82 +59,119 @@ export const defaultStatus = (kind: RegisterKind) => (kind === 'install' ? 'pend
 export const statusMeta = (kind: RegisterKind, key: string): StatusMeta =>
   statusFamily(kind).find((s) => s[0] === key) || [key, key, key, 'var(--text2)'];
 
-/* common install columns shared by LED / Projector / MAXHUB / AV */
-const INSTALL_COMMON: FieldDef[] = [
-  { key: 'developer', zh: 'Developer', en: 'Developer', type: 'text' },
-  { key: 'siteAddress', zh: 'Site Address', en: 'Site Address', type: 'text' },
-  { key: 'mainCon', zh: 'Main Con', en: 'Main Con', type: 'text' },
-  { key: 'installDate', zh: '安装日期', en: 'Install Date', type: 'date', required: true },
-];
-const INSTALL_TAIL: FieldDef[] = [
-  { key: 'quantity', zh: '数量 Qty', en: 'Quantity', type: 'text' },
-  { key: 'signedOff', zh: 'Signed Off', en: 'Signed Off', type: 'date' },
-  { key: 'launch', zh: 'Launch', en: 'Launch', type: 'date' },
-];
-
-/* ---- the 7 registers ---- */
+/* ---- the 7 registers — columns mirror the studio's Google Sheet tabs ----
+   Required fields are limited to project info (name is a project-level column,
+   so the only required record field is the site address, per PD); 3D Links also
+   requires the Link. */
 export const REGISTERS: RegisterDef[] = [
   {
+    // Scale Model sheet: Project detail · Client Company · Client Contact Person ·
+    // PM · Status · Handover Date · Expiration Date · Model Maker
     svc: 'scale', kind: 'delivery', confirmed: true, watchDateKey: 'expirationDate',
     fields: [
-      { key: 'modelType', zh: 'Model Type / 比例', en: 'Model Type / Scale', type: 'text' },
-      { key: 'description', zh: 'Detail / 描述', en: 'Detail / Description', type: 'textarea' },
-      { key: 'clientContact', zh: 'Client Contact', en: 'Client Contact', type: 'text' },
-      { key: 'modelMaker', zh: 'Model Maker', en: 'Model Maker', type: 'text' },
-      { key: 'handoverDate', zh: 'Handover Date', en: 'Handover Date', type: 'date', required: true },
-      { key: 'expirationDate', zh: 'Expiration Date', en: 'Expiration Date', type: 'date' },
+      { key: 'projectDetail', zh: 'Project detail 项目详情', en: 'Project detail', type: 'text' },
+      { key: 'clientContact', zh: 'Client Contact 客户联系人', en: 'Client Contact Person', type: 'text' },
+      { key: 'modelMaker', zh: 'Model Maker 模型师', en: 'Model Maker', type: 'text' },
+      { key: 'handoverDate', zh: 'Handover Date 交付日期', en: 'Handover Date', type: 'date' },
+      { key: 'expirationDate', zh: 'Expiration Date 有效期', en: 'Expiration Date', type: 'date' },
     ],
   },
   {
+    // Projector sheet: Developer · Site Address · Main Con · Installation ·
+    // Quantity · Details · Signed Off · Launch · Type
     svc: 'projector', kind: 'install', confirmed: true,
     fields: [
-      ...INSTALL_COMMON,
-      { key: 'quantity', zh: '数量 Qty', en: 'Quantity', type: 'text' },
-      { key: 'details', zh: 'Details', en: 'Details', type: 'textarea' },
-      { key: 'signedOff', zh: 'Signed Off', en: 'Signed Off', type: 'date' },
+      { key: 'developer', zh: 'Developer', en: 'Developer', type: 'text' },
+      { key: 'siteAddress', zh: 'Site Address 地址', en: 'Site Address', type: 'text', required: true },
+      { key: 'mainCon', zh: 'Main Con', en: 'Main Con', type: 'text' },
+      { key: 'installation', zh: 'Installation 安装日期', en: 'Installation', type: 'date' },
+      { key: 'quantity', zh: 'Quantity 数量', en: 'Quantity', type: 'text' },
+      { key: 'details', zh: 'Details 详情', en: 'Details', type: 'textarea' },
+      { key: 'signedOff', zh: 'Signed Off 签收', en: 'Signed Off', type: 'date' },
       { key: 'launch', zh: 'Launch', en: 'Launch', type: 'date' },
-      { key: 'ptype', zh: 'Type', en: 'Type', type: 'text' },
+      { key: 'ptype', zh: 'Type 类型', en: 'Type', type: 'text' },
     ],
   },
   {
-    svc: 'led', kind: 'install', confirmed: false,
+    // LED sheet: Address · Main Con · Metal Frame · Installation · Signed Off ·
+    // Dimension (L/H/SQM) · Quantity (L/H/Total) · Type · DB Box · Power/Data
+    // Cable · Speaker · Remarks.  PD edits: drop Launch, add Warranty.
+    svc: 'led', kind: 'install', confirmed: true,
     fields: [
-      ...INSTALL_COMMON,
-      { key: 'screenSpec', zh: '屏幕规格 (P3/P2.5)', en: 'Screen Spec (P3/P2.5)', type: 'text' },
-      ...INSTALL_TAIL,
+      { key: 'siteAddress', zh: 'Address 地址', en: 'Address', type: 'text', required: true },
+      { key: 'mainCon', zh: 'Main Con', en: 'Main Con', type: 'text' },
+      { key: 'metalFrame', zh: 'Metal Frame 金属框', en: 'Metal Frame', type: 'text' },
+      { key: 'installation', zh: 'Installation 安装日期', en: 'Installation', type: 'date' },
+      { key: 'signedOff', zh: 'Signed Off 签收', en: 'Signed Off', type: 'date' },
+      { key: 'dimL', zh: 'L (mm)', en: 'L (mm)', type: 'text' },
+      { key: 'dimH', zh: 'H (mm)', en: 'H (mm)', type: 'text' },
+      { key: 'sqm', zh: 'SQM 面积', en: 'SQM', type: 'text' },
+      { key: 'qtyL', zh: '数量 L', en: 'Qty L', type: 'text' },
+      { key: 'qtyH', zh: '数量 H', en: 'Qty H', type: 'text' },
+      { key: 'qtyTotal', zh: '数量 Total', en: 'Qty Total', type: 'text' },
+      { key: 'ledType', zh: 'Type 类型', en: 'Type', type: 'text' },
+      { key: 'dbBox', zh: 'DB Box (KW)', en: 'DB Box (KW)', type: 'text' },
+      { key: 'powerCable', zh: 'Power Cable (No.)', en: 'Power Cable (No.)', type: 'text' },
+      { key: 'dataCable', zh: 'Data Cable (No.)', en: 'Data Cable (No.)', type: 'text' },
+      { key: 'speaker', zh: 'Speaker 音箱', en: 'Speaker', type: 'text' },
+      { key: 'remarks', zh: 'Remarks 备注', en: 'Remarks', type: 'textarea' },
+      { key: 'warranty', zh: 'Warranty 保修到期', en: 'Warranty', type: 'date' },
     ],
   },
   {
-    svc: 'vrar', kind: 'delivery', confirmed: false, watchDateKey: 'expirationDate',
+    // Matterport / 3D Links sheet: Project Record · Project Unit Type ·
+    // Client Company · Client Contact · PM · Shooting Date · Handover Date ·
+    // Expiration Date · Nature · Link · Source.  PD edits: Type dropdown
+    // 360/720/VR/AR, Link required.
+    svc: 'vrar', kind: 'delivery', confirmed: true, watchDateKey: 'expirationDate',
     fields: [
-      { key: 'linkType', zh: '类型', en: 'Type', type: 'select', options: [['360', '360', '360'], ['720', '720', '720'], ['vr', 'VR', 'VR']] },
-      { key: 'url', zh: 'Link / URL', en: 'Link / URL', type: 'url', required: true },
-      { key: 'deliveryDate', zh: '交付日期', en: 'Delivery Date', type: 'date' },
-      { key: 'expirationDate', zh: '有效期 Expiration', en: 'Expiration', type: 'date' },
+      { key: 'projectRecord', zh: 'Project Record 项目编号', en: 'Project Record', type: 'text' },
+      { key: 'unitType', zh: 'Unit Type 单元类型', en: 'Project Unit Type', type: 'text' },
+      { key: 'clientContact', zh: 'Client Contact 客户联系人', en: 'Client Contact Person', type: 'text' },
+      { key: 'shootingDate', zh: 'Shooting Date 拍摄日期', en: 'Shooting Date', type: 'date' },
+      { key: 'handoverDate', zh: 'Handover Date 交付日期', en: 'Handover Date', type: 'date' },
+      { key: 'expirationDate', zh: 'Expiration 有效期', en: 'Expiration Date', type: 'date' },
+      { key: 'nature', zh: 'Nature 性质', en: 'Nature', type: 'select', options: [['matterport', 'Matterport', 'Matterport'], ['3drender', '3D Render', '3D Render'], ['drone', 'Drone 航拍', 'Drone']] },
+      { key: 'linkType', zh: 'Type 类型', en: 'Type', type: 'select', options: [['360', '360', '360'], ['720', '720', '720'], ['vr', 'VR', 'VR'], ['ar', 'AR', 'AR']] },
+      { key: 'url', zh: 'Link 链接', en: 'Link', type: 'url', required: true },
+      { key: 'source', zh: 'Source 来源', en: 'Source', type: 'text' },
     ],
   },
   {
-    svc: 'maxhub', kind: 'install', confirmed: false,
+    // MAXHUB sheet: Address · Main Con · End User · Installation · Signed Off ·
+    // Quantity · Type/Size · Remarks
+    svc: 'maxhub', kind: 'install', confirmed: true,
     fields: [
-      ...INSTALL_COMMON,
-      { key: 'modelSpec', zh: 'Model / Spec', en: 'Model / Spec', type: 'text' },
-      ...INSTALL_TAIL,
+      { key: 'siteAddress', zh: 'Address 地址', en: 'Address', type: 'text', required: true },
+      { key: 'mainCon', zh: 'Main Con', en: 'Main Con', type: 'text' },
+      { key: 'endUser', zh: 'End User 终端用户', en: 'End User', type: 'text' },
+      { key: 'installation', zh: 'Installation 安装日期', en: 'Installation', type: 'date' },
+      { key: 'signedOff', zh: 'Signed Off 签收', en: 'Signed Off', type: 'date' },
+      { key: 'quantity', zh: 'Quantity 数量', en: 'Quantity', type: 'text' },
+      { key: 'typeSize', zh: 'Type / Size 型号尺寸', en: 'Type / Size', type: 'text' },
+      { key: 'remarks', zh: 'Remarks 备注', en: 'Remarks', type: 'textarea' },
     ],
   },
   {
+    // AV System — no PD sheet supplied yet; suggested columns pending confirmation.
     svc: 'av', kind: 'install', confirmed: false,
     fields: [
-      ...INSTALL_COMMON,
-      { key: 'systemScope', zh: 'System Scope (设备清单)', en: 'System Scope (equipment)', type: 'textarea' },
-      ...INSTALL_TAIL,
+      { key: 'developer', zh: 'Developer', en: 'Developer', type: 'text' },
+      { key: 'siteAddress', zh: 'Site Address 地址', en: 'Site Address', type: 'text', required: true },
+      { key: 'mainCon', zh: 'Main Con', en: 'Main Con', type: 'text' },
+      { key: 'installation', zh: 'Installation 安装日期', en: 'Installation', type: 'date' },
+      { key: 'systemScope', zh: 'System Scope 设备清单', en: 'System Scope', type: 'textarea' },
+      { key: 'quantity', zh: 'Quantity 数量', en: 'Quantity', type: 'text' },
+      { key: 'signedOff', zh: 'Signed Off 签收', en: 'Signed Off', type: 'date' },
     ],
   },
   {
-    svc: 'others', kind: 'delivery', confirmed: false, watchDateKey: 'deliveryDate',
+    // Others — PD edit: Delivery Date renamed 完成日期.
+    svc: 'others', kind: 'delivery', confirmed: true, watchDateKey: 'completedDate',
     fields: [
       { key: 'serviceType', zh: 'Service / 类别', en: 'Service / Category', type: 'text' },
       { key: 'description', zh: 'Detail / 描述', en: 'Detail / Description', type: 'textarea' },
-      { key: 'deliveryDate', zh: '交付日期', en: 'Delivery Date', type: 'date', required: true },
+      { key: 'completedDate', zh: '完成日期', en: 'Completed Date', type: 'date' },
     ],
   },
 ];

@@ -18,7 +18,7 @@ const PAGE = 20;
 
 /* representative date for Year filter + "expiring" watch */
 function mainDate(def: RegisterDef, pk: ServicePackage): string {
-  const keys = def.kind === 'install' ? ['installDate'] : [def.watchDateKey || '', 'deliveryDate', 'handoverDate'];
+  const keys = def.kind === 'install' ? ['installation', 'installDate'] : [def.watchDateKey || '', 'completedDate', 'deliveryDate', 'handoverDate'];
   for (const k of keys) { if (k) { const v = recordVal(pk.record, k); if (v) return v; } }
   return '';
 }
@@ -68,7 +68,7 @@ export default function RegistersView() {
       if (pm && !(r.p.owners || []).includes(pm)) return false;
       if (year) { const d = mainDate(def, r.pk); const y = d ? d.slice(0, 4) : String(new Date(r.p.created).getFullYear()); if (y !== year) return false; }
       if (ql) {
-        const hay = [r.p.name, r.p.client, recordVal(r.pk.record, 'developer'), recordVal(r.pk.record, 'mainCon')].join(' ').toLowerCase();
+        const hay = [r.p.name, r.p.client, recordVal(r.pk.record, 'developer'), recordVal(r.pk.record, 'siteAddress'), recordVal(r.pk.record, 'mainCon')].join(' ').toLowerCase();
         if (!hay.includes(ql)) return false;
       }
       return true;
