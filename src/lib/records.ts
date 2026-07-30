@@ -153,9 +153,10 @@ export const REGISTERS: RegisterDef[] = [
     ],
   },
   {
-    // AV System — no PD sheet supplied yet; suggested columns pending confirmation.
-    svc: 'av', kind: 'install', confirmed: false,
+    // AV System — PD: add Project No. (links to project progress) + Remarks.
+    svc: 'av', kind: 'install', confirmed: true,
     fields: [
+      { key: 'projectRecord', zh: '项目编号', en: 'Project No.', type: 'text' },
       { key: 'developer', zh: 'Developer', en: 'Developer', type: 'text' },
       { key: 'siteAddress', zh: 'Site Address 地址', en: 'Site Address', type: 'text', required: true },
       { key: 'mainCon', zh: 'Main Con', en: 'Main Con', type: 'text' },
@@ -163,6 +164,7 @@ export const REGISTERS: RegisterDef[] = [
       { key: 'systemScope', zh: 'System Scope 设备清单', en: 'System Scope', type: 'textarea' },
       { key: 'quantity', zh: 'Quantity 数量', en: 'Quantity', type: 'text' },
       { key: 'signedOff', zh: 'Signed Off 签收', en: 'Signed Off', type: 'date' },
+      { key: 'remarks', zh: 'Remarks 备注', en: 'Remarks', type: 'textarea' },
     ],
   },
   {

@@ -7,7 +7,7 @@ import { svcName, svcColor } from '@/lib/templates';
 import { useLang } from '@/lib/i18n';
 import { Icon } from '../ui';
 import {
-  registerDef, statusFamily, statusMeta, defaultStatus, recordVal, isIncomplete,
+  REGISTERS, registerDef, statusFamily, statusMeta, defaultStatus, recordVal, isIncomplete,
   type FieldDef, type RegisterDef,
 } from '@/lib/records';
 import type { Project, ServicePackage } from '@/lib/types';
@@ -56,6 +56,38 @@ export default function JobRecordTab({ p }: { p: Project }) {
           </div>
         );
       })}
+
+      {canEd && <AddServiceBar p={p} />}
+    </div>
+  );
+}
+
+/* add a business/service to the project mid-flight (production scope changed).
+   Only offers the 7 register services the project doesn't already have. */
+function AddServiceBar({ p }: { p: Project }) {
+  const { dispatch } = useStore();
+  const { lang, t } = useLang();
+  const [svc, setSvc] = useState('');
+  const [busy, setBusy] = useState(false);
+  const have = new Set(p.packages.map((pk) => pk.svc));
+  const options = REGISTERS.filter((r) => !have.has(r.svc));
+  if (options.length === 0) return null;
+
+  return (
+    <div className="panel" style={{ padding: '12px 16px', borderStyle: 'dashed' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 9, flexWrap: 'wrap' }}>
+        <span style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--navy900)' }}>＋ {t('添加业务', 'Add service')}</span>
+        <span style={{ fontSize: 11.5, color: 'var(--text2)' }}>{t('制作过程中新增的业务可在此加入', 'Add a service if scope changes during production')}</span>
+        <div style={{ flex: 1 }} />
+        <select className="in sm" value={svc} onChange={(e) => setSvc(e.target.value)} style={{ width: 'auto' }}>
+          <option value="">{t('— 选择业务 —', '— select service —')}</option>
+          {options.map((r) => <option key={r.svc} value={r.svc}>{svcName(r.svc, lang)}</option>)}
+        </select>
+        <button className="btn-navy sm" disabled={busy || !svc}
+          onClick={async () => { setBusy(true); await dispatch(p.id, { type: 'addServicePackage', svc, patch: {} }); setBusy(false); setSvc(''); }}>
+          {busy ? t('添加中…', 'Adding…') : t('添加', 'Add')}
+        </button>
+      </div>
     </div>
   );
 }
