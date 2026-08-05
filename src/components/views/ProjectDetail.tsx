@@ -7,7 +7,7 @@ import {
   pkgProgress, pkgStart, planDates, plannedFinish, projectHealth, projPoints,
   projStage, riskKey, schedProgress, todayMid,
 } from '@/lib/project';
-import { canAssign, canCommercial, canDecide, canEdit, canEditFinance, isFull } from '@/lib/permissions';
+import { canAssign, canCommercial, canDecide, canDelete, canEdit, canEditFinance, isFull } from '@/lib/permissions';
 import { DIFF, STAGES, stageIdx, svcColor, svcName } from '@/lib/templates';
 import { useLang } from '@/lib/i18n';
 import { Avatar, HM, Icon, Pill, ProgressBar, TM } from '../ui';
@@ -87,7 +87,7 @@ export default function ProjectDetail() {
                   📦 {p.archived ? t('取消归档', 'Unarchive') : t('归档', 'Archive')}
                 </button>
               )}
-              {isFull(me) && (
+              {canDelete(me) && (
                 <button className="btn-line sm danger" onClick={async () => {
                   if (confirm(t('确认删除此项目?对所有协作成员生效。', 'Delete this project for everyone?'))) { if (await removeProject(p.id)) go('projects'); }
                 }}>{t('删除', 'Delete')}</button>

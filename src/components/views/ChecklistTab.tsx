@@ -49,7 +49,9 @@ export default function ChecklistTab({ p, pkgIdx, onExport, onPkg }: {
     if (it.status === 'confirmed') doneN++;
     if (it.status === 'pending') pendingN++;
     const due = parseISO(it.date);
-    if (due && due < today && it.status !== 'confirmed') overdueN++;
+    // REQ-003: overdue = 未收到(pending) 且已过截止日。已收到/需修改/已确认等
+    // 都不算逾期(资料已到位或已在处理),避免把「已收到」误报成逾期。
+    if (due && due < today && it.status === 'pending') overdueN++;
   }));
   const pct = totalN ? Math.round((doneN / totalN) * 100) : 0;
 
@@ -192,7 +194,8 @@ export default function ChecklistTab({ p, pkgIdx, onExport, onPkg }: {
 
               {!isCol && g.items.map((it, ii) => {
                 const due = parseISO(it.date);
-                const overdue = due && due < today && it.status !== 'confirmed' && it.status !== 'na';
+                // REQ-003: 仅「未收到 pending」且过期才标逾期(已收到不算)
+                const overdue = due && due < today && it.status === 'pending';
                 const shots = it.shots && it.shots.length ? it.shots : (it.shot ? [it.shot] : []);
                 return (
                   <div key={it.id || ii} style={{

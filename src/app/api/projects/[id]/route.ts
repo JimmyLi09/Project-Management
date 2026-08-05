@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { appendAudit, commitWorkflowAction, deleteProject, getEffectiveTemplate, getProject, saveProject, saveProjectCAS } from '@/server/db';
 import { currentUser } from '@/server/session';
-import { identityOf, isFull } from '@/lib/permissions';
+import { canDelete, identityOf, isFull } from '@/lib/permissions';
 import { applyAction, PermissionError, ValidationError, type ProjectAction } from '@/server/actions';
 
 type Params = { params: Promise<{ id: string }> };
@@ -85,8 +85,8 @@ export async function PATCH(req: NextRequest, { params }: Params) {
 export async function DELETE(_req: NextRequest, { params }: Params) {
   const user = await currentUser();
   if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
-  if (!isFull(identityOf(user))) {
-    return NextResponse.json({ error: '仅 PD/BD 可删除项目' }, { status: 403 });
+  if (!canDelete(identityOf(user))) {
+    return NextResponse.json({ error: '仅 Sales / PD / BD 可删除项目' }, { status: 403 });
   }
   const { id } = await params;
   deleteProject(id);

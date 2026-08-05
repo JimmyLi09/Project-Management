@@ -40,6 +40,10 @@ export const canDecide = (u: Identity) => isFull(u);
 
 export const canCreate = (u: Identity) => isFull(u) || u.role === 'sales';
 
+/* REQ-008: only Sales / PD / BD may delete a project. PM & members can edit/add
+   but never delete; viewer/finance cannot either. Server is the final authority. */
+export const canDelete = (u: Identity) => isFull(u) || u.role === 'sales';
+
 export const canAdmin = (u: Identity) => isFull(u);
 
 export const ROLE_LABEL: Record<Role, string> = {
