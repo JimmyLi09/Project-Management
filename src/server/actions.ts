@@ -67,6 +67,9 @@ export type ProjectAction =
   | { type: 'restoreRisk'; key: string }
   | { type: 'editUpdate'; field: 'done' | 'nextNodes' | 'risks' | 'needDirector' | 'clientPending' | 'budget'; value: string }
   | { type: 'setDecision'; field: 'dDecision' | 'dStatus'; value: string }
+  | { type: 'setRecord'; pkg: number; patch: Record<string, string> }
+  | { type: 'addServicePackage'; svc: string; patch: Record<string, string> }
+  | { type: 'addCustomNode'; pkg: number; name: string; date: string; owner: string; atIdx?: number }
   | { type: 'toggleInvoiced' };
 
 export class PermissionError extends Error {}
@@ -594,6 +597,61 @@ export function applyAction(u: Identity, p: Project, a: ProjectAction, ctx: Acti
       if (!canEdit(u, p)) throw new PermissionError('无编辑权限');
       const pk = p.packages[a.pkg];
       if (pk && Array.isArray(pk.scopeItems) && pk.scopeItems[a.idx]) pk.scopeItems.splice(a.idx, 1);
+      break;
+    }
+    case 'setRecord': {
+      // Job Record edit-all & register row-edit share this. Merges a partial
+      // record into the package; single source of truth for both views.
+      if (!canEdit(u, p)) throw new PermissionError('无编辑权限');
+      const pk = p.packages[a.pkg];
+      if (!pk) throw new ValidationError('无效的服务包');
+      if (!a.patch || typeof a.patch !== 'object') throw new ValidationError('无效的资料');
+      const rec: Record<string, string | number | undefined> = { ...(pk.record || {}) };
+      for (const [k, v] of Object.entries(a.patch)) {
+        if (k === 'updatedAt') continue; // server-owned
+        rec[k] = String(v ?? '').slice(0, 2000);
+      }
+      rec.updatedAt = Date.now();
+      pk.record = rec;
+      logIt(p, u.name, `更新资料 Record: ${pk.svc}`);
+      break;
+    }
+    case 'addServicePackage': {
+      // §3: "新增记录" from a register — ensure the project has a package of this
+      // svc and set its record. If the svc already exists, merge into it (no dup).
+      if (!canEdit(u, p)) throw new PermissionError('无编辑权限');
+      const svc = String(a.svc || '').trim();
+      if (!svc) throw new ValidationError('无效的业务类型');
+      let pk = p.packages.find((x) => x.svc === svc);
+      if (!pk) {
+        pk = { svc, start: '', delivery: '', buffer: 0, owner: '', status: 'active', schedule: [], checklist: [] };
+        p.packages.push(pk);
+        if (!Array.isArray(p.services)) p.services = [];
+        if (!p.services.includes(svc)) p.services.push(svc);
+      }
+      const rec: Record<string, string | number | undefined> = { ...(pk.record || {}) };
+      for (const [k, v] of Object.entries(a.patch || {})) { if (k === 'updatedAt') continue; rec[k] = String(v ?? '').slice(0, 2000); }
+      rec.updatedAt = Date.now();
+      pk.record = rec;
+      logIt(p, u.name, `新增登记记录 Add record: ${svc}`);
+      break;
+    }
+    case 'addCustomNode': {
+      // §5: manual ad-hoc schedule node (sample / extra request)
+      if (!canEdit(u, p)) throw new PermissionError('无编辑权限');
+      const pk = p.packages[a.pkg];
+      if (!pk) throw new ValidationError('无效的服务包');
+      const name = String(a.name || '').slice(0, 200).trim();
+      if (!name) throw new ValidationError('请填写节点名称');
+      const row = {
+        id: newId(), no: '', phase: name, task: name, taskEn: name,
+        owner: '', assignee: String(a.owner || '').slice(0, 120), weeks: 0, typical: '—', gate: '',
+        freeze: false, status: 'todo' as const, note: '', s: String(a.date || ''), e: String(a.date || ''),
+        custom: true,
+      };
+      const at = typeof a.atIdx === 'number' && a.atIdx >= 0 && a.atIdx < pk.schedule.length ? a.atIdx + 1 : pk.schedule.length;
+      pk.schedule.splice(at, 0, row);
+      logIt(p, u.name, `新增自定义节点 Custom node: ${name}`);
       break;
     }
     case 'setArchived': {

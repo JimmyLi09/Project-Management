@@ -48,11 +48,25 @@ export default function ContactsView() {
   const { projects, openProject } = useStore();
   const { t } = useLang();
   const [q, setQ] = useState('');
+  const [fRole, setFRole] = useState('');
+  const [fCompany, setFCompany] = useState('');
+  const [fProject, setFProject] = useState('');
   const rows = useMemo(() => collect(projects), [projects]);
+
+  /* §4: filter options built from the aggregated rows */
+  const roleOpts = useMemo(() => [...new Set(rows.map((r) => r.role).filter(Boolean))].sort(), [rows]);
+  const companyOpts = useMemo(() => [...new Set(rows.map((r) => r.company).filter(Boolean))].sort(), [rows]);
+  const projectOpts = useMemo(() => [...new Set(rows.map((r) => r.project).filter(Boolean))].sort(), [rows]);
+
   const needle = q.trim().toLowerCase();
-  const shown = needle
-    ? rows.filter((r) => (r.project + ' ' + r.role + ' ' + r.company + ' ' + r.person + ' ' + r.phone + ' ' + r.email).toLowerCase().includes(needle))
-    : rows;
+  const shown = rows.filter((r) => {
+    if (fRole && r.role !== fRole) return false;
+    if (fCompany && r.company !== fCompany) return false;
+    if (fProject && r.project !== fProject) return false;
+    if (needle && !(r.project + ' ' + r.role + ' ' + r.company + ' ' + r.person + ' ' + r.phone + ' ' + r.email).toLowerCase().includes(needle)) return false;
+    return true;
+  });
+  const filtered = !!(fRole || fCompany || fProject);
 
   function downloadCsv() {
     const esc = (v: string) => `"${String(v ?? '').replace(/"/g, '""')}"`;
@@ -71,11 +85,24 @@ export default function ContactsView() {
 
   return (
     <>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginBottom: 20 }}>
-        <div className="searchbox" style={{ background: 'var(--card)', width: 300 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 16 }}>
+        <div className="searchbox" style={{ background: 'var(--card)', width: 260 }}>
           <Icon name="search" size={16} />
           <input placeholder={t('搜索客户 / 总包 / 联系人…', 'Search client / contractor / contact…')} value={q} onChange={(e) => setQ(e.target.value)} />
         </div>
+        <select className="in sm" value={fRole} onChange={(e) => setFRole(e.target.value)} style={{ width: 'auto' }}>
+          <option value="">{t('全部角色', 'All roles')}</option>
+          {roleOpts.map((r) => <option key={r} value={r}>{r}</option>)}
+        </select>
+        <select className="in sm" value={fCompany} onChange={(e) => setFCompany(e.target.value)} style={{ width: 'auto', maxWidth: 200 }}>
+          <option value="">{t('全部公司', 'All companies')}</option>
+          {companyOpts.map((c) => <option key={c} value={c}>{c}</option>)}
+        </select>
+        <select className="in sm" value={fProject} onChange={(e) => setFProject(e.target.value)} style={{ width: 'auto', maxWidth: 200 }}>
+          <option value="">{t('全部项目', 'All projects')}</option>
+          {projectOpts.map((p) => <option key={p} value={p}>{p}</option>)}
+        </select>
+        {filtered && <button className="btn-line sm" onClick={() => { setFRole(''); setFCompany(''); setFProject(''); }}>{t('清除', 'Clear')}</button>}
         <div style={{ fontSize: 12.5, color: 'var(--text2)' }}>{t(`共 ${shown.length} 条`, `${shown.length} contacts`)}</div>
         <div style={{ flex: 1 }} />
         <button className="btn-line sm" onClick={downloadCsv} disabled={shown.length === 0}>

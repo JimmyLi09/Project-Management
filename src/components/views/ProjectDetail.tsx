@@ -13,6 +13,7 @@ import { useLang } from '@/lib/i18n';
 import { Avatar, HM, Icon, Pill, ProgressBar, TM } from '../ui';
 import ScheduleTab from './ScheduleTab';
 import ChecklistTab from './ChecklistTab';
+import JobRecordTab from './JobRecordTab';
 import ExportOverlay from './ExportOverlay';
 import TransferModal from '../TransferModal';
 import type { Project } from '@/lib/types';
@@ -39,7 +40,7 @@ export default function ProjectDetail() {
   const t0 = todayMid();
   const daysLeft = del ? Math.round((del.getTime() - t0.getTime()) / 86400000) : null;
 
-  const setTab = (tb: 'overview' | 'schedule' | 'checklist') => setView({ ...view, tab: tb });
+  const setTab = (tb: 'overview' | 'schedule' | 'checklist' | 'jobrecord') => setView({ ...view, tab: tb });
 
   return (
     <>
@@ -98,6 +99,7 @@ export default function ProjectDetail() {
           <button className={`detail-tab ${tab === 'overview' ? 'active' : ''}`} onClick={() => setTab('overview')}>{t('概览', 'Overview')}</button>
           <button className={`detail-tab ${tab === 'schedule' ? 'active' : ''}`} onClick={() => setTab('schedule')}>{t('排期', 'Schedule')}</button>
           <button className={`detail-tab ${tab === 'checklist' ? 'active' : ''}`} onClick={() => setTab('checklist')}>{t('信息清单', 'Checklist')}</button>
+          <button className={`detail-tab ${tab === 'jobrecord' ? 'active' : ''}`} onClick={() => setTab('jobrecord')}>{t('Job Record', 'Job Record')}</button>
         </div>
       </div>
 
@@ -177,6 +179,7 @@ export default function ProjectDetail() {
           p={p} pkgIdx={pkgIdx} onExport={() => setShowExport(true)} onPkg={(i) => setView({ ...view, pkg: i })}
         />
       )}
+      {tab === 'jobrecord' && <JobRecordTab key={p.id} p={p} />}
       {showExport && <ExportOverlay p={p} onClose={() => setShowExport(false)} />}
       {transferFrom && (
         <TransferModal from={transferFrom} pid={p.id} onClose={() => setTransferFrom(null)} />
@@ -490,6 +493,18 @@ function WorkflowPanel({ p, users, me, dispatch }: {
     setBusy(false);
   }
 
+  /* §5.1 six-step timeline — each step derives done/current/pending from block timestamps */
+  const dz = (ts?: number) => (ts ? fmtDate(new Date(ts)).slice(0, 6) : '');
+  const steps: { zh: string; en: string; done: boolean; at: string; who: string }[] = [
+    { zh: '交接', en: 'Handover', done: !!h && h.status === 'accepted', at: dz(h?.submittedAt), who: h?.submittedBy || '' },
+    { zh: '完成包', en: 'Completion', done: !!cr && (cr.status === 'submitted' || cr.approval?.status === 'approved'), at: dz(cr?.submittedAt), who: cr?.submittedBy || '' },
+    { zh: 'PD 审批', en: 'PD approval', done: cr?.approval?.status === 'approved', at: dz(cr?.approval?.decidedAt), who: cr?.approval?.pdId || '' },
+    { zh: 'Sales 核对', en: 'Sales verify', done: sv?.status === 'verified', at: dz(sv?.at), who: sv?.by || '' },
+    { zh: '开票', en: 'Invoice', done: inv?.invoiceStatus === 'issued', at: '', who: inv?.invoiceRef || '' },
+    { zh: '收款', en: 'Payment', done: inv?.paymentStatus === 'received', at: '', who: '' },
+  ];
+  const curIdx = steps.findIndex((s) => !s.done);
+
   return (
     <div className="panel" style={{ padding: 20 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 14 }}>
@@ -497,6 +512,26 @@ function WorkflowPanel({ p, users, me, dispatch }: {
         <div style={{ flex: 1 }} />
         <span style={{ fontSize: 11, color: 'var(--text2)' }}>{t('制作', 'Production')}</span>{badge(prod)}
         <span style={{ fontSize: 11, color: 'var(--text2)' }}>{t('商业', 'Commercial')}</span>{badge(comm)}
+      </div>
+
+      {/* six-step progress timeline */}
+      <div style={{ display: 'flex', alignItems: 'flex-start', overflowX: 'auto', gap: 0, marginBottom: 16, padding: '2px 0' }}>
+        {steps.map((s, i) => {
+          const isCur = i === curIdx;
+          const color = s.done ? 'var(--success)' : isCur ? 'var(--bronze)' : 'var(--border)';
+          const txt = s.done ? 'var(--navy900)' : isCur ? 'var(--bronze)' : 'var(--text2)';
+          return (
+            <div key={i} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', minWidth: 78, flex: 1, position: 'relative' }}>
+              {i > 0 && <div style={{ position: 'absolute', top: 8, left: 'calc(-50% + 9px)', width: 'calc(100% - 18px)', height: 2, background: steps[i - 1].done ? 'var(--success)' : 'var(--border)' }} />}
+              <div style={{ width: 18, height: 18, borderRadius: '50%', border: `2px solid ${color}`, background: s.done ? 'var(--success)' : 'var(--card)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1, flexShrink: 0 }}>
+                {s.done && <span style={{ color: '#fff', fontSize: 10, lineHeight: 1 }}>✓</span>}
+                {isCur && !s.done && <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--bronze)' }} />}
+              </div>
+              <div style={{ fontSize: 10.5, fontWeight: s.done || isCur ? 700 : 500, color: txt, marginTop: 5, textAlign: 'center', whiteSpace: 'nowrap' }}>{i + 1}. {lang === 'zh' ? s.zh : s.en}</div>
+              {(s.at || s.who) && <div className="tnum" style={{ fontSize: 9.5, color: 'var(--text2)', marginTop: 1, textAlign: 'center', whiteSpace: 'nowrap', maxWidth: 76, overflow: 'hidden', textOverflow: 'ellipsis' }}>{[s.who, s.at].filter(Boolean).join(' · ')}</div>}
+            </div>
+          );
+        })}
       </div>
 
       {/* Step 1 — Sales → PM handover */}

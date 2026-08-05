@@ -176,7 +176,7 @@ export default function ScheduleTab({ p, pkgIdx, onExport, onPkg }: {
                     <div key={r.id || i} className="row-hover" style={{
                       display: 'grid', gridTemplateColumns: '26px 26px minmax(220px,2fr) 40px 1.15fr 120px', gap: 15, alignItems: 'center',
                       padding: '18px 24px', borderBottom: '1px solid var(--row-line)',
-                      borderLeft: `3px solid ${over ? 'var(--danger)' : r.freeze ? 'var(--bronze)' : 'transparent'}`,
+                      borderLeft: `3px solid ${over ? 'var(--danger)' : r.custom ? '#7c5bd6' : r.freeze ? 'var(--bronze)' : 'transparent'}`,
                     }}>
                       <button className={`ckbox ${done ? 'on' : ''} ${rowEd ? '' : 'locked'}`}
                         onClick={rowEd ? () => dispatch(p.id, { type: 'toggleDone', pkg: pkgIdx, idx: i }) : undefined}>
@@ -223,8 +223,11 @@ export default function ScheduleTab({ p, pkgIdx, onExport, onPkg }: {
                           </div>
                         ) : (
                           <>
-                            <div style={{ fontSize: 13.5, fontWeight: 500, textDecoration: done ? 'line-through' : 'none', color: done ? 'var(--text2)' : 'var(--text)' }}>{taskMain}</div>
-                            <div style={{ fontSize: 11.5, color: 'var(--text2)' }}>{taskSub}{r.owner ? ` · ${r.owner}` : ''}</div>
+                            <div style={{ fontSize: 13.5, fontWeight: 500, textDecoration: done ? 'line-through' : 'none', color: done ? 'var(--text2)' : 'var(--text)', display: 'flex', alignItems: 'center', gap: 7 }}>
+                              {r.custom && <span style={{ fontSize: 10, fontWeight: 700, color: '#7c5bd6', background: '#efe9fb', borderRadius: 5, padding: '1px 6px', letterSpacing: '.02em' }}>＋{t('自定义', 'Custom')}</span>}
+                              {taskMain}
+                            </div>
+                            <div style={{ fontSize: 11.5, color: 'var(--text2)' }}>{taskSub}{r.owner ? ` · ${r.owner}` : ''}{r.assignee && r.custom ? ` · ${r.assignee}` : ''}</div>
                             {gateTxt && (
                               <div style={{ display: 'inline-flex', gap: 5, marginTop: 5, fontSize: 11.5, color: r.freeze ? '#8f5b1d' : 'var(--text2)', background: r.freeze ? '#f6ecdd' : 'var(--row-line2)', borderRadius: 6, padding: '3px 8px' }}>
                                 {r.freeze ? '★' : '›'} {gateTxt}
@@ -283,11 +286,56 @@ export default function ScheduleTab({ p, pkgIdx, onExport, onPkg }: {
         <button className="btn-line" style={{ width: '100%', marginTop: 12, justifyContent: 'center', borderStyle: 'dashed' }}
           onClick={() => dispatch(p.id, { type: 'addRow', pkg: pkgIdx })}>+ {t('添加阶段', 'Add phase')}</button>
       )}
+      {ed && <AddNodeBar pid={p.id} pkgIdx={pkgIdx} />}
       <p style={{ marginTop: 12, fontSize: 12.5, color: 'var(--text2)' }}>
         {t('勾选=完成;未勾且过期=逾期(红边)。点状态徽章切换 未开始→进行中→已完成→受阻。团队成员只能操作指派给自己(👤)的任务。',
           'Tick = done; unticked past due = overdue (red edge). Click the status pill to cycle To Do → In Progress → Done → Blocked. Members can only act on tasks assigned 👤 to them.')}
       </p>
     </>
+  );
+}
+
+/* §5: add an ad-hoc custom node (sample / extra request) to the schedule */
+function AddNodeBar({ pid, pkgIdx }: { pid: string; pkgIdx: number }) {
+  const { dispatch, users } = useStore();
+  const { t } = useLang();
+  const [open, setOpen] = useState(false);
+  const [name, setName] = useState('');
+  const [date, setDate] = useState('');
+  const [owner, setOwner] = useState('');
+  const [busy, setBusy] = useState(false);
+  const names = users.filter((u) => u.role === 'pm' || u.role === 'member' || u.role === 'director' || u.role === 'bd').map((u) => u.name);
+
+  async function add() {
+    if (!name.trim()) return;
+    setBusy(true);
+    const ok = await dispatch(pid, { type: 'addCustomNode', pkg: pkgIdx, name: name.trim(), date, owner });
+    setBusy(false);
+    if (ok) { setName(''); setDate(''); setOwner(''); setOpen(false); }
+  }
+
+  if (!open) {
+    return (
+      <button className="btn-line" style={{ width: '100%', marginTop: 10, justifyContent: 'center', borderStyle: 'dashed', color: '#6b4bc9', borderColor: '#c9bcee' }}
+        onClick={() => setOpen(true)}>＋ {t('添加自定义节点(小样 / 临时需求)', 'Add custom node (sample / extra request)')}</button>
+    );
+  }
+  return (
+    <div className="panel" style={{ marginTop: 10, padding: '12px 16px', borderColor: '#c9bcee' }}>
+      <div className="mini-label" style={{ fontWeight: 700, color: '#6b4bc9', marginBottom: 8 }}>＋ {t('自定义节点', 'Custom node')}</div>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+        <input className="in sm" placeholder={t('节点名称,如「客户临时加一版小样」', 'Node name, e.g. "extra sample round"')} value={name} onChange={(e) => setName(e.target.value)} style={{ flex: 1, minWidth: 200 }} autoFocus />
+        <input type="date" className="in sm" value={date} onChange={(e) => setDate(e.target.value)} title={t('日期', 'Date')} />
+        <input className="in sm" list="assignee-names" placeholder={t('负责人', 'Owner')} value={owner} onChange={(e) => setOwner(e.target.value)} style={{ width: 130 }} />
+        <datalist id="assignee-names-node">{names.map((n) => <option key={n} value={n} />)}</datalist>
+        <button className="btn-navy sm" onClick={add} disabled={busy || !name.trim()}>{busy ? t('添加中…', 'Adding…') : t('添加', 'Add')}</button>
+        <button className="btn-line sm" onClick={() => setOpen(false)} disabled={busy}>{t('取消', 'Cancel')}</button>
+      </div>
+      <div style={{ fontSize: 11, color: 'var(--text2)', marginTop: 7 }}>
+        {t('添加后出现在排期末尾,可在「编辑阶段」里用 ↑↓ 移到合适位置。照常计入进度与逾期。',
+           'Appears at the end of the schedule; use ↑↓ in "Edit phases" to reposition. Counts toward progress and overdue as usual.')}
+      </div>
+    </div>
   );
 }
 
