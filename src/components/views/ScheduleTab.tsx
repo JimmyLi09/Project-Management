@@ -210,7 +210,8 @@ export default function ScheduleTab({ p, pkgIdx, onExport, onPkg }: {
                         >⠿</span>
                       ) : (
                         <span style={{ color: 'var(--navy700)', display: 'flex', justifyContent: 'center' }}>
-                          {r.freeze ? <Icon name="lock" size={14} /> : <span className="tnum" style={{ fontSize: 11, color: 'var(--text2)' }}>{r.no}</span>}
+                          {/* REQ-017: number by position so deletions renumber */}
+                          {r.freeze ? <Icon name="lock" size={14} /> : <span className="tnum" style={{ fontSize: 11, color: 'var(--text2)' }}>{i}</span>}
                         </span>
                       )}
                       <div style={{ minWidth: 0 }}>

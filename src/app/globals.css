@@ -172,11 +172,18 @@ textarea.in { width: 100%; min-height: 46px; resize: vertical }
 .ex-doc th, .ex-doc td { border: 1px solid #ccc; padding: 6px 9px; font-size: 12px; text-align: left; vertical-align: top }
 .ex-doc th { background: #f0f2f5 }
 .ex-doc .grp-h { background: #e8edf2; font-weight: 700 }
+/* REQ-017: print layout. The old `inset:0` clamped .ex-wrap to one viewport
+   so only page 1 printed; height must stay auto for multi-page output. */
 @media print {
   body * { visibility: hidden }
   .ex-wrap, .ex-wrap * { visibility: visible }
-  .ex-wrap { position: absolute; inset: 0; padding: 0 }
-  .ex-actions, .ex-colbar { display: none !important }
+  .ex-wrap { position: absolute; left: 0; top: 0; width: 100%; height: auto; bottom: auto; overflow: visible; padding: 0 }
+  .ex-actions, .ex-colbar, .ex-noteedit { display: none !important }
+  .ex-doc table { table-layout: fixed; break-inside: auto }
+  .ex-doc th, .ex-doc td { word-break: break-word; overflow-wrap: anywhere }
+  .ex-doc tr { break-inside: avoid; page-break-inside: avoid }
+  .ex-doc thead { display: table-header-group }
+  .ex-doc h2, .ex-doc h3 { break-after: avoid-page; break-inside: avoid }
 }
 
 /* ── stage steps (project lifecycle) ────────────────────── */
