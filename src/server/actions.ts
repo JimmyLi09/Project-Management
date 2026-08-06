@@ -25,6 +25,7 @@ export type ProjectAction =
   | { type: 'addRow'; pkg: number }
   | { type: 'removeRow'; pkg: number; idx: number }
   | { type: 'moveRow'; pkg: number; idx: number; dir: -1 | 1 }
+  | { type: 'reorderRow'; pkg: number; from: number; to: number }
   | { type: 'setClStatus'; pkg: number; gi: number; ii: number; value: ChecklistStatus }
   | { type: 'editCl'; pkg: number; gi: number; ii: number; field: 'date' | 'remark' | 'zh' | 'en' | 'owner'; value: string }
   | { type: 'toggleHighlight'; pkg: number; gi: number; ii: number }
@@ -192,6 +193,19 @@ export function applyAction(u: Identity, p: Project, a: ProjectAction, ctx: Acti
       const arr = pk.schedule;
       [arr[a.idx], arr[j]] = [arr[j], arr[a.idx]];
       logIt(p, u.name, `调整阶段顺序 Reorder phase`);
+      break;
+    }
+    case 'reorderRow': {
+      // REQ-002: drag-to-reorder — move a phase from one index to another
+      if (!canEdit(u, p)) throw new PermissionError('无编辑权限');
+      const pk = p.packages[a.pkg];
+      if (!pk) throw new ValidationError('无效的服务包');
+      const n = pk.schedule.length;
+      if (a.from < 0 || a.from >= n || a.to < 0 || a.to >= n || a.from === a.to) break;
+      const arr = pk.schedule;
+      const [moved] = arr.splice(a.from, 1);
+      arr.splice(a.to, 0, moved);
+      logIt(p, u.name, `拖动调整阶段顺序 Reorder: ${moved.task}`);
       break;
     }
     case 'setClStatus': {

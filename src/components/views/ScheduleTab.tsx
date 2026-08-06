@@ -17,6 +17,9 @@ export default function ScheduleTab({ p, pkgIdx, onExport, onPkg }: {
   const { me, dispatch, users, setToast } = useStore();
   const { lang, t } = useLang();
   const [editMode, setEditMode] = useState(false);
+  const [showCal, setShowCal] = useState(false);
+  const [dragIdx, setDragIdx] = useState<number | null>(null);
+  const [overIdx, setOverIdx] = useState<number | null>(null);
   const ed = canEdit(me, p);
   const pkg = p.packages[pkgIdx];
   const assigneeNames = users.filter((u) => u.role === 'pm' || u.role === 'member' || u.role === 'director' || u.role === 'bd').map((u) => u.name);
@@ -93,8 +96,12 @@ export default function ScheduleTab({ p, pkgIdx, onExport, onPkg }: {
         {slackNode}
         {ed && <button className="btn-line sm" onClick={() => dispatch(p.id, { type: 'reversePkg', pkg: pkgIdx })}>↩ {t('按交付日倒排', 'Back-plan from delivery')}</button>}
         {ed && <button className="btn-line sm" onClick={() => setEditMode(!editMode)}>{editMode ? t('完成编辑', 'Done editing') : t('编辑阶段', 'Edit phases')}</button>}
+        <button className={`btn-line sm ${showCal ? 'active' : ''}`} onClick={() => setShowCal((v) => !v)} style={showCal ? { borderColor: 'var(--navy700)', color: 'var(--navy900)' } : undefined}>📅 {t('交付日历', 'Calendar')}</button>
         <button className="btn-line sm" onClick={onExport}><Icon name="download" size={13} />{t('导出排期', 'Export Schedule')}</button>
       </div>
+
+      {/* REQ-002: delivery calendar (Gantt-style timeline) — time-linked to weeks */}
+      {showCal && <DeliveryCalendar p={p} pkg={pkg} pd={pd} t0={t0} lang={lang} t={t} />}
 
       {/* datalist shared by the assignee inputs (B4) */}
       <datalist id="assignee-names">{assigneeNames.map((n) => <option key={n} value={n} />)}</datalist>
@@ -153,8 +160,9 @@ export default function ScheduleTab({ p, pkgIdx, onExport, onPkg }: {
         )}
       </div>
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14, fontSize: 12.5, color: 'var(--text2)' }}>
-        <Icon name="lock" size={14} style={{ color: 'var(--navy700)' }} /> {t('冻结点 — 确认后锁定,改动影响下游', 'Freeze point — locked once confirmed; changes ripple downstream')}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 14, fontSize: 12.5, color: 'var(--text2)', flexWrap: 'wrap' }}>
+        <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}><Icon name="lock" size={14} style={{ color: 'var(--navy700)' }} /> {t('冻结点 — 确认后锁定,改动影响下游', 'Freeze point — locked once confirmed; changes ripple downstream')}</span>
+        {ed && !editMode && <span style={{ color: 'var(--navy700)' }}>⠿ {t('拖动左侧手柄即可调整阶段顺序(无需进入编辑)', 'Drag the ⠿ handle to reorder phases — no edit mode needed')}</span>}
       </div>
 
       <div className="panel clip">
@@ -178,18 +186,33 @@ export default function ScheduleTab({ p, pkgIdx, onExport, onPkg }: {
                   const taskMain = lang === 'zh' ? r.task : r.taskEn || r.task;
                   const taskSub = lang === 'zh' ? r.taskEn : r.task;
                   return (
-                    <div key={r.id || i} className="row-hover" style={{
-                      display: 'grid', gridTemplateColumns: '26px 26px minmax(220px,2fr) 40px 1.15fr 120px', gap: 15, alignItems: 'center',
-                      padding: '18px 24px', borderBottom: '1px solid var(--row-line)',
-                      borderLeft: `3px solid ${over ? 'var(--danger)' : r.custom ? '#7c5bd6' : r.freeze ? 'var(--bronze)' : 'transparent'}`,
-                    }}>
+                    <div key={r.id || i} className="row-hover"
+                      onDragOver={ed && !editMode ? (e) => { e.preventDefault(); if (overIdx !== i) setOverIdx(i); } : undefined}
+                      onDrop={ed && !editMode ? (e) => { e.preventDefault(); if (dragIdx != null && dragIdx !== i) dispatch(p.id, { type: 'reorderRow', pkg: pkgIdx, from: dragIdx, to: i }); setDragIdx(null); setOverIdx(null); } : undefined}
+                      style={{
+                        display: 'grid', gridTemplateColumns: '26px 26px minmax(220px,2fr) 40px 1.15fr 120px', gap: 15, alignItems: 'center',
+                        padding: '18px 24px', borderBottom: '1px solid var(--row-line)',
+                        borderLeft: `3px solid ${over ? 'var(--danger)' : r.custom ? '#7c5bd6' : r.freeze ? 'var(--bronze)' : 'transparent'}`,
+                        boxShadow: overIdx === i && dragIdx != null && dragIdx !== i ? 'inset 0 2px 0 var(--navy700)' : undefined,
+                        opacity: dragIdx === i ? 0.45 : 1,
+                      }}>
                       <button className={`ckbox ${done ? 'on' : ''} ${rowEd ? '' : 'locked'}`}
                         onClick={rowEd ? () => dispatch(p.id, { type: 'toggleDone', pkg: pkgIdx, idx: i }) : undefined}>
                         {done && <Icon name="checkSm" size={13} style={{ color: '#fff' }} />}
                       </button>
-                      <span style={{ color: 'var(--navy700)', display: 'flex', justifyContent: 'center' }}>
-                        {r.freeze ? <Icon name="lock" size={14} /> : <span className="tnum" style={{ fontSize: 11, color: 'var(--text2)' }}>{r.no}</span>}
-                      </span>
+                      {ed && !editMode ? (
+                        <span
+                          draggable
+                          onDragStart={(e) => { setDragIdx(i); e.dataTransfer.effectAllowed = 'move'; }}
+                          onDragEnd={() => { setDragIdx(null); setOverIdx(null); }}
+                          title={t('拖动调整顺序', 'Drag to reorder')}
+                          style={{ cursor: 'grab', color: 'var(--text2)', display: 'flex', justifyContent: 'center', userSelect: 'none', fontSize: 14, lineHeight: 1 }}
+                        >⠿</span>
+                      ) : (
+                        <span style={{ color: 'var(--navy700)', display: 'flex', justifyContent: 'center' }}>
+                          {r.freeze ? <Icon name="lock" size={14} /> : <span className="tnum" style={{ fontSize: 11, color: 'var(--text2)' }}>{r.no}</span>}
+                        </span>
+                      )}
                       <div style={{ minWidth: 0 }}>
                         {editMode && ed ? (
                           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -303,6 +326,83 @@ export default function ScheduleTab({ p, pkgIdx, onExport, onPkg }: {
           'Tick = done; unticked past due = overdue (red edge). Click the status pill to cycle To Do → In Progress → Done → Blocked. Members can only act on tasks assigned 👤 to them.')}
       </p>
     </>
+  );
+}
+
+/* REQ-002: delivery calendar — a Gantt-style timeline derived from planDates,
+   so it stays time-linked (change a phase's weeks → its bar span moves). The
+   computed delivery = the last phase's end (#8). */
+function DeliveryCalendar({ p, pkg, pd, t0, lang, t }: {
+  p: Project; pkg: Project['packages'][0]; pd: (import('@/lib/project').PlanDate | null)[];
+  t0: Date; lang: 'zh' | 'en'; t: (zh: string, en: string) => string;
+}) {
+  const DAY = 86400000;
+  const rows = pkg.schedule.map((r, i) => ({ r, i, d: pd[i] })).filter((x): x is { r: typeof pkg.schedule[0]; i: number; d: import('@/lib/project').PlanDate } => !!x.d);
+  if (!rows.length) {
+    return <div className="panel" style={{ padding: 16, marginBottom: 14, fontSize: 12.5, color: 'var(--text2)' }}>{t('暂无可显示日期的阶段(填了周期/开始日后自动生成日历)。', 'No dated phases yet — set start & weeks to build the calendar.')}</div>;
+  }
+  const starts = rows.map((x) => x.d.start.getTime());
+  const ends = rows.map((x) => x.d.end.getTime());
+  const del = parseISO(pkg.delivery);
+  const finish = Math.max(...ends); // computed delivery = last phase end
+  let min = Math.min(...starts, t0.getTime());
+  let max = Math.max(...ends, del ? del.getTime() : 0);
+  min -= 2 * DAY; max += 4 * DAY;
+  const total = max - min || 1;
+  const pct = (ms: number) => ((ms - min) / total) * 100;
+  const ticks: Date[] = [];
+  const cur = new Date(min); cur.setDate(1);
+  while (cur.getTime() < max) { ticks.push(new Date(cur)); cur.setMonth(cur.getMonth() + 1); }
+  const monthLbl = (d: Date) => `${d.getFullYear()}/${d.getMonth() + 1}`;
+  const lines = [
+    { at: t0.getTime(), color: 'var(--info)', label: t('今天', 'Today') },
+    { at: finish, color: 'var(--bronze)', label: t('交付(最后阶段)', 'Delivery') },
+  ];
+
+  return (
+    <div className="panel" style={{ padding: '14px 16px', marginBottom: 14 }}>
+      <div className="mini-label" style={{ fontWeight: 700, color: 'var(--navy900)', marginBottom: 4 }}>📅 {t('交付日历', 'Delivery calendar')}
+        <span style={{ fontWeight: 400, color: 'var(--text2)', marginLeft: 8 }}>{t('交付日 = 最后阶段结束', 'Delivery = last phase end')}: <b className="tnum" style={{ color: 'var(--bronze)' }}>{fmtDate(new Date(finish))}</b></span>
+      </div>
+      <div style={{ overflowX: 'auto' }}>
+        <div style={{ minWidth: 620 }}>
+          {/* header: months + line labels */}
+          <div style={{ display: 'grid', gridTemplateColumns: '150px 1fr', columnGap: 10 }}>
+            <div />
+            <div style={{ position: 'relative', height: 22, borderBottom: '1px solid var(--row-line)', marginBottom: 6 }}>
+              {ticks.map((d, k) => (
+                <span key={k} className="tnum" style={{ position: 'absolute', left: `${pct(d.getTime())}%`, fontSize: 10, color: 'var(--text2)', borderLeft: '1px solid var(--row-line)', paddingLeft: 3, height: 22 }}>{monthLbl(d)}</span>
+              ))}
+              {lines.map((ln, k) => (
+                <span key={`l${k}`} style={{ position: 'absolute', left: `${pct(ln.at)}%`, top: -2, fontSize: 9.5, color: ln.color, fontWeight: 700, transform: 'translateX(-50%)', whiteSpace: 'nowrap' }}>{ln.label}</span>
+              ))}
+            </div>
+          </div>
+          {/* one row per phase */}
+          {rows.map(({ r, i, d }) => {
+            const m = macroStage(r, i);
+            const color = r.custom ? '#7c5bd6' : MACRO[m][2];
+            const over = r.status !== 'done' && d.end < t0;
+            return (
+              <div key={r.id || i} style={{ display: 'grid', gridTemplateColumns: '150px 1fr', columnGap: 10, alignItems: 'center', padding: '3px 0' }}>
+                <div style={{ fontSize: 11.5, color: r.status === 'done' ? 'var(--text2)' : 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={lang === 'zh' ? r.task : r.taskEn}>
+                  {r.freeze ? '🔒 ' : ''}{lang === 'zh' ? r.task : r.taskEn || r.task}
+                </div>
+                <div style={{ position: 'relative', height: 20 }}>
+                  {lines.map((ln, k) => <span key={`v${k}`} style={{ position: 'absolute', left: `${pct(ln.at)}%`, top: 0, bottom: 0, width: 1, background: ln.color, opacity: 0.5 }} />)}
+                  <div title={`${fmtDate(d.start)} → ${fmtDate(d.end)}`}
+                    style={{
+                      position: 'absolute', left: `${pct(d.start.getTime())}%`, width: `${Math.max(0.8, pct(d.end.getTime()) - pct(d.start.getTime()))}%`,
+                      top: 3, height: 14, background: color, borderRadius: 4, opacity: r.status === 'done' ? 0.5 : 1,
+                      border: over ? '1.5px solid var(--danger)' : 'none', boxSizing: 'border-box',
+                    }} />
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
   );
 }
 
