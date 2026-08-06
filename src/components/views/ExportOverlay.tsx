@@ -30,6 +30,7 @@ export default function ExportOverlay({ p, onClose, scope = 'all' }: { p: Projec
   const [order, setOrder] = useState<Order>('byPkg');
   const [orient, setOrient] = useState<'portrait' | 'landscape'>('portrait');
   const [pkgSel, setPkgSel] = useState<boolean[]>(() => p.packages.map(() => true));
+  const [blanks, setBlanks] = useState(true); // REQ-013: include blank (Pending) items — default on
   /* REQ-016: company notes — global default, per-export toggle + tweak */
   const [notesOn, setNotesOn] = useState(true);
   const [notes, setNotes] = useState(DEFAULT_NOTES);
@@ -126,44 +127,58 @@ export default function ExportOverlay({ p, onClose, scope = 'all' }: { p: Projec
     );
   }
 
-  /* ── unified checklist block (per package) ── */
+  /* ── unified checklist block (per package) — REQ-019 template columns ── */
   function ClBlock({ pkg, pi }: { pkg: ServicePackage; pi: number }) {
     const clStat: Record<string, string> = {
       pending: T('未收到', 'Pending'), received: T('已收到', 'Received'), confirmed: T('已确认', 'Confirmed'),
       na: 'N/A', revision: T('需修订', 'Revision'), rejected: T('退回', 'Rejected'),
     };
-    const clSpan = 2 + (cols.clStatus ? 1 : 0) + (cols.clDate ? 1 : 0) + (cols.clRemark ? 1 : 0);
-    const groups = pkg.checklist
-      .map((g) => ({ g, items: g.items.filter((it) => !((it.status === 'pending' || it.status === 'na') && !it.date && !it.remark)) }))
-      .filter((x) => x.items.length);
+    const flat = !!pkg.noCategories; // REQ-014: export follows the chosen mode
+    const showOwner = !flat;
+    const clSpan = 1 + (showOwner ? 1 : 0) + (cols.clStatus ? 1 : 0) + (cols.clDate ? 1 : 0) + (cols.clRemark ? 1 : 0);
+    /* REQ-013: blank items are exported too (kept Pending) unless the user
+       unticks 「含空白项」. N/A rows are always dropped. */
+    const keep = (it: { status: string; date: string; remark: string; received?: string }) =>
+      it.status !== 'na' && (blanks || !!(it.date || it.remark || it.received) || it.status !== 'pending');
+    const groups = flat
+      ? [{ g: { group: '', groupEn: '', color: '', items: [] }, items: pkg.checklist.flatMap((g) => g.items).filter(keep) }]
+      : pkg.checklist.map((g) => ({ g, items: g.items.filter(keep) })).filter((x) => x.items.length);
+    const head = (
+      <tr>
+        <th>{T('信息项', 'Item')}</th>
+        {showOwner && <th style={{ width: '13%' }}>{T('负责人', 'Owner')}</th>}
+        {cols.clStatus && <th style={{ width: '24%' }}>{T('状态 / 收到内容', 'Status / Received')}</th>}
+        {cols.clDate && <th style={{ width: '13%' }}>{T('收到日期', 'Date received')}</th>}
+        {cols.clRemark && <th style={{ width: '22%' }}>{T('备注', 'Remark')}</th>}
+      </tr>
+    );
+    const row = (it: (typeof pkg.checklist)[0]['items'][0], ii: number) => (
+      <tr key={it.id || ii}>
+        <td>{L === 'zh' ? it.zh : it.en}</td>
+        {showOwner && <td>{it.owner || '—'}</td>}
+        {cols.clStatus && (
+          <td style={it.status === 'pending' ? { background: '#fffbeb' } : undefined}>
+            {clStat[it.status] || it.status}{it.received ? ` — ${it.received}` : ''}
+          </td>
+        )}
+        {cols.clDate && <td>{it.date || '—'}</td>}
+        {cols.clRemark && <td style={{ whiteSpace: 'pre-wrap' }}>{it.remark || '—'}</td>}
+      </tr>
+    );
     return (
       <React.Fragment>
         <h2 style={{ color: svcColor(pkg.svc) }}>{svcName(pkg)} — {T('信息清单', 'Information Checklist')}</h2>
-        {groups.length === 0 ? (
-          <p style={{ color: '#888', fontSize: 12 }}>{T('暂无已填写的信息项。', 'No filled-in items yet.')}</p>
+        {groups.length === 0 || groups.every((x) => !x.items.length) ? (
+          <p style={{ color: '#888', fontSize: 12 }}>{T('暂无信息项。', 'No checklist items.')}</p>
+        ) : flat ? (
+          <table className="t-fix"><thead>{head}</thead><tbody>{groups[0].items.map(row)}</tbody></table>
         ) : groups.map(({ g, items }, gi) => (
           <table key={gi} className="t-fix">
             <thead>
               <tr className="grp-h"><td colSpan={clSpan}>{L === 'zh' ? g.group : g.groupEn}</td></tr>
-              <tr>
-                <th>{T('信息项', 'Item')}</th>
-                <th style={{ width: '14%' }}>{T('负责人', 'Owner')}</th>
-                {cols.clStatus && <th style={{ width: '12%' }}>{T('状态', 'Status')}</th>}
-                {cols.clDate && <th style={{ width: '13%' }}>{T('收到日期', 'Date received')}</th>}
-                {cols.clRemark && <th style={{ width: '26%' }}>{T('备注', 'Remark')}</th>}
-              </tr>
+              {head}
             </thead>
-            <tbody>
-              {items.map((it, ii) => (
-                <tr key={it.id || ii}>
-                  <td>{L === 'zh' ? it.zh : it.en}</td>
-                  <td>{it.owner || '—'}</td>
-                  {cols.clStatus && <td>{clStat[it.status] || it.status}</td>}
-                  {cols.clDate && <td>{it.date || '—'}</td>}
-                  {cols.clRemark && <td style={{ whiteSpace: 'pre-wrap' }}>{it.remark || '—'}</td>}
-                </tr>
-              ))}
-            </tbody>
+            <tbody>{items.map(row)}</tbody>
           </table>
         ))}
       </React.Fragment>
@@ -229,7 +244,13 @@ export default function ExportOverlay({ p, onClose, scope = 'all' }: { p: Projec
         )}
         {T('栏位', 'Columns')}:
         {showSched && <span className="ex-grp">排期 {colToggle('owner', '负责', 'Owner')}{colToggle('start', '开始', 'Start')}{colToggle('due', '到期', 'Due')}{colToggle('status', '状态', 'Status')}</span>}
-        {showCl && <span className="ex-grp">清单 {colToggle('clStatus', '状态', 'Status')}{colToggle('clDate', '日期', 'Date')}{colToggle('clRemark', '备注', 'Remark')}</span>}
+        {showCl && (
+          <span className="ex-grp">清单 {colToggle('clStatus', '状态', 'Status')}{colToggle('clDate', '日期', 'Date')}{colToggle('clRemark', '备注', 'Remark')}
+            <label className="ex-col" title={T('未收到的空白项也一并导出(状态 Pending)', 'Export blank items too (kept Pending)')}>
+              <input type="checkbox" checked={blanks} onChange={() => setBlanks(!blanks)} /> {T('含空白项', 'Include blanks')}
+            </label>
+          </span>
+        )}
         <span className="ex-grp">
           <label className="ex-col"><input type="checkbox" checked={notesOn} onChange={() => setNotesOn(!notesOn)} /> {T('公司说明', 'Company notes')}</label>
           {notesOn && <button className="btn-line sm" onClick={() => setNotesEdit(!notesEdit)}>{notesEdit ? T('收起', 'Done') : T('编辑', 'Edit')}</button>}

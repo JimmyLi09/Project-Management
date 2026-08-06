@@ -108,6 +108,7 @@ export interface ChecklistItem {
   status: ChecklistStatus;
   date: string;
   remark: string;
+  received?: string; // REQ-013/019: what was received (file name / note) — filling it auto-sets Received + today
   shot?: string; // legacy single dataURL thumbnail (migrated into shots)
   shots?: string[]; // multiple dataURL thumbnails per item
   owner?: string; // responsible person (name), shown with an avatar
@@ -141,6 +142,7 @@ export interface ServicePackage {
   resourceLinks?: string; // free text: web links / network paths to renders, VR, drone, models
   scopeItems?: ScopeItem[]; // R5-3: deliverables breakdown (item / qty / notes)
   record?: ServiceRecord; // business "资料 record" — single source for Job Record & Registers
+  noCategories?: boolean; // REQ-014: flat checklist (no fixed categories) for this package
 }
 
 /* business record attached to a service package (Job Record / Project Registers).

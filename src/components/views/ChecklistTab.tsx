@@ -102,9 +102,12 @@ export default function ChecklistTab({ p, pkgIdx, onExport, onPkg }: {
     return null;
   }
 
-  const cols = editMode && ed
-    ? 'minmax(280px,2.4fr) 160px 132px 116px 118px 30px'
-    : 'minmax(280px,2.4fr) 160px 132px 116px 118px';
+  /* REQ-014: flat mode drops the Owner column (Item / Status+received / Date / Remark);
+     REQ-019: template columns are Item · Status(含收到内容) · Date received. */
+  const flat = !!pkg.noCategories;
+  const cols = flat
+    ? (editMode && ed ? 'minmax(300px,2.6fr) 220px 132px 30px' : 'minmax(300px,2.6fr) 220px 132px')
+    : (editMode && ed ? 'minmax(280px,2.4fr) 150px 220px 124px 30px' : 'minmax(280px,2.4fr) 150px 220px 124px');
 
   return (
     <>
@@ -161,6 +164,14 @@ export default function ChecklistTab({ p, pkgIdx, onExport, onPkg }: {
           </button>
         )}
         {ed && <button className="btn-line sm" onClick={() => setEditMode(!editMode)}>{editMode ? t('完成编辑', 'Done editing') : t('增减信息项', 'Edit items')}</button>}
+        {/* REQ-014: category mode toggle */}
+        {ed && (
+          <label className="btn-line sm" style={{ cursor: 'pointer', display: 'inline-flex', gap: 6, alignItems: 'center' }}
+            title={t('开启后清单不分分类,仅 信息项/状态/日期/备注', 'Flat list — Item / Status / Date / Remark only')}>
+            <input type="checkbox" checked={flat} onChange={(e) => dispatch(p.id, { type: 'setNoCategories', pkg: pkgIdx, value: e.target.checked })} />
+            {t('无固定分类', 'No categories')}
+          </label>
+        )}
         <button className="btn-line sm" onClick={onExport}><Icon name="download" size={13} />{t('导出清单', 'Export Checklist')}</button>
       </div>
 
@@ -172,10 +183,9 @@ export default function ChecklistTab({ p, pkgIdx, onExport, onPkg }: {
           fontSize: 11, fontWeight: 700, letterSpacing: '.04em', textTransform: 'uppercase', color: 'var(--text2)',
         }}>
           <div>{t('信息项', 'Item')}</div>
-          <div>{t('负责人', 'Owner')}</div>
-          <div>{t('截止日期', 'Due date')}</div>
-          <div>{t('最后更新', 'Last update')}</div>
-          <div>{t('状态', 'Status')}</div>
+          {!flat && <div>{t('负责人', 'Owner')}</div>}
+          <div>{t('状态 / 收到内容', 'Status / Received')}</div>
+          <div>{t('收到日期', 'Date received')}</div>
           {editMode && ed && <div />}
         </div>
 
@@ -186,20 +196,35 @@ export default function ChecklistTab({ p, pkgIdx, onExport, onPkg }: {
           const isCol = !!collapsed[gi];
           return (
             <div key={gi}>
-              {/* collapsible bold section header */}
-              <button onClick={() => setCollapsed((s) => ({ ...s, [gi]: !s[gi] }))}
-                style={{
-                  width: '100%', display: 'flex', alignItems: 'center', gap: 10, padding: '16px 24px',
-                  background: 'var(--card-bg, #fff)', borderBottom: '1px solid var(--row-line)', textAlign: 'left',
-                }}>
-                <span style={{ transform: isCol ? 'rotate(-90deg)' : 'none', transition: 'transform .15s', color: 'var(--text2)', fontSize: 12 }}>▾</span>
-                <span style={{ width: 9, height: 9, borderRadius: 2, background: g.color, flexShrink: 0 }} />
-                <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--navy900)' }}>{lang === 'zh' ? g.group : g.groupEn}</span>
-                <span style={{ fontWeight: 400, color: 'var(--text2)', fontSize: 12 }}>{lang === 'zh' ? g.groupEn : g.group}</span>
-                <span className="badge" style={{ background: 'var(--hover-bg)', color: 'var(--text2)' }}>{applicable.length}</span>
-                <div style={{ flex: 1 }} />
-                <span className="tnum" style={{ fontSize: 12.5, fontWeight: 600, color: gpct >= 100 ? 'var(--success)' : 'var(--text2)' }}>{gpct}%</span>
-              </button>
+              {/* collapsible bold section header — hidden in flat mode (REQ-014) */}
+              {!flat && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '16px 24px', borderBottom: '1px solid var(--row-line)' }}>
+                <button onClick={() => setCollapsed((s) => ({ ...s, [gi]: !s[gi] }))}
+                  style={{ display: 'flex', alignItems: 'center', gap: 10, background: 'none', textAlign: 'left', flex: 1, minWidth: 0, padding: 0 }}>
+                  <span style={{ transform: isCol ? 'rotate(-90deg)' : 'none', transition: 'transform .15s', color: 'var(--text2)', fontSize: 12 }}>▾</span>
+                  <span style={{ width: 9, height: 9, borderRadius: 2, background: g.color, flexShrink: 0 }} />
+                  <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--navy900)' }}>{lang === 'zh' ? g.group : g.groupEn}</span>
+                  <span style={{ fontWeight: 400, color: 'var(--text2)', fontSize: 12 }}>{lang === 'zh' ? g.groupEn : g.group}</span>
+                  <span className="badge" style={{ background: 'var(--hover-bg)', color: 'var(--text2)' }}>{applicable.length}</span>
+                  <div style={{ flex: 1 }} />
+                  <span className="tnum" style={{ fontSize: 12.5, fontWeight: 600, color: gpct >= 100 ? 'var(--success)' : 'var(--text2)' }}>{gpct}%</span>
+                </button>
+                {/* REQ-014: rename / delete category */}
+                {ed && editMode && (
+                  <>
+                    <button className="btn-line sm" title={t('重命名分类', 'Rename category')}
+                      onClick={() => {
+                        const name = prompt(t('分类名称(中)', 'Category name'), g.group);
+                        if (name == null || !name.trim()) return;
+                        const nameEn = prompt(t('分类名称(英,可空)', 'Category name (EN, optional)'), g.groupEn) ?? g.groupEn;
+                        dispatch(p.id, { type: 'renameGroup', pkg: pkgIdx, gi, name: name.trim(), nameEn });
+                      }}>✎</button>
+                    <button className="btn-line sm danger" title={t('删除分类', 'Delete category')}
+                      onClick={() => { if (confirm(t(`删除分类「${g.group}」及其 ${g.items.length} 个信息项?`, `Delete category "${g.group}" and its ${g.items.length} items?`))) dispatch(p.id, { type: 'removeGroup', pkg: pkgIdx, gi }); }}>✕</button>
+                  </>
+                )}
+              </div>
+              )}
 
               {!isCol && g.items.map((it, ii) => {
                 const due = parseISO(it.date);
@@ -210,6 +235,8 @@ export default function ChecklistTab({ p, pkgIdx, onExport, onPkg }: {
                   <div key={it.id || ii} style={{
                     display: 'grid', gridTemplateColumns: cols, gap: 16,
                     alignItems: 'start', padding: '18px 24px', borderBottom: '1px solid var(--row-line)',
+                    /* REQ-019: 未收到 Pending 用黄底高亮 */
+                    background: it.status === 'pending' ? '#fffbeb' : undefined,
                   }}>
                     {/* ── Item: name, thumbnails, remark ── */}
                     <div style={{ minWidth: 0 }}>
@@ -276,33 +303,26 @@ export default function ChecklistTab({ p, pkgIdx, onExport, onPkg }: {
                       </div>
                     </div>
 
-                    {/* ── Owner (avatar + name); highlight the person ── */}
-                    <div style={{ minWidth: 0 }}>
-                      {editMode && ed ? (
-                        <input className="in sm" list="cl-owner-names" defaultValue={it.owner || ''} placeholder={t('负责人', 'Owner')}
-                          onBlur={(e) => e.target.value !== (it.owner || '') && dispatch(p.id, { type: 'editCl', pkg: pkgIdx, gi, ii, field: 'owner', value: e.target.value })} />
-                      ) : it.owner ? (
-                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7, fontSize: 13, fontWeight: 700, color: 'var(--navy900)' }}>
-                          <Avatar name={it.owner} size={24} />{it.owner}
-                        </span>
-                      ) : (
-                        <span style={{ fontSize: 12, color: '#b6bfc9' }}>{t('未指派', 'Unassigned')}</span>
-                      )}
-                    </div>
+                    {/* ── Owner (hidden in flat mode, REQ-014) ── */}
+                    {!flat && (
+                      <div style={{ minWidth: 0 }}>
+                        {editMode && ed ? (
+                          <input className="in sm" list="cl-owner-names" defaultValue={it.owner || ''} placeholder={t('负责人', 'Owner')}
+                            onBlur={(e) => e.target.value !== (it.owner || '') && dispatch(p.id, { type: 'editCl', pkg: pkgIdx, gi, ii, field: 'owner', value: e.target.value })} />
+                        ) : it.owner ? (
+                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7, fontSize: 13, fontWeight: 700, color: 'var(--navy900)' }}>
+                            <Avatar name={it.owner} size={24} />{it.owner}
+                          </span>
+                        ) : (
+                          <span style={{ fontSize: 12, color: '#b6bfc9' }}>{t('未指派', 'Unassigned')}</span>
+                        )}
+                      </div>
+                    )}
 
-                    {/* ── Due date ── */}
-                    <div>
-                      <input type="date" className="in sm" style={{ width: '100%', ...(overdue ? { borderColor: '#e7a19b', color: '#b23a32' } : {}) }} value={it.date} disabled={!fe}
-                        onChange={(e) => dispatch(p.id, { type: 'editCl', pkg: pkgIdx, gi, ii, field: 'date', value: e.target.value })} />
-                    </div>
-
-                    {/* ── Last update ── */}
-                    <div style={{ fontSize: 12, color: 'var(--text2)', paddingTop: 6 }}>{relTime(it.updatedAt, lang === 'zh')}</div>
-
-                    {/* ── Status ── */}
-                    <div style={{ paddingTop: 2 }}>
+                    {/* ── Status + 收到内容 (REQ-013/019) ── */}
+                    <div style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: 6 }}>
                       {fe ? (
-                        <button title={t('点击推进状态,右键选择', 'Click to advance, right-click to pick')} style={{ padding: 0, background: 'none' }}
+                        <button title={t('点击推进状态,右键选择', 'Click to advance, right-click to pick')} style={{ padding: 0, background: 'none', alignSelf: 'flex-start' }}
                           onClick={() => dispatch(p.id, { type: 'setClStatus', pkg: pkgIdx, gi, ii, value: CYCLE[it.status] })}
                           onContextMenu={(e) => {
                             e.preventDefault();
@@ -316,8 +336,23 @@ export default function ChecklistTab({ p, pkgIdx, onExport, onPkg }: {
                           <Pill m={CM[it.status]} />
                         </button>
                       ) : (
-                        <Pill m={CM[it.status]} />
+                        <span style={{ alignSelf: 'flex-start' }}><Pill m={CM[it.status]} /></span>
                       )}
+                      {fe ? (
+                        <input className="in sm" defaultValue={it.received || ''} key={`rcv-${it.id || ii}-${it.received || ''}`}
+                          placeholder={t('收到内容 / 文件名…', 'Received content / file name…')}
+                          title={t('填入后自动标记「已收到」并填今天的日期', 'Filling this auto-sets Received + today’s date')}
+                          onBlur={(e) => e.target.value !== (it.received || '') && dispatch(p.id, { type: 'editCl', pkg: pkgIdx, gi, ii, field: 'received', value: e.target.value })} />
+                      ) : it.received ? (
+                        <span style={{ fontSize: 12, color: 'var(--text)', wordBreak: 'break-word' }}>📄 {it.received}</span>
+                      ) : null}
+                    </div>
+
+                    {/* ── Date received ── */}
+                    <div>
+                      <input type="date" className="in sm" style={{ width: '100%', ...(overdue ? { borderColor: '#e7a19b', color: '#b23a32' } : {}) }} value={it.date} disabled={!fe}
+                        onChange={(e) => dispatch(p.id, { type: 'editCl', pkg: pkgIdx, gi, ii, field: 'date', value: e.target.value })} />
+                      <div style={{ fontSize: 10.5, color: 'var(--text2)', marginTop: 3 }}>{relTime(it.updatedAt, lang === 'zh')}</div>
                     </div>
 
                     {/* ── edit actions: reorder + delete ── */}

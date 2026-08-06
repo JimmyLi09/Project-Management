@@ -27,7 +27,10 @@ export type ProjectAction =
   | { type: 'moveRow'; pkg: number; idx: number; dir: -1 | 1 }
   | { type: 'reorderRow'; pkg: number; from: number; to: number }
   | { type: 'setClStatus'; pkg: number; gi: number; ii: number; value: ChecklistStatus }
-  | { type: 'editCl'; pkg: number; gi: number; ii: number; field: 'date' | 'remark' | 'zh' | 'en' | 'owner'; value: string }
+  | { type: 'editCl'; pkg: number; gi: number; ii: number; field: 'date' | 'remark' | 'zh' | 'en' | 'owner' | 'received'; value: string }
+  | { type: 'renameGroup'; pkg: number; gi: number; name: string; nameEn?: string }
+  | { type: 'removeGroup'; pkg: number; gi: number }
+  | { type: 'setNoCategories'; pkg: number; value: boolean }
   | { type: 'toggleHighlight'; pkg: number; gi: number; ii: number }
   | { type: 'addItem'; pkg: number; gi: number; items?: { zh: string; en: string }[] }
   | { type: 'removeItem'; pkg: number; gi: number; ii: number }
@@ -220,8 +223,49 @@ export function applyAction(u: Identity, p: Project, a: ProjectAction, ctx: Acti
     case 'editCl': {
       if (!canEdit(u, p)) throw new PermissionError('无编辑权限');
       const { it } = getItem(p, a.pkg, a.gi, a.ii);
+      const was = (it as any)[a.field];
       (it as any)[a.field] = a.value;
+      /* REQ-013: filling in "received content / file name" auto-advances the
+         item to Received and stamps today's date — but only from Pending and
+         only when the field was previously empty, so a manual Status/Date
+         always wins and editing a remark never changes the status. */
+      if (a.field === 'received' && !String(was || '').trim() && String(a.value || '').trim()) {
+        if (it.status === 'pending') it.status = 'received';
+        if (!it.date) it.date = isoDate(new Date());
+      }
       it.updatedAt = Date.now();
+      break;
+    }
+    case 'renameGroup': {
+      // REQ-014: rename a checklist category
+      if (!canEdit(u, p)) throw new PermissionError('无编辑权限');
+      const pk = p.packages[a.pkg];
+      if (!pk || !pk.checklist[a.gi]) throw new ValidationError('无效的分类');
+      const g = pk.checklist[a.gi];
+      const name = String(a.name || '').slice(0, 120).trim();
+      if (!name) throw new ValidationError('分类名不能为空');
+      const old = g.group;
+      g.group = name;
+      if (a.nameEn !== undefined) g.groupEn = String(a.nameEn).slice(0, 120);
+      logIt(p, u.name, `重命名清单分类: ${old} → ${name}`);
+      break;
+    }
+    case 'removeGroup': {
+      // REQ-014: delete a checklist category (with its items)
+      if (!canEdit(u, p)) throw new PermissionError('无编辑权限');
+      const pk = p.packages[a.pkg];
+      if (!pk || !pk.checklist[a.gi]) throw new ValidationError('无效的分类');
+      const [g] = pk.checklist.splice(a.gi, 1);
+      logIt(p, u.name, `删除清单分类: ${g.group}`);
+      break;
+    }
+    case 'setNoCategories': {
+      // REQ-014: flat mode — no fixed categories for this package
+      if (!canEdit(u, p)) throw new PermissionError('无编辑权限');
+      const pk = p.packages[a.pkg];
+      if (!pk) throw new ValidationError('无效的服务包');
+      pk.noCategories = !!a.value;
+      logIt(p, u.name, pk.noCategories ? '清单切换为「无固定分类」' : '清单恢复分类模式');
       break;
     }
     case 'toggleHighlight': {
