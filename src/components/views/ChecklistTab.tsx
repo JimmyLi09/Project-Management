@@ -35,9 +35,12 @@ export default function ChecklistTab({ p, pkgIdx, onExport, onPkg }: {
   const { me, dispatch, users } = useStore();
   const { lang, t } = useLang();
   const [editMode, setEditMode] = useState(false);
+  /* REQ-005: 信息清单默认只读,点「编辑」才可改字段(状态/日期/备注/图片) */
+  const [fieldEdit, setFieldEdit] = useState(false);
   const [lightbox, setLightbox] = useState<string | null>(null);
   const [collapsed, setCollapsed] = useState<Record<number, boolean>>({});
   const ed = canEdit(me, p);
+  const fe = ed && fieldEdit;
   const pkg = p.packages[pkgIdx];
   const assigneeNames = users.filter((u) => u.role !== 'viewer').map((u) => u.name);
   const today = todayMid();
@@ -151,6 +154,12 @@ export default function ChecklistTab({ p, pkgIdx, onExport, onPkg }: {
             ↺ {t('恢复默认', 'Reset')}
           </button>
         )}
+        {ed && (
+          <button className={`btn-line sm ${fieldEdit ? '' : ''}`} style={fieldEdit ? { borderColor: 'var(--navy700)', color: 'var(--navy900)', fontWeight: 600 } : undefined}
+            onClick={() => setFieldEdit(!fieldEdit)}>
+            {fieldEdit ? t('完成', 'Done') : t('编辑', 'Edit')}
+          </button>
+        )}
         {ed && <button className="btn-line sm" onClick={() => setEditMode(!editMode)}>{editMode ? t('完成编辑', 'Done editing') : t('增减信息项', 'Edit items')}</button>}
         <button className="btn-line sm" onClick={onExport}><Icon name="download" size={13} />{t('导出清单', 'Export Checklist')}</button>
       </div>
@@ -225,14 +234,14 @@ export default function ChecklistTab({ p, pkgIdx, onExport, onPkg }: {
                             <img src={s} alt="" title={t('点击放大', 'Click to enlarge')}
                               style={{ width: 54, height: 38, objectFit: 'cover', borderRadius: 6, border: '1px solid var(--border)', cursor: 'pointer' }}
                               onClick={() => setLightbox(s)} />
-                            {ed && (
+                            {fe && (
                               <button title={t('删除此图', 'Remove image')}
                                 onClick={() => dispatch(p.id, { type: 'removeShot', pkg: pkgIdx, gi, ii, shotIdx: si })}
                                 style={{ position: 'absolute', top: -6, right: -6, width: 16, height: 16, borderRadius: 8, background: 'var(--danger)', color: '#fff', fontSize: 10, lineHeight: '16px', textAlign: 'center' }}>✕</button>
                             )}
                           </span>
                         ))}
-                        {ed && (
+                        {fe && (
                           <label
                             tabIndex={0}
                             title={t('点击选择,或拖入 / 粘贴图片(可多张)', 'Click to select, or drag / paste images (multiple)')}
@@ -249,7 +258,7 @@ export default function ChecklistTab({ p, pkgIdx, onExport, onPkg }: {
 
                       {/* remark — wrapping textarea (D3), with highlight star (C3) */}
                       <div style={{ marginTop: 10, display: 'flex', alignItems: 'flex-start', gap: 6 }}>
-                        {ed && (
+                        {fe && (
                           <button title={it.highlight ? t('取消重点', 'Unmark important') : t('标为重点', 'Mark important')}
                             onClick={() => dispatch(p.id, { type: 'toggleHighlight', pkg: pkgIdx, gi, ii })}
                             style={{ flex: '0 0 auto', fontSize: 15, lineHeight: 1, padding: '3px 3px', background: 'none', color: it.highlight ? '#D98A12' : '#c2cad3' }}>
@@ -258,12 +267,12 @@ export default function ChecklistTab({ p, pkgIdx, onExport, onPkg }: {
                         )}
                         <textarea className="in sm" rows={1}
                           placeholder={t('下一步 / 备注…(可换行)', 'Next step / note… (multi-line)')}
-                          defaultValue={it.remark} readOnly={!ed}
+                          defaultValue={it.remark} readOnly={!fe}
                           style={{
                             width: '100%', minHeight: 30, resize: 'vertical', lineHeight: 1.5, whiteSpace: 'pre-wrap',
                             ...(it.highlight ? { background: '#fff6e2', borderColor: '#e6b657', color: '#8a5a0f', fontWeight: 600 } : {}),
                           }}
-                          onBlur={(e) => { if (ed && e.target.value !== it.remark) dispatch(p.id, { type: 'editCl', pkg: pkgIdx, gi, ii, field: 'remark', value: e.target.value }); }} />
+                          onBlur={(e) => { if (fe && e.target.value !== it.remark) dispatch(p.id, { type: 'editCl', pkg: pkgIdx, gi, ii, field: 'remark', value: e.target.value }); }} />
                       </div>
                     </div>
 
@@ -283,7 +292,7 @@ export default function ChecklistTab({ p, pkgIdx, onExport, onPkg }: {
 
                     {/* ── Due date ── */}
                     <div>
-                      <input type="date" className="in sm" style={{ width: '100%', ...(overdue ? { borderColor: '#e7a19b', color: '#b23a32' } : {}) }} value={it.date} disabled={!ed}
+                      <input type="date" className="in sm" style={{ width: '100%', ...(overdue ? { borderColor: '#e7a19b', color: '#b23a32' } : {}) }} value={it.date} disabled={!fe}
                         onChange={(e) => dispatch(p.id, { type: 'editCl', pkg: pkgIdx, gi, ii, field: 'date', value: e.target.value })} />
                     </div>
 
@@ -292,7 +301,7 @@ export default function ChecklistTab({ p, pkgIdx, onExport, onPkg }: {
 
                     {/* ── Status ── */}
                     <div style={{ paddingTop: 2 }}>
-                      {ed ? (
+                      {fe ? (
                         <button title={t('点击推进状态,右键选择', 'Click to advance, right-click to pick')} style={{ padding: 0, background: 'none' }}
                           onClick={() => dispatch(p.id, { type: 'setClStatus', pkg: pkgIdx, gi, ii, value: CYCLE[it.status] })}
                           onContextMenu={(e) => {

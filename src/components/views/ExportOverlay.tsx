@@ -1,10 +1,15 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
+import { useStore } from '../store';
+import { isFull } from '@/lib/permissions';
 import { fmtDate, pkgStart, planDates, projCode, projStage, todayMid } from '@/lib/project';
 import { useLang } from '@/lib/i18n';
 import { STAGES, stageIdx, SVC, svcColor, svcLabel } from '@/lib/templates';
 import type { Project } from '@/lib/types';
+
+/* REQ-016: built-in fallback when no global note has been saved yet */
+const DEFAULT_NOTES = '注 Note:资料不齐可能影响交付时间;确认后如需多次修改,可能酌收修改费。\nIncomplete information may affect the delivery schedule; repeated revisions after confirmation may incur additional charges.';
 
 type Cols = { owner: boolean; start: boolean; due: boolean; status: boolean; clStatus: boolean; clDate: boolean; clRemark: boolean };
 export type ExportScope = 'all' | 'schedule' | 'checklist';
@@ -12,8 +17,20 @@ export type ExportScope = 'all' | 'schedule' | 'checklist';
 /* REQ-007: scope lets the caller export only the排期 or only the信息清单. */
 export default function ExportOverlay({ p, onClose, scope = 'all' }: { p: Project; onClose: () => void; scope?: ExportScope }) {
   const { lang: appLang } = useLang();
+  const { me, setToast } = useStore();
   const [lang, setLang] = useState<'en' | 'zh'>(appLang);
   const [cols, setCols] = useState<Cols>({ owner: true, start: true, due: true, status: true, clStatus: true, clDate: true, clRemark: true });
+  /* REQ-016: company notes — global default, per-export toggle + tweak */
+  const [notesOn, setNotesOn] = useState(true);
+  const [notes, setNotes] = useState(DEFAULT_NOTES);
+  const [notesEdit, setNotesEdit] = useState(false);
+  useEffect(() => {
+    fetch('/api/settings?key=exportNotes').then((r) => (r.ok ? r.json() : null)).then((d) => { if (d && d.value) setNotes(d.value); }).catch(() => {});
+  }, []);
+  async function saveDefaultNotes() {
+    const r = await fetch('/api/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key: 'exportNotes', value: notes }) });
+    setToast(r.ok ? '已保存为全局默认说明' : '保存失败(仅 PD/BD 可存默认)');
+  }
   const L = lang;
   const T = (zh: string, en: string) => (L === 'zh' ? zh : en);
   const showSched = scope !== 'checklist';
@@ -40,7 +57,18 @@ export default function ExportOverlay({ p, onClose, scope = 'all' }: { p: Projec
         {T('显示栏位', 'Columns')}:
         {showSched && <span className="ex-grp">排期 {colToggle('owner', '负责', 'Owner')}{colToggle('start', '开始', 'Start')}{colToggle('due', '到期', 'Due')}{colToggle('status', '状态', 'Status')}</span>}
         {showCl && <span className="ex-grp">清单 {colToggle('clStatus', '状态', 'Status')}{colToggle('clDate', '日期', 'Date')}{colToggle('clRemark', '备注', 'Remark')}</span>}
+        <span className="ex-grp">
+          <label className="ex-col"><input type="checkbox" checked={notesOn} onChange={() => setNotesOn(!notesOn)} /> {T('公司说明', 'Company notes')}</label>
+          {notesOn && <button className="btn-line sm" onClick={() => setNotesEdit(!notesEdit)}>{notesEdit ? T('收起', 'Done') : T('编辑', 'Edit')}</button>}
+        </span>
       </div>
+      {notesOn && notesEdit && (
+        <div style={{ maxWidth: 860, margin: '0 auto 10px', padding: '0 10px' }}>
+          <textarea className="in" value={notes} onChange={(e) => setNotes(e.target.value)}
+            style={{ width: '100%', minHeight: 64, fontSize: 12.5 }} placeholder={T('公司说明 / 免责声明…', 'Company notes / disclaimer…')} />
+          {isFull(me) && <button className="btn-line sm" style={{ marginTop: 4 }} onClick={saveDefaultNotes}>{T('存为全局默认', 'Save as global default')}</button>}
+        </div>
+      )}
       <div className="ex-doc">
         <h1>{projCode(p) ? projCode(p) + ' · ' : ''}{p.name}{scopeLabel ? ` — ${scopeLabel}` : ''}</h1>
         <div className="exsub">
@@ -134,6 +162,12 @@ export default function ExportOverlay({ p, onClose, scope = 'all' }: { p: Projec
             </React.Fragment>
           );
         })}
+        {/* REQ-016: company notes / disclaimer at the bottom of every export */}
+        {notesOn && notes.trim() && (
+          <div style={{ marginTop: 22, padding: '10px 12px', border: '1px solid #d9d9d9', borderLeft: '3px solid #a8690b', fontSize: 11.5, whiteSpace: 'pre-wrap', color: '#555' }}>
+            {notes}
+          </div>
+        )}
         <p style={{ color: '#999', fontSize: 11, marginTop: 24 }}>Audax Visuals · {T('导出于', 'Exported')} {fmtDate(todayMid())}</p>
       </div>
     </div>

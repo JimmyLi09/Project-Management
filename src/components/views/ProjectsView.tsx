@@ -240,7 +240,15 @@ function ProjectCard({ p, onOpen }: { p: Project; onOpen: () => void }) {
   );
 }
 
-/* ===== New Project modal (opened from the topbar) ===== */
+/* ===== New Project modal (opened from the topbar) =====
+   REQ-010: sectioned form (客户信息 / 相关公司 / 服务类型 / 项目属性) with
+   dynamic add/remove company blocks, each carrying person/phone/email. */
+interface CompanyDraft { role: string; company: string; person: string; phone: string; email: string }
+const COMPANY_ROLES: [string, string][] = [
+  ['总包 Main Con', 'Main Contractor'], ['建筑师 Architect', 'Architect'], ['景观 Landscape', 'Landscape'],
+  ['室内 Interior', 'Interior'], ['创意 Creative', 'Creative'],
+];
+
 export function NewProjectModal({ onClose }: { onClose: () => void }) {
   const { me, users, createProject, openProject } = useStore();
   const { lang, t } = useLang();
@@ -252,17 +260,10 @@ export function NewProjectModal({ onClose }: { onClose: () => void }) {
   const [start, setStart] = useState(isoDate(new Date()));
   const [delivery, setDelivery] = useState('');
   const [buffer, setBuffer] = useState(0);
-  const [mainContractor, setMainContractor] = useState('');
-  const [architect, setArchitect] = useState('');
-  const [landscape, setLandscape] = useState('');
-  const [interior, setInterior] = useState('');
-  const [creative, setCreative] = useState('');
   const [clientPerson, setClientPerson] = useState('');
   const [clientPhone, setClientPhone] = useState('');
   const [clientEmail, setClientEmail] = useState('');
-  const [mainConPerson, setMainConPerson] = useState('');
-  const [mainConPhone, setMainConPhone] = useState('');
-  const [mainConEmail, setMainConEmail] = useState('');
+  const [companies, setCompanies] = useState<CompanyDraft[]>([]);
   const [busy, setBusy] = useState(false);
 
   function toggleSvc(k: string) {
@@ -271,6 +272,8 @@ export function NewProjectModal({ onClose }: { onClose: () => void }) {
       return [...s, k];
     });
   }
+  const setComp = (i: number, k: keyof CompanyDraft, v: string) =>
+    setCompanies((cs) => cs.map((c, ci) => (ci === i ? { ...c, [k]: v } : c)));
 
   async function submit() {
     if (!name.trim()) return;
@@ -279,27 +282,69 @@ export function NewProjectModal({ onClose }: { onClose: () => void }) {
       name: name.trim(), client, services,
       owners: owners.split(',').map((s) => s.trim()).filter(Boolean),
       difficulty, start, delivery, buffer,
-      mainContractor, architect, landscape, interior, creative,
       clientPerson, clientPhone, clientEmail,
-      mainConPerson, mainConPhone, mainConEmail,
+      companies: companies.filter((c) => c.company || c.person || c.phone || c.email),
     });
     setBusy(false);
     if (p) { onClose(); openProject(p.id); }
   }
 
   const pmNames = users.filter((u) => u.role === 'pm' || u.role === 'director' || u.role === 'bd').map((u) => u.name);
+  const Section = ({ zh, en }: { zh: string; en: string }) => (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 10, margin: '16px 0 10px' }}>
+      <span style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--navy900)', letterSpacing: '.03em' }}>{t(zh, en)}</span>
+      <div style={{ flex: 1, height: 1, background: 'var(--row-line)' }} />
+    </div>
+  );
 
   return (
     <div className="overlay" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <div className="modal">
         <h2>{t('新建项目', 'New Project')}</h2>
-        <div className="msub">{t('选择一个或多个服务;含模板的服务会自动生成排期与信息清单。', 'Pick one or more services; templated services auto-generate a schedule and checklist.')}</div>
+        <div className="msub">{t('按分区填写;相关公司按需添加,不必每项都有。', 'Fill in by section; add related companies only as needed.')}</div>
         <div className="field">
           <label>{t('项目名称', 'Project name')}</label>
           <input value={name} onChange={(e) => setName(e.target.value)} placeholder={t('例:Dunearn Road Condo', 'e.g. Dunearn Road Condo')} autoFocus />
         </div>
+
+        <Section zh="① 客户信息" en="① Client" />
+        <div className="field" style={{ marginBottom: 6 }}><label>{t('客户 公司', 'Client company')}</label>
+          <input value={client} onChange={(e) => setClient(e.target.value)} placeholder={t('developer / 客户', 'developer / client')} /></div>
+        <div className="two" style={{ marginBottom: 4 }}>
+          <div className="field"><label>{t('联系人(可选)', 'Contact (optional)')}</label><input value={clientPerson} onChange={(e) => setClientPerson(e.target.value)} placeholder={t('姓名', 'name')} /></div>
+          <div className="field"><label>{t('电话(可选)', 'Phone (optional)')}</label><input value={clientPhone} onChange={(e) => setClientPhone(e.target.value)} placeholder="+65 ..." /></div>
+          <div className="field"><label>{t('邮箱(可选)', 'Email (optional)')}</label><input value={clientEmail} onChange={(e) => setClientEmail(e.target.value)} placeholder="name@company.com" /></div>
+        </div>
+
+        <Section zh="② 相关公司(按需添加)" en="② Related companies (as needed)" />
+        {companies.length === 0 && (
+          <div className="msub" style={{ margin: '0 0 8px' }}>{t('没有就不加。点下方按钮添加总包/建筑师/景观等。', 'None? Skip. Use the button below to add Main Con / Architect / Landscape etc.')}</div>
+        )}
+        {companies.map((c, i) => (
+          <div key={i} style={{ border: '1px solid var(--row-line)', borderRadius: 10, padding: '10px 12px', marginBottom: 8 }}>
+            <div className="two" style={{ marginBottom: 4 }}>
+              <div className="field">
+                <label>{t('角色', 'Role')}</label>
+                <input list="company-roles" value={c.role} onChange={(e) => setComp(i, 'role', e.target.value)} placeholder={t('如 总包 / 建筑师…', 'e.g. Main Con / Architect…')} />
+              </div>
+              <div className="field"><label>{t('公司名', 'Company')}</label><input value={c.company} onChange={(e) => setComp(i, 'company', e.target.value)} /></div>
+            </div>
+            <div className="two">
+              <div className="field"><label>{t('联系人', 'Contact')}</label><input value={c.person} onChange={(e) => setComp(i, 'person', e.target.value)} placeholder={t('姓名', 'name')} /></div>
+              <div className="field"><label>{t('电话', 'Phone')}</label><input value={c.phone} onChange={(e) => setComp(i, 'phone', e.target.value)} placeholder="+65 ..." /></div>
+              <div className="field"><label>Email</label><input value={c.email} onChange={(e) => setComp(i, 'email', e.target.value)} placeholder="name@company.com" /></div>
+            </div>
+            <button className="btn-line sm danger" style={{ marginTop: 6 }} onClick={() => setCompanies((cs) => cs.filter((_, ci) => ci !== i))}>− {t('删除此公司', 'Remove company')}</button>
+          </div>
+        ))}
+        <datalist id="company-roles">{COMPANY_ROLES.map(([zh, en]) => <option key={zh} value={lang === 'zh' ? zh : en} />)}</datalist>
+        <button className="btn-line sm" style={{ borderStyle: 'dashed', marginBottom: 4 }}
+          onClick={() => setCompanies((cs) => [...cs, { role: '', company: '', person: '', phone: '', email: '' }])}>
+          ＋ {t('添加相关公司', 'Add company')}
+        </button>
+
+        <Section zh="③ 服务类型" en="③ Services" />
         <div className="field">
-          <label>{t('服务(可多选)', 'Services (multi-select)')}</label>
           <div className="svc-multi">
             {Object.entries(SVC).map(([k, v]) => (
               <button key={k} className={`svc-opt ${services.includes(k) ? 'sel' : ''}`} onClick={() => toggleSvc(k)}>
@@ -307,36 +352,16 @@ export function NewProjectModal({ onClose }: { onClose: () => void }) {
               </button>
             ))}
           </div>
+          <div className="msub" style={{ marginTop: 4 }}>{t('点选添加/移除;含模板的服务会自动生成排期与信息清单。', 'Click to add/remove; templated services auto-generate a schedule & checklist.')}</div>
         </div>
-        {/* 客户 — 公司 + 可选联系人/电话/邮箱 (每个公司几个基础信息) */}
-        <div className="field" style={{ marginBottom: 6 }}><label>{t('客户 公司', 'Client company')}</label>
-          <input value={client} onChange={(e) => setClient(e.target.value)} placeholder={t('developer / 客户', 'developer / client')} /></div>
-        <div className="two" style={{ marginBottom: 4 }}>
-          <div className="field"><label>{t('客户联系人(可选)', 'Contact person (optional)')}</label><input value={clientPerson} onChange={(e) => setClientPerson(e.target.value)} placeholder={t('姓名', 'name')} /></div>
-          <div className="field"><label>{t('电话(可选)', 'Phone (optional)')}</label><input value={clientPhone} onChange={(e) => setClientPhone(e.target.value)} placeholder="+65 ..." /></div>
-          <div className="field"><label>{t('邮箱(可选)', 'Email (optional)')}</label><input value={clientEmail} onChange={(e) => setClientEmail(e.target.value)} placeholder="name@company.com" /></div>
-        </div>
-        {/* 总包 — 公司 + 可选联系人/电话/邮箱 */}
-        <div className="field" style={{ marginBottom: 6 }}><label>{t('总包 公司', 'Main contractor company')}</label>
-          <input value={mainContractor} onChange={(e) => setMainContractor(e.target.value)} /></div>
-        <div className="two" style={{ marginBottom: 4 }}>
-          <div className="field"><label>{t('总包联系人(可选)', 'Contact person (optional)')}</label><input value={mainConPerson} onChange={(e) => setMainConPerson(e.target.value)} placeholder={t('姓名', 'name')} /></div>
-          <div className="field"><label>{t('电话(可选)', 'Phone (optional)')}</label><input value={mainConPhone} onChange={(e) => setMainConPhone(e.target.value)} placeholder="+65 ..." /></div>
-          <div className="field"><label>{t('邮箱(可选)', 'Email (optional)')}</label><input value={mainConEmail} onChange={(e) => setMainConEmail(e.target.value)} placeholder="name@company.com" /></div>
-        </div>
-        <div className="msub" style={{ margin: '2px 0 10px' }}>{t('其他公司(建筑师/景观等)可先填公司名,联系人可创建后在项目「联系人」里补充。', 'Other companies: enter the name here; contact details can be added later in the project’s Contacts panel.')}</div>
+
+        <Section zh="④ 项目属性" en="④ Project attributes" />
         <div className="two">
-          <div className="field"><label>{t('建筑师', 'Architect')}</label><input value={architect} onChange={(e) => setArchitect(e.target.value)} /></div>
-          <div className="field"><label>{t('景观师', 'Landscape architect')}</label><input value={landscape} onChange={(e) => setLandscape(e.target.value)} /></div>
-          <div className="field"><label>{t('室内设计', 'Interior designer')}</label><input value={interior} onChange={(e) => setInterior(e.target.value)} /></div>
-          <div className="field"><label>{t('创意代理', 'Creative agency')}</label><input value={creative} onChange={(e) => setCreative(e.target.value)} /></div>
           <div className="field">
             <label>{t('负责 PM(逗号分隔多人)', 'PM (comma-separated)')}</label>
             <input value={owners} onChange={(e) => setOwners(e.target.value)} placeholder={pmNames.slice(0, 2).join(', ') || '张三, 李四'} list="pm-names" />
             <datalist id="pm-names">{pmNames.map((n) => <option key={n} value={n} />)}</datalist>
           </div>
-        </div>
-        <div className="two">
           <div className="field">
             <label>{t('难度', 'Difficulty')}</label>
             <select value={difficulty} onChange={(e) => setDifficulty(e.target.value)}>

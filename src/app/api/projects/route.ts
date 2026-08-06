@@ -43,6 +43,14 @@ export async function POST(req: NextRequest) {
     mainConPerson: String(body.mainConPerson || ''),
     mainConPhone: String(body.mainConPhone || ''),
     mainConEmail: String(body.mainConEmail || ''),
+    // REQ-010: dynamic related-company blocks
+    companies: Array.isArray(body.companies)
+      ? body.companies.slice(0, 30).map((c: Record<string, unknown>) => ({
+          role: String(c?.role || '').slice(0, 100), company: String(c?.company || '').slice(0, 200),
+          person: String(c?.person || '').slice(0, 120), phone: String(c?.phone || '').slice(0, 60),
+          email: String(c?.email || '').slice(0, 160),
+        }))
+      : [],
   }, getEffectiveTemplate); // use PD/BD-edited templates when present
   p.serial = nextProjectSerial(); // REQ-006: auto project NO.
   p.log.unshift({ at: Date.now(), by: user.name, text: `创建项目 (NO. ${String(p.serial).padStart(3, '0')})` });

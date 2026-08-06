@@ -202,6 +202,18 @@ function migrateSchema(d: Database.Database) {
   /* v2.2 §4.2 [P0-3]: optimistic-lock version on projects */
   const pcols = (d.prepare('PRAGMA table_info(projects)').all() as { name: string }[]).map((c) => c.name);
   if (!pcols.includes('version')) d.exec('ALTER TABLE projects ADD COLUMN version INTEGER NOT NULL DEFAULT 0');
+  /* REQ-016: simple global key-value settings (e.g. export company notes) */
+  d.exec('CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL DEFAULT \'\')');
+}
+
+/* ---- REQ-016: global app settings (key-value) ---- */
+export function getSetting(key: string): string {
+  const row = getDb().prepare('SELECT value FROM app_settings WHERE key = ?').get(key) as { value: string } | undefined;
+  return row ? row.value : '';
+}
+export function setSetting(key: string, value: string) {
+  getDb().prepare('INSERT INTO app_settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value')
+    .run(key, value);
 }
 
 /* ---- secret for session signing (persisted so sessions survive restarts) ---- */

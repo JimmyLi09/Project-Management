@@ -49,6 +49,9 @@ export interface NewProjectInput {
   mainConPerson?: string; // optional main-contractor contact captured on create
   mainConPhone?: string;
   mainConEmail?: string;
+  /* REQ-010: dynamic related-company blocks (role + company + person/phone/email).
+     Known roles also fill the fixed parties fields for existing views. */
+  companies?: { role: string; company: string; person: string; phone: string; email: string }[];
 }
 
 export function buildPackage(svc: string, start: string, tpl?: Template): ServicePackage {
@@ -99,11 +102,13 @@ export function newProject(o: NewProjectInput, tplLookup?: (svc: string) => Temp
     created: Date.now(),
     update: emptyUpdate(),
     parties: {
-      mainContractor: o.mainContractor || '',
-      architect: o.architect || '',
-      landscape: o.landscape || '',
-      interior: o.interior || '',
-      creative: o.creative || '',
+      /* known roles from the dynamic company blocks also fill the fixed
+         parties fields so existing views (overview, exports) keep working */
+      mainContractor: o.mainContractor || compRole(o, /总包|main\s*con/i) || '',
+      architect: o.architect || compRole(o, /建筑|architect/i) || '',
+      landscape: o.landscape || compRole(o, /景观|landscape/i) || '',
+      interior: o.interior || compRole(o, /室内|interior|\bid\b/i) || '',
+      creative: o.creative || compRole(o, /创意|creative/i) || '',
     },
     /* seed the contact directory: a client row (+ any parties given), so the
        Contacts module has data from day one (R5-2/R5-4) */
@@ -115,10 +120,18 @@ export function newProject(o: NewProjectInput, tplLookup?: (svc: string) => Temp
       ...(o.landscape ? [{ role: '景观 Landscape', company: o.landscape, person: '', phone: '', email: '' }] : []),
       ...(o.interior ? [{ role: '室内 Interior', company: o.interior, person: '', phone: '', email: '' }] : []),
       ...(o.creative ? [{ role: '创意 Creative', company: o.creative, person: '', phone: '', email: '' }] : []),
+      /* REQ-010: dynamic company blocks straight into the directory */
+      ...(o.companies || []).map((c) => ({ role: c.role || '', company: c.company || '', person: c.person || '', phone: c.phone || '', email: c.email || '' })),
     ].filter((c) => c.company || c.person || c.phone || c.email),
     log: [],
     packages: services.map((svc) => buildPackage(svc, o.start || '', tplLookup ? tplLookup(svc) : undefined)),
   };
+}
+
+/* first company whose role matches, from the dynamic blocks (REQ-010) */
+function compRole(o: NewProjectInput, re: RegExp): string {
+  const hit = (o.companies || []).find((c) => re.test(c.role || ''));
+  return hit ? hit.company || '' : '';
 }
 
 export function emptyUpdate(): DirectorUpdate {
