@@ -14,7 +14,7 @@ const NEXT: Record<ScheduleStatus, ScheduleStatus> = { todo: 'wip', wip: 'done',
 export default function ScheduleTab({ p, pkgIdx, onExport, onPkg }: {
   p: Project; pkgIdx: number; onExport: () => void; onPkg: (i: number) => void;
 }) {
-  const { me, dispatch, users } = useStore();
+  const { me, dispatch, users, setToast } = useStore();
   const { lang, t } = useLang();
   const [editMode, setEditMode] = useState(false);
   const ed = canEdit(me, p);
@@ -71,7 +71,12 @@ export default function ScheduleTab({ p, pkgIdx, onExport, onPkg }: {
         </Field>
         <Field label={t('交付', 'Delivery')}>
           {ed ? <input type="date" className="in sm" value={pkg.delivery || ''}
-            onChange={(e) => dispatch(p.id, { type: 'setPkgField', pkg: pkgIdx, field: 'delivery', value: e.target.value })} />
+            onChange={(e) => {
+              const v = e.target.value; const startIso = pkgStart(p, pkg);
+              // REQ-001: 交付日不能早于开始日
+              if (v && startIso && v < startIso) { setToast(t('交付日不能早于开始日', 'Delivery cannot be before the start date')); return; }
+              dispatch(p.id, { type: 'setPkgField', pkg: pkgIdx, field: 'delivery', value: v });
+            }} />
             : <b className="tnum">{pkg.delivery ? fmtDate(parseISO(pkg.delivery)) : '—'}</b>}
         </Field>
         <Field label="Buffer">
@@ -88,7 +93,7 @@ export default function ScheduleTab({ p, pkgIdx, onExport, onPkg }: {
         {slackNode}
         {ed && <button className="btn-line sm" onClick={() => dispatch(p.id, { type: 'reversePkg', pkg: pkgIdx })}>↩ {t('按交付日倒排', 'Back-plan from delivery')}</button>}
         {ed && <button className="btn-line sm" onClick={() => setEditMode(!editMode)}>{editMode ? t('完成编辑', 'Done editing') : t('编辑阶段', 'Edit phases')}</button>}
-        <button className="btn-line sm" onClick={onExport}><Icon name="download" size={13} />{t('导出', 'Export')}</button>
+        <button className="btn-line sm" onClick={onExport}><Icon name="download" size={13} />{t('导出排期', 'Export Schedule')}</button>
       </div>
 
       {/* datalist shared by the assignee inputs (B4) */}
@@ -196,7 +201,13 @@ export default function ScheduleTab({ p, pkgIdx, onExport, onPkg }: {
                               <input className="in sm" style={{ flex: 1 }} defaultValue={r.owner} placeholder={t('角色', 'Owner role')}
                                 onBlur={(e) => e.target.value !== r.owner && dispatch(p.id, { type: 'editSched', pkg: pkgIdx, idx: i, field: 'owner', value: e.target.value })} />
                               <input className="in sm" type="number" step={0.5} min={0} style={{ width: 66 }} defaultValue={r.weeks} title={t('周数', 'weeks')}
-                                onBlur={(e) => (parseFloat(e.target.value) || 0) !== r.weeks && dispatch(p.id, { type: 'editSchedNum', pkg: pkgIdx, idx: i, field: 'weeks', value: parseFloat(e.target.value) || 0 })} />
+                                onBlur={(e) => {
+                                  const raw = e.target.value.trim(); const v = parseFloat(raw);
+                                  // REQ-001: 周期须为 ≥ 0 的数字;非法则拦截并还原
+                                  if (raw !== '' && (isNaN(v) || v < 0)) { setToast(t('周期需为 ≥ 0 的数字', 'Weeks must be a number ≥ 0')); e.target.value = String(r.weeks); return; }
+                                  const nv = isNaN(v) ? 0 : v;
+                                  if (nv !== r.weeks) dispatch(p.id, { type: 'editSchedNum', pkg: pkgIdx, idx: i, field: 'weeks', value: nv });
+                                }} />
                             </div>
                             {/* B4: pick assignee from accounts (still allows a free-typed name) */}
                             <input className="in sm" list="assignee-names" defaultValue={r.assignee} placeholder={t('👤 指派给(可选账号)', '👤 Assignee (pick account)')}

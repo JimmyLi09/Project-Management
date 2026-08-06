@@ -4,7 +4,7 @@ import React, { useMemo, useState } from 'react';
 import { useStore } from '../store';
 import { canEdit, isFull } from '@/lib/permissions';
 import { svcName, svcColor } from '@/lib/templates';
-import { todayMid, fmtDate } from '@/lib/project';
+import { todayMid, fmtDate, projCode } from '@/lib/project';
 import { useLang } from '@/lib/i18n';
 import { Icon } from '../ui';
 import {
@@ -106,7 +106,7 @@ export default function RegistersView() {
     const head = [t('项目', 'Project'), t('客户', 'Client'), 'PM', t('状态', 'Status'), ...def.fields.map((f) => (lang === 'zh' ? f.zh : f.en))];
     const body = rows.map((r) => {
       const sm = statusMeta(def.kind, (r.pk.record?.status as string) || defaultStatus(def.kind));
-      return [r.p.name, r.p.client || '', (r.p.owners || []).join(' / '), lang === 'zh' ? sm[1] : sm[2],
+      return [(projCode(r.p) ? projCode(r.p) + ' ' : '') + r.p.name, r.p.client || '', (r.p.owners || []).join(' / '), lang === 'zh' ? sm[1] : sm[2],
         ...def.fields.map((f) => recordVal(r.pk.record, f.key).replace(/\n/g, ' '))];
     });
     const csv = [head, ...body].map((r) => r.map(esc).join(',')).join('\r\n');
@@ -195,7 +195,9 @@ export default function RegistersView() {
                 const exp = isExpiring(def, rec, t0);
                 return (
                   <tr key={`${r.p.id}:${r.pi}`} className="row-hover">
-                    <td style={{ ...cell, fontWeight: 600, color: 'var(--navy900)', cursor: 'pointer', whiteSpace: 'nowrap' }} onClick={() => openProject(r.p.id)}>{r.p.name}</td>
+                    <td style={{ ...cell, fontWeight: 600, color: 'var(--navy900)', cursor: 'pointer', whiteSpace: 'nowrap' }} onClick={() => openProject(r.p.id)}>
+                      {projCode(r.p) && <span className="tnum" style={{ color: 'var(--bronze)', marginRight: 6 }}>{projCode(r.p)}</span>}{r.p.name}
+                    </td>
                     <td style={{ ...cell, color: 'var(--text2)', whiteSpace: 'nowrap' }}>{r.p.client || '—'}</td>
                     <td style={{ ...cell, whiteSpace: 'nowrap' }}>{(r.p.owners || [])[0] || <span style={{ color: '#b6bfc9' }}>—</span>}</td>
                     <td style={{ ...cell, whiteSpace: 'nowrap' }}>

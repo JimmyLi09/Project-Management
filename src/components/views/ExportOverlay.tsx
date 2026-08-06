@@ -1,19 +1,24 @@
 'use client';
 
 import React, { useState } from 'react';
-import { fmtDate, pkgStart, planDates, projStage, todayMid } from '@/lib/project';
+import { fmtDate, pkgStart, planDates, projCode, projStage, todayMid } from '@/lib/project';
 import { useLang } from '@/lib/i18n';
 import { STAGES, stageIdx, SVC, svcColor, svcLabel } from '@/lib/templates';
 import type { Project } from '@/lib/types';
 
 type Cols = { owner: boolean; start: boolean; due: boolean; status: boolean; clStatus: boolean; clDate: boolean; clRemark: boolean };
+export type ExportScope = 'all' | 'schedule' | 'checklist';
 
-export default function ExportOverlay({ p, onClose }: { p: Project; onClose: () => void }) {
+/* REQ-007: scope lets the caller export only the排期 or only the信息清单. */
+export default function ExportOverlay({ p, onClose, scope = 'all' }: { p: Project; onClose: () => void; scope?: ExportScope }) {
   const { lang: appLang } = useLang();
   const [lang, setLang] = useState<'en' | 'zh'>(appLang);
   const [cols, setCols] = useState<Cols>({ owner: true, start: true, due: true, status: true, clStatus: true, clDate: true, clRemark: true });
   const L = lang;
   const T = (zh: string, en: string) => (L === 'zh' ? zh : en);
+  const showSched = scope !== 'checklist';
+  const showCl = scope !== 'schedule';
+  const scopeLabel = scope === 'schedule' ? T('生产排期', 'Schedule') : scope === 'checklist' ? T('信息清单', 'Checklist') : '';
   const svcNames = p.services.map((k) => (SVC[k] ? (L === 'zh' ? SVC[k].label : SVC[k].en) : k)).join(', ');
   const clSpan = 2 + (cols.clStatus ? 1 : 0) + (cols.clDate ? 1 : 0) + (cols.clRemark ? 1 : 0);
 
@@ -33,11 +38,11 @@ export default function ExportOverlay({ p, onClose }: { p: Project; onClose: () 
       </div>
       <div className="ex-colbar">
         {T('显示栏位', 'Columns')}:
-        <span className="ex-grp">排期 {colToggle('owner', '负责', 'Owner')}{colToggle('start', '开始', 'Start')}{colToggle('due', '到期', 'Due')}{colToggle('status', '状态', 'Status')}</span>
-        <span className="ex-grp">清单 {colToggle('clStatus', '状态', 'Status')}{colToggle('clDate', '日期', 'Date')}{colToggle('clRemark', '备注', 'Remark')}</span>
+        {showSched && <span className="ex-grp">排期 {colToggle('owner', '负责', 'Owner')}{colToggle('start', '开始', 'Start')}{colToggle('due', '到期', 'Due')}{colToggle('status', '状态', 'Status')}</span>}
+        {showCl && <span className="ex-grp">清单 {colToggle('clStatus', '状态', 'Status')}{colToggle('clDate', '日期', 'Date')}{colToggle('clRemark', '备注', 'Remark')}</span>}
       </div>
       <div className="ex-doc">
-        <h1>{p.name}</h1>
+        <h1>{projCode(p) ? projCode(p) + ' · ' : ''}{p.name}{scopeLabel ? ` — ${scopeLabel}` : ''}</h1>
         <div className="exsub">
           {T('客户', 'Client')}: {p.client || '—'} · {T('服务', 'Services')}: {svcNames} · {T('阶段', 'Stage')}:{' '}
           {L === 'zh' ? STAGES[stageIdx(projStage(p))][1] : STAGES[stageIdx(projStage(p))][2]}
@@ -54,7 +59,8 @@ export default function ExportOverlay({ p, onClose }: { p: Project; onClose: () 
             .filter((x) => x.items.length);
           return (
             <React.Fragment key={pi}>
-              <h2 style={{ color: svcColor(pkg.svc) }}>{svcName} — {T('生产排期', 'Production Schedule')}</h2>
+              <h2 style={{ color: svcColor(pkg.svc) }}>{svcName}{scope === 'all' ? ` — ${T('生产排期', 'Production Schedule')}` : ''}</h2>
+              {showSched && (<>
               <table>
                 <tbody>
                   <tr>
@@ -96,6 +102,8 @@ export default function ExportOverlay({ p, onClose }: { p: Project; onClose: () 
                   </table>
                 </>
               )}
+              </>)}
+              {showCl && <>
               <h3 style={{ fontSize: 12.5, margin: '12px 0 6px' }}>{T('信息清单(仅含已填写)', 'Information Checklist (filled only)')}</h3>
               {groups.length === 0 ? (
                 <p style={{ color: '#888' }}>{T('暂无已填写的信息项。', 'No filled-in items yet.')}</p>
@@ -122,6 +130,7 @@ export default function ExportOverlay({ p, onClose }: { p: Project; onClose: () 
                   </tbody>
                 </table>
               ))}
+              </>}
             </React.Fragment>
           );
         })}

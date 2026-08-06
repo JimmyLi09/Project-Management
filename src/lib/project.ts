@@ -72,6 +72,14 @@ export function buildPackage(svc: string, start: string, tpl?: Template): Servic
   };
 }
 
+/* REQ-006: display code for a project's sequential NO. (zero-padded to 3).
+   projLabel prefixes the name, e.g. "020 · Lentor Mansion". */
+export const projCode = (p: { serial?: number }): string => (p.serial ? String(p.serial).padStart(3, '0') : '');
+export const projLabel = (p: { serial?: number; name: string }): string => {
+  const c = projCode(p);
+  return c ? `${c} · ${p.name}` : p.name;
+};
+
 export function newProject(o: NewProjectInput, tplLookup?: (svc: string) => Template): Project {
   const services = o.services && o.services.length ? o.services : ['others'];
   const difficulty = (o.difficulty || 'medium') as Project['difficulty'];

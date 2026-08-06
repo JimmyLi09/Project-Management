@@ -2,7 +2,7 @@
 
 import React, { useMemo, useState } from 'react';
 import { useStore } from '../store';
-import { fmtDate, isoDate, parseISO, projectHealth, projStage, schedProgress } from '@/lib/project';
+import { fmtDate, isoDate, parseISO, projCode, projectHealth, projStage, schedProgress } from '@/lib/project';
 import { canCreate } from '@/lib/permissions';
 import { DIFF, SVC, svcColor, svcName } from '@/lib/templates';
 import { useLang } from '@/lib/i18n';
@@ -117,7 +117,9 @@ function CompactCard({ p, onOpen }: { p: Project; onOpen: () => void }) {
       onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.boxShadow = 'var(--shadow)'; }}>
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8 }}>
         <div style={{ minWidth: 0 }}>
-          <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--navy900)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.name}</div>
+          <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--navy900)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+            {projCode(p) && <span className="tnum" style={{ color: 'var(--bronze)', marginRight: 6 }}>{projCode(p)}</span>}{p.name}
+          </div>
           <div style={{ fontSize: 11.5, color: 'var(--text2)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.client || '—'}</div>
         </div>
         <Pill m={HM[h]} />
@@ -157,7 +159,9 @@ function ProjectList({ list, onOpen }: { list: Project[]; onOpen: (id: string) =
         return (
           <div key={p.id} className="row-hover" style={{ display: 'grid', gridTemplateColumns: cols, gap: 12, alignItems: 'center', padding: '13px 16px', borderBottom: '1px solid var(--row-line)', cursor: 'pointer' }} onClick={() => onOpen(p.id)}>
             <div style={{ minWidth: 0 }}>
-              <div style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--navy900)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.name}</div>
+              <div style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--navy900)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                {projCode(p) && <span className="tnum" style={{ color: 'var(--bronze)', marginRight: 6 }}>{projCode(p)}</span>}{p.name}
+              </div>
               <div style={{ fontSize: 11.5, color: 'var(--text2)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.client || '—'}</div>
             </div>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, minWidth: 0 }}>

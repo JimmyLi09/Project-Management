@@ -4,7 +4,7 @@ import React, { useState } from 'react';
 import { useStore } from '../store';
 import {
   deliverySlack, fmtDate, infoProgress, isRiskDismissed, nextFreeze, overdueItems, parseISO,
-  pkgProgress, pkgStart, planDates, plannedFinish, projectHealth, projPoints,
+  pkgProgress, pkgStart, planDates, plannedFinish, projCode, projectHealth, projPoints,
   projStage, riskKey, schedProgress, todayMid,
 } from '@/lib/project';
 import { canAssign, canCommercial, canDecide, canDelete, canEdit, canEditFinance, isFull } from '@/lib/permissions';
@@ -21,7 +21,7 @@ import type { Project } from '@/lib/types';
 export default function ProjectDetail() {
   const { projects, view, setView, me, dispatch, removeProject, go, users } = useStore();
   const { lang, t } = useLang();
-  const [showExport, setShowExport] = useState(false);
+  const [exportScope, setExportScope] = useState<null | 'all' | 'schedule' | 'checklist'>(null);
   const [transferFrom, setTransferFrom] = useState<string | null>(null);
   const [assignOpen, setAssignOpen] = useState(false);
   const p = projects.find((x) => x.id === view.pid);
@@ -49,7 +49,10 @@ export default function ProjectDetail() {
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 16, flexWrap: 'wrap', paddingBottom: 18 }}>
           <div style={{ minWidth: 0 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-              <h1 style={{ fontSize: 22, fontWeight: 600, color: 'var(--navy900)', letterSpacing: '-.01em' }}>{p.name}</h1>
+              <h1 style={{ fontSize: 22, fontWeight: 600, color: 'var(--navy900)', letterSpacing: '-.01em', display: 'flex', alignItems: 'baseline', gap: 9 }}>
+                {projCode(p) && <span className="tnum" style={{ fontSize: 15, fontWeight: 700, color: 'var(--bronze)' }}>{projCode(p)}</span>}
+                {p.name}
+              </h1>
               <Pill m={HM[h]} />
               {p.archived && <span className="badge" style={{ background: '#eef1f4', color: '#51606f' }}>📦 {t('已归档', 'Archived')}</span>}
             </div>
@@ -75,7 +78,7 @@ export default function ProjectDetail() {
               </div>
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              <button className="btn-line sm" onClick={() => setShowExport(true)}><Icon name="download" size={13} />{t('导出', 'Export')}</button>
+              <button className="btn-line sm" onClick={() => setExportScope('all')}><Icon name="download" size={13} />{t('导出', 'Export')}</button>
               {stage === 'complete' && canCommercial(me, p) && (
                 <button className="btn-line sm" onClick={() => dispatch(p.id, { type: 'toggleInvoiced' })}>{t('标记开票/收尾', 'Mark invoiced')}</button>
               )}
@@ -170,17 +173,17 @@ export default function ProjectDetail() {
       {tab === 'schedule' && (
         <ScheduleTab
           key={`${p.id}:${pkgIdx}`}
-          p={p} pkgIdx={pkgIdx} onExport={() => setShowExport(true)} onPkg={(i) => setView({ ...view, pkg: i })}
+          p={p} pkgIdx={pkgIdx} onExport={() => setExportScope('schedule')} onPkg={(i) => setView({ ...view, pkg: i })}
         />
       )}
       {tab === 'checklist' && (
         <ChecklistTab
           key={`${p.id}:${pkgIdx}`}
-          p={p} pkgIdx={pkgIdx} onExport={() => setShowExport(true)} onPkg={(i) => setView({ ...view, pkg: i })}
+          p={p} pkgIdx={pkgIdx} onExport={() => setExportScope('checklist')} onPkg={(i) => setView({ ...view, pkg: i })}
         />
       )}
       {tab === 'jobrecord' && <JobRecordTab key={p.id} p={p} />}
-      {showExport && <ExportOverlay p={p} onClose={() => setShowExport(false)} />}
+      {exportScope && <ExportOverlay p={p} scope={exportScope} onClose={() => setExportScope(null)} />}
       {transferFrom && (
         <TransferModal from={transferFrom} pid={p.id} onClose={() => setTransferFrom(null)} />
       )}

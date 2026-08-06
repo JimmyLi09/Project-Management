@@ -197,6 +197,7 @@ export type Difficulty = 'easy' | 'medium' | 'hard' | 'complex';
 
 export interface Project {
   id: string;
+  serial?: number; // REQ-006: sequential project NO. (auto-assigned on create)
   name: string;
   client: string;
   services: string[];

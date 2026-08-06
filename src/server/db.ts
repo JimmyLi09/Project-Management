@@ -68,6 +68,7 @@ export function getDb(): Database.Database {
   seedIfEmpty(db);
   maybeSeedDemo(db);
   backfillIds(db);
+  backfillSerials(db);
   scheduleBackups(db);
   return db;
 }
@@ -93,6 +94,42 @@ function backfillIds(d: Database.Database) {
     const { updatedAt: _drop, ...data } = m as any;
     upd.run(JSON.stringify(data), r.id);
   }
+}
+
+/* REQ-006: assign a sequential project NO. to any project missing one, in
+   creation order, continuing from the current max. Runs once at startup. */
+let serialsBackfilled = false;
+function backfillSerials(d: Database.Database) {
+  if (serialsBackfilled) return;
+  serialsBackfilled = true;
+  const rows = d.prepare('SELECT id, data FROM projects ORDER BY created_at ASC').all() as { id: string; data: string }[];
+  const parsed: { id: string; o: any }[] = [];
+  let max = 0;
+  for (const r of rows) {
+    let o: any;
+    try { o = JSON.parse(r.data); } catch { continue; }
+    parsed.push({ id: r.id, o });
+    if (typeof o.serial === 'number' && o.serial > max) max = o.serial;
+  }
+  const upd = d.prepare('UPDATE projects SET data = ? WHERE id = ?');
+  for (const { id, o } of parsed) {
+    if (typeof o.serial === 'number' && o.serial > 0) continue;
+    o.serial = ++max;
+    const { updatedAt: _u, version: _v, ...data } = o;
+    upd.run(JSON.stringify(data), id);
+  }
+}
+
+/* next project NO. — one past the current max across all projects */
+export function nextProjectSerial(): number {
+  const rows = getDb().prepare('SELECT data FROM projects').all() as { data: string }[];
+  let max = 0;
+  for (const r of rows) {
+    let o: any;
+    try { o = JSON.parse(r.data); } catch { continue; }
+    if (typeof o.serial === 'number' && o.serial > max) max = o.serial;
+  }
+  return max + 1;
 }
 
 /* ---- built-in daily backups (local/server deployments) ----
