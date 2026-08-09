@@ -20,7 +20,7 @@
 
 ```bash
 # 1. 选一个存放目录并进入(示例:D 盘或家目录)
-git clone -b claude/project-management-system-siumg2 https://github.com/JimmyLi09/Project-Management.git audax-platform
+git clone -b main https://github.com/JimmyLi09/Project-Management.git audax-platform
 cd audax-platform
 
 # 2. 安装依赖并构建(首次约 2-5 分钟)

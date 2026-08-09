@@ -24,7 +24,7 @@ git -v
 在命令行里逐行执行（建议装到 D 盘）：
 ```
 d:
-git clone -b claude/project-management-system-siumg2 https://github.com/JimmyLi09/Project-Management.git audax-platform
+git clone -b main https://github.com/JimmyLi09/Project-Management.git audax-platform
 cd audax-platform
 npm install
 npm run build
