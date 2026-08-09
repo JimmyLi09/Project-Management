@@ -7,6 +7,7 @@ import { getBuiltinTemplate, svcColor, svcName } from '@/lib/templates';
 import { parseISO, todayMid } from '@/lib/project';
 import { useLang } from '@/lib/i18n';
 import { Avatar, CM, Icon, Pill } from '../ui';
+import FragmentBar from '../FragmentBar';
 import type { ChecklistStatus, Project } from '@/lib/types';
 
 const CYCLE: Record<ChecklistStatus, ChecklistStatus> = {
@@ -39,6 +40,9 @@ export default function ChecklistTab({ p, pkgIdx, onExport, onPkg }: {
   const [fieldEdit, setFieldEdit] = useState(false);
   const [lightbox, setLightbox] = useState<string | null>(null);
   const [collapsed, setCollapsed] = useState<Record<number, boolean>>({});
+  /* REQ-012: drag-to-reorder items inside a category (gi:ii identifies a row) */
+  const [drag, setDrag] = useState<{ gi: number; ii: number } | null>(null);
+  const [dragOver, setDragOver] = useState<string | null>(null);
   const ed = canEdit(me, p);
   const fe = ed && fieldEdit;
   const pkg = p.packages[pkgIdx];
@@ -106,8 +110,8 @@ export default function ChecklistTab({ p, pkgIdx, onExport, onPkg }: {
      REQ-019: template columns are Item · Status(含收到内容) · Date received. */
   const flat = !!pkg.noCategories;
   const cols = flat
-    ? (editMode && ed ? 'minmax(300px,2.6fr) 220px 132px 30px' : 'minmax(300px,2.6fr) 220px 132px')
-    : (editMode && ed ? 'minmax(280px,2.4fr) 150px 220px 124px 30px' : 'minmax(280px,2.4fr) 150px 220px 124px');
+    ? (editMode && ed ? 'minmax(300px,2.6fr) 220px 132px 34px' : 'minmax(300px,2.6fr) 220px 132px')
+    : (editMode && ed ? 'minmax(280px,2.4fr) 150px 220px 124px 34px' : 'minmax(280px,2.4fr) 150px 220px 124px');
 
   return (
     <>
@@ -147,7 +151,9 @@ export default function ChecklistTab({ p, pkgIdx, onExport, onPkg }: {
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 14, flexWrap: 'wrap' }}>
         <div style={{ fontSize: 13, color: 'var(--text2)' }}>
-          {t('点状态徽章向前推进(右键选择指定状态)', 'Click a status badge to advance it (right-click to pick)')}
+          {editMode && ed
+            ? <span style={{ color: 'var(--navy700)' }}>⠿ {t('拖动右侧手柄可在同一分类内调整信息项顺序', 'Drag the ⠿ handle to reorder items within a category')}</span>
+            : t('点状态徽章向前推进(右键选择指定状态)', 'Click a status badge to advance it (right-click to pick)')}
         </div>
         <div style={{ flex: 1 }} />
         {ed && editMode && (
@@ -174,6 +180,9 @@ export default function ChecklistTab({ p, pkgIdx, onExport, onPkg }: {
         )}
         <button className="btn-line sm" onClick={onExport}><Icon name="download" size={13} />{t('导出清单', 'Export Checklist')}</button>
       </div>
+
+      {/* REQ-012: import this package's checklist from another project / a saved template */}
+      {ed && <FragmentBar p={p} pkgIdx={pkgIdx} kind="checklist" />}
 
       <div className="panel clip">
         {/* column headers (image7) */}
@@ -231,12 +240,22 @@ export default function ChecklistTab({ p, pkgIdx, onExport, onPkg }: {
                 // REQ-003: 仅「未收到 pending」且过期才标逾期(已收到不算)
                 const overdue = due && due < today && it.status === 'pending';
                 const shots = it.shots && it.shots.length ? it.shots : (it.shot ? [it.shot] : []);
+                const over = dragOver === `${gi}:${ii}` && drag && drag.gi === gi && drag.ii !== ii;
                 return (
-                  <div key={it.id || ii} style={{
+                  <div key={it.id || ii}
+                    onDragOver={editMode && ed ? (e) => { if (drag && drag.gi === gi) { e.preventDefault(); setDragOver(`${gi}:${ii}`); } } : undefined}
+                    onDrop={editMode && ed ? (e) => {
+                      e.preventDefault();
+                      if (drag && drag.gi === gi && drag.ii !== ii) dispatch(p.id, { type: 'reorderItem', pkg: pkgIdx, gi, from: drag.ii, to: ii });
+                      setDrag(null); setDragOver(null);
+                    } : undefined}
+                    style={{
                     display: 'grid', gridTemplateColumns: cols, gap: 16,
-                    alignItems: 'start', padding: '18px 24px', borderBottom: '1px solid var(--row-line)',
+                    alignItems: 'start', padding: '18px 24px 18px 21px', borderBottom: '1px solid var(--row-line)',
                     /* REQ-019: 未收到 Pending 用黄底高亮 */
                     background: it.status === 'pending' ? '#fffbeb' : undefined,
+                    borderLeft: `3px solid ${over ? 'var(--navy700)' : 'transparent'}`,
+                    opacity: drag && drag.gi === gi && drag.ii === ii ? 0.45 : 1,
                   }}>
                     {/* ── Item: name, thumbnails, remark ── */}
                     <div style={{ minWidth: 0 }}>
@@ -358,6 +377,12 @@ export default function ChecklistTab({ p, pkgIdx, onExport, onPkg }: {
                     {/* ── edit actions: reorder + delete ── */}
                     {editMode && ed && (
                       <div style={{ display: 'flex', flexDirection: 'column', gap: 2, alignItems: 'center' }}>
+                        {/* REQ-012: drag handle — reorder inside this category */}
+                        <span draggable
+                          onDragStart={(e) => { setDrag({ gi, ii }); e.dataTransfer.effectAllowed = 'move'; }}
+                          onDragEnd={() => { setDrag(null); setDragOver(null); }}
+                          title={t('拖动调整顺序（同一分类内）', 'Drag to reorder within this category')}
+                          style={{ cursor: 'grab', color: 'var(--text2)', userSelect: 'none', fontSize: 14, lineHeight: 1 }}>⠿</span>
                         <button title={t('上移', 'Move up')} disabled={ii === 0} style={{ opacity: ii === 0 ? 0.3 : 1, fontSize: 12, lineHeight: 1 }}
                           onClick={() => dispatch(p.id, { type: 'moveItem', pkg: pkgIdx, gi, ii, dir: -1 })}>▲</button>
                         <button style={{ color: 'var(--danger)', fontWeight: 700 }} title={t('删除', 'Delete')}

@@ -7,6 +7,7 @@ import { canEdit, canRowEdit } from '@/lib/permissions';
 import { svcColor, svcName } from '@/lib/templates';
 import { useLang } from '@/lib/i18n';
 import { Avatar, Icon, Pill, TM } from '../ui';
+import FragmentBar from '../FragmentBar';
 import type { PlanDate } from '@/lib/project';
 import type { Project, ScheduleStatus } from '@/lib/types';
 
@@ -118,6 +119,9 @@ export default function ScheduleTab({ p, pkgIdx, onExport, onPkg }: {
             onClick={() => setTplEdit(!tplEdit)}>{tplEdit ? t('完成', 'Done') : t('编辑', 'Edit')}</button>
         )}
       </div>
+
+      {/* REQ-012: import this package's schedule from another project / a saved template */}
+      {ed && <FragmentBar p={p} pkgIdx={pkgIdx} kind="schedule" />}
 
       {/* REQ-002: delivery calendar (Gantt-style timeline) — time-linked to weeks */}
       {showCal && <DeliveryCalendar p={p} pkg={pkg} pd={pd} t0={t0} lang={lang} t={t} />}

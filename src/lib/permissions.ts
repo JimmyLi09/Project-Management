@@ -46,6 +46,15 @@ export const canDelete = (u: Identity) => isFull(u) || u.role === 'sales';
 
 export const canAdmin = (u: Identity) => isFull(u);
 
+/* REQ-012: anyone who actually builds schedules/checklists may save one as a
+   reusable template — that includes PM, who owns the production content.
+   Viewer / member / finance can still read and apply, not save. */
+export const canSaveTemplate = (u: Identity) => isFull(u) || u.role === 'sales' || u.role === 'pm';
+
+/* Only the author or PD/BD may delete a shared template, so one person can't
+   wipe another team's saved layout. */
+export const canDeleteTemplate = (u: Identity, createdBy: string) => isFull(u) || u.name === createdBy;
+
 export const ROLE_LABEL: Record<Role, string> = {
   director: 'PD',
   bd: 'BD',

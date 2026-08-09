@@ -37,6 +37,7 @@ export type ProjectAction =
   | { type: 'addItem'; pkg: number; gi: number; items?: { zh: string; en: string }[] }
   | { type: 'removeItem'; pkg: number; gi: number; ii: number }
   | { type: 'moveItem'; pkg: number; gi: number; ii: number; dir: -1 | 1 }
+  | { type: 'reorderItem'; pkg: number; gi: number; from: number; to: number }
   | { type: 'addGroup'; pkg: number; name: string }
   | { type: 'resetChecklist'; pkg: number }
   | { type: 'attachShot'; pkg: number; gi: number; ii: number; data: string }
@@ -303,6 +304,20 @@ export function applyAction(u: Identity, p: Project, a: ProjectAction, ctx: Acti
       const j = a.ii + (a.dir === 1 ? 1 : -1);
       if (j < 0 || j >= g.items.length) break; // at an edge, no-op
       [g.items[a.ii], g.items[j]] = [g.items[j], g.items[a.ii]];
+      break;
+    }
+    case 'reorderItem': {
+      /* REQ-012: drag-to-reorder checklist items inside a category. The array
+         order IS the persisted order (same as the schedule), so there's no
+         second `order` field to drift out of sync. */
+      if (!canEdit(u, p)) throw new PermissionError('无编辑权限');
+      const pk = p.packages[a.pkg];
+      const g = pk && pk.checklist[a.gi];
+      if (!g) throw new ValidationError('无效的分类');
+      const n = g.items.length;
+      if (a.from < 0 || a.from >= n || a.to < 0 || a.to >= n || a.from === a.to) break;
+      const [moved] = g.items.splice(a.from, 1);
+      g.items.splice(a.to, 0, moved);
       break;
     }
     case 'addGroup': {

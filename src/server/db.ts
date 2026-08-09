@@ -204,6 +204,38 @@ function migrateSchema(d: Database.Database) {
   if (!pcols.includes('version')) d.exec('ALTER TABLE projects ADD COLUMN version INTEGER NOT NULL DEFAULT 0');
   /* REQ-016: simple global key-value settings (e.g. export company notes) */
   d.exec('CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL DEFAULT \'\')');
+  /* REQ-012: user-saved schedule/checklist snippets. Named user_templates so it
+     never collides with `templates` (the per-service production template admin). */
+  d.exec(`CREATE TABLE IF NOT EXISTS user_templates (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    type TEXT NOT NULL,
+    name TEXT NOT NULL,
+    payload TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    created_by TEXT NOT NULL DEFAULT ''
+  )`);
+}
+
+/* ---- REQ-012: user-saved templates (schedule / checklist snippets) ---- */
+export interface UserTemplate { id: number; type: string; name: string; payload: string; created_at: number; created_by: string }
+export function listUserTemplates(type?: string): UserTemplate[] {
+  const d = getDb();
+  return (type
+    ? d.prepare('SELECT * FROM user_templates WHERE type = ? ORDER BY created_at DESC').all(type)
+    : d.prepare('SELECT * FROM user_templates ORDER BY created_at DESC').all()) as UserTemplate[];
+}
+export function getUserTemplate(id: number): UserTemplate | undefined {
+  return getDb().prepare('SELECT * FROM user_templates WHERE id = ?').get(id) as UserTemplate | undefined;
+}
+export function saveUserTemplate(type: string, name: string, payload: string, by: string): UserTemplate {
+  const now = Date.now();
+  const info = getDb()
+    .prepare('INSERT INTO user_templates (type, name, payload, created_at, created_by) VALUES (?, ?, ?, ?, ?)')
+    .run(type, name, payload, now, by);
+  return { id: Number(info.lastInsertRowid), type, name, payload, created_at: now, created_by: by };
+}
+export function deleteUserTemplate(id: number) {
+  getDb().prepare('DELETE FROM user_templates WHERE id = ?').run(id);
 }
 
 /* ---- REQ-016: global app settings (key-value) ---- */

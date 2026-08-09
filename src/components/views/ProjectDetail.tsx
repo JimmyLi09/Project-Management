@@ -7,7 +7,7 @@ import {
   pkgProgress, pkgStart, planDates, plannedFinish, projCode, projectHealth, projPoints,
   projStage, riskKey, schedProgress, todayMid,
 } from '@/lib/project';
-import { canAssign, canCommercial, canDecide, canDelete, canEdit, canEditFinance, isFull } from '@/lib/permissions';
+import { canAssign, canCommercial, canCreate, canDecide, canDelete, canEdit, canEditFinance, isFull } from '@/lib/permissions';
 import { DIFF, STAGES, stageIdx, svcColor, svcName } from '@/lib/templates';
 import { useLang } from '@/lib/i18n';
 import { Avatar, HM, Icon, Pill, ProgressBar, TM } from '../ui';
@@ -19,11 +19,12 @@ import TransferModal from '../TransferModal';
 import type { Project } from '@/lib/types';
 
 export default function ProjectDetail() {
-  const { projects, view, setView, me, dispatch, removeProject, go, users } = useStore();
+  const { projects, view, setView, me, dispatch, removeProject, go, users, refresh, openProject, setToast } = useStore();
   const { lang, t } = useLang();
   const [exportScope, setExportScope] = useState<null | 'all' | 'schedule' | 'checklist'>(null);
   const [transferFrom, setTransferFrom] = useState<string | null>(null);
   const [assignOpen, setAssignOpen] = useState(false);
+  const [copyOpen, setCopyOpen] = useState(false);
   const p = projects.find((x) => x.id === view.pid);
   if (!p) {
     return <div className="panel" style={{ padding: 40, textAlign: 'center', color: 'var(--text2)' }}>{t('项目加载中…', 'Loading project…')}</div>;
@@ -79,6 +80,10 @@ export default function ProjectDetail() {
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               <button className="btn-line sm" onClick={() => setExportScope('all')}><Icon name="download" size={13} />{t('导出', 'Export')}</button>
+              {/* REQ-012: duplicate this project (whole / schedule only / checklist only) */}
+              {canCreate(me) && (
+                <button className="btn-line sm" onClick={() => setCopyOpen(true)}>⧉ {t('复制项目', 'Copy project')}</button>
+              )}
               {stage === 'complete' && canCommercial(me, p) && (
                 <button className="btn-line sm" onClick={() => dispatch(p.id, { type: 'toggleInvoiced' })}>{t('标记开票/收尾', 'Mark invoiced')}</button>
               )}
@@ -187,6 +192,11 @@ export default function ProjectDetail() {
       {transferFrom && (
         <TransferModal from={transferFrom} pid={p.id} onClose={() => setTransferFrom(null)} />
       )}
+      {copyOpen && (
+        <CopyProjectModal p={p} onClose={() => setCopyOpen(false)}
+          onDone={async (newId) => { setCopyOpen(false); await refresh(); openProject(newId); }}
+          onError={(m) => setToast(m)} />
+      )}
       {assignOpen && (
         <AssignModal
           candidates={users.filter((u) => u.role !== 'viewer' && !(p.owners || []).includes(u.name)).map((u) => u.name)}
@@ -219,6 +229,66 @@ function AssignModal({ candidates, onClose, onAssign }: { candidates: string[]; 
         <div className="modal-actions">
           <button className="btn-line" onClick={onClose}>{t('取消', 'Cancel')}</button>
           <button className="btn-navy" disabled={!name} onClick={() => onAssign(name)}>{t('确认指派', 'Assign')}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* REQ-012: copy a project — whole thing, or just its schedule / checklist.
+   The copy always starts clean: new NO., stage back to 售前, every status,
+   date, remark and the whole post-sales workflow reset server-side. */
+function CopyProjectModal({ p, onClose, onDone, onError }: {
+  p: Project; onClose: () => void; onDone: (id: string) => void; onError: (msg: string) => void;
+}) {
+  const { t } = useLang();
+  const [mode, setMode] = useState<'entire' | 'schedule' | 'checklist'>('entire');
+  const [busy, setBusy] = useState(false);
+  const MODES: [typeof mode, string, string, string, string][] = [
+    ['entire', '复制整个项目', 'Copy entire project', '服务、排期、信息清单、联系人、服务内容全部带走(不含 Job Record 与进度)。', 'Services, schedule, checklist, contacts and scope — progress and Job Record excluded.'],
+    ['schedule', '仅复制排期', 'Schedule only', '只带走各服务的阶段与周期,信息清单留空。', 'Only the phases/durations per service; the checklist starts empty.'],
+    ['checklist', '仅复制信息清单', 'Checklist only', '只带走分类与信息项,排期留空。', 'Only categories and items; the schedule starts empty.'],
+  ];
+
+  async function run() {
+    setBusy(true);
+    const res = await fetch('/api/projects/copy', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sourceId: p.id, mode }),
+    });
+    const data = await res.json().catch(() => ({}));
+    setBusy(false);
+    if (!res.ok || !data.project) { onError(data.error || t('复制失败', 'Copy failed')); return; }
+    onDone(data.project.id);
+  }
+
+  return (
+    <div className="overlay" onClick={(e) => { if (e.target === e.currentTarget && !busy) onClose(); }}>
+      <div className="modal" style={{ maxWidth: 520 }}>
+        <h2>{t('复制项目', 'Copy project')}</h2>
+        <div className="msub">{t(`以「${p.name}」为模板新建一个项目。`, `Create a new project from "${p.name}".`)}</div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, margin: '4px 0 6px' }}>
+          {MODES.map(([k, zh, en, dzh, den]) => (
+            <label key={k} style={{
+              display: 'flex', gap: 10, alignItems: 'flex-start', padding: '10px 12px', cursor: 'pointer',
+              border: `1px solid ${mode === k ? 'var(--navy700)' : 'var(--border)'}`, borderRadius: 8,
+              background: mode === k ? '#f2f6fd' : undefined,
+            }}>
+              <input type="radio" name="copy-mode" checked={mode === k} onChange={() => setMode(k)} style={{ marginTop: 3 }} />
+              <span>
+                <span style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--navy900)' }}>{t(zh, en)}</span>
+                <span style={{ display: 'block', fontSize: 11.5, color: 'var(--text2)', marginTop: 2 }}>{t(dzh, den)}</span>
+              </span>
+            </label>
+          ))}
+        </div>
+        <div style={{ fontSize: 11.5, color: 'var(--text2)' }}>
+          {t('副本会拿到新的项目编号,阶段回到「售前」,所有状态/日期/备注/图片清空。',
+             'The copy gets a new NO., returns to the Presales stage, and every status, date, note and photo is cleared.')}
+        </div>
+        <div className="modal-actions">
+          <button className="btn-line" onClick={onClose} disabled={busy}>{t('取消', 'Cancel')}</button>
+          <button className="btn-navy" onClick={run} disabled={busy}>{busy ? t('复制中…', 'Copying…') : t('创建副本', 'Create copy')}</button>
         </div>
       </div>
     </div>
