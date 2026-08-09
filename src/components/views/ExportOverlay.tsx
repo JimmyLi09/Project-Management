@@ -71,12 +71,84 @@ export default function ExportOverlay({ p, onClose, scope = 'all' }: { p: Projec
   @bottom-right { content: counter(page) " / " counter(pages); font-size: 9px; color: #999; }
 }`;
 
-  /* ── unified schedule block (per package) ── */
+  /* ── unified schedule block (per package) — follows the project's REQ-018 template ── */
   function SchedBlock({ pkg, pi }: { pkg: ServicePackage; pi: number }) {
     const pd = planDates(pkg, pkgStart(p, pkg));
+    const style = p.schedStyle || 'classic';
+    const sub = pkg.schedule.filter((r) => !r.kind).reduce((n, r) => n + (Number(r.weeks) || 0), 0);
+    const band = (r: { phase: string; task: string; taskEn: string }) => {
+      const s = `${r.phase} ${r.task} ${r.taskEn}`.toLowerCase();
+      if (/交接|移交|签收|handover|sign-?off/.test(s)) return 2;
+      if (/交付|deliver|出图|提交|final|高清/.test(s)) return 1;
+      return 0;
+    };
+    const BAND_L: [string, string][] = [['制作 Production', 'Production'], ['交付 Delivery', 'Delivery'], ['交接 Handover', 'Handover']];
+    let lastBand = -1;
     return (
       <React.Fragment>
         <h2 style={{ color: svcColor(pkg.svc) }}>{svcName(pkg)} — {T('生产排期', 'Production Schedule')}</h2>
+        {/* REQ-018 style B: date-based (Scale Model) */}
+        {style === 'dates' ? (
+          <table className="t-fix">
+            <thead>
+              <tr>
+                <th style={{ width: '26%' }}>{T('日期区间 Date Range', 'Date Range')}</th>
+                <th>{T('任务 Task', 'Task')}</th>
+                <th style={{ width: '11%' }}>{T('时长', 'Duration')}</th>
+                <th style={{ width: '17%' }}>{T('阶段', 'Stage')}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {pkg.schedule.map((r, i) => {
+                if (r.kind === 'holiday') return (
+                  <tr key={r.id || i}><td colSpan={4} style={{ textAlign: 'center', color: '#b23a32', fontWeight: 700, background: '#fdecec', letterSpacing: '.06em' }}>{(L === 'zh' ? r.task : r.taskEn || r.task).toUpperCase()}</td></tr>
+                );
+                if (r.kind === 'milestone') return (
+                  <tr key={r.id || i}><td colSpan={4} style={{ color: '#b23a32', fontWeight: 700, background: '#fff5f5' }}>⚑ {L === 'zh' ? r.task : r.taskEn || r.task}{r.s ? ` · ${r.s}` : ''}</td></tr>
+                );
+                const d = pd[i];
+                const b = band(r); const showBand = b !== lastBand; lastBand = b;
+                return (
+                  <tr key={r.id || i}>
+                    <td>{d ? `${fmtDate(d.start)} – ${fmtDate(d.end)}` : '—'}</td>
+                    <td>{(L === 'zh' ? r.task : r.taskEn)}{r.freeze ? ' ★' : ''}</td>
+                    <td>{r.weeks ? T(`${r.weeks} 周`, `${r.weeks}w`) : '—'}</td>
+                    <td>{showBand ? `${b + 1}. ${L === 'zh' ? BAND_L[b][0] : BAND_L[b][1]}` : ''}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        ) : style === 'weeks' ? (
+          /* REQ-018 style A: per-service weeks table + subtotal */
+          <table className="t-fix">
+            <thead>
+              <tr>
+                <th style={{ width: '6%' }}>#</th><th>{T('阶段 / 任务', 'Phase / Task')}</th>
+                <th style={{ width: '26%' }}>{T('日期', 'Dates')}</th>
+                <th style={{ width: '13%' }}>{T('时长', 'Duration')}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {pkg.schedule.map((r, i) => {
+                if (r.kind) return null;
+                const d = pd[i];
+                return (
+                  <tr key={r.id || i}>
+                    <td>{i}</td>
+                    <td>{(L === 'zh' ? r.task : r.taskEn)}{r.freeze ? ' ★' : ''}</td>
+                    <td>{d ? `${fmtDate(d.start)} – ${fmtDate(d.end)}` : '—'}</td>
+                    <td>{r.weeks ? T(`${r.weeks} 周`, `${r.weeks} week${r.weeks > 1 ? 's' : ''}`) : '—'}</td>
+                  </tr>
+                );
+              })}
+              <tr>
+                <td colSpan={3} style={{ textAlign: 'right', fontWeight: 700 }}>{T('小计 Subtotal', 'Subtotal')}</td>
+                <td style={{ fontWeight: 700 }}>{T(`${sub} 周`, `${sub} weeks`)}</td>
+              </tr>
+            </tbody>
+          </table>
+        ) : (
         <table className="t-fix">
           <thead>
             <tr>
@@ -108,6 +180,7 @@ export default function ExportOverlay({ p, onClose, scope = 'all' }: { p: Projec
             })}
           </tbody>
         </table>
+        )}
         {(pkg.scopeItems && pkg.scopeItems.length > 0) && (
           <>
             <h3 style={{ fontSize: 12.5, margin: '12px 0 6px' }}>{T('服务内容 / 交付清单', 'Service Scope / Deliverables')}</h3>
@@ -273,6 +346,20 @@ export default function ExportOverlay({ p, onClose, scope = 'all' }: { p: Projec
         {selPkgs.length === 0 ? (
           <p style={{ color: '#888' }}>{T('请至少勾选一个服务。', 'Select at least one service.')}</p>
         ) : blocks}
+        {/* REQ-018 style A: overall Sum across the exported services */}
+        {(p.schedStyle || 'classic') === 'weeks' && showSched && selPkgs.length > 0 && (
+          <table className="t-fix" style={{ marginTop: 4 }}>
+            <tbody>
+              <tr>
+                <td style={{ textAlign: 'right', fontWeight: 700, background: '#f0f2f5' }}>{T('Sum · 合计 Overall duration', 'Sum · Overall duration')}</td>
+                <td style={{ width: '13%', fontWeight: 700, background: '#f0f2f5' }}>
+                  {T(`${selPkgs.reduce((n, x) => n + x.pkg.schedule.filter((r) => !r.kind).reduce((m, r) => m + (Number(r.weeks) || 0), 0), 0)} 周`,
+                     `${selPkgs.reduce((n, x) => n + x.pkg.schedule.filter((r) => !r.kind).reduce((m, r) => m + (Number(r.weeks) || 0), 0), 0)} weeks`)}
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        )}
         {/* REQ-016: company notes / disclaimer at the bottom of every export */}
         {notesOn && notes.trim() && (
           <div style={{ marginTop: 22, padding: '10px 12px', border: '1px solid #d9d9d9', borderLeft: '3px solid #a8690b', fontSize: 11.5, whiteSpace: 'pre-wrap', color: '#555' }}>

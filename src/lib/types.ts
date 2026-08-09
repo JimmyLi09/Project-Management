@@ -99,6 +99,9 @@ export interface ScheduleRow {
   e: string; // ISO end override
   delayNote?: string; // reason for a delay/date adjustment (shows a red mark)
   custom?: boolean; // §5: manually-inserted node (ad-hoc sample / extra request)
+  /* REQ-018 style B: full-width annotation rows in the date-based template —
+     'milestone' = red deadline note, 'holiday' = centred red holiday band */
+  kind?: 'milestone' | 'holiday';
 }
 
 export interface ChecklistItem {
@@ -197,9 +200,15 @@ export interface ProjectContact {
 
 export type Difficulty = 'easy' | 'medium' | 'hard' | 'complex';
 
+/* REQ-018: which schedule template the project renders/exports with.
+   classic = the original phase editor; weeks = per-service grouped table with
+   subtotals; dates = the Scale-Model date-range template. */
+export type SchedStyle = 'classic' | 'weeks' | 'dates';
+
 export interface Project {
   id: string;
   serial?: number; // REQ-006: sequential project NO. (auto-assigned on create)
+  schedStyle?: SchedStyle;
   name: string;
   client: string;
   services: string[];

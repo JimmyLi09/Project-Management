@@ -26,6 +26,8 @@ export type ProjectAction =
   | { type: 'removeRow'; pkg: number; idx: number }
   | { type: 'moveRow'; pkg: number; idx: number; dir: -1 | 1 }
   | { type: 'reorderRow'; pkg: number; from: number; to: number }
+  | { type: 'setSchedStyle'; value: 'classic' | 'weeks' | 'dates' }
+  | { type: 'addSpecialRow'; pkg: number; kind: 'milestone' | 'holiday'; text: string; date: string }
   | { type: 'setClStatus'; pkg: number; gi: number; ii: number; value: ChecklistStatus }
   | { type: 'editCl'; pkg: number; gi: number; ii: number; field: 'date' | 'remark' | 'zh' | 'en' | 'owner' | 'received'; value: string }
   | { type: 'renameGroup'; pkg: number; gi: number; name: string; nameEn?: string }
@@ -710,6 +712,29 @@ export function applyAction(u: Identity, p: Project, a: ProjectAction, ctx: Acti
       const at = typeof a.atIdx === 'number' && a.atIdx >= 0 && a.atIdx < pk.schedule.length ? a.atIdx + 1 : pk.schedule.length;
       pk.schedule.splice(at, 0, row);
       logIt(p, u.name, `新增自定义节点 Custom node: ${name}`);
+      break;
+    }
+    case 'setSchedStyle': {
+      // REQ-018: which schedule template this project uses (view + export)
+      if (!canEdit(u, p)) throw new PermissionError('无编辑权限');
+      if (!['classic', 'weeks', 'dates'].includes(a.value)) throw new ValidationError('无效的排期样式');
+      p.schedStyle = a.value;
+      break;
+    }
+    case 'addSpecialRow': {
+      // REQ-018 style B: red milestone / holiday band rows
+      if (!canEdit(u, p)) throw new PermissionError('无编辑权限');
+      const pk = p.packages[a.pkg];
+      if (!pk) throw new ValidationError('无效的服务包');
+      const text = String(a.text || '').slice(0, 200).trim();
+      if (!text) throw new ValidationError('请填写内容');
+      pk.schedule.push({
+        id: newId(), no: '', phase: text, task: text, taskEn: text,
+        owner: '', assignee: '', weeks: 0, typical: '—', gate: '', freeze: false,
+        status: 'todo', note: '', s: String(a.date || ''), e: String(a.date || ''),
+        kind: a.kind,
+      });
+      logIt(p, u.name, `${a.kind === 'holiday' ? '新增假期行' : '新增卡点行'}: ${text}`);
       break;
     }
     case 'setArchived': {
