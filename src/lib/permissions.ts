@@ -46,6 +46,33 @@ export const canDelete = (u: Identity) => isFull(u) || u.role === 'sales';
 
 export const canAdmin = (u: Identity) => isFull(u);
 
+/* ===== REQ-022: who sees which part of the post-sales workflow =====
+   Sales 管两头(交接、核对/开票/收款),PM 只管制作 —— 整张售后卡片对 PM
+   完全不出现。这些只影响前端呈现:服务端 applyAction 里每个 action 自己的
+   权限校验一条都没动,藏 UI 不等于放宽权限。
+
+   注意 canEdit 对 PD/BD 也返回 true,不能拿它判断「是不是 PM」,否则 PD 会
+   跟着被藏掉、无法审批 —— 判断 PM 一律用 isPM。 */
+export const isPM = (u: Identity) => u.role === 'pm';
+/* member / viewer / finance 只旁观,不参与生产也不发起售后 */
+const isBystander = (u: Identity) => u.role === 'member' || u.role === 'viewer';
+
+/* PM 整块不见;其余角色都看得到卡片(至少是顶部六步时间线) */
+export const canSeeWorkflow = (u: Identity) => !isPM(u);
+/* 顶部六步时间线:除 PM 外一律保留(只读),含 Finance 与 member/viewer */
+export const canSeeWorkflowTimeline = (u: Identity) => !isPM(u);
+
+export const canSeeHandoverBlock = (u: Identity) =>
+  !isPM(u) && !isBystander(u) && u.role !== 'finance' && canCommercial(u);
+export const canSeeCompletionBlock = (u: Identity) => isFull(u);
+export const canSeeVerifyBlock = (u: Identity) =>
+  !isPM(u) && !isBystander(u) && u.role !== 'finance' && canCommercial(u);
+export const canSeeFinanceBlock = (u: Identity) =>
+  !isPM(u) && !isBystander(u) && (isFull(u) || u.role === 'sales' || u.role === 'finance');
+
+/* 「提交完工」的新家:排期页底部,只给本项目的 PM 与全权角色 */
+export const canSubmitCompletionHere = (u: Identity, p: Project) => canEdit(u, p);
+
 /* REQ-012: anyone who actually builds schedules/checklists may save one as a
    reusable template — that includes PM, who owns the production content.
    Viewer / member / finance can still read and apply, not save. */

@@ -7,7 +7,11 @@ import {
   pkgProgress, pkgStart, planDates, plannedFinish, projCode, projectHealth, projPoints,
   projStage, riskKey, schedProgress, todayMid,
 } from '@/lib/project';
-import { canAssign, canCommercial, canCreate, canDecide, canDelete, canEdit, canEditFinance, isFull } from '@/lib/permissions';
+import {
+  canAssign, canCommercial, canCreate, canDecide, canDelete, canEdit, canEditFinance, isFull,
+  canSeeWorkflow, canSeeWorkflowTimeline, canSeeHandoverBlock, canSeeCompletionBlock,
+  canSeeVerifyBlock, canSeeFinanceBlock, isPM,
+} from '@/lib/permissions';
 import { DIFF, STAGES, stageIdx, svcColor, svcName } from '@/lib/templates';
 import { useLang } from '@/lib/i18n';
 import { Avatar, HM, Icon, Pill, ProgressBar, TM } from '../ui';
@@ -159,6 +163,11 @@ export default function ProjectDetail() {
           </div>
         </div>
       )}
+      {/* REQ-022: 售后卡片对 PM 整块隐藏后,「接受交接」这个按钮也跟着没了。
+          给被指派的 PM 一条独立的接单横幅 —— 他要的只是这一个动作,
+          不需要为此把整套售后流程重新摆到他面前。 */}
+      <HandoverInbox p={p} />
+
       {!ed && (
         <div className="panel" style={{ padding: '11px 18px', marginBottom: 20, fontSize: 12.5, color: 'var(--text2)', display: 'flex', gap: 8, alignItems: 'center' }}>
           <Icon name="lock" size={14} />
@@ -231,6 +240,41 @@ function AssignModal({ candidates, onClose, onAssign }: { candidates: string[]; 
           <button className="btn-navy" disabled={!name} onClick={() => onAssign(name)}>{t('确认指派', 'Assign')}</button>
         </div>
       </div>
+    </div>
+  );
+}
+
+/* ===== REQ-022 — 给 PM 的接单横幅 =====
+   售后工作流整块对 PM 不可见,但「接受交接」是 PM 必须做的动作。
+   这里只露出他需要的那一件事:简报 + 一个接单按钮。 */
+function HandoverInbox({ p }: { p: Project }) {
+  const { me, dispatch } = useStore();
+  const { t } = useLang();
+  const [busy, setBusy] = useState(false);
+  const h = p.handover;
+  /* 只给被指派的那位 PM;PD/BD 在售后卡片里本来就能接 */
+  if (!isPM(me) || !h || h.status !== 'submitted' || h.assignedPmId !== me.name) return null;
+
+  return (
+    <div className="panel" style={{ padding: '14px 18px', marginBottom: 20, borderLeft: '3px solid var(--bronze)' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+        <span style={{ fontSize: 13.5, fontWeight: 700, color: 'var(--navy900)' }}>
+          📥 {t('这个项目交接给你了', 'This project was handed to you')}
+        </span>
+        <span style={{ fontSize: 12, color: 'var(--text2)' }}>
+          {h.submittedBy} · {h.submittedAt ? fmtDate(new Date(h.submittedAt)) : ''}
+        </span>
+        <div style={{ flex: 1 }} />
+        <button className="btn-navy sm" disabled={busy}
+          onClick={async () => { setBusy(true); await dispatch(p.id, { type: 'acceptHandover' }); setBusy(false); }}>
+          ✓ {t('接受交接,开始制作', 'Accept → start production')}
+        </button>
+      </div>
+      {h.salesBrief && (
+        <div style={{ marginTop: 10, fontSize: 12.5, whiteSpace: 'pre-wrap', background: 'var(--hover-bg)', borderRadius: 8, padding: '9px 11px' }}>
+          {h.salesBrief}
+        </div>
+      )}
     </div>
   );
 }
@@ -544,6 +588,9 @@ function WorkflowPanel({ p, users, me, dispatch }: {
   const [cSummary, setCSummary] = useState('');
   const [cLinks, setCLinks] = useState('');
   const [pdNote, setPdNote] = useState('');
+  /* REQ-022: 交接块「接收后收起」的展开状态 + 提交到接收之间的修改态 */
+  const [handoverOpen, setHandoverOpen] = useState(false);
+  const [editHandover, setEditHandover] = useState(false);
   const [scopeOk, setScopeOk] = useState(true);
   const [jobOk, setJobOk] = useState(true);
   const [invAllowed, setInvAllowed] = useState(true);
@@ -578,6 +625,18 @@ function WorkflowPanel({ p, users, me, dispatch }: {
   ];
   const curIdx = steps.findIndex((s) => !s.done);
 
+  /* ===== REQ-022 — 按角色决定这张卡片露出多少 =====
+     PM 整块不见(连时间线也不留),其余角色只看到自己要动手的那几块。
+     ④⑤⑥(核对/开票/收款)再叠一条阶段闸:项目没做完就没有可核对的东西。 */
+  const lateStage = stageIdx(projStage(p)) >= stageIdx('complete');
+  const seeHandover   = canSeeHandoverBlock(me);
+  const seeCompletion = canSeeCompletionBlock(me);
+  const seeVerify     = canSeeVerifyBlock(me) && lateStage;
+  const seeFinance    = canSeeFinanceBlock(me) && lateStage;
+  const anyBlock = seeHandover || seeCompletion || seeVerify || seeFinance;
+  /* 一块都看不到、时间线也不给,就整张卡片不渲染(不占位、不留空白) */
+  if (!canSeeWorkflow(me) || (!anyBlock && !canSeeWorkflowTimeline(me))) return null;
+
   return (
     <div className="panel" style={{ padding: 20 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 14 }}>
@@ -607,10 +666,26 @@ function WorkflowPanel({ p, users, me, dispatch }: {
         })}
       </div>
 
-      {/* Step 1 — Sales → PM handover */}
+      {/* Step 1 — Sales → PM handover (REQ-022: Sales / PD·BD only) */}
+      {seeHandover && (h && h.status === 'accepted' && !handoverOpen ? (
+        /* REQ-022: PM 接收之后「交接即结束」—— 收成一行摘要,想看再展开。
+           提交到接收之间不收,那段时间 Sales 还要能改。 */
+        <div style={{ border: '1px solid var(--row-line)', borderRadius: 10, padding: '11px 14px', display: 'flex', alignItems: 'center', gap: 9, flexWrap: 'wrap' }}>
+          <span style={{ color: 'var(--success)', fontWeight: 600, fontSize: 12.5 }}>✓ {t('已交接给', 'Handed to')} {h.assignedPmId}</span>
+          <span style={{ fontSize: 12, color: 'var(--text2)' }}>
+            · {h.submittedBy} {h.submittedAt ? fmtDate(new Date(h.submittedAt)) : ''}
+          </span>
+          <div style={{ flex: 1 }} />
+          <button className="btn-line sm" onClick={() => setHandoverOpen(true)}>{t('展开', 'Expand')}</button>
+        </div>
+      ) : (
       <div style={{ border: '1px solid var(--row-line)', borderRadius: 10, padding: 14 }}>
-        <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--navy900)', marginBottom: 8 }}>
-          ① {t('交接:Sales → PM', 'Handover: Sales → PM')}
+        <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--navy900)', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span>① {t('交接:Sales → PM', 'Handover: Sales → PM')}</span>
+          <div style={{ flex: 1 }} />
+          {h && h.status === 'accepted' && (
+            <button className="btn-line sm" onClick={() => setHandoverOpen(false)}>{t('收起', 'Collapse')}</button>
+          )}
         </div>
 
         {(!h || h.status === 'not_started') && (
@@ -643,6 +718,35 @@ function WorkflowPanel({ p, users, me, dispatch }: {
                 ✓ {t('接受交接,进入生产', 'Accept handover → Production')}
               </button>
             )}
+            {/* REQ-022: 提交到接收之间 Sales 仍可修改简报 / 换人 */}
+            {canSubmit && (editHandover ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 9, borderTop: '1px solid var(--row-line)', paddingTop: 10 }}>
+                <textarea className="in" value={brief} onChange={(e) => setBrief(e.target.value)} style={{ minHeight: 64 }}
+                  placeholder={t('交接简报:范围 / 商务要点 / 客户注意事项…', 'Handover brief: scope / commercials / client notes…')} />
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                  <select className="in sm" value={pm} onChange={(e) => setPm(e.target.value)} style={{ minWidth: 180 }}>
+                    <option value="">{t('— 指派接单 PM —', '— assign PM —')}</option>
+                    {pmNames.map((n) => <option key={n} value={n}>{n}</option>)}
+                  </select>
+                  <button className="btn-navy sm" disabled={busy || !pm}
+                    onClick={async () => {
+                      setBusy(true);
+                      /* 走 editHandover 而不是 submitHandover —— 后者一个工作流版本
+                         只允许提交一次(防重复提交),改内容不该消耗那把钥匙。 */
+                      const ok = await dispatch(p.id, { type: 'editHandover', salesBrief: brief, assignedPmId: pm });
+                      setBusy(false);
+                      if (ok) setEditHandover(false);
+                    }}>{t('保存修改', 'Save changes')}</button>
+                  <button className="btn-line sm" onClick={() => setEditHandover(false)}>{t('取消', 'Cancel')}</button>
+                </div>
+              </div>
+            ) : (
+              <button className="btn-line sm" style={{ alignSelf: 'flex-start' }}
+                title={t('PM 接收前还可以改简报或换人', 'Editable until the PM accepts')}
+                onClick={() => { setBrief(h.salesBrief || ''); setPm(h.assignedPmId || ''); setEditHandover(true); }}>
+                ✎ {t('修改交接', 'Edit handover')}
+              </button>
+            ))}
           </div>
         )}
 
@@ -656,9 +760,11 @@ function WorkflowPanel({ p, users, me, dispatch }: {
           </div>
         )}
       </div>
+      ))}
 
-      {/* Step 2 — PM completion package + PD approval (unlocks after handover accepted) */}
-      {h && h.status === 'accepted' && cr && (
+      {/* Step 2 — completion package + PD approval (REQ-022: PD / BD only；
+          PM 的提交入口已移到排期页底部 CompletionCard) */}
+      {seeCompletion && h && h.status === 'accepted' && cr && (
         <div style={{ border: '1px solid var(--row-line)', borderRadius: 10, padding: 14, marginTop: 12 }}>
           <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--navy900)', marginBottom: 8 }}>
             ② {t('完成包 + PD 审批', 'Completion package + PD approval')}
@@ -718,8 +824,8 @@ function WorkflowPanel({ p, users, me, dispatch }: {
         </div>
       )}
 
-      {/* Step 3 — Sales verify (unlocks once production completed) */}
-      {prodDone && sv && (
+      {/* Step 3 — Sales verify (REQ-022: Sales / PD·BD，且项目已进入「完成」阶段) */}
+      {seeVerify && prodDone && sv && (
         <div style={{ border: '1px solid var(--row-line)', borderRadius: 10, padding: 14, marginTop: 12 }}>
           <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--navy900)', marginBottom: 8 }}>③ {t('Sales 核对', 'Sales verification')}</div>
           {sv.status === 'verified' ? (
@@ -748,8 +854,8 @@ function WorkflowPanel({ p, users, me, dispatch }: {
         </div>
       )}
 
-      {/* Step 4 — Finance: invoice + payment status (ref-only, §7) */}
-      {sv && sv.status === 'verified' && sv.finalInvoiceAllowed && inv && (
+      {/* Step 4 — Finance: invoice + payment status (REQ-022: Finance 可操作，Sales / PD·BD 只读) */}
+      {seeFinance && sv && sv.status === 'verified' && sv.finalInvoiceAllowed && inv && (
         <div style={{ border: '1px solid var(--row-line)', borderRadius: 10, padding: 14, marginTop: 12 }}>
           <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--navy900)', marginBottom: 4 }}>④ {t('Finance 开票 / 收款', 'Finance: invoice / payment')}</div>
           <div style={{ fontSize: 11, color: 'var(--text2)', marginBottom: 10 }}>{t('仅记录状态与单号,不记金额(以现有 Finance 系统为准)。', 'Status & reference only — no amounts (source of truth is your Finance system).')}</div>
@@ -783,8 +889,9 @@ function WorkflowPanel({ p, users, me, dispatch }: {
         </div>
       )}
 
-      {/* Payment Risk — non-blocking banner + control */}
-      {pr && (pr.level !== 'none' || canCommercial(me, p)) && (
+      {/* Payment Risk — non-blocking banner + control
+          (REQ-022: 属于售后商业信息,跟着开票/收款那一闸走) */}
+      {seeFinance && pr && (pr.level !== 'none' || canCommercial(me, p)) && (
         <div style={{ borderRadius: 10, padding: '10px 14px', marginTop: 12, background: pr.level === 'high' ? '#fbe9e7' : pr.level === 'watch' ? '#fbf0dc' : 'var(--hover-bg)', border: '1px solid var(--row-line)' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
             <span style={{ fontSize: 12.5, fontWeight: 700, color: pr.level === 'high' ? '#b23a32' : pr.level === 'watch' ? '#a8690b' : 'var(--text2)' }}>
