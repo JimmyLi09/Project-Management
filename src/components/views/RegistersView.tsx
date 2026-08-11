@@ -8,7 +8,7 @@ import { todayMid, fmtDate, projCode } from '@/lib/project';
 import { useLang } from '@/lib/i18n';
 import { Icon } from '../ui';
 import {
-  REGISTERS, registerDef, statusFamily, statusMeta, defaultStatus, recordVal,
+  REGISTERS, registerDef, statusFamily, statusMeta, defaultStatus, recordVal, fieldsOf,
   isIncomplete, isExpiring, type RegisterDef, type FieldDef,
 } from '@/lib/records';
 import type { Project, ServicePackage } from '@/lib/types';
@@ -24,7 +24,7 @@ function mainDate(def: RegisterDef, pk: ServicePackage): string {
 }
 
 export default function RegistersView() {
-  const { projects, me, dispatch, openProject, refresh, setToast } = useStore();
+  const { projects, me, dispatch, openProject, refresh, setToast, recordFields } = useStore();
   const { lang, t } = useLang();
   const [svc, setSvc] = useState(REGISTERS[0].svc);
   const [q, setQ] = useState('');
@@ -37,7 +37,10 @@ export default function RegistersView() {
   const [imp, setImp] = useState<ImportPreview | null>(null);
   const canImport = isFull(me);
 
-  const def = registerDef(svc)!;
+  /* REQ-023: 把用户改过的字段并进 def —— 下游所有 def.fields(表头、导出、
+     导入模板、编辑弹窗…)自动跟着走,不用一处处改。 */
+  const baseDef = registerDef(svc)!;
+  const def = useMemo<RegisterDef>(() => ({ ...baseDef, fields: fieldsOf(baseDef, recordFields) }), [baseDef, recordFields]);
   const t0 = todayMid();
 
   const all = useMemo<Row[]>(() => {
