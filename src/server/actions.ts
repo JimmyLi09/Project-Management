@@ -55,6 +55,7 @@ export type ProjectAction =
   | { type: 'transferProject'; from: string; to: string; includeTasks: boolean }
   | { type: 'submitHandover'; salesBrief: string; assignedPmId: string }
   | { type: 'acceptHandover' }
+  | { type: 'editHandover'; salesBrief: string; assignedPmId: string }
   | { type: 'submitCompletion'; summary: string; links: string }
   | { type: 'decideCompletion'; decision: 'approved' | 'rejected' | 'changes_requested'; note: string }
   | { type: 'salesVerify'; scopeMatches: boolean; jobOrderUpdated: boolean; finalInvoiceAllowed: boolean }
@@ -502,6 +503,28 @@ export function applyAction(u: Identity, p: Project, a: ProjectAction, ctx: Acti
       /* make sure the assigned PM owns the project so it flows to My Tasks */
       if (!(p.owners || []).includes(pm)) p.owners = [...(p.owners || []), pm];
       logIt(p, u.name, `提交交接给 PM「${pm}」Submit handover`);
+      break;
+    }
+    /* REQ-022: PM 接收之前,Sales 还能改简报或改派 PM。
+       这刻意不走 submitHandover —— 后者在 workflow_actions 里有
+       (project, submit_handover, workflowVersion) 的唯一键,一个版本只允许提交
+       一次(防重复提交的 P0 保障)。改内容是另一回事,不该消耗那把钥匙。
+       submittedAt 保持不变:SLA 的计时从首次提交那一刻起算,改内容不重置。 */
+    case 'editHandover': {
+      if (!canCommercial(u, p)) throw new PermissionError('仅 Sales / PD / BD 可修改交接');
+      const h = p.handover!;
+      if (h.status !== 'submitted') {
+        throw new ValidationError(h.status === 'accepted' ? 'PM 已接单,交接不可再改' : '尚未发起交接');
+      }
+      const pm = String(a.assignedPmId || '').trim();
+      if (!pm) throw new ValidationError('请指定接单 PM');
+      const was = h.assignedPmId;
+      h.salesBrief = String(a.salesBrief || '');
+      h.assignedPmId = pm;
+      /* 新 PM 要能在「我的待办」里看到项目;原 PM 留在成员里不动 ——
+         他可能是 PD 另外指派的,这里不该替人做减法。 */
+      if (!(p.owners || []).includes(pm)) p.owners = [...(p.owners || []), pm];
+      logIt(p, u.name, was === pm ? '修改交接简报 Edit handover brief' : `交接改派 PM「${was}」→「${pm}」`);
       break;
     }
     case 'acceptHandover': {

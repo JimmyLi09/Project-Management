@@ -3,7 +3,7 @@
 import React, { useState } from 'react';
 import { useStore } from '../store';
 import { fmtDate, isoDate, MACRO, macroStage, parseISO, pkgStart, planDates, todayMid } from '@/lib/project';
-import { canEdit, canRowEdit } from '@/lib/permissions';
+import { canEdit, canRowEdit, canSubmitCompletionHere } from '@/lib/permissions';
 import { svcColor, svcName } from '@/lib/templates';
 import { useLang } from '@/lib/i18n';
 import { Avatar, Icon, Pill, TM } from '../ui';
@@ -365,7 +365,95 @@ export default function ScheduleTab({ p, pkgIdx, onExport, onPkg }: {
             'Tick = done; unticked past due = overdue (red edge). Click the status pill to cycle To Do → In Progress → Done → Blocked. Members can only act on tasks assigned 👤 to them.')}
         </p>
       )}
+
+      {/* REQ-022: 「提交完工」的新家 —— 售后工作流整块对 PM 不可见后,
+          这个动作挪到排期页底部,紧挨着 PM 真正在做的生产内容。 */}
+      <CompletionCard p={p} />
     </>
+  );
+}
+
+/* ===== REQ-022 — 提交完工(原「完成包」,从售后工作流卡片移来) =====
+   只给本项目的 PM 与全权角色。服务端 submitCompletion 的权限没变,
+   变的只是入口位置。 */
+function CompletionCard({ p }: { p: Project }) {
+  const { me, dispatch } = useStore();
+  const { t } = useLang();
+  const [summary, setSummary] = useState('');
+  const [links, setLinks] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [open, setOpen] = useState(false);
+
+  const h = p.handover;
+  const cr = p.completionReview;
+  /* 还没接单就没有「完工」可言 */
+  if (!canSubmitCompletionHere(me, p) || !h || h.status !== 'accepted' || !cr) return null;
+
+  const approved = cr.approval?.status === 'approved';
+  const pending = cr.status === 'submitted' && !approved;
+  const returned = cr.approval?.status === 'changes_requested' || cr.approval?.status === 'rejected';
+
+  /* 已提交 / 已批准 —— 收成一行状态,不占版面 */
+  if (pending || approved) {
+    return (
+      <div className="panel" style={{ padding: '12px 16px', marginTop: 16, display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+        <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--navy900)' }}>{t('完工提交', 'Completion')}</span>
+        {approved ? (
+          <span style={{ fontSize: 12.5, color: 'var(--success)', fontWeight: 600 }}>
+            ✓ {t('PD 已批准 · 制作完成', 'PD approved · production completed')}
+          </span>
+        ) : (
+          <span style={{ fontSize: 12.5, color: 'var(--warning)', fontWeight: 600 }}>{t('待 PD 审批', 'Awaiting PD approval')}</span>
+        )}
+        <span style={{ fontSize: 12, color: 'var(--text2)' }}>
+          · {cr.submittedBy} {cr.submittedAt ? fmtDate(new Date(cr.submittedAt)) : ''}
+        </span>
+      </div>
+    );
+  }
+
+  return (
+    <div className="panel" style={{ padding: '14px 16px', marginTop: 16 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 9, flexWrap: 'wrap' }}>
+        <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--navy900)' }}>
+          ✅ {t('制作做完了?提交完工', 'Production done? Submit completion')}
+        </span>
+        <span style={{ fontSize: 11.5, color: 'var(--text2)' }}>
+          {t('提交后交由 PD 审批,通过即进入开票流程。', 'Goes to PD for approval, then on to invoicing.')}
+        </span>
+        <div style={{ flex: 1 }} />
+        {!open && (
+          <button className="btn-navy sm" onClick={() => { setSummary(cr.summary || ''); setLinks(cr.links || ''); setOpen(true); }}>
+            {returned ? t('重新提交', 'Resubmit') : t('提交完工', 'Submit completion')}
+          </button>
+        )}
+      </div>
+
+      {returned && (
+        <div style={{ marginTop: 10, fontSize: 12.5, color: 'var(--danger)', background: '#fbe9e7', borderRadius: 8, padding: '8px 11px' }}>
+          {t('PD 退回', 'Returned by PD')}{cr.approval?.note ? ' — ' + cr.approval.note : ''} · {t('请修正后重新提交', 'fix and resubmit')}
+        </div>
+      )}
+
+      {open && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 9, marginTop: 12 }}>
+          <textarea className="in" style={{ minHeight: 60 }} value={summary} onChange={(e) => setSummary(e.target.value)}
+            placeholder={t('完成说明:交付了什么 / 版本 / 备注…', 'What was delivered / version / notes…')} />
+          <input className="in sm" value={links} onChange={(e) => setLinks(e.target.value)}
+            placeholder={t('成品链接 / 路径(可多行)', 'Deliverable links / paths')} />
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <button className="btn-navy sm" disabled={busy}
+              onClick={async () => {
+                setBusy(true);
+                const ok = await dispatch(p.id, { type: 'submitCompletion', summary, links });
+                setBusy(false);
+                if (ok) setOpen(false);
+              }}>{t('确认提交', 'Submit')}</button>
+            <button className="btn-line sm" onClick={() => setOpen(false)}>{t('取消', 'Cancel')}</button>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 
