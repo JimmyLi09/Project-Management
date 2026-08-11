@@ -109,9 +109,10 @@ export default function ChecklistTab({ p, pkgIdx, onExport, onPkg }: {
   /* REQ-014: flat mode drops the Owner column (Item / Status+received / Date / Remark);
      REQ-019: template columns are Item · Status(含收到内容) · Date received. */
   const flat = !!pkg.noCategories;
+  /* REQ-024: 「参考图」列插在 信息项 与 负责人 之间(无分类模式下就在信息项之后) */
   const cols = flat
-    ? (editMode && ed ? 'minmax(300px,2.6fr) 220px 132px 34px' : 'minmax(300px,2.6fr) 220px 132px')
-    : (editMode && ed ? 'minmax(280px,2.4fr) 150px 220px 124px 34px' : 'minmax(280px,2.4fr) 150px 220px 124px');
+    ? (editMode && ed ? 'minmax(260px,2.4fr) 132px 220px 132px 34px' : 'minmax(260px,2.4fr) 132px 220px 132px')
+    : (editMode && ed ? 'minmax(240px,2.2fr) 132px 150px 220px 124px 34px' : 'minmax(240px,2.2fr) 132px 150px 220px 124px');
 
   return (
     <>
@@ -192,6 +193,7 @@ export default function ChecklistTab({ p, pkgIdx, onExport, onPkg }: {
           fontSize: 11, fontWeight: 700, letterSpacing: '.04em', textTransform: 'uppercase', color: 'var(--text2)',
         }}>
           <div>{t('信息项', 'Item')}</div>
+          <div>{t('参考图', 'Reference')}</div>
           {!flat && <div>{t('负责人', 'Owner')}</div>}
           <div>{t('状态 / 收到内容', 'Status / Received')}</div>
           <div>{t('收到日期', 'Date received')}</div>
@@ -273,35 +275,6 @@ export default function ChecklistTab({ p, pkgIdx, onExport, onPkg }: {
                         </>
                       )}
 
-                      {/* thumbnails (multi-image) + uploader */}
-                      <div style={{ marginTop: 10, display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
-                        {shots.map((s, si) => (
-                          <span key={si} style={{ position: 'relative', display: 'inline-flex' }}>
-                            <img src={s} alt="" title={t('点击放大', 'Click to enlarge')}
-                              style={{ width: 54, height: 38, objectFit: 'cover', borderRadius: 6, border: '1px solid var(--border)', cursor: 'pointer' }}
-                              onClick={() => setLightbox(s)} />
-                            {fe && (
-                              <button title={t('删除此图', 'Remove image')}
-                                onClick={() => dispatch(p.id, { type: 'removeShot', pkg: pkgIdx, gi, ii, shotIdx: si })}
-                                style={{ position: 'absolute', top: -6, right: -6, width: 16, height: 16, borderRadius: 8, background: 'var(--danger)', color: '#fff', fontSize: 10, lineHeight: '16px', textAlign: 'center' }}>✕</button>
-                            )}
-                          </span>
-                        ))}
-                        {fe && (
-                          <label
-                            tabIndex={0}
-                            title={t('点击选择,或拖入 / 粘贴图片(可多张)', 'Click to select, or drag / paste images (multiple)')}
-                            style={{ fontSize: 11, color: '#234f97', background: '#e7eefb', borderRadius: 6, padding: '4px 9px', cursor: 'pointer', outline: 'none' }}
-                            onDragOver={(e) => { e.preventDefault(); (e.currentTarget as HTMLElement).style.background = '#c9dcff'; }}
-                            onDragLeave={(e) => { (e.currentTarget as HTMLElement).style.background = '#e7eefb'; }}
-                            onDrop={(e) => { e.preventDefault(); (e.currentTarget as HTMLElement).style.background = '#e7eefb'; processImageFile(gi, ii, imageFromDataTransfer(e.dataTransfer)); }}
-                            onPaste={(e) => { const f = imageFromDataTransfer(e.clipboardData); if (f) { e.preventDefault(); processImageFile(gi, ii, f); } }}>
-                            📎 {shots.length ? t('加图', 'Add image') : t('上传 / 拖入 / 粘贴', 'Upload / drag / paste')}
-                            <input type="file" accept="image/*" multiple style={{ display: 'none' }} onChange={(e) => attachShot(gi, ii, e.target)} />
-                          </label>
-                        )}
-                      </div>
-
                       {/* remark — wrapping textarea (D3), with highlight star (C3) */}
                       <div style={{ marginTop: 10, display: 'flex', alignItems: 'flex-start', gap: 6 }}>
                         {fe && (
@@ -320,6 +293,41 @@ export default function ChecklistTab({ p, pkgIdx, onExport, onPkg }: {
                           }}
                           onBlur={(e) => { if (fe && e.target.value !== it.remark) dispatch(p.id, { type: 'editCl', pkg: pkgIdx, gi, ii, field: 'remark', value: e.target.value }); }} />
                       </div>
+                    </div>
+
+                    {/* ── REQ-024 参考图 Reference ──
+                        查看态只读缩略图(点开看大图),编辑态可上传 / 拖入 / 粘贴 / 删除。
+                        复用信息清单原有的图片通道(attachShot / removeShot),不新建图床。 */}
+                    <div style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                      <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
+                        {shots.map((s, si) => (
+                          <span key={si} style={{ position: 'relative', display: 'inline-flex' }}>
+                            <img src={s} alt="" title={t('点击放大', 'Click to enlarge')}
+                              style={{ width: 58, height: 42, objectFit: 'cover', borderRadius: 6, border: '1px solid var(--border)', cursor: 'zoom-in' }}
+                              onClick={() => setLightbox(s)} />
+                            {fe && (
+                              <button title={t('删除此图', 'Remove image')}
+                                onClick={() => dispatch(p.id, { type: 'removeShot', pkg: pkgIdx, gi, ii, shotIdx: si })}
+                                style={{ position: 'absolute', top: -6, right: -6, width: 16, height: 16, borderRadius: 8, background: 'var(--danger)', color: '#fff', fontSize: 10, lineHeight: '16px', textAlign: 'center' }}>✕</button>
+                            )}
+                          </span>
+                        ))}
+                      </div>
+                      {fe ? (
+                        <label
+                          tabIndex={0}
+                          title={t('点击选择,或拖入 / 粘贴图片(可多张)', 'Click to select, or drag / paste images (multiple)')}
+                          style={{ fontSize: 11, color: '#234f97', background: '#e7eefb', borderRadius: 6, padding: '4px 8px', cursor: 'pointer', outline: 'none', textAlign: 'center' }}
+                          onDragOver={(e) => { e.preventDefault(); (e.currentTarget as HTMLElement).style.background = '#c9dcff'; }}
+                          onDragLeave={(e) => { (e.currentTarget as HTMLElement).style.background = '#e7eefb'; }}
+                          onDrop={(e) => { e.preventDefault(); (e.currentTarget as HTMLElement).style.background = '#e7eefb'; processImageFile(gi, ii, imageFromDataTransfer(e.dataTransfer)); }}
+                          onPaste={(e) => { const f = imageFromDataTransfer(e.clipboardData); if (f) { e.preventDefault(); processImageFile(gi, ii, f); } }}>
+                          📎 {shots.length ? t('加图', 'Add') : t('上传 / 拖入 / 粘贴', 'Upload / drag / paste')}
+                          <input type="file" accept="image/*" multiple style={{ display: 'none' }} onChange={(e) => attachShot(gi, ii, e.target)} />
+                        </label>
+                      ) : shots.length === 0 ? (
+                        <span style={{ fontSize: 11.5, color: '#b6bfc9' }}>{t('暂无参考图', 'No reference')}</span>
+                      ) : null}
                     </div>
 
                     {/* ── Owner (hidden in flat mode, REQ-014) ── */}

@@ -206,6 +206,13 @@ function migrateSchema(d: Database.Database) {
   d.exec('CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL DEFAULT \'\')');
   /* REQ-012: user-saved schedule/checklist snippets. Named user_templates so it
      never collides with `templates` (the per-service production template admin). */
+  /* REQ-023: 每个服务类型的资料卡字段定义(覆盖 lib/records.ts 里的出厂默认) */
+  d.exec(`CREATE TABLE IF NOT EXISTS record_fields (
+    svc TEXT PRIMARY KEY,
+    fields TEXT NOT NULL,
+    updated_at INTEGER NOT NULL,
+    updated_by TEXT NOT NULL DEFAULT ''
+  )`);
   d.exec(`CREATE TABLE IF NOT EXISTS user_templates (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     type TEXT NOT NULL,
@@ -236,6 +243,26 @@ export function saveUserTemplate(type: string, name: string, payload: string, by
 }
 export function deleteUserTemplate(id: number) {
   getDb().prepare('DELETE FROM user_templates WHERE id = ?').run(id);
+}
+
+/* ---- REQ-023: per-service record field schema (overrides lib/records.ts) ----
+   One row per service type. Job Record and Project Registers both read this,
+   so a change in either place shows up in both — that's the "同源" the spec
+   asks for. Field *values* stay on each project's packages[i].record. */
+export function listRecordFields(): Record<string, unknown> {
+  const rows = getDb().prepare('SELECT svc, fields FROM record_fields').all() as { svc: string; fields: string }[];
+  const out: Record<string, unknown> = {};
+  rows.forEach((r) => { try { out[r.svc] = JSON.parse(r.fields); } catch { /* 坏行忽略,回落到出厂默认 */ } });
+  return out;
+}
+export function setRecordFields(svc: string, fieldsJson: string, by: string) {
+  getDb()
+    .prepare(`INSERT INTO record_fields (svc, fields, updated_at, updated_by) VALUES (?, ?, ?, ?)
+              ON CONFLICT(svc) DO UPDATE SET fields = excluded.fields, updated_at = excluded.updated_at, updated_by = excluded.updated_by`)
+    .run(svc, fieldsJson, Date.now(), by);
+}
+export function resetRecordFields(svc: string) {
+  getDb().prepare('DELETE FROM record_fields WHERE svc = ?').run(svc);
 }
 
 /* ---- REQ-016: global app settings (key-value) ---- */

@@ -181,15 +181,70 @@ export const REGISTERS: RegisterDef[] = [
 export const REGISTER_SVCS = REGISTERS.map((r) => r.svc);
 export const registerDef = (svc: string): RegisterDef | undefined => REGISTERS.find((r) => r.svc === svc);
 
+/* ===== REQ-023: 每个服务类型的字段可以被用户改掉 =====
+   上面的 REGISTERS 是出厂默认;用户在「增减字段」里改过之后,改动存进
+   record_fields 表,按 svc 覆盖 fields。Job Record 与项目档案登记表读的是
+   同一份覆盖表 —— 改一次两边一致,这正是需求要的「同源」。
+   字段值仍然挂在各项目的 packages[i].record 上,不动。 */
+export type FieldOverrides = Record<string, FieldDef[]>;
+
+/* 取某个登记表的生效字段:有覆盖用覆盖,没有就用出厂默认 */
+export function fieldsOf(def: RegisterDef, ov?: FieldOverrides): FieldDef[] {
+  const custom = ov && ov[def.svc];
+  return custom && custom.length ? custom : def.fields;
+}
+
+export const FIELD_TYPES: [FieldType, string, string][] = [
+  ['text', '文本', 'Text'],
+  ['date', '日期', 'Date'],
+  ['select', '下拉', 'Dropdown'],
+  ['url', '链接', 'Link'],
+  ['textarea', '多行文本', 'Long text'],
+];
+
+/* 校验一份字段定义:key 必须存在且唯一,类型必须合法。服务端落库前跑一遍,
+   免得一个手滑的 key 冲突把整张表的数据读花。 */
+export function validateFields(raw: unknown): { ok: true; fields: FieldDef[] } | { ok: false; error: string } {
+  if (!Array.isArray(raw)) return { ok: false, error: '字段定义必须是数组' };
+  if (raw.length > 60) return { ok: false, error: '字段最多 60 个' };
+  const types = new Set(FIELD_TYPES.map((x) => x[0]));
+  const seen = new Set<string>();
+  const out: FieldDef[] = [];
+  for (const item of raw) {
+    const f = item as Partial<FieldDef>;
+    const key = String(f?.key || '').trim();
+    if (!key) return { ok: false, error: '字段 key 不能为空' };
+    if (!/^[A-Za-z][A-Za-z0-9_]{0,39}$/.test(key)) return { ok: false, error: `字段 key「${key}」只能用字母开头的字母/数字/下划线` };
+    if (seen.has(key)) return { ok: false, error: `字段 key「${key}」重复` };
+    seen.add(key);
+    const type = String(f?.type || 'text') as FieldType;
+    if (!types.has(type)) return { ok: false, error: `字段「${key}」的类型无效` };
+    const zh = String(f?.zh || key).slice(0, 60);
+    const def: FieldDef = { key, zh, en: String(f?.en || zh).slice(0, 60), type };
+    if (f?.required) def.required = true;
+    if (type === 'select') {
+      const opts = Array.isArray(f?.options) ? f!.options! : [];
+      def.options = opts.slice(0, 40).map((o) => {
+        const a = Array.isArray(o) ? o : [String(o), String(o), String(o)];
+        const v = String(a[0] ?? '').slice(0, 60);
+        return [v, String(a[1] ?? v).slice(0, 60), String(a[2] ?? a[1] ?? v).slice(0, 60)] as [string, string, string];
+      }).filter((o) => o[0]);
+      if (!def.options.length) return { ok: false, error: `下拉字段「${zh}」至少要有一个选项` };
+    }
+    out.push(def);
+  }
+  return { ok: true, fields: out };
+}
+
 /* ---- record helpers ---- */
 export const recordVal = (rec: ServiceRecord | undefined, key: string): string =>
   rec && rec[key] != null ? String(rec[key]) : '';
 
 /* a required field is blank → the record is "incomplete" (also true when draft) */
-export function isIncomplete(def: RegisterDef, rec: ServiceRecord | undefined): boolean {
+export function isIncomplete(def: RegisterDef, rec: ServiceRecord | undefined, ov?: FieldOverrides): boolean {
   if (!rec) return true;
   if ((rec.status || defaultStatus(def.kind)) === 'draft') return true;
-  return def.fields.some((f) => f.required && !recordVal(rec, f.key).trim());
+  return fieldsOf(def, ov).some((f) => f.required && !recordVal(rec, f.key).trim());
 }
 
 /* delivery records expiring within `days` (default 30) of the watch date, not

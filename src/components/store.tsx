@@ -6,6 +6,7 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useR
 import type { Project, User } from '@/lib/types';
 import type { ProjectAction } from '@/server/actions';
 import type { Identity } from '@/lib/permissions';
+import type { FieldOverrides } from '@/lib/records';
 
 export interface View {
   name: 'overview' | 'projects' | 'team' | 'mytasks' | 'dupdate' | 'stats' | 'contacts' | 'finance' | 'registers' | 'users' | 'templates' | 'project';
@@ -30,6 +31,9 @@ interface Store {
   removeProject: (pid: string) => Promise<boolean>;
   refresh: () => Promise<void>;
   refreshUsers: () => Promise<void>;
+  /* REQ-023: 用户改过的资料卡字段定义,按服务类型覆盖出厂默认 */
+  recordFields: FieldOverrides;
+  refreshRecordFields: () => Promise<void>;
 }
 
 const Ctx = createContext<Store | null>(null);
@@ -42,6 +46,7 @@ export const useStore = () => {
 export function StoreProvider({ user, children }: { user: User; children: React.ReactNode }) {
   const [projects, setProjects] = useState<Project[]>([]);
   const [users, setUsers] = useState<User[]>([]);
+  const [recordFields, setRecordFields] = useState<FieldOverrides>({});
   const [view, setView] = useState<View>({ name: 'overview' });
   const [toast, setToast] = useState('');
   /* latest known version per project (updated synchronously on every write) and
@@ -63,13 +68,20 @@ export function StoreProvider({ user, children }: { user: User; children: React.
     if (res.ok) setUsers((await res.json()).users);
   }, []);
 
+  /* REQ-023: 字段定义是全局的,和项目数据分开取一次即可 */
+  const refreshRecordFields = useCallback(async () => {
+    const res = await fetch('/api/record-fields');
+    if (res.ok) setRecordFields(((await res.json()).overrides || {}) as FieldOverrides);
+  }, []);
+
   useEffect(() => {
     refresh();
     refreshUsers();
+    refreshRecordFields();
     /* light polling so teammates' changes appear without manual reload */
     const t = setInterval(refresh, 30_000);
     return () => clearInterval(t);
-  }, [refresh, refreshUsers]);
+  }, [refresh, refreshUsers, refreshRecordFields]);
 
   const dispatch = useCallback((pid: string, action: ProjectAction) => {
     /* v2.2 [P0-3] strict optimistic lock. Serialize per project so a user's own
@@ -151,7 +163,9 @@ export function StoreProvider({ user, children }: { user: User; children: React.
     removeProject,
     refresh,
     refreshUsers,
-  }), [user, projects, users, view, toast, dispatch, createProject, removeProject, refresh, refreshUsers]);
+    recordFields,
+    refreshRecordFields,
+  }), [user, projects, users, view, toast, dispatch, createProject, removeProject, refresh, refreshUsers, recordFields, refreshRecordFields]);
 
   return <Ctx.Provider value={store}>{children}</Ctx.Provider>;
 }
