@@ -4,8 +4,7 @@
 
 import type { Identity } from '@/lib/permissions';
 import {
-  canAssign, canCommercial, canDecide, canEdit, canEditFinance, canRowEdit, isFull,
-} from '@/lib/permissions';
+  canAssign, canCommercial, canDecide, canEdit, canEditFinance, canRowEdit, isFull, canDelete } from '@/lib/permissions';
 import { buildPackage, deriveStatuses, fitWindow, newId, parseISO, isoDate, totalDays } from '@/lib/project';
 import { SVC, type Template } from '@/lib/templates';
 import type { ChecklistStatus, Project, ScheduleStatus } from '@/lib/types';
@@ -76,7 +75,8 @@ export type ProjectAction =
   | { type: 'editUpdate'; field: 'done' | 'nextNodes' | 'risks' | 'needDirector' | 'clientPending' | 'budget'; value: string }
   | { type: 'setDecision'; field: 'dDecision' | 'dStatus'; value: string }
   | { type: 'setRecord'; pkg: number; patch: Record<string, string> }
-  | { type: 'addServicePackage'; svc: string; patch: Record<string, string> }
+  | { type: 'addServicePackage'; svc: string; patch: Record<string, string>; asNew?: boolean; label?: string }
+  | { type: 'removeServicePackage'; pkg: number }
   | { type: 'addCustomNode'; pkg: number; name: string; date: string; owner: string; atIdx?: number }
   | { type: 'toggleInvoiced' };
 
@@ -720,18 +720,42 @@ export function applyAction(u: Identity, p: Project, a: ProjectAction, ctx: Acti
       if (!canEdit(u, p)) throw new PermissionError('无编辑权限');
       const svc = String(a.svc || '').trim();
       if (!svc) throw new ValidationError('无效的业务类型');
-      let pk = p.packages.find((x) => x.svc === svc);
+      /* REQ-026: asNew=true 时无条件新开一份实例(一个项目可以有两块 LED);
+         不带 asNew 时保持原来的「有就并进去」—— 登记表的新增记录与 CSV 导入
+         走的是那条路,它们按项目名+业务找记录,不该一导入就冒出重复卡片。 */
+      let pk = a.asNew ? undefined : p.packages.find((x) => x.svc === svc);
       if (!pk) {
+        if (p.packages.length >= 24) throw new ValidationError('一个项目最多 24 份业务');
         pk = { svc, start: '', delivery: '', buffer: 0, owner: '', status: 'active', schedule: [], checklist: [] };
+        const label = String(a.label || '').slice(0, 40).trim();
+        if (label) pk.label = label;
+        /* 新实例带上该业务的默认排期与信息清单,和建项目时一致 */
+        const tpl = tplForSvc?.(svc);
+        if (tpl) { const built = buildPackage(svc, '', tpl); pk.schedule = built.schedule; pk.checklist = built.checklist; }
         p.packages.push(pk);
         if (!Array.isArray(p.services)) p.services = [];
-        if (!p.services.includes(svc)) p.services.push(svc);
+        if (!p.services.includes(svc)) p.services.push(svc);   // services 是类型清单,仍然去重
       }
       const rec: Record<string, string | number | undefined> = { ...(pk.record || {}) };
       for (const [k, v] of Object.entries(a.patch || {})) { if (k === 'updatedAt') continue; rec[k] = String(v ?? '').slice(0, 2000); }
       rec.updatedAt = Date.now();
       pk.record = rec;
-      logIt(p, u.name, `新增登记记录 Add record: ${svc}`);
+      logIt(p, u.name, `${a.asNew ? '新增业务' : '新增登记记录'} ${svcName(svc)}${pk.label ? '·' + pk.label : ''}`);
+      break;
+    }
+    /* REQ-026: 删掉一份业务实例。整包连排期、信息清单、资料一起没,
+       所以按 REQ-008 的口径只放给 Sales / PD / BD,和删项目同一档。 */
+    case 'removeServicePackage': {
+      if (!canDelete(u)) throw new PermissionError('仅 Sales / PD / BD 可删除业务');
+      const pk = p.packages[a.pkg];
+      if (!pk) throw new ValidationError('无效的服务包');
+      if (p.packages.length <= 1) throw new ValidationError('至少要保留一份业务');
+      p.packages.splice(a.pkg, 1);
+      /* services 是类型清单:只有该类型一份不剩时才从清单里摘掉 */
+      if (!p.packages.some((x) => x.svc === pk.svc)) {
+        p.services = (p.services || []).filter((x) => x !== pk.svc);
+      }
+      logIt(p, u.name, `删除业务 ${svcName(pk.svc)}${pk.label ? '·' + pk.label : ''}`);
       break;
     }
     case 'addCustomNode': {

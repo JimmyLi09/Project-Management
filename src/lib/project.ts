@@ -503,3 +503,17 @@ export function staleInfo(u: DirectorUpdate | undefined, lang: 'zh' | 'en' = 'zh
   if (days > 7) return { cls: 'stale-warn', txt: staleTxt };
   return { cls: 'stale-ok', txt: days <= 0 ? (en ? 'updated today' : '今日更新') : en ? `${days}d ago` : `${days}天前` };
 }
+
+/* ===== REQ-026: 一个项目可以有多份同类业务 =====
+   区分方式:填了实例名就用实例名,没填就按同类里的第几份标 ①②③。
+   只有一份时不加任何后缀 —— 绝大多数项目是这种情况,不该平白多出个「①」。 */
+const CIRCLED = ['①', '②', '③', '④', '⑤', '⑥', '⑦', '⑧', '⑨', '⑩'];
+export function pkgSuffix(p: Project, idx: number): string {
+  const pk = p.packages[idx];
+  if (!pk) return '';
+  if (pk.label) return pk.label;
+  const same = p.packages.filter((x) => x.svc === pk.svc);
+  if (same.length <= 1) return '';
+  const ord = same.indexOf(pk);
+  return CIRCLED[ord] || `#${ord + 1}`;
+}

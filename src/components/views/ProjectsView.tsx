@@ -2,9 +2,9 @@
 
 import React, { useMemo, useState } from 'react';
 import { useStore } from '../store';
-import { fmtDate, isoDate, parseISO, projCode, projectHealth, projStage, schedProgress } from '@/lib/project';
+import { fmtDate, isoDate, parseISO, projectHealth, projStage, schedProgress } from '@/lib/project';
 import { canCreate } from '@/lib/permissions';
-import { DIFF, SVC, svcColor, svcName } from '@/lib/templates';
+import { DIFF, SVC, stageIdx, svcColor, svcName } from '@/lib/templates';
 import { useLang } from '@/lib/i18n';
 import { Avatar, AvatarStack, HM, Icon, Pill, ProgressBar } from '../ui';
 import type { Project } from '@/lib/types';
@@ -118,7 +118,7 @@ function CompactCard({ p, onOpen }: { p: Project; onOpen: () => void }) {
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8 }}>
         <div style={{ minWidth: 0 }}>
           <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--navy900)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-            {projCode(p) && <span className="tnum" style={{ color: 'var(--bronze)', marginRight: 6 }}>{projCode(p)}</span>}{p.name}
+            {p.name}
           </div>
           <div style={{ fontSize: 11.5, color: 'var(--text2)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.client || '—'}</div>
         </div>
@@ -138,17 +138,68 @@ function CompactCard({ p, onOpen }: { p: Project; onOpen: () => void }) {
 }
 
 /* R5-1: list/details view — a dense table, most projects visible at once */
+/* REQ-025: Excel 式列头排序 —— 点一次升序,再点降序,第三次回到默认。
+   不做独立的排序控件,排序入口就是列头本身。 */
+type SortKey = 'name' | 'services' | 'pm' | 'stage' | 'progress' | 'delivery' | 'health';
+const HEALTH_ORDER: Record<string, number> = { completed: 0, ontrack: 1, watch: 2, risk: 3, late: 4 };
+
 function ProjectList({ list, onOpen }: { list: Project[]; onOpen: (id: string) => void }) {
   const { lang, t } = useLang();
+  const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 } | null>(null);
   const th: React.CSSProperties = { padding: '11px 16px', fontSize: 11, fontWeight: 700, letterSpacing: '.04em', textTransform: 'uppercase', color: 'var(--text2)', textAlign: 'left', whiteSpace: 'nowrap' };
   const cols = '2fr 1.4fr 90px 120px 1.1fr 96px 96px';
+
+  const rows = useMemo(() => {
+    if (!sort) return list;   // 默认序 = 列表原顺序,也就是按项目编号
+    const val = (p: Project): string | number => {
+      const stage = projStage(p);
+      switch (sort.key) {
+        case 'name': return p.name.toLowerCase();
+        case 'services': return p.services.map((k) => svcName(k, lang)).join(',').toLowerCase();
+        case 'pm': return ((p.owners || [])[0] || '').toLowerCase();
+        case 'stage': return stageIdx(stage);
+        case 'progress': return schedProgress(p).pct;
+        /* 没填交付日的一律排到最后 —— 空值夹在中间最难扫 */
+        case 'delivery': return p.delivery || '9999-99-99';
+        case 'health': {
+          const done = stage === 'complete' || stage === 'invoice';
+          return HEALTH_ORDER[done ? 'completed' : projectHealth(p)] ?? 9;
+        }
+      }
+    };
+    return [...list].sort((a, b) => {
+      const va = val(a), vb = val(b);
+      if (va < vb) return -sort.dir;
+      if (va > vb) return sort.dir;
+      return 0;
+    });
+  }, [list, sort, lang]);
+
+  const Th = ({ k, label }: { k: SortKey; label: string }) => {
+    const on = sort?.key === k;
+    return (
+      <button
+        onClick={() => setSort((s) => (s && s.key === k ? (s.dir === 1 ? { key: k, dir: -1 } : null) : { key: k, dir: 1 }))}
+        title={t('点击排序;再点反向;第三次恢复默认', 'Click to sort; again to reverse; a third click restores the default')}
+        style={{ ...th, display: 'flex', alignItems: 'center', gap: 4, width: '100%', background: 'none', cursor: 'pointer', color: on ? 'var(--navy900)' : 'var(--text2)' }}>
+        {label}
+        <span style={{ fontSize: 9, opacity: on ? 1 : 0.25 }}>{on ? (sort!.dir === 1 ? '▲' : '▼') : '⇅'}</span>
+      </button>
+    );
+  };
+
   return (
     <div className="panel clip">
       <div style={{ display: 'grid', gridTemplateColumns: cols, gap: 12, background: 'var(--hover-bg)', borderBottom: '1px solid var(--row-line)' }}>
-        <div style={th}>{t('项目', 'Project')}</div><div style={th}>{t('服务', 'Services')}</div><div style={th}>PM</div>
-        <div style={th}>{t('阶段', 'Stage')}</div><div style={th}>{t('进度', 'Progress')}</div><div style={th}>{t('交付', 'Delivery')}</div><div style={th}>{t('健康', 'Health')}</div>
+        <Th k="name" label={t('项目', 'Project')} />
+        <Th k="services" label={t('服务', 'Services')} />
+        <Th k="pm" label="PM" />
+        <Th k="stage" label={t('阶段', 'Stage')} />
+        <Th k="progress" label={t('进度', 'Progress')} />
+        <Th k="delivery" label={t('交付', 'Delivery')} />
+        <Th k="health" label={t('健康', 'Health')} />
       </div>
-      {list.map((p) => {
+      {rows.map((p) => {
         const sp = schedProgress(p);
         const stage = projStage(p);
         const done = stage === 'complete' || stage === 'invoice';
@@ -160,7 +211,7 @@ function ProjectList({ list, onOpen }: { list: Project[]; onOpen: (id: string) =
           <div key={p.id} className="row-hover" style={{ display: 'grid', gridTemplateColumns: cols, gap: 12, alignItems: 'center', padding: '13px 16px', borderBottom: '1px solid var(--row-line)', cursor: 'pointer' }} onClick={() => onOpen(p.id)}>
             <div style={{ minWidth: 0 }}>
               <div style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--navy900)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                {projCode(p) && <span className="tnum" style={{ color: 'var(--bronze)', marginRight: 6 }}>{projCode(p)}</span>}{p.name}
+                {p.name}
               </div>
               <div style={{ fontSize: 11.5, color: 'var(--text2)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.client || '—'}</div>
             </div>

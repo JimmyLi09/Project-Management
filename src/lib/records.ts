@@ -12,11 +12,12 @@
    The other five (LED / 3D Links / MAXHUB / AV / Others) use the suggested
    columns from the spec — flagged `confirmed: false` — pending PD tweak. */
 
+import { compileFormula, evalFormula, findFormulaCycle } from './formula';
 import type { ServiceRecord } from './types';
 export type { ServiceRecord };
 
 export type RegisterKind = 'install' | 'delivery';
-export type FieldType = 'text' | 'date' | 'url' | 'textarea' | 'select';
+export type FieldType = 'text' | 'date' | 'url' | 'textarea' | 'select' | 'number' | 'formula';
 
 export interface FieldDef {
   key: string;
@@ -25,6 +26,10 @@ export interface FieldDef {
   type: FieldType;
   required?: boolean;               // counts toward the "资料不完整" KPI
   options?: [string, string, string][]; // for select: [value, zh, en]
+  /* REQ-027 —— 公式字段 */
+  formula?: string;                 // 用户填的表达式,引用同卡其它字段的 key
+  decimals?: number;                // 结果小数位,默认 2
+  group?: string;                   // 分组名;同组字段聚在一起、组内两列排布
 }
 
 export interface RegisterDef {
@@ -196,10 +201,12 @@ export function fieldsOf(def: RegisterDef, ov?: FieldOverrides): FieldDef[] {
 
 export const FIELD_TYPES: [FieldType, string, string][] = [
   ['text', '文本', 'Text'],
+  ['number', '数字', 'Number'],
   ['date', '日期', 'Date'],
   ['select', '下拉', 'Dropdown'],
   ['url', '链接', 'Link'],
   ['textarea', '多行文本', 'Long text'],
+  ['formula', '公式', 'Formula'],
 ];
 
 /* 校验一份字段定义:key 必须存在且唯一,类型必须合法。服务端落库前跑一遍,
@@ -222,6 +229,12 @@ export function validateFields(raw: unknown): { ok: true; fields: FieldDef[] } |
     const zh = String(f?.zh || key).slice(0, 60);
     const def: FieldDef = { key, zh, en: String(f?.en || zh).slice(0, 60), type };
     if (f?.required) def.required = true;
+    if (f?.group) def.group = String(f.group).slice(0, 40);
+    if (type === 'formula') {
+      def.formula = String(f?.formula || '').slice(0, 500);
+      const dp = Number(f?.decimals);
+      def.decimals = Number.isFinite(dp) && dp >= 0 && dp <= 6 ? Math.floor(dp) : 2;
+    }
     if (type === 'select') {
       const opts = Array.isArray(f?.options) ? f!.options! : [];
       def.options = opts.slice(0, 40).map((o) => {
@@ -233,7 +246,48 @@ export function validateFields(raw: unknown): { ok: true; fields: FieldDef[] } |
     }
     out.push(def);
   }
+
+  /* REQ-027: 公式要等所有字段都收齐了才能校验 —— 它可能引用后面定义的字段。
+     两步:先逐条编译(语法 + 引用是否存在),再整体查循环引用。
+     循环引用必须在这里拦下:漏掉的话渲染时会无限递归,页面直接卡死。 */
+  const allKeys = new Set(out.map((f) => f.key));
+  const deps: Record<string, string[]> = {};
+  for (const f of out) {
+    if (f.type !== 'formula') continue;
+    if (!f.formula || !f.formula.trim()) return { ok: false, error: `公式字段「${f.zh}」还没填表达式` };
+    const c = compileFormula(f.formula, allKeys);
+    if (!c.ok) return { ok: false, error: `公式字段「${f.zh}」:${c.error}` };
+    deps[f.key] = c.refs;
+  }
+  const cycle = findFormulaCycle(deps);
+  if (cycle) {
+    const label = (k: string) => out.find((f) => f.key === k)?.zh || k;
+    return { ok: false, error: `公式循环引用:${cycle.map(label).join(' → ')}` };
+  }
+
   return { ok: true, fields: out };
+}
+
+/* REQ-027: 算出一张资料卡上某个公式字段的值。
+   派生值,不落库 —— 每次渲染时算,免得存下来之后和源字段对不上。
+   算不出来(空值 / 非数字 / 除零 / 坏公式)一律返回 null,显示「—」。 */
+export function computeFormula(field: FieldDef, fields: FieldDef[], rec: ServiceRecord | undefined): number | null {
+  if (field.type !== 'formula' || !field.formula) return null;
+  const values: Record<string, string> = {};
+  fields.forEach((f) => { if (f.type !== 'formula') values[f.key] = recordVal(rec, f.key); });
+  /* 公式可以引用另一个公式字段 —— 递归解析,深度由 evalFormula 兜底 */
+  const resolve = (key: string, depth: number): number | null => {
+    const t = fields.find((f) => f.key === key);
+    if (!t || t.type !== 'formula' || !t.formula) return null;
+    return evalFormula(t.formula, values, resolve, depth);
+  };
+  return evalFormula(field.formula, values, resolve);
+}
+
+/* 公式结果的显示串 */
+export function formulaText(field: FieldDef, fields: FieldDef[], rec: ServiceRecord | undefined): string {
+  const v = computeFormula(field, fields, rec);
+  return v == null ? '—' : v.toFixed(field.decimals ?? 2);
 }
 
 /* ---- record helpers ---- */

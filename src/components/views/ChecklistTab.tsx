@@ -4,7 +4,7 @@ import React, { useState } from 'react';
 import { useStore } from '../store';
 import { canEdit } from '@/lib/permissions';
 import { getBuiltinTemplate, svcColor, svcName } from '@/lib/templates';
-import { parseISO, todayMid } from '@/lib/project';
+import { parseISO, todayMid , pkgSuffix } from '@/lib/project';
 import { useLang } from '@/lib/i18n';
 import { Avatar, CM, Icon, Pill } from '../ui';
 import FragmentBar from '../FragmentBar';
@@ -122,7 +122,7 @@ export default function ChecklistTab({ p, pkgIdx, onExport, onPkg }: {
             <button key={i} className={`chip ${i === pkgIdx ? 'active' : ''}`}
               style={i === pkgIdx ? { background: svcColor(pk.svc), borderColor: svcColor(pk.svc) } : undefined}
               onClick={() => onPkg(i)}>
-              {svcName(pk.svc, lang)}
+              {svcName(pk.svc, lang)}{pkgSuffix(p, i) ? ' ' + pkgSuffix(p, i) : ''}
             </button>
           ))}
         </div>

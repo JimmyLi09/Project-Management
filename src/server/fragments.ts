@@ -53,9 +53,14 @@ export function applyFragment(pkg: ServicePackage, kind: FragmentKind, frag: Fra
 }
 
 /* pick the package on the source project that best matches a destination
-   package: same service first, else the first one. */
-export function matchPackage(src: Project, svc: string): ServicePackage | undefined {
-  return src.packages.find((x) => x.svc === svc) || src.packages[0];
+   package: same service first, else the first one.
+   REQ-026: 一个项目可以有多份同类业务,所以按「同类里的第几份」配对 ——
+   目标项目的第二块 LED 应该抄源项目的第二块 LED,而不是永远抄第一块。
+   源项目份数不够时回落到该类的最后一份。 */
+export function matchPackage(src: Project, svc: string, ordinal = 0): ServicePackage | undefined {
+  const same = src.packages.filter((x) => x.svc === svc);
+  if (same.length) return same[Math.min(ordinal, same.length - 1)];
+  return src.packages[0];
 }
 
 /* strip a package down to one section (used by Copy Schedule/Checklist Only) */
