@@ -2,7 +2,7 @@
 
 import React, { useState } from 'react';
 import { useStore } from '../store';
-import { fmtDate, isoDate, MACRO, macroStage, parseISO, pkgStart, planDates, todayMid } from '@/lib/project';
+import { fmtDate, isoDate, MACRO, macroStage, parseISO, pkgStart, planDates, todayMid , pkgSuffix } from '@/lib/project';
 import { canEdit, canRowEdit, canSubmitCompletionHere } from '@/lib/permissions';
 import { svcColor, svcName } from '@/lib/templates';
 import { useLang } from '@/lib/i18n';
@@ -62,7 +62,7 @@ export default function ScheduleTab({ p, pkgIdx, onExport, onPkg }: {
             <button key={i} className={`chip ${i === pkgIdx ? 'active' : ''}`}
               style={i === pkgIdx ? { background: svcColor(pk.svc), borderColor: svcColor(pk.svc) } : undefined}
               onClick={() => onPkg(i)}>
-              {svcName(pk.svc, lang)}
+              {svcName(pk.svc, lang)}{pkgSuffix(p, i) ? ' ' + pkgSuffix(p, i) : ''}
             </button>
           ))}
         </div>

@@ -4,7 +4,7 @@ import React, { useMemo, useState } from 'react';
 import { useStore } from '../store';
 import { canEdit, isFull } from '@/lib/permissions';
 import { svcName, svcColor } from '@/lib/templates';
-import { todayMid, fmtDate, projCode } from '@/lib/project';
+import { todayMid, fmtDate, projCode , pkgSuffix } from '@/lib/project';
 import { useLang } from '@/lib/i18n';
 import { Icon } from '../ui';
 import {
@@ -109,7 +109,7 @@ export default function RegistersView() {
     const head = [t('项目', 'Project'), t('客户', 'Client'), 'PM', t('状态', 'Status'), ...def.fields.map((f) => (lang === 'zh' ? f.zh : f.en))];
     const body = rows.map((r) => {
       const sm = statusMeta(def.kind, (r.pk.record?.status as string) || defaultStatus(def.kind));
-      return [(projCode(r.p) ? projCode(r.p) + ' ' : '') + r.p.name, r.p.client || '', (r.p.owners || []).join(' / '), lang === 'zh' ? sm[1] : sm[2],
+      return [(projCode(r.p) ? projCode(r.p) + ' ' : '') + r.p.name + (pkgSuffix(r.p, r.pi) ? ' ' + pkgSuffix(r.p, r.pi) : ''), r.p.client || '', (r.p.owners || []).join(' / '), lang === 'zh' ? sm[1] : sm[2],
         ...def.fields.map((f) => (f.type === 'formula' ? formulaText(f, def.fields, r.pk.record) : recordVal(r.pk.record, f.key)).replace(/\n/g, ' '))];
     });
     const csv = [head, ...body].map((r) => r.map(esc).join(',')).join('\r\n');
@@ -200,6 +200,8 @@ export default function RegistersView() {
                   <tr key={`${r.p.id}:${r.pi}`} className="row-hover">
                     <td style={{ ...cell, fontWeight: 600, color: 'var(--navy900)', cursor: 'pointer', whiteSpace: 'nowrap' }} onClick={() => openProject(r.p.id)}>
                       {projCode(r.p) && <span className="tnum" style={{ color: 'var(--bronze)', marginRight: 6 }}>{projCode(r.p)}</span>}{r.p.name}
+                      {/* REQ-026: 同一项目同类多份时,标出这是哪一份 */}
+                      {pkgSuffix(r.p, r.pi) && <span style={{ color: 'var(--bronze)', marginLeft: 6, fontWeight: 700 }}>{pkgSuffix(r.p, r.pi)}</span>}
                     </td>
                     <td style={{ ...cell, color: 'var(--text2)', whiteSpace: 'nowrap' }}>{r.p.client || '—'}</td>
                     <td style={{ ...cell, whiteSpace: 'nowrap' }}>{(r.p.owners || [])[0] || <span style={{ color: '#b6bfc9' }}>—</span>}</td>
@@ -477,7 +479,7 @@ function EditModal({ row, def, onClose, onSave }: { row: Row; def: RegisterDef; 
           <div style={{ flex: 1 }} />
           <button className="btn-line sm" onClick={onClose}>{t('关闭', 'Close')}</button>
         </div>
-        <div className="msub">{row.p.name} · {row.p.client || '—'}</div>
+        <div className="msub">{row.p.name}{pkgSuffix(row.p, row.pi) ? ' ' + pkgSuffix(row.p, row.pi) : ''} · {row.p.client || '—'}</div>
         <div style={{ display: 'grid', gridTemplateColumns: '120px 1fr', gap: '10px 12px', alignItems: 'center', margin: '10px 0 16px' }}>
           <label style={lbl}>{t('状态', 'Status')}</label>
           <select className="in sm" value={draft.status} onChange={(e) => set('status', e.target.value)}>

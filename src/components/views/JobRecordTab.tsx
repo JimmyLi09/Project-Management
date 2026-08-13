@@ -2,8 +2,9 @@
 
 import React, { useMemo, useState } from 'react';
 import { useStore } from '../store';
-import { canAdmin, canEdit } from '@/lib/permissions';
+import { canAdmin, canDelete, canEdit } from '@/lib/permissions';
 import { svcName, svcColor } from '@/lib/templates';
+import { pkgSuffix } from '@/lib/project';
 import { useLang } from '@/lib/i18n';
 import { Icon } from '../ui';
 import {
@@ -68,10 +69,13 @@ function AddServiceBar({ p }: { p: Project }) {
   const { dispatch } = useStore();
   const { lang, t } = useLang();
   const [svc, setSvc] = useState('');
+  const [label, setLabel] = useState('');
   const [busy, setBusy] = useState(false);
-  const have = new Set(p.packages.map((pk) => pk.svc));
-  const options = REGISTERS.filter((r) => !have.has(r.svc));
-  if (options.length === 0) return null;
+
+  /* REQ-026: 同类业务可以再加一份(两块 LED / 两个沙盘),所以不再排除已有的;
+     已经有的在下拉里标一下「已有 N 份」,免得手滑重复添加。 */
+  const countOf = (k: string) => p.packages.filter((x) => x.svc === k).length;
+  const options = REGISTERS;
 
   return (
     <div className="panel" style={{ padding: '12px 16px', borderStyle: 'dashed' }}>
@@ -81,10 +85,20 @@ function AddServiceBar({ p }: { p: Project }) {
         <div style={{ flex: 1 }} />
         <select className="in sm" value={svc} onChange={(e) => setSvc(e.target.value)} style={{ width: 'auto' }}>
           <option value="">{t('— 选择业务 —', '— select service —')}</option>
-          {options.map((r) => <option key={r.svc} value={r.svc}>{svcName(r.svc, lang)}</option>)}
+          {options.map((r) => {
+            const n = countOf(r.svc);
+            return <option key={r.svc} value={r.svc}>{svcName(r.svc, lang)}{n ? t(`（已有 ${n} 份）`, ` (${n} existing)`) : ''}</option>;
+          })}
         </select>
+        <input className="in sm" style={{ width: 150 }} value={label} onChange={(e) => setLabel(e.target.value)}
+          placeholder={t('实例名(可空)', 'Instance name (optional)')}
+          title={t('同类多份时用来区分,例如「大堂 LED」「入口 LED」;留空则按 ①②③ 标号', 'Distinguishes multiple of the same type, e.g. "Lobby LED"; blank falls back to ①②③')} />
         <button className="btn-navy sm" disabled={busy || !svc}
-          onClick={async () => { setBusy(true); await dispatch(p.id, { type: 'addServicePackage', svc, patch: {} }); setBusy(false); setSvc(''); }}>
+          onClick={async () => {
+            setBusy(true);
+            await dispatch(p.id, { type: 'addServicePackage', svc, patch: {}, asNew: true, label: label.trim() });
+            setBusy(false); setSvc(''); setLabel('');
+          }}>
           {busy ? t('添加中…', 'Adding…') : t('添加', 'Add')}
         </button>
       </div>
@@ -130,7 +144,12 @@ function RecordCard({ p, pk, pkgIdx, def: baseDef, canEd }: {
     <div className="panel clip">
       <div className="panel-head" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
         <span style={{ width: 10, height: 10, borderRadius: 3, background: svcColor(pk.svc) }} />
-        <span className="panel-title">{svcName(pk.svc, lang)} · {t('资料', 'Record')}</span>
+        {/* REQ-026: 同类有多份时,标题带上实例名或 ①②③ */}
+        <span className="panel-title">
+          {svcName(pk.svc, lang)}
+          {pkgSuffix(p, pkgIdx) && <span style={{ color: 'var(--bronze)', marginLeft: 6 }}>{pkgSuffix(p, pkgIdx)}</span>}
+          <span style={{ color: 'var(--text2)', fontWeight: 400 }}> · {t('资料', 'Record')}</span>
+        </span>
         {!def.confirmed && (
           <span className="badge" style={{ background: '#fbf0dc', color: '#a8690b', fontSize: 10.5 }}>{t('列待PD确认', 'cols draft')}</span>
         )}
@@ -152,6 +171,19 @@ function RecordCard({ p, pk, pkgIdx, def: baseDef, canEd }: {
             onClick={() => setFieldEdit(!fieldEdit)}>
             {fieldEdit ? t('完成', 'Done') : t('增减字段', 'Edit fields')}
           </button>
+        )}
+        {/* REQ-026: 删除这一份业务。整包连排期/信息清单/资料一起没,
+            所以只给 Sales / PD / BD,并且说清楚删的是什么。 */}
+        {canDelete(me) && !editing && p.packages.length > 1 && (
+          <button className="btn-line sm danger" title={t('删除这份业务', 'Remove this service')}
+            onClick={async () => {
+              const name = svcName(pk.svc, lang) + (pkgSuffix(p, pkgIdx) ? ' ' + pkgSuffix(p, pkgIdx) : '');
+              const sched = pk.schedule.length, items = pk.checklist.reduce((n, g) => n + g.items.length, 0);
+              if (!confirm(t(
+                `删除业务「${name}」?\n它的 ${sched} 个排期阶段、${items} 个信息项和这张资料卡会一起删掉,不能撤销。`,
+                `Remove "${name}"? Its ${sched} schedule phases, ${items} checklist items and this record card go with it. This cannot be undone.`))) return;
+              await dispatch(p.id, { type: 'removeServicePackage', pkg: pkgIdx });
+            }}>✕ {t('删除业务', 'Remove')}</button>
         )}
       </div>
 

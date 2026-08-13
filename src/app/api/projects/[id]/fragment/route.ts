@@ -47,7 +47,9 @@ export async function POST(req: NextRequest, { params }: Params) {
   } else if (body?.sourceId) {
     const src = getProject(String(body.sourceId));
     if (!src) return NextResponse.json({ error: '源项目不存在' }, { status: 404 });
-    const srcPkg = matchPackage(src, dest.svc);
+    /* 目标包在本项目同类业务里排第几 —— 用它去源项目找对应的那一份 */
+    const ordinal = p.packages.filter((x, i) => x.svc === dest.svc && i < pkgIdx).length;
+    const srcPkg = matchPackage(src, dest.svc, ordinal);
     if (!srcPkg) return NextResponse.json({ error: '源项目没有可用的服务包' }, { status: 400 });
     frag = extractFragment(srcPkg, kind, src.schedStyle);
     label = `项目「${src.name}」`;

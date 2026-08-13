@@ -146,6 +146,7 @@ export interface ServicePackage {
   scopeItems?: ScopeItem[]; // R5-3: deliverables breakdown (item / qty / notes)
   record?: ServiceRecord; // business "资料 record" — single source for Job Record & Registers
   noCategories?: boolean; // REQ-014: flat checklist (no fixed categories) for this package
+  label?: string;         // REQ-026: 同类业务有多份时的实例名(如「大堂 LED」);留空则按序号显示
 }
 
 /* business record attached to a service package (Job Record / Project Registers).
