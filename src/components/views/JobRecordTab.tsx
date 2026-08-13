@@ -7,7 +7,7 @@ import { svcName, svcColor } from '@/lib/templates';
 import { useLang } from '@/lib/i18n';
 import { Icon } from '../ui';
 import {
-  REGISTERS, registerDef, statusFamily, statusMeta, defaultStatus, recordVal, isIncomplete, fieldsOf, FIELD_TYPES,
+  REGISTERS, registerDef, statusFamily, statusMeta, defaultStatus, recordVal, isIncomplete, fieldsOf, FIELD_TYPES, formulaText,
   type FieldDef, type FieldType, type RegisterDef,
 } from '@/lib/records';
 import type { Project, ServicePackage } from '@/lib/types';
@@ -111,7 +111,7 @@ function RecordCard({ p, pk, pkgIdx, def: baseDef, canEd }: {
 
   function begin() {
     const d: Record<string, string> = { status };
-    def.fields.forEach((f) => { d[f.key] = recordVal(rec, f.key); });
+    def.fields.forEach((f) => { if (f.type !== 'formula') d[f.key] = recordVal(rec, f.key); });
     setDraft(d);
     setEditing(true);
   }
@@ -158,22 +158,41 @@ function RecordCard({ p, pk, pkgIdx, def: baseDef, canEd }: {
       {fieldEdit && !editing && <FieldEditor svc={baseDef.svc} builtin={baseDef.fields} current={def.fields} onClose={() => setFieldEdit(false)} />}
 
       {!editing ? (
-        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-          <tbody>
-            {def.fields.map((f) => {
-              const val = recordVal(rec, f.key);
-              const missing = f.required && !val.trim();
-              return (
-                <tr key={f.key}>
-                  <th style={cellK}>{lang === 'zh' ? f.zh : f.en}{f.required && <span style={{ color: 'var(--danger)' }}> *</span>}</th>
-                  <td style={{ ...cellV, background: missing ? 'var(--hl-cell, #fef3c7)' : undefined }}>
-                    {val ? <FieldValue f={f} val={val} /> : <span style={{ color: missing ? '#b8860b' : '#b6bfc9' }}>{missing ? t('待补充', 'to fill') : '—'}</span>}
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
+        /* REQ-027: 按分组渲染,组内两列 —— 尺寸/数量/计算这些相关字段聚在一块,
+           不再一长条竖着散开。没设分组的字段归到最前面的「未分组」里照旧显示。 */
+        <div style={{ padding: '2px 0 6px' }}>
+          {groupFields(def.fields).map(([gname, gfields]) => (
+            <div key={gname || '_'}>
+              {gname && (
+                <div style={{ padding: '10px 18px 4px', fontSize: 11, fontWeight: 700, letterSpacing: '.05em', textTransform: 'uppercase', color: 'var(--text2)' }}>
+                  {gname}
+                </div>
+              )}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(260px,1fr))', gap: '0 18px', padding: '0 18px' }}>
+                {gfields.map((f) => {
+                  const isF = f.type === 'formula';
+                  const val = isF ? formulaText(f, def.fields, rec) : recordVal(rec, f.key);
+                  const missing = !isF && f.required && !val.trim();
+                  return (
+                    <div key={f.key} style={{ display: 'flex', gap: 10, alignItems: 'baseline', padding: '7px 0', borderBottom: '1px solid var(--row-line)', minWidth: 0 }}>
+                      <span style={{ flex: '0 0 40%', fontSize: 12, color: 'var(--text2)', fontWeight: 600 }}>
+                        {lang === 'zh' ? f.zh : f.en}
+                        {f.required && <span style={{ color: 'var(--danger)' }}> *</span>}
+                        {isF && <span title={f.formula} style={{ marginLeft: 5, fontSize: 10, color: 'var(--bronze)' }}>ƒ</span>}
+                      </span>
+                      <span style={{ flex: 1, minWidth: 0, fontSize: 13, background: missing ? 'var(--hl-cell, #fef3c7)' : undefined }}>
+                        {isF
+                          ? <b className="tnum" style={{ color: val === '—' ? '#b6bfc9' : 'var(--navy900)' }}>{val}</b>
+                          : val ? <FieldValue f={f} val={val} />
+                          : <span style={{ color: missing ? '#b8860b' : '#b6bfc9' }}>{missing ? t('待补充', 'to fill') : '—'}</span>}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+        </div>
       ) : (
         <div style={{ padding: '4px 0' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
@@ -188,8 +207,22 @@ function RecordCard({ p, pk, pkgIdx, def: baseDef, canEd }: {
               </tr>
               {def.fields.map((f) => (
                 <tr key={f.key}>
-                  <th style={cellK}>{lang === 'zh' ? f.zh : f.en}{f.required && <span style={{ color: 'var(--danger)' }}> *</span>}</th>
-                  <td style={cellV}><FieldInput f={f} val={draft[f.key] || ''} onChange={(v) => set(f.key, v)} lang={lang} /></td>
+                  <th style={cellK}>
+                    {lang === 'zh' ? f.zh : f.en}{f.required && <span style={{ color: 'var(--danger)' }}> *</span>}
+                    {f.type === 'formula' && <span title={f.formula} style={{ marginLeft: 5, fontSize: 10, color: 'var(--bronze)' }}>ƒ</span>}
+                  </th>
+                  <td style={cellV}>
+                    {/* REQ-027: 公式字段是算出来的,编辑态也不给手填 —— 随着上面的
+                        源字段边改边重算,所见即保存后的值。 */}
+                    {f.type === 'formula' ? (
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7 }}>
+                        <b className="tnum">{formulaText(f, def.fields, { ...(rec || {}), ...draft })}</b>
+                        <span style={{ fontSize: 11, color: 'var(--text2)' }}>= {f.formula}</span>
+                      </span>
+                    ) : (
+                      <FieldInput f={f} val={draft[f.key] || ''} onChange={(v) => set(f.key, v)} lang={lang} />
+                    )}
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -224,6 +257,7 @@ function FieldInput({ f, val, onChange, lang }: { f: FieldDef; val: string; onCh
       {(f.options || []).map((o) => <option key={o[0]} value={o[0]}>{lang === 'zh' ? o[1] : o[2]}</option>)}
     </select>
   );
+  if (f.type === 'number') return <input className="in sm" type="number" value={val} onChange={(e) => onChange(e.target.value)} style={{ maxWidth: 190 }} />;
   return <input className="in sm" type={f.type === 'date' ? 'date' : 'text'} value={val} onChange={(e) => onChange(e.target.value)} style={f.type === 'date' ? { maxWidth: 190 } : undefined} />;
 }
 
@@ -328,7 +362,12 @@ function FieldEditor({ svc, builtin, current, onClose }: {
             <select className="in sm" value={f.type}
               onChange={(e) => {
                 const type = e.target.value as FieldType;
-                patch(i, { type, options: type === 'select' ? (f.options && f.options.length ? f.options : [['optionA', '选项A', 'Option A']]) : undefined });
+                patch(i, {
+                  type,
+                  options: type === 'select' ? (f.options && f.options.length ? f.options : [['optionA', '选项A', 'Option A']]) : undefined,
+                  formula: type === 'formula' ? (f.formula || '') : undefined,
+                  decimals: type === 'formula' ? (f.decimals ?? 2) : undefined,
+                });
               }}>
               {FIELD_TYPES.map(([v, zh, en]) => <option key={v} value={v}>{lang === 'zh' ? zh : en}</option>)}
             </select>
@@ -350,9 +389,42 @@ function FieldEditor({ svc, builtin, current, onClose }: {
                   })} />
               </div>
             )}
+
+            {/* REQ-027: 公式字段 —— 表达式由你自己填,系统不写死任何一条 */}
+            {f.type === 'formula' && (
+              <div style={{ gridColumn: '2 / -1', display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+                <span style={{ fontSize: 11, color: 'var(--bronze)', fontWeight: 700 }}>ƒ =</span>
+                <input className="in sm" style={{ flex: 1, minWidth: 220, fontFamily: 'ui-monospace, monospace' }}
+                  value={f.formula || ''} placeholder="L * H / 1000000"
+                  onChange={(e) => patch(i, { formula: e.target.value })} />
+                <span style={{ fontSize: 11, color: 'var(--text2)' }}>{t('小数位', 'Decimals')}</span>
+                <input className="in sm" type="number" min={0} max={6} style={{ width: 60 }}
+                  value={f.decimals ?? 2} onChange={(e) => patch(i, { decimals: Math.max(0, Math.min(6, parseInt(e.target.value) || 0)) })} />
+              </div>
+            )}
+            {f.type === 'formula' && (
+              <div style={{ gridColumn: '2 / -1', fontSize: 11, color: 'var(--text2)' }}>
+                {t('可用字段:', 'Available fields: ')}
+                {rows.filter((r) => r.key !== f.key && r.type !== 'formula').map((r) => r.key).join(' · ') || t('（先加几个数字字段）', '(add number fields first)')}
+                <span style={{ marginLeft: 8 }}>{t('只支持 + - * / 与括号。', 'Only + - * / and parentheses.')}</span>
+              </div>
+            )}
+
+            {/* 分组名:同组字段在资料卡里聚成一块、组内两列 */}
+            <div style={{ gridColumn: '2 / -1', display: 'flex', gap: 6, alignItems: 'center' }}>
+              <span style={{ fontSize: 11, color: 'var(--text2)' }}>{t('分组', 'Group')}</span>
+              <input className="in sm" style={{ maxWidth: 200 }} value={f.group || ''}
+                placeholder={t('留空 = 不分组', 'blank = ungrouped')}
+                list="rf-groups"
+                onChange={(e) => patch(i, { group: e.target.value })} />
+            </div>
           </div>
         ))}
       </div>
+
+      <datalist id="rf-groups">
+        {[...new Set(rows.map((r) => r.group).filter(Boolean))].map((g) => <option key={g} value={g!} />)}
+      </datalist>
 
       <div style={{ display: 'flex', gap: 8, marginTop: 12, flexWrap: 'wrap' }}>
         <button className="btn-line sm" style={{ borderStyle: 'dashed' }} onClick={addField}>＋ {t('新增字段', 'Add field')}</button>
@@ -365,4 +437,18 @@ function FieldEditor({ svc, builtin, current, onClose }: {
       </div>
     </div>
   );
+}
+
+
+/* REQ-027: 按 group 归拢字段,保持原顺序;未分组的排最前面 */
+function groupFields(fields: FieldDef[]): [string, FieldDef[]][] {
+  const order: string[] = [];
+  const map = new Map<string, FieldDef[]>();
+  fields.forEach((f) => {
+    const g = f.group || '';
+    if (!map.has(g)) { map.set(g, []); order.push(g); }
+    map.get(g)!.push(f);
+  });
+  order.sort((a, b) => (a === '' ? -1 : b === '' ? 1 : 0));   // 未分组的置顶,其余保持出现顺序
+  return order.map((g) => [g, map.get(g)!]);
 }

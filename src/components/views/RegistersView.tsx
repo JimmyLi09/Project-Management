@@ -8,7 +8,7 @@ import { todayMid, fmtDate, projCode } from '@/lib/project';
 import { useLang } from '@/lib/i18n';
 import { Icon } from '../ui';
 import {
-  REGISTERS, registerDef, statusFamily, statusMeta, defaultStatus, recordVal, fieldsOf,
+  REGISTERS, registerDef, statusFamily, statusMeta, defaultStatus, recordVal, fieldsOf, formulaText,
   isIncomplete, isExpiring, type RegisterDef, type FieldDef,
 } from '@/lib/records';
 import type { Project, ServicePackage } from '@/lib/types';
@@ -110,7 +110,7 @@ export default function RegistersView() {
     const body = rows.map((r) => {
       const sm = statusMeta(def.kind, (r.pk.record?.status as string) || defaultStatus(def.kind));
       return [(projCode(r.p) ? projCode(r.p) + ' ' : '') + r.p.name, r.p.client || '', (r.p.owners || []).join(' / '), lang === 'zh' ? sm[1] : sm[2],
-        ...def.fields.map((f) => recordVal(r.pk.record, f.key).replace(/\n/g, ' '))];
+        ...def.fields.map((f) => (f.type === 'formula' ? formulaText(f, def.fields, r.pk.record) : recordVal(r.pk.record, f.key)).replace(/\n/g, ' '))];
     });
     const csv = [head, ...body].map((r) => r.map(esc).join(',')).join('\r\n');
     const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' });
@@ -208,7 +208,12 @@ export default function RegistersView() {
                       {exp && <span className="badge" style={{ background: '#fef3c7', color: '#92600a', marginLeft: 4 }}>{t('即将到期', 'expiring')}</span>}
                       {inc && <span className="badge" style={{ background: '#fdecec', color: 'var(--danger)', marginLeft: 4 }}>{t('缺资料', 'incomplete')}</span>}
                     </td>
-                    {def.fields.map((f) => <td key={f.key} style={{ ...cell, maxWidth: 220 }}><CellVal f={f} val={recordVal(rec, f.key)} /></td>)}
+                    {/* REQ-027: 公式列在这里也是算出来的,和 Job Record 同一份定义、同一个结果 */}
+                    {def.fields.map((f) => (
+                      <td key={f.key} style={{ ...cell, maxWidth: 220 }}>
+                        <CellVal f={f} val={f.type === 'formula' ? formulaText(f, def.fields, rec) : recordVal(rec, f.key)} />
+                      </td>
+                    ))}
                     <td style={{ ...cell, textAlign: 'right', whiteSpace: 'nowrap' }}>
                       {canEdit(me, r.p)
                         ? <button className="btn-line sm" style={{ padding: '3px 9px' }} onClick={() => setEdit(r)}>{t('编辑', 'Edit')}</button>
@@ -480,12 +485,18 @@ function EditModal({ row, def, onClose, onSave }: { row: Row; def: RegisterDef; 
           </select>
           {def.fields.map((f) => (
             <React.Fragment key={f.key}>
-              <label style={lbl}>{lang === 'zh' ? f.zh : f.en}{f.required && <span style={{ color: 'var(--danger)' }}> *</span>}</label>
-              {f.type === 'textarea'
+              <label style={lbl}>
+                {lang === 'zh' ? f.zh : f.en}{f.required && <span style={{ color: 'var(--danger)' }}> *</span>}
+                {f.type === 'formula' && <span title={f.formula} style={{ marginLeft: 4, fontSize: 10, color: 'var(--bronze)' }}>ƒ</span>}
+              </label>
+              {/* REQ-027: 公式字段算出来、只读,随上面的源字段边改边重算 */}
+              {f.type === 'formula'
+                ? <b className="tnum" style={{ fontSize: 13 }}>{formulaText(f, def.fields, { ...(row.pk.record || {}), ...draft })}</b>
+                : f.type === 'textarea'
                 ? <textarea className="in sm" value={draft[f.key]} onChange={(e) => set(f.key, e.target.value)} style={{ minHeight: 48 }} />
                 : f.type === 'select'
                   ? <select className="in sm" value={draft[f.key]} onChange={(e) => set(f.key, e.target.value)}><option value="">—</option>{(f.options || []).map((o) => <option key={o[0]} value={o[0]}>{lang === 'zh' ? o[1] : o[2]}</option>)}</select>
-                  : <input className="in sm" type={f.type === 'date' ? 'date' : 'text'} value={draft[f.key]} onChange={(e) => set(f.key, e.target.value)} />}
+                  : <input className="in sm" type={f.type === 'date' || f.type === 'number' ? (f.type === 'number' ? 'number' : 'date') : 'text'} value={draft[f.key]} onChange={(e) => set(f.key, e.target.value)} />}
             </React.Fragment>
           ))}
         </div>
