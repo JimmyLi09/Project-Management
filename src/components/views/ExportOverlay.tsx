@@ -3,7 +3,7 @@
 import React, { useEffect, useState } from 'react';
 import { useStore } from '../store';
 import { isFull } from '@/lib/permissions';
-import { fmtDate, pkgStart, planDates, projCode, projStage, todayMid } from '@/lib/project';
+import { fmtDate, parseISO, pkgStart, planDates, projCode, projStage, todayMid } from '@/lib/project';
 import { useLang } from '@/lib/i18n';
 import { STAGES, stageIdx, SVC, svcColor } from '@/lib/templates';
 import type { Project, ServicePackage } from '@/lib/types';
@@ -31,6 +31,7 @@ export default function ExportOverlay({ p, onClose, scope = 'all' }: { p: Projec
   const [orient, setOrient] = useState<'portrait' | 'landscape'>('portrait');
   const [pkgSel, setPkgSel] = useState<boolean[]>(() => p.packages.map(() => true));
   const [blanks, setBlanks] = useState(true); // REQ-013: include blank (Pending) items — default on
+  const [cover, setCover] = useState(true);   // REQ-021: 封面页,默认开
   /* REQ-016: company notes — global default, per-export toggle + tweak */
   const [notesOn, setNotesOn] = useState(true);
   const [notes, setNotes] = useState(DEFAULT_NOTES);
@@ -288,6 +289,12 @@ export default function ExportOverlay({ p, onClose, scope = 'all' }: { p: Projec
 
       {/* REQ-015: content picker + ordering */}
       <div className="ex-colbar">
+        {/* REQ-021 */}
+        <label style={{ display: 'inline-flex', gap: 6, alignItems: 'center', cursor: 'pointer' }}
+          title={T('第一页放项目封面(编号 / 名称 / 客户 / 日期)', 'Put a project cover on page 1 (no. / name / client / dates)')}>
+          <input type="checkbox" checked={cover} onChange={(e) => setCover(e.target.checked)} />
+          {T('封面页', 'Cover page')}
+        </label>
         <span className="ex-grp">
           {T('内容', 'Content')}:
           <label className="ex-col"><input type="radio" name="exsec" checked={sec === 'all'} onChange={() => setSec('all')} /> {T('排期+清单', 'Schedule + Checklist')}</label>
@@ -338,6 +345,38 @@ export default function ExportOverlay({ p, onClose, scope = 'all' }: { p: Projec
       )}
 
       <div className="ex-doc">
+        {/* REQ-021: 封面页 —— 项目编号 / 名称 / 客户 / 日期,独占第一页。
+            日期给两行:交付日是客户关心的,导出日期用来区分同一项目的不同版本。 */}
+        {cover && (
+          <section className="ex-cover">
+            <div className="exc-top">
+              <div className="exc-brand">AUDAX</div>
+              {scopeLabel && <div className="exc-kind">{scopeLabel}</div>}
+            </div>
+            <div className="exc-mid">
+              {projCode(p) && <div className="exc-no">{projCode(p)}</div>}
+              <h1 className="exc-name">{p.name}</h1>
+              <div className="exc-client">{p.client || '—'}</div>
+            </div>
+            <table className="exc-meta">
+              <tbody>
+                <tr>
+                  <th>{T('项目编号', 'Project no.')}</th><td>{projCode(p) || '—'}</td>
+                  <th>{T('客户', 'Client')}</th><td>{p.client || '—'}</td>
+                </tr>
+                <tr>
+                  <th>{T('交付日期', 'Delivery date')}</th><td>{p.delivery ? fmtDate(parseISO(p.delivery)) : '—'}</td>
+                  <th>{T('导出日期', 'Exported')}</th><td>{fmtDate(new Date())}</td>
+                </tr>
+                <tr>
+                  <th>{T('服务', 'Services')}</th><td>{svcNames}</td>
+                  <th>PM</th><td>{(p.owners || []).join(' / ') || '—'}</td>
+                </tr>
+              </tbody>
+            </table>
+          </section>
+        )}
+
         <h1>{projCode(p) ? projCode(p) + ' · ' : ''}{p.name}{scopeLabel ? ` — ${scopeLabel}` : ''}</h1>
         <div className="exsub">
           {T('客户', 'Client')}: {p.client || '—'} · {T('服务', 'Services')}: {svcNames} · {T('阶段', 'Stage')}:{' '}

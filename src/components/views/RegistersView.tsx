@@ -29,6 +29,7 @@ export default function RegistersView() {
   const [svc, setSvc] = useState(REGISTERS[0].svc);
   const [q, setQ] = useState('');
   const [pm, setPm] = useState('');
+  const [client, setClient] = useState('');   // REQ-020
   const [status, setStatus] = useState('');
   const [year, setYear] = useState('');
   const [page, setPage] = useState(0);
@@ -57,6 +58,14 @@ export default function RegistersView() {
     all.forEach((r) => (r.p.owners || []).forEach((n) => s.add(n)));
     return [...s].sort();
   }, [all]);
+  /* REQ-020: 客户下拉 —— 只列当前这张登记表里真实出现过的客户,
+     选项直接取项目的 client 字段,不新建客户主数据。 */
+  const clients = useMemo(() => {
+    const s = new Set<string>();
+    all.forEach((r) => { const c = (r.p.client || '').trim(); if (c) s.add(c); });
+    return [...s].sort((a, b) => a.localeCompare(b, 'zh-Hans-CN'));
+  }, [all]);
+
   const years = useMemo(() => {
     const s = new Set<string>();
     all.forEach((r) => { const d = mainDate(def, r.pk); const y = d ? d.slice(0, 4) : String(new Date(r.p.created).getFullYear()); if (y) s.add(y); });
@@ -69,6 +78,7 @@ export default function RegistersView() {
       const st = (r.pk.record?.status as string) || defaultStatus(def.kind);
       if (status && st !== status) return false;
       if (pm && !(r.p.owners || []).includes(pm)) return false;
+      if (client && (r.p.client || '').trim() !== client) return false;   // REQ-020
       if (year) { const d = mainDate(def, r.pk); const y = d ? d.slice(0, 4) : String(new Date(r.p.created).getFullYear()); if (y !== year) return false; }
       if (ql) {
         const hay = [r.p.name, r.p.client, recordVal(r.pk.record, 'developer'), recordVal(r.pk.record, 'siteAddress'), recordVal(r.pk.record, 'mainCon')].join(' ').toLowerCase();
@@ -76,7 +86,7 @@ export default function RegistersView() {
       }
       return true;
     });
-  }, [all, q, pm, status, year, def]);
+  }, [all, q, pm, status, year, client, def]);
 
   // KPIs
   const kpi = useMemo(() => {
@@ -102,7 +112,7 @@ export default function RegistersView() {
 
   const pageRows = rows.slice(page * PAGE, page * PAGE + PAGE);
   const pages = Math.ceil(rows.length / PAGE) || 1;
-  React.useEffect(() => { setPage(0); }, [svc, q, pm, status, year]);
+  React.useEffect(() => { setPage(0); }, [svc, q, pm, status, year, client]);
 
   function exportCsv() {
     const esc = (v: string) => `"${String(v ?? '').replace(/"/g, '""')}"`;
@@ -148,6 +158,12 @@ export default function RegistersView() {
           <option value="">{t('全部 PM', 'All PM')}</option>
           {pms.map((n) => <option key={n} value={n}>{n}</option>)}
         </select>
+        {/* REQ-020: 按客户筛选 —— 项目一多,靠翻的太慢 */}
+        <select className="in sm" value={client} onChange={(e) => setClient(e.target.value)} style={{ width: 'auto', maxWidth: 200 }}
+          title={t('按客户筛选', 'Filter by client')}>
+          <option value="">{t('全部客户', 'All clients')}</option>
+          {clients.map((c) => <option key={c} value={c}>{c}</option>)}
+        </select>
         <select className="in sm" value={status} onChange={(e) => setStatus(e.target.value)} style={{ width: 'auto' }}>
           <option value="">{t('全部状态', 'All status')}</option>
           {statusFamily(def.kind).map((s) => <option key={s[0]} value={s[0]}>{lang === 'zh' ? s[1] : s[2]}</option>)}
@@ -156,6 +172,11 @@ export default function RegistersView() {
           <option value="">{t('全部年份', 'All years')}</option>
           {years.map((y) => <option key={y} value={y}>{y}</option>)}
         </select>
+        {(q || pm || client || status || year) && (
+          <button className="btn-line sm" onClick={() => { setQ(''); setPm(''); setClient(''); setStatus(''); setYear(''); }}>
+            ✕ {t('清除筛选', 'Clear filters')}
+          </button>
+        )}
         <div style={{ flex: 1 }} />
         <span style={{ fontSize: 12, color: 'var(--text2)' }}>{t(`${rows.length} 条`, `${rows.length} rows`)}</span>
         {canEdit(me, projects[0] || ({} as Project)) || isFull(me) ? (

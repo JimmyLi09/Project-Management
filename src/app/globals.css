@@ -217,3 +217,29 @@ textarea.in { width: 100%; min-height: 46px; resize: vertical }
   .content { padding: 18px }
   .two { grid-template-columns: 1fr }
 }
+
+/* ===== REQ-021: 导出封面页 =====
+   独占第一页,后面正文另起一页。屏幕预览和打印用同一套盒子,
+   只是打印时靠 break-after 强制分页。 */
+.ex-cover {
+  min-height: 60vh; display: flex; flex-direction: column;
+  padding: 8px 0 26px; margin-bottom: 26px; border-bottom: 1px solid var(--border);
+}
+.ex-cover .exc-top { display: flex; align-items: baseline; gap: 12px; border-bottom: 3px solid var(--navy900); padding-bottom: 10px }
+.ex-cover .exc-brand { font-size: 19px; font-weight: 700; letter-spacing: .22em; color: var(--navy900) }
+.ex-cover .exc-kind { margin-left: auto; font-size: 12px; font-weight: 600; letter-spacing: .1em; text-transform: uppercase; color: var(--bronze) }
+.ex-cover .exc-mid { flex: 1; display: flex; flex-direction: column; justify-content: center; padding: 44px 0 34px }
+.ex-cover .exc-no { font-size: 13px; font-weight: 700; letter-spacing: .1em; color: var(--bronze); margin-bottom: 8px; font-variant-numeric: tabular-nums }
+.ex-cover .exc-name { font-size: 30px; font-weight: 600; line-height: 1.25; color: var(--navy900); margin: 0 0 10px; max-width: 22ch }
+.ex-cover .exc-client { font-size: 15px; color: #555 }
+.ex-cover .exc-meta { width: 100%; border-collapse: collapse; margin: 0; table-layout: fixed }
+.ex-cover .exc-meta th, .ex-cover .exc-meta td { border: 1px solid #ccc; padding: 7px 10px; font-size: 12px; text-align: left; word-break: break-word }
+/* 固定四列:标签窄、值宽,两组左右对称 */
+.ex-cover .exc-meta th { background: #f0f2f5; width: 16%; white-space: nowrap }
+.ex-cover .exc-meta td { width: 34% }
+
+@media print {
+  /* 封面独占一页,正文从第二页开始 */
+  .ex-cover { min-height: calc(100vh - 60px); border-bottom: none; margin-bottom: 0; break-after: page; page-break-after: always }
+  .ex-cover .exc-name { font-size: 26px }
+}
