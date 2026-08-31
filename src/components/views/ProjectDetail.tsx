@@ -4,13 +4,13 @@ import React, { useState } from 'react';
 import { useStore } from '../store';
 import {
   deliverySlack, fmtDate, infoProgress, isRiskDismissed, nextFreeze, overdueItems, parseISO,
-  pkgProgress, pkgStart, planDates, plannedFinish, projCode, projectHealth, projPoints,
+  pkgProgress, pkgStart, planDates, plannedFinish, projectHealth, projPoints,
   projStage, riskKey, schedProgress, todayMid,
 } from '@/lib/project';
 import {
   canAssign, canCommercial, canCreate, canDecide, canDelete, canEdit, canEditFinance, isFull,
   canSeeWorkflow, canSeeWorkflowTimeline, canSeeHandoverBlock, canSeeCompletionBlock,
-  canSeeVerifyBlock, canSeeFinanceBlock, isPM,
+  canSeeVerifyBlock, canSeeFinanceBlock, isPM, canMeta,
 } from '@/lib/permissions';
 import { DIFF, STAGES, stageIdx, svcColor, svcName } from '@/lib/templates';
 import { useLang } from '@/lib/i18n';
@@ -29,6 +29,7 @@ export default function ProjectDetail() {
   const [transferFrom, setTransferFrom] = useState<string | null>(null);
   const [assignOpen, setAssignOpen] = useState(false);
   const [copyOpen, setCopyOpen] = useState(false);
+  const [renaming, setRenaming] = useState(false);   // REQ-028
   const p = projects.find((x) => x.id === view.pid);
   if (!p) {
     return <div className="panel" style={{ padding: 40, textAlign: 'center', color: 'var(--text2)' }}>{t('项目加载中…', 'Loading project…')}</div>;
@@ -54,10 +55,41 @@ export default function ProjectDetail() {
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 16, flexWrap: 'wrap', paddingBottom: 18 }}>
           <div style={{ minWidth: 0 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-              <h1 style={{ fontSize: 22, fontWeight: 600, color: 'var(--navy900)', letterSpacing: '-.01em', display: 'flex', alignItems: 'baseline', gap: 9 }}>
-                {projCode(p) && <span className="tnum" style={{ fontSize: 15, fontWeight: 700, color: 'var(--bronze)' }}>{projCode(p)}</span>}
-                {p.name}
-              </h1>
+              {/* REQ-028: 详情页不再显示系统编号(与 REQ-025 列表一致,编号只是不显示、
+                  数据仍在);项目名可就地改 —— 副本改名、打错字都不用重建项目。 */}
+              {renaming ? (
+                <input
+                  className="in"
+                  autoFocus
+                  aria-label={t('项目名', 'Project name')}
+                  defaultValue={p.name}
+                  maxLength={120}
+                  style={{ fontSize: 20, fontWeight: 600, color: 'var(--navy900)', minWidth: 280, maxWidth: 520 }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Escape') { setRenaming(false); return; }
+                    if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+                  }}
+                  onBlur={async (e) => {
+                    const v = e.target.value.trim();
+                    if (!v) { setToast(t('项目名不能为空', 'Project name cannot be empty')); e.target.value = p.name; setRenaming(false); return; }
+                    if (v !== p.name) await dispatch(p.id, { type: 'renameProject', name: v });
+                    setRenaming(false);
+                  }}
+                />
+              ) : (
+                <h1 style={{ fontSize: 22, fontWeight: 600, color: 'var(--navy900)', letterSpacing: '-.01em', display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span
+                    onClick={() => canMeta(me, p) && setRenaming(true)}
+                    title={canMeta(me, p) ? t('点击改名', 'Click to rename') : undefined}
+                    style={{ cursor: canMeta(me, p) ? 'text' : 'default' }}>
+                    {p.name}
+                  </span>
+                  {canMeta(me, p) && (
+                    <button onClick={() => setRenaming(true)} title={t('改名', 'Rename')}
+                      style={{ fontSize: 13, color: 'var(--text2)', padding: '2px 4px', lineHeight: 1 }}>✎</button>
+                  )}
+                </h1>
+              )}
               <Pill m={HM[h]} />
               {p.archived && <span className="badge" style={{ background: '#eef1f4', color: '#51606f' }}>📦 {t('已归档', 'Archived')}</span>}
             </div>

@@ -4,7 +4,7 @@
 
 import type { Identity } from '@/lib/permissions';
 import {
-  canAssign, canCommercial, canDecide, canEdit, canEditFinance, canRowEdit, isFull, canDelete } from '@/lib/permissions';
+  canAssign, canCommercial, canDecide, canEdit, canEditFinance, canRowEdit, isFull, canDelete , canMeta } from '@/lib/permissions';
 import { buildPackage, deriveStatuses, fitWindow, newId, parseISO, isoDate, totalDays } from '@/lib/project';
 import { SVC, type Template } from '@/lib/templates';
 import type { ChecklistStatus, Project, ScheduleStatus } from '@/lib/types';
@@ -30,6 +30,7 @@ export type ProjectAction =
   | { type: 'setClStatus'; pkg: number; gi: number; ii: number; value: ChecklistStatus }
   | { type: 'editCl'; pkg: number; gi: number; ii: number; field: 'date' | 'remark' | 'zh' | 'en' | 'owner' | 'received'; value: string }
   | { type: 'renameGroup'; pkg: number; gi: number; name: string; nameEn?: string }
+  | { type: 'renameProject'; name: string }
   | { type: 'removeGroup'; pkg: number; gi: number }
   | { type: 'setNoCategories'; pkg: number; value: boolean }
   | { type: 'toggleHighlight'; pkg: number; gi: number; ii: number }
@@ -238,6 +239,19 @@ export function applyAction(u: Identity, p: Project, a: ProjectAction, ctx: Acti
         if (!it.date) it.date = isoDate(new Date());
       }
       it.updatedAt = Date.now();
+      break;
+    }
+    /* REQ-028: 改项目名。权限沿用 canMeta —— PD/BD/Sales/PM 可改,viewer 只读。
+       项目名是各处的显示主键(列表、登记表、导出、日志),所以只做最基本的
+       非空与长度校验,不去动名字里自带的编号(140- 之类由用户自己写)。 */
+    case 'renameProject': {
+      if (!canMeta(u, p)) throw new PermissionError('无修改项目名的权限');
+      const name = String(a.name || '').trim().slice(0, 120);
+      if (!name) throw new ValidationError('项目名不能为空');
+      if (name === p.name) break;
+      const was = p.name;
+      p.name = name;
+      logIt(p, u.name, `项目更名:「${was}」→「${name}」`);
       break;
     }
     case 'renameGroup': {
