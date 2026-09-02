@@ -72,14 +72,20 @@ export default function MyTasksView() {
   return (
     <>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2,minmax(0,220px)) 1fr', gap: 20, marginBottom: 20, alignItems: 'center' }}>
-        <div className="kpi" style={{ padding: '18px 20px' }}>
+        {/* REQ-034: 两张卡可点 —— 点了直接切到对应筛选,和下面的「全部 / 逾期」按钮联动。
+            当前选中的那张给个高亮边,免得点完看不出发生了什么。 */}
+        <button className="kpi" style={{ padding: '18px 20px', textAlign: 'left', cursor: 'pointer', border: filter === 'all' ? '1.5px solid var(--navy700)' : undefined }}
+          title={t('查看全部未完成任务', 'Show all open tasks')}
+          onClick={() => setFilter('all')}>
           <div className="kpi-label">{t('未完成任务', 'Open Tasks')}</div>
           <div className="tnum" style={{ fontSize: 32, fontWeight: 600, color: 'var(--navy900)', marginTop: 6, lineHeight: 1 }}>{items.length}</div>
-        </div>
-        <div className="kpi" style={{ padding: '18px 20px' }}>
+        </button>
+        <button className="kpi" style={{ padding: '18px 20px', textAlign: 'left', cursor: 'pointer', border: filter === 'overdue' ? '1.5px solid var(--navy700)' : undefined }}
+          title={t('只看逾期任务', 'Show overdue only')}
+          onClick={() => setFilter('overdue')}>
           <div className="kpi-label">{t('逾期', 'Overdue')}</div>
           <div className="tnum" style={{ fontSize: 32, fontWeight: 600, color: overdueN ? 'var(--danger)' : 'var(--success)', marginTop: 6, lineHeight: 1 }}>{overdueN}</div>
-        </div>
+        </button>
         <div style={{ display: 'flex', gap: 7, justifySelf: 'end', flexWrap: 'wrap', alignItems: 'center' }}>
           <button className={`chip ${filter === 'all' ? 'active' : ''}`} onClick={() => setFilter('all')}>{t('全部', 'All')}</button>
           <button className={`chip ${filter === 'overdue' ? 'active' : ''}`} onClick={() => setFilter('overdue')}>{t('逾期', 'Overdue')}</button>

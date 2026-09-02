@@ -31,6 +31,7 @@ export type ProjectAction =
   | { type: 'editCl'; pkg: number; gi: number; ii: number; field: 'date' | 'remark' | 'zh' | 'en' | 'owner' | 'received'; value: string }
   | { type: 'renameGroup'; pkg: number; gi: number; name: string; nameEn?: string }
   | { type: 'renameProject'; name: string }
+  | { type: 'setQuotationNo'; value: string }
   | { type: 'removeGroup'; pkg: number; gi: number }
   | { type: 'setNoCategories'; pkg: number; value: boolean }
   | { type: 'toggleHighlight'; pkg: number; gi: number; ii: number }
@@ -252,6 +253,16 @@ export function applyAction(u: Identity, p: Project, a: ProjectAction, ctx: Acti
       const was = p.name;
       p.name = name;
       logIt(p, u.name, `项目更名:「${was}」→「${name}」`);
+      break;
+    }
+    /* REQ-031: 报价单号。非必填、纯文本,不做唯一性校验也不接外部报价系统 —— 
+       它现在只是个便于对账检索的记录字段。 */
+    case 'setQuotationNo': {
+      if (!canMeta(u, p)) throw new PermissionError('无修改报价号的权限');
+      const v = String(a.value || '').trim().slice(0, 60);
+      if (v === (p.quotationNo || '')) break;
+      p.quotationNo = v;
+      logIt(p, u.name, `报价号 Quotation No.=${v || '—'}`);
       break;
     }
     case 'renameGroup': {

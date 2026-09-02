@@ -31,6 +31,7 @@ export const isoDate = (d: Date) => d.toISOString().slice(0, 10);
 export interface NewProjectInput {
   name: string;
   client: string;
+  quotationNo?: string;   // REQ-031
   services: string[];
   owners?: string[];
   difficulty?: string;
@@ -90,6 +91,7 @@ export function newProject(o: NewProjectInput, tplLookup?: (svc: string) => Temp
     id: uid(),
     name: o.name,
     client: o.client,
+    quotationNo: (o.quotationNo || '').trim(),   // REQ-031
     services,
     stage: 'presales',
     difficulty,

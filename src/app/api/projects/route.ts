@@ -26,6 +26,7 @@ export async function POST(req: NextRequest) {
   const p = newProject({
     name,
     client: String(body.client || ''),
+    quotationNo: String(body.quotationNo || '').slice(0, 60),   // REQ-031
     services: services.length ? services : ['others'],
     owners: Array.isArray(body.owners) ? body.owners.map(String).filter(Boolean) : [],
     difficulty: String(body.difficulty || 'medium'),

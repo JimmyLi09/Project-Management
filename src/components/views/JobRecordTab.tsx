@@ -4,7 +4,7 @@ import React, { useMemo, useState } from 'react';
 import { useStore } from '../store';
 import { canAdmin, canDelete, canEdit } from '@/lib/permissions';
 import { svcName, svcColor } from '@/lib/templates';
-import { pkgSuffix } from '@/lib/project';
+import { fmtDate, parseISO, pkgSuffix, projCode } from '@/lib/project';
 import { useLang } from '@/lib/i18n';
 import { Icon } from '../ui';
 import {
@@ -18,17 +18,79 @@ import type { Project, ServicePackage } from '@/lib/types';
    edit form with one bottom Save (a single setRecord per package). */
 export default function JobRecordTab({ p }: { p: Project }) {
   const { me } = useStore();
-  const { t } = useLang();
+  const { lang, t } = useLang();
   const canEd = canEdit(me, p);
 
   const known = p.packages.filter((pk) => registerDef(pk.svc));
   const other = p.packages.filter((pk) => !registerDef(pk.svc));
 
+  /* REQ-032: 一个「总编辑」管整页 —— 不要每块各自一个铅笔。
+     各张资料卡把自己的 进入编辑 / 保存 / 取消 注册进来,页面顶部统一调度;
+     保存仍是每个服务包一次 setRecord(服务端本来就是按包写的),
+     所以底下每张卡自己的保存按钮也留着,单独改一张时更顺手。 */
+  const cardApi = React.useRef<Record<number, { begin: () => void; save: () => Promise<void>; cancel: () => void }>>({});
+  const [editAll, setEditAll] = useState(false);
+  const [savingAll, setSavingAll] = useState(false);
+  const register = React.useCallback((idx: number, api: { begin: () => void; save: () => Promise<void>; cancel: () => void } | null) => {
+    if (api) cardApi.current[idx] = api; else delete cardApi.current[idx];
+  }, []);
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-      <div style={{ fontSize: 12.5, color: 'var(--text2)' }}>
-        {t('每个服务的业务资料集中在此维护;与「项目档案」登记表同源,任一处修改即时一致。',
-           'Business records for each service live here; the same data powers the cross-project Registers — edit either place, stays in sync.')}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+        <div style={{ fontSize: 12.5, color: 'var(--text2)', flex: 1, minWidth: 240 }}>
+          {t('每个服务的业务资料集中在此维护;与「项目档案」登记表同源,任一处修改即时一致。',
+             'Business records for each service live here; the same data powers the cross-project Registers — edit either place, stays in sync.')}
+        </div>
+        {canEd && known.length > 0 && (editAll ? (
+          <>
+            <button className="btn-line sm" disabled={savingAll}
+              onClick={() => { Object.values(cardApi.current).forEach((a) => a.cancel()); setEditAll(false); }}>
+              {t('取消', 'Cancel')}
+            </button>
+            <button className="btn-navy sm" disabled={savingAll}
+              onClick={async () => {
+                setSavingAll(true);
+                for (const a of Object.values(cardApi.current)) await a.save();
+                setSavingAll(false); setEditAll(false);
+              }}>
+              {savingAll ? t('保存中…', 'Saving…') : t('保存', 'Save')}
+            </button>
+          </>
+        ) : (
+          <button className="btn-navy sm" onClick={() => { Object.values(cardApi.current).forEach((a) => a.begin()); setEditAll(true); }}>
+            <Icon name="edit" size={13} />{t('总编辑', 'Edit all')}
+          </button>
+        ))}
+      </div>
+
+      {/* REQ-032: 同步自项目创建的信息 —— 表格化、始终只读,
+          它跟着项目档案走,不该在这里被改。 */}
+      <div className="panel clip">
+        <div style={{ padding: '12px 18px', borderBottom: '1px solid var(--row-line)', display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span className="panel-title" style={{ fontSize: 14 }}>{t('项目信息', 'Project info')}</span>
+          <span className="badge" style={{ background: 'var(--hover-bg)', color: 'var(--text2)' }}>
+            {t('同步自项目创建 · 只读', 'Synced from the project · read-only')}
+          </span>
+        </div>
+        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <tbody>
+            {([
+              [t('项目编号', 'Project no.'), projCode(p) || '—'],
+              [t('项目名称', 'Project name'), p.name],
+              [t('客户', 'Client'), p.client || '—'],
+              [t('报价号', 'Quotation no.'), p.quotationNo || '—'],
+              [t('PM', 'PM'), (p.owners || []).join(' / ') || '—'],
+              [t('交付日期', 'Delivery'), p.delivery ? fmtDate(parseISO(p.delivery)) : '—'],
+              [t('服务', 'Services'), p.services.map((k) => svcName(k, lang)).join(', ') || '—'],
+            ] as [string, string][]).map(([k, v], i) => (
+              <tr key={i}>
+                <th style={cellK}>{k}</th>
+                <td style={cellV}>{v}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
 
       {p.packages.length === 0 && (
@@ -39,7 +101,7 @@ export default function JobRecordTab({ p }: { p: Project }) {
 
       {known.map((pk) => {
         const gi = p.packages.indexOf(pk);
-        return <RecordCard key={gi} p={p} pk={pk} pkgIdx={gi} def={registerDef(pk.svc)!} canEd={canEd} />;
+        return <RecordCard key={gi} p={p} pk={pk} pkgIdx={gi} def={registerDef(pk.svc)!} canEd={canEd} register={register} />;
       })}
 
       {other.map((pk) => {
@@ -106,8 +168,9 @@ function AddServiceBar({ p }: { p: Project }) {
   );
 }
 
-function RecordCard({ p, pk, pkgIdx, def: baseDef, canEd }: {
+function RecordCard({ p, pk, pkgIdx, def: baseDef, canEd, register }: {
   p: Project; pk: ServicePackage; pkgIdx: number; def: RegisterDef; canEd: boolean;
+  register?: (idx: number, api: { begin: () => void; save: () => Promise<void>; cancel: () => void } | null) => void;
 }) {
   const { dispatch, me, recordFields } = useStore();
   const { lang, t } = useLang();
@@ -137,6 +200,21 @@ function RecordCard({ p, pk, pkgIdx, def: baseDef, canEd }: {
   }
   const set = (k: string, v: string) => setDraft((d) => ({ ...d, [k]: v }));
 
+  /* REQ-032: 把本卡的 进入编辑 / 保存 / 取消 交给页面级「总编辑」调度。
+     依赖里带上 rec 与 def.fields —— 字段或值变了要重新注册,
+     否则总编辑保存的会是旧闭包里的 draft 初值。 */
+  const beginRef = React.useRef(begin), saveRef = React.useRef(save);
+  beginRef.current = begin; saveRef.current = save;
+  React.useEffect(() => {
+    if (!register || !canEd) return;
+    register(pkgIdx, {
+      begin: () => beginRef.current(),
+      save: async () => { await saveRef.current(); },
+      cancel: () => setEditing(false),
+    });
+    return () => register(pkgIdx, null);
+  }, [register, canEd, pkgIdx]);
+
   const sm = statusMeta(def.kind, status);
   const updated = rec?.updatedAt ? new Date(rec.updatedAt as number) : null;
 
@@ -162,9 +240,8 @@ function RecordCard({ p, pk, pkgIdx, def: baseDef, canEd }: {
             <span className="bdot" style={{ background: sm[3] }} />{lang === 'zh' ? sm[1] : sm[2]}
           </span>
         )}
-        {canEd && !editing && (
-          <button className="btn-line sm" onClick={begin}><Icon name="edit" size={13} />{t('总编辑', 'Edit all')}</button>
-        )}
+        {/* REQ-032: 卡片上不再各放一个编辑按钮 —— 整页只留顶部那一个「总编辑」,
+            需求方明确否掉了分块编辑。 */}
         {/* REQ-023: 字段定义是全局的(改一次影响该服务类型所有项目),只给 PD/BD */}
         {canAdmin(me) && !editing && (
           <button className="btn-line sm" style={fieldEdit ? { borderColor: 'var(--navy700)', color: 'var(--navy900)', fontWeight: 600 } : undefined}
@@ -259,10 +336,7 @@ function RecordCard({ p, pk, pkgIdx, def: baseDef, canEd }: {
               ))}
             </tbody>
           </table>
-          <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', padding: '12px 18px', borderTop: '1px solid var(--row-line)' }}>
-            <button className="btn-line sm" onClick={() => setEditing(false)} disabled={busy}>{t('取消', 'Cancel')}</button>
-            <button className="btn-navy sm" onClick={save} disabled={busy}>{busy ? t('保存中…', 'Saving…') : t('保存', 'Save')}</button>
-          </div>
+          {/* 保存 / 取消 统一放在页面顶部,这里不再重复一套 */}
         </div>
       )}
 
@@ -301,7 +375,7 @@ const cellV: React.CSSProperties = { padding: '10px 18px', fontSize: 13, borderT
    改的是「服务类型」级别的定义:同一类型下所有项目的 Job Record 与项目档案
    登记表都跟着变(需求要的同源)。字段值挂在各项目自己的 record 上,这里只改
    列定义,不动任何已填的数据 —— 删列时值还在库里,把列加回来数据就回来了。 */
-function FieldEditor({ svc, builtin, current, onClose }: {
+export function FieldEditor({ svc, builtin, current, onClose }: {
   svc: string; builtin: FieldDef[]; current: FieldDef[]; onClose: () => void;
 }) {
   const { setToast, refreshRecordFields } = useStore();

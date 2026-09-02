@@ -305,6 +305,7 @@ export function NewProjectModal({ onClose }: { onClose: () => void }) {
   const { lang, t } = useLang();
   const [name, setName] = useState('');
   const [client, setClient] = useState('');
+  const [quotationNo, setQuotationNo] = useState('');   // REQ-031
   const [services, setServices] = useState<string[]>(['cgi']);
   const [owners, setOwners] = useState(me.role === 'pm' ? me.name : '');
   const [difficulty, setDifficulty] = useState('medium');
@@ -330,7 +331,7 @@ export function NewProjectModal({ onClose }: { onClose: () => void }) {
     if (!name.trim()) return;
     setBusy(true);
     const p = await createProject({
-      name: name.trim(), client, services,
+      name: name.trim(), client, quotationNo: quotationNo.trim(), services,
       owners: owners.split(',').map((s) => s.trim()).filter(Boolean),
       difficulty, start, delivery, buffer,
       clientPerson, clientPhone, clientEmail,
@@ -353,9 +354,16 @@ export function NewProjectModal({ onClose }: { onClose: () => void }) {
       <div className="modal">
         <h2>{t('新建项目', 'New Project')}</h2>
         <div className="msub">{t('按分区填写;相关公司按需添加,不必每项都有。', 'Fill in by section; add related companies only as needed.')}</div>
-        <div className="field">
-          <label>{t('项目名称', 'Project name')}</label>
-          <input value={name} onChange={(e) => setName(e.target.value)} placeholder={t('例:Dunearn Road Condo', 'e.g. Dunearn Road Condo')} autoFocus />
+        {/* REQ-031: 报价单号跟项目名同一行 —— 建项目时顺手记下,日后对账好找 */}
+        <div className="two">
+          <div className="field">
+            <label>{t('项目名称', 'Project name')}</label>
+            <input value={name} onChange={(e) => setName(e.target.value)} placeholder={t('例:Dunearn Road Condo', 'e.g. Dunearn Road Condo')} autoFocus />
+          </div>
+          <div className="field">
+            <label>{t('报价单号 Quotation No.(可选)', 'Quotation No. (optional)')}</label>
+            <input value={quotationNo} onChange={(e) => setQuotationNo(e.target.value)} maxLength={60} placeholder="Q-2026-0123" />
+          </div>
         </div>
 
         <Section zh="① 客户信息" en="① Client" />
