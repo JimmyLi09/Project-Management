@@ -209,6 +209,7 @@ export type SchedStyle = 'classic' | 'weeks' | 'dates';
 export interface Project {
   id: string;
   serial?: number; // REQ-006: sequential project NO. (auto-assigned on create)
+  quotationNo?: string; // REQ-031: 报价单号(非必填,纯文本如 Q-2026-0123)
   schedStyle?: SchedStyle;
   name: string;
   client: string;

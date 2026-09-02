@@ -6,7 +6,7 @@ import { teamLoads } from '@/lib/alloc';
 import { projPoints, projStage } from '@/lib/project';
 import { canAssign } from '@/lib/permissions';
 import { useLang } from '@/lib/i18n';
-import { Avatar, ProgressBar, healthColor } from '../ui';
+import { Avatar, healthColor } from '../ui';
 import TransferModal from '../TransferModal';
 
 export default function TeamView() {
@@ -55,7 +55,6 @@ export default function TeamView() {
               const loadPct = hasCap ? Math.round((pts / m.pointCap) * 100) : m.load;
               const overCap = hasCap && pts > m.pointCap;
               const busy = loadPct >= 85;
-              const lc = overCap ? '#D4483F' : healthColor(loadPct);
               const loadLabel = overCap ? t('超载', 'Overloaded') : busy ? t('较满', 'Busy') : loadPct >= 70 ? t('较满', 'Busy') : t('可用', 'Available');
               return (
                 <div key={m.name} className="panel" style={{ padding: 20, ...(overCap ? { boxShadow: 'inset 0 0 0 1.5px #e7a19b' } : {}) }}>
@@ -71,16 +70,10 @@ export default function TeamView() {
                       {loadLabel}
                     </span>
                   </div>
-                  <div style={{ marginBottom: 16 }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11.5, color: 'var(--text2)', marginBottom: 6 }}>
-                      <span>{hasCap ? t('积分负载', 'Points load') : t('工作量', 'Workload')}</span>
-                      <span className="tnum" style={{ fontWeight: 600, color: lc }}>
-                        {hasCap ? <>{pts} / {m.pointCap} {t('积分', 'pts')} · {loadPct}%</> : <>{loadPct}%</>}
-                      </span>
-                    </div>
-                    <ProgressBar pct={Math.min(100, loadPct)} color={lc} showPct={false} />
-                    {hasCap && <div style={{ fontSize: 11, color: 'var(--text2)', marginTop: 4 }}>{t('按积分上限计算', 'measured against point cap')}</div>}
-                  </div>
+                  {/* REQ-029: 「工作量 %」进度条去掉 —— 口径不准、100% 也不代表真满载,
+                      留着反而误导。右上角的状态标签(较满 / 可用)保留,下面三个数字
+                      (进行中项目 / 未完成任务 / 积分)才是真正有参考价值的。
+                      后端负载计算没动,只是不再展示这一条。 */}
                   <div style={{ display: 'flex', gap: 22, marginBottom: 16 }}>
                     <div><div className="tnum" style={{ fontSize: 20, fontWeight: 600, color: 'var(--navy900)' }}>{m.activeProjects.length}</div><div style={{ fontSize: 11, color: 'var(--text2)' }}>{t('进行中项目', 'Active projects')}</div></div>
                     <div><div className="tnum" style={{ fontSize: 20, fontWeight: 600, color: 'var(--navy900)' }}>{m.openTasks}</div><div style={{ fontSize: 11, color: 'var(--text2)' }}>{t('未完成任务', 'Open tasks')}</div></div>

@@ -2,11 +2,12 @@
 
 import React, { useMemo, useState } from 'react';
 import { useStore } from '../store';
-import { canEdit, isFull } from '@/lib/permissions';
+import { canAdmin, canEdit, isFull } from '@/lib/permissions';
 import { svcName, svcColor } from '@/lib/templates';
 import { todayMid, fmtDate, projCode , pkgSuffix } from '@/lib/project';
 import { useLang } from '@/lib/i18n';
 import { Icon } from '../ui';
+import { FieldEditor } from './JobRecordTab';
 import {
   REGISTERS, registerDef, statusFamily, statusMeta, defaultStatus, recordVal, fieldsOf, formulaText,
   isIncomplete, isExpiring, type RegisterDef, type FieldDef,
@@ -30,6 +31,12 @@ export default function RegistersView() {
   const [q, setQ] = useState('');
   const [pm, setPm] = useState('');
   const [client, setClient] = useState('');   // REQ-020
+  const [sort, setSort] = useState<{ key: string; dir: 1 | -1 } | null>(null);   // REQ-033
+  const [fieldEdit, setFieldEdit] = useState(false);                            // REQ-033 增删列
+  const [cellEditing, setCellEditing] = useState<string | null>(null);          // REQ-033 就地编辑中的格子
+  /* 有没有资格就地改:PD/BD 全量,PM 只在自己项目上 —— 这里只控制点不点得动,
+     真正把关的还是服务端 setRecord 里的 canEdit。 */
+  const canEditCells = isFull(me) || me.role === 'pm' || me.role === 'sales';
   const [status, setStatus] = useState('');
   const [year, setYear] = useState('');
   const [page, setPage] = useState(0);
@@ -72,7 +79,7 @@ export default function RegistersView() {
     return [...s].sort().reverse();
   }, [all, def]);
 
-  const rows = useMemo(() => {
+  const filtered = useMemo(() => {
     const ql = q.trim().toLowerCase();
     return all.filter((r) => {
       const st = (r.pk.record?.status as string) || defaultStatus(def.kind);
@@ -87,6 +94,29 @@ export default function RegistersView() {
       return true;
     });
   }, [all, q, pm, status, year, client, def]);
+
+  /* REQ-033: 点列头排序 —— 和项目列表(REQ-025)同一套手感:
+     一次升序、再点降序、第三次回到默认序。 */
+  const rows = useMemo(() => {
+    if (!sort) return filtered;
+    const val = (r: Row): string => {
+      if (sort.key === 'project') return r.p.name.toLowerCase();
+      if (sort.key === 'client') return (r.p.client || '').toLowerCase();
+      if (sort.key === 'pm') return ((r.p.owners || [])[0] || '').toLowerCase();
+      if (sort.key === 'status') return String((r.pk.record?.status as string) || defaultStatus(def.kind));
+      const key = sort.key.slice(2);
+      const f = def.fields.find((x) => x.key === key);
+      const v = f && f.type === 'formula' ? formulaText(f, def.fields, r.pk.record) : recordVal(r.pk.record, key);
+      /* 空值一律排最后,升降序都是 —— 空格夹在中间最难扫 */
+      return v.trim() ? v.toLowerCase() : '\uffff';
+    };
+    return [...filtered].sort((a, b) => {
+      const va = val(a), vb = val(b);
+      if (va < vb) return -sort.dir;
+      if (va > vb) return sort.dir;
+      return 0;
+    });
+  }, [filtered, sort, def]);
 
   // KPIs
   const kpi = useMemo(() => {
@@ -112,7 +142,7 @@ export default function RegistersView() {
 
   const pageRows = rows.slice(page * PAGE, page * PAGE + PAGE);
   const pages = Math.ceil(rows.length / PAGE) || 1;
-  React.useEffect(() => { setPage(0); }, [svc, q, pm, status, year, client]);
+  React.useEffect(() => { setPage(0); }, [svc, q, pm, status, year, client, sort]);
 
   function exportCsv() {
     const esc = (v: string) => `"${String(v ?? '').replace(/"/g, '""')}"`;
@@ -194,17 +224,35 @@ export default function RegistersView() {
         </div>
       )}
 
+      {/* REQ-033: 增删列 —— 直接复用 Job Record 那套字段编辑器,
+          同一份 schema,改完两边一致(REQ-023 的同源规则)。 */}
+      {canAdmin(me) && (
+        <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 8 }}>
+          <button className="btn-line sm" style={fieldEdit ? { borderColor: 'var(--navy700)', color: 'var(--navy900)', fontWeight: 600 } : undefined}
+            onClick={() => setFieldEdit(!fieldEdit)}>
+            {fieldEdit ? t('完成', 'Done') : t('增删列', 'Edit columns')}
+          </button>
+        </div>
+      )}
+      {fieldEdit && canAdmin(me) && (
+        <div className="panel clip" style={{ marginBottom: 12 }}>
+          <FieldEditor svc={svc} builtin={baseDef.fields} current={def.fields} onClose={() => setFieldEdit(false)} />
+        </div>
+      )}
+
       {/* table */}
       <div className="panel clip">
         <div style={{ overflowX: 'auto' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 760 }}>
             <thead>
               <tr>
-                <th style={th}>{t('项目', 'Project')}</th>
-                <th style={th}>{t('客户', 'Client')}</th>
-                <th style={th}>PM</th>
-                <th style={th}>{t('状态', 'Status')}</th>
-                {def.fields.map((f) => <th key={f.key} style={th}>{lang === 'zh' ? f.zh : f.en}</th>)}
+                <SortTh k="project" label={t('项目', 'Project')} sort={sort} setSort={setSort} th={th} />
+                <SortTh k="client" label={t('客户', 'Client')} sort={sort} setSort={setSort} th={th} />
+                <SortTh k="pm" label="PM" sort={sort} setSort={setSort} th={th} />
+                <SortTh k="status" label={t('状态', 'Status')} sort={sort} setSort={setSort} th={th} />
+                {def.fields.map((f) => (
+                  <SortTh key={f.key} k={`f:${f.key}`} label={lang === 'zh' ? f.zh : f.en} sort={sort} setSort={setSort} th={th} />
+                ))}
                 <th style={{ ...th, textAlign: 'right' }}>{t('操作', 'Action')}</th>
               </tr>
             </thead>
@@ -231,10 +279,29 @@ export default function RegistersView() {
                       {exp && <span className="badge" style={{ background: '#fef3c7', color: '#92600a', marginLeft: 4 }}>{t('即将到期', 'expiring')}</span>}
                       {inc && <span className="badge" style={{ background: '#fdecec', color: 'var(--danger)', marginLeft: 4 }}>{t('缺资料', 'incomplete')}</span>}
                     </td>
-                    {/* REQ-027: 公式列在这里也是算出来的,和 Job Record 同一份定义、同一个结果 */}
+                    {/* REQ-027: 公式列是算出来的,和 Job Record 同一份定义、同一个结果
+                        REQ-033: 其余列点一下就地改,回车 / 失焦保存,不用再开弹窗 */}
                     {def.fields.map((f) => (
-                      <td key={f.key} style={{ ...cell, maxWidth: 220 }}>
-                        <CellVal f={f} val={f.type === 'formula' ? formulaText(f, def.fields, rec) : recordVal(rec, f.key)} />
+                      <td key={f.key} style={{ ...cell, maxWidth: 220, padding: cellEditing === `${r.p.id}:${r.pi}:${f.key}` ? 4 : undefined }}>
+                        {f.type === 'formula' ? (
+                          <b className="tnum">{formulaText(f, def.fields, rec)}</b>
+                        ) : cellEditing === `${r.p.id}:${r.pi}:${f.key}` ? (
+                          <CellEditor
+                            f={f} val={recordVal(rec, f.key)} lang={lang}
+                            onDone={async (v) => {
+                              if (v !== recordVal(rec, f.key)) await dispatch(r.p.id, { type: 'setRecord', pkg: r.pi, patch: { [f.key]: v } });
+                              setCellEditing(null);
+                            }}
+                            onCancel={() => setCellEditing(null)}
+                          />
+                        ) : (
+                          <div
+                            onClick={() => canEditCells && setCellEditing(`${r.p.id}:${r.pi}:${f.key}`)}
+                            title={canEditCells ? t('点击就地编辑', 'Click to edit') : undefined}
+                            style={{ cursor: canEditCells ? 'text' : 'default', minHeight: 18 }}>
+                            <CellVal f={f} val={recordVal(rec, f.key)} />
+                          </div>
+                        )}
                       </td>
                     ))}
                     <td style={{ ...cell, textAlign: 'right', whiteSpace: 'nowrap' }}>
@@ -535,3 +602,53 @@ function EditModal({ row, def, onClose, onSave }: { row: Row; def: RegisterDef; 
 const th: React.CSSProperties = { padding: '11px 16px', fontSize: 11, fontWeight: 700, letterSpacing: '.03em', textTransform: 'uppercase', color: 'var(--text2)', background: 'var(--hover-bg)', textAlign: 'left', whiteSpace: 'nowrap', borderBottom: '1px solid var(--row-line)' };
 const cell: React.CSSProperties = { padding: '11px 16px', fontSize: 13, borderTop: '1px solid var(--row-line)' };
 const lbl: React.CSSProperties = { fontSize: 12.5, fontWeight: 600, color: 'var(--text2)' };
+
+/* REQ-033: 可点排序的列头(与 REQ-025 项目列表同一手感) */
+function SortTh({ k, label, sort, setSort, th }: {
+  k: string; label: string;
+  sort: { key: string; dir: 1 | -1 } | null;
+  setSort: React.Dispatch<React.SetStateAction<{ key: string; dir: 1 | -1 } | null>>;
+  th: React.CSSProperties;
+}) {
+  const on = sort?.key === k;
+  return (
+    <th style={th}>
+      <button
+        onClick={() => setSort((s) => (s && s.key === k ? (s.dir === 1 ? { key: k, dir: -1 } : null) : { key: k, dir: 1 }))}
+        style={{ display: 'inline-flex', alignItems: 'center', gap: 4, font: 'inherit', color: on ? 'var(--navy900)' : 'inherit', cursor: 'pointer', background: 'none' }}>
+        {label}
+        <span style={{ fontSize: 9, opacity: on ? 1 : 0.25 }}>{on ? (sort!.dir === 1 ? '▲' : '▼') : '⇅'}</span>
+      </button>
+    </th>
+  );
+}
+
+/* REQ-033: 单元格就地编辑器。回车 / 失焦保存,Esc 取消。
+   下拉与日期直接用原生控件,文本用输入框 —— 和弹窗里的字段类型保持一致。 */
+function CellEditor({ f, val, lang, onDone, onCancel }: {
+  f: FieldDef; val: string; lang: 'zh' | 'en';
+  onDone: (v: string) => void; onCancel: () => void;
+}) {
+  const [v, setV] = useState(val);
+  const commit = () => onDone(v.trim());
+  const keys = (e: React.KeyboardEvent) => {
+    if (e.key === 'Escape') { e.preventDefault(); onCancel(); }
+    if (e.key === 'Enter' && f.type !== 'textarea') { e.preventDefault(); commit(); }
+  };
+  if (f.type === 'select') {
+    return (
+      <select className="in sm" autoFocus value={v} onKeyDown={keys} onBlur={commit}
+        onChange={(e) => { setV(e.target.value); onDone(e.target.value); }} style={{ width: '100%' }}>
+        <option value="">—</option>
+        {(f.options || []).map((o) => <option key={o[0]} value={o[0]}>{lang === 'zh' ? o[1] : o[2]}</option>)}
+      </select>
+    );
+  }
+  if (f.type === 'textarea') {
+    return <textarea className="in sm" autoFocus value={v} onKeyDown={keys} onBlur={commit}
+      onChange={(e) => setV(e.target.value)} style={{ width: '100%', minHeight: 46 }} />;
+  }
+  return <input className="in sm" autoFocus
+    type={f.type === 'date' ? 'date' : f.type === 'number' ? 'number' : 'text'}
+    value={v} onKeyDown={keys} onBlur={commit} onChange={(e) => setV(e.target.value)} style={{ width: '100%' }} />;
+}

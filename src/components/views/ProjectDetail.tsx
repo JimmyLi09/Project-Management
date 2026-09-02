@@ -20,7 +20,7 @@ import ChecklistTab from './ChecklistTab';
 import JobRecordTab from './JobRecordTab';
 import ExportOverlay from './ExportOverlay';
 import TransferModal from '../TransferModal';
-import type { Project } from '@/lib/types';
+import type { Project, ProjectContact } from '@/lib/types';
 
 export default function ProjectDetail() {
   const { projects, view, setView, me, dispatch, removeProject, go, users, refresh, openProject, setToast } = useStore();
@@ -30,6 +30,7 @@ export default function ProjectDetail() {
   const [assignOpen, setAssignOpen] = useState(false);
   const [copyOpen, setCopyOpen] = useState(false);
   const [renaming, setRenaming] = useState(false);   // REQ-028
+  const [quoting, setQuoting] = useState(false);     // REQ-031
   const p = projects.find((x) => x.id === view.pid);
   if (!p) {
     return <div className="panel" style={{ padding: 40, textAlign: 'center', color: 'var(--text2)' }}>{t('项目加载中…', 'Loading project…')}</div>;
@@ -93,9 +94,40 @@ export default function ProjectDetail() {
               <Pill m={HM[h]} />
               {p.archived && <span className="badge" style={{ background: '#eef1f4', color: '#51606f' }}>📦 {t('已归档', 'Archived')}</span>}
             </div>
-            <div style={{ fontSize: 13.5, color: 'var(--text2)', marginTop: 4 }}>
-              {p.client || '—'} · PM {(p.owners || []).join(', ') || t('未指派', 'unassigned')}
-              {p.start ? <> · {t('起', 'from')} {fmtDate(parseISO(p.start))}</> : null}
+            <div style={{ fontSize: 13.5, color: 'var(--text2)', marginTop: 4, display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+              <span>
+                {p.client || '—'} · PM {(p.owners || []).join(', ') || t('未指派', 'unassigned')}
+                {p.start ? <> · {t('起', 'from')} {fmtDate(parseISO(p.start))}</> : null}
+              </span>
+              {/* REQ-031: 报价单号 —— 点一下就地改,不填就显示占位 */}
+              <span style={{ color: 'var(--border)' }}>·</span>
+              {quoting ? (
+                <input
+                  className="in sm"
+                  autoFocus
+                  aria-label={t('报价单号', 'Quotation number')}
+                  defaultValue={p.quotationNo || ''}
+                  maxLength={60}
+                  placeholder="Q-2026-0123"
+                  style={{ width: 170 }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Escape') { setQuoting(false); return; }
+                    if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+                  }}
+                  onBlur={async (e) => {
+                    const v = e.target.value.trim();
+                    if (v !== (p.quotationNo || '')) await dispatch(p.id, { type: 'setQuotationNo', value: v });
+                    setQuoting(false);
+                  }}
+                />
+              ) : (
+                <button
+                  onClick={() => canMeta(me, p) && setQuoting(true)}
+                  title={canMeta(me, p) ? t('点击填写 / 修改报价单号', 'Click to set the quotation number') : undefined}
+                  style={{ fontSize: 13.5, color: p.quotationNo ? 'var(--text2)' : '#b6bfc9', cursor: canMeta(me, p) ? 'text' : 'default', padding: 0 }}>
+                  {t('报价号', 'Quote')} {p.quotationNo || (canMeta(me, p) ? t('＋ 填写', '＋ add') : '—')}
+                </button>
+              )}
             </div>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 12 }}>
               {p.services.map((k) => <span key={k} className="svc-chip" style={{ color: svcColor(k), padding: '3px 9px', fontSize: 11.5 }}>{svcName(k, lang)}</span>)}
@@ -515,40 +547,8 @@ function OverviewTab({ p, onSchedule }: { p: Project; onSchedule: (pkg: number) 
           {(p.owners || []).length === 0 && team.length === 0 && <div style={{ fontSize: 12.5, color: 'var(--text2)', padding: '8px 0' }}>{t('尚未指派人员', 'No one assigned yet')}</div>}
         </div>
 
-        {/* R5-2: company contacts (client / main con / architect …) */}
-        <div className="panel" style={{ padding: 20 }}>
-          <div className="panel-title" style={{ fontSize: 15, marginBottom: 12 }}>{t('联系人', 'Contacts')}</div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-            {(p.contacts || []).map((c, ci) => (
-              <div key={ci} style={{ borderTop: ci ? '1px solid var(--row-line2)' : 'none', paddingTop: ci ? 12 : 0 }}>
-                {canEd ? (
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 7 }}>
-                    <input className="in sm" defaultValue={c.role} placeholder={t('角色(如 客户/总包)', 'Role (e.g. Client)')}
-                      onBlur={(e) => e.target.value !== c.role && dispatch(p.id, { type: 'editContact', idx: ci, field: 'role', value: e.target.value })} />
-                    <input className="in sm" defaultValue={c.company} placeholder={t('公司', 'Company')}
-                      onBlur={(e) => e.target.value !== c.company && dispatch(p.id, { type: 'editContact', idx: ci, field: 'company', value: e.target.value })} />
-                    <input className="in sm" defaultValue={c.person} placeholder={t('联系人', 'Contact person')}
-                      onBlur={(e) => e.target.value !== c.person && dispatch(p.id, { type: 'editContact', idx: ci, field: 'person', value: e.target.value })} />
-                    <input className="in sm" defaultValue={c.phone} placeholder={t('电话', 'Phone')}
-                      onBlur={(e) => e.target.value !== c.phone && dispatch(p.id, { type: 'editContact', idx: ci, field: 'phone', value: e.target.value })} />
-                    <input className="in sm" style={{ gridColumn: '1 / -1' }} defaultValue={c.email} placeholder={t('邮箱', 'Email')}
-                      onBlur={(e) => e.target.value !== c.email && dispatch(p.id, { type: 'editContact', idx: ci, field: 'email', value: e.target.value })} />
-                    <button className="btn-line sm danger" style={{ justifySelf: 'start' }} onClick={() => dispatch(p.id, { type: 'removeContact', idx: ci })}>✕ {t('删除', 'Remove')}</button>
-                  </div>
-                ) : (
-                  <div>
-                    <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--navy900)' }}>{c.company || c.person || '—'} {c.role && <span style={{ fontSize: 11, fontWeight: 500, color: 'var(--text2)' }}>· {c.role}</span>}</div>
-                    <div style={{ fontSize: 12, color: 'var(--text2)' }}>
-                      {[c.person, c.phone, c.email].filter(Boolean).join(' · ') || t('无联系方式', 'no contact details')}
-                    </div>
-                  </div>
-                )}
-              </div>
-            ))}
-            {(p.contacts || []).length === 0 && <div style={{ fontSize: 12.5, color: 'var(--text2)' }}>{t('暂无联系人', 'No contacts yet')}</div>}
-          </div>
-          {canEd && <button className="btn-line sm" style={{ marginTop: 12, borderStyle: 'dashed' }} onClick={() => dispatch(p.id, { type: 'addContact' })}>+ {t('添加联系人', 'Add contact')}</button>}
-        </div>
+        {/* R5-2 联系人 · REQ-030: 默认只读展示,点「编辑」才进编辑态 */}
+        <ContactsPanel p={p} canEd={canEd} />
 
         <div className="panel" style={{ padding: 20 }}>
           <div className="panel-title" style={{ fontSize: 15, marginBottom: 8, cursor: 'pointer' }} onClick={() => setLogOpen(!logOpen)}>
@@ -992,5 +992,146 @@ function HistoryModal({ pid, onClose }: { pid: string; onClose: () => void }) {
         ))}
       </div>
     </div>
+  );
+}
+
+/* ===== REQ-030 — 项目详情·联系人 =====
+   原来一进来就是一排输入框,容易误改也显得杂乱。改成默认只读展示,
+   点「编辑」整块一起进编辑态(和 Job Record 的「总编辑」一个思路),
+   保存 / 取消明确。角色改成下拉,选「其他」再手填。 */
+const CONTACT_ROLES: [string, string][] = [
+  ['客户 Client', 'Client'],
+  ['总包 Main-con', 'Main contractor'],
+  ['建筑师 Architect', 'Architect'],
+  ['景观 Landscape', 'Landscape'],
+  ['室内 Interior', 'Interior'],
+  ['创意 Creative', 'Creative'],
+];
+
+function ContactsPanel({ p, canEd }: { p: Project; canEd: boolean }) {
+  const { dispatch, setToast } = useStore();
+  const { t } = useLang();
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState<ProjectContact[]>([]);
+  const [busy, setBusy] = useState(false);
+
+  const list = p.contacts || [];
+
+  function begin() {
+    setDraft(list.map((c) => ({ ...c })));
+    setEditing(true);
+  }
+  type CField = 'role' | 'company' | 'person' | 'phone' | 'email';
+  const set = (i: number, field: CField, v: string) =>
+    setDraft((d) => d.map((c, k) => (k === i ? { ...c, [field]: v } : c)));
+
+  /* 服务端的联系人动作是「按下标逐条改」,没有整块替换的 action。
+     这里在保存时把差异拆成 添加 / 逐字段修改 / 删除 依次下发 ——
+     删除从后往前,免得前面的删掉后后面的下标全串位。 */
+  async function save() {
+    setBusy(true);
+    try {
+      for (let i = list.length; i < draft.length; i++) {
+        if (!(await dispatch(p.id, { type: 'addContact' }))) throw new Error('add');
+      }
+      for (let i = list.length - 1; i >= draft.length; i--) {
+        if (!(await dispatch(p.id, { type: 'removeContact', idx: i }))) throw new Error('remove');
+      }
+      const fields: CField[] = ['role', 'company', 'person', 'phone', 'email'];
+      for (let i = 0; i < draft.length; i++) {
+        const was = list[i];
+        for (const f of fields) {
+          const v = String(draft[i][f] ?? '');
+          if (!was || String(was[f] ?? '') !== v) {
+            if (!(await dispatch(p.id, { type: 'editContact', idx: i, field: f, value: v }))) throw new Error('edit');
+          }
+        }
+      }
+      setEditing(false);
+    } catch {
+      setToast(t('保存联系人时出错,请刷新后重试', 'Could not save contacts — refresh and try again'));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="panel" style={{ padding: 20 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+        <span className="panel-title" style={{ fontSize: 15 }}>{t('联系人', 'Contacts')}</span>
+        <div style={{ flex: 1 }} />
+        {canEd && !editing && (
+          <button className="btn-line sm" onClick={begin}><Icon name="edit" size={13} />{t('编辑', 'Edit')}</button>
+        )}
+      </div>
+
+      {!editing ? (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          {list.map((c, ci) => (
+            <div key={ci} style={{ borderTop: ci ? '1px solid var(--row-line2)' : 'none', paddingTop: ci ? 12 : 0 }}>
+              <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--navy900)' }}>
+                {c.company || c.person || '—'}
+                {c.role && <span style={{ fontSize: 11, fontWeight: 500, color: 'var(--text2)' }}> · {c.role}</span>}
+              </div>
+              <div style={{ fontSize: 12, color: 'var(--text2)' }}>
+                {[c.person, c.phone, c.email].filter(Boolean).join(' · ') || t('无联系方式', 'no contact details')}
+              </div>
+            </div>
+          ))}
+          {list.length === 0 && (
+            <div style={{ fontSize: 12.5, color: 'var(--text2)' }}>
+              {t('暂无联系人。', 'No contacts yet.')}
+              {canEd && <button style={{ color: 'var(--navy700)', fontWeight: 600, marginLeft: 6 }} onClick={begin}>{t('去添加', 'Add one')}</button>}
+            </div>
+          )}
+        </div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          {draft.map((c, ci) => (
+            <div key={ci} style={{ borderTop: ci ? '1px solid var(--row-line2)' : 'none', paddingTop: ci ? 12 : 0, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 7 }}>
+              <RoleSelect value={c.role} onChange={(v) => set(ci, 'role', v)} />
+              <input className="in sm" value={c.company} placeholder={t('公司', 'Company')} onChange={(e) => set(ci, 'company', e.target.value)} />
+              <input className="in sm" value={c.person} placeholder={t('联系人', 'Contact person')} onChange={(e) => set(ci, 'person', e.target.value)} />
+              <input className="in sm" value={c.phone} placeholder={t('电话', 'Phone')} onChange={(e) => set(ci, 'phone', e.target.value)} />
+              <input className="in sm" style={{ gridColumn: '1 / -1' }} value={c.email} placeholder={t('邮箱', 'Email')} onChange={(e) => set(ci, 'email', e.target.value)} />
+              <button className="btn-line sm danger" style={{ justifySelf: 'start' }}
+                onClick={() => setDraft((d) => d.filter((_, k) => k !== ci))}>✕ {t('删除', 'Remove')}</button>
+            </div>
+          ))}
+          <button className="btn-line sm" style={{ borderStyle: 'dashed', alignSelf: 'flex-start' }}
+            onClick={() => setDraft((d) => [...d, { role: '', company: '', person: '', phone: '', email: '' }])}>
+            + {t('添加联系人', 'Add contact')}
+          </button>
+          <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', borderTop: '1px solid var(--row-line)', paddingTop: 12 }}>
+            <button className="btn-line sm" onClick={() => setEditing(false)} disabled={busy}>{t('取消', 'Cancel')}</button>
+            <button className="btn-navy sm" onClick={save} disabled={busy}>{busy ? t('保存中…', 'Saving…') : t('保存', 'Save')}</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* 角色下拉:命中固定枚举就选枚举,否则落到「其他」并露出手填框 ——
+   老数据里那些手打的角色不会因为换成下拉就丢掉。 */
+function RoleSelect({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const { t } = useLang();
+  const known = CONTACT_ROLES.some(([zh]) => zh === value);
+  const [other, setOther] = useState(!known && !!value);
+  if (other) {
+    return (
+      <div style={{ display: 'flex', gap: 5 }}>
+        <input className="in sm" value={value} placeholder={t('角色', 'Role')} onChange={(e) => onChange(e.target.value)} />
+        <button className="btn-line sm" title={t('回到下拉选择', 'Back to the list')} onClick={() => { setOther(false); onChange(''); }}>↺</button>
+      </div>
+    );
+  }
+  return (
+    <select className="in sm" value={known ? value : ''}
+      onChange={(e) => { if (e.target.value === '__other') { setOther(true); onChange(''); } else onChange(e.target.value); }}>
+      <option value="">{t('— 角色 —', '— Role —')}</option>
+      {CONTACT_ROLES.map(([zh, en]) => <option key={zh} value={zh}>{t(zh, en)}</option>)}
+      <option value="__other">{t('其他(手填)', 'Other (type it)')}</option>
+    </select>
   );
 }
