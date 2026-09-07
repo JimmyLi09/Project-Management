@@ -32,6 +32,7 @@ export type ProjectAction =
   | { type: 'renameGroup'; pkg: number; gi: number; name: string; nameEn?: string }
   | { type: 'renameProject'; name: string }
   | { type: 'setQuotationNo'; value: string }
+  | { type: 'setClient'; value: string }
   | { type: 'removeGroup'; pkg: number; gi: number }
   | { type: 'setNoCategories'; pkg: number; value: boolean }
   | { type: 'toggleHighlight'; pkg: number; gi: number; ii: number }
@@ -263,6 +264,17 @@ export function applyAction(u: Identity, p: Project, a: ProjectAction, ctx: Acti
       if (v === (p.quotationNo || '')) break;
       p.quotationNo = v;
       logIt(p, u.name, `报价号 Quotation No.=${v || '—'}`);
+      break;
+    }
+    /* REQ-039: Job Record 顶上那张「同步自项目创建」的表保留只读,但表里每一项
+       都得在别处改得动 —— 客户名以前只能在建项目时填,建完就锁死了。 */
+    case 'setClient': {
+      if (!canMeta(u, p)) throw new PermissionError('无修改客户的权限');
+      const v = String(a.value || '').trim().slice(0, 120);
+      if (v === (p.client || '')) break;
+      const was = p.client;
+      p.client = v;
+      logIt(p, u.name, `客户:「${was || '—'}」→「${v || '—'}」`);
       break;
     }
     case 'renameGroup': {

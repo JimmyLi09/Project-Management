@@ -31,6 +31,7 @@ export default function ProjectDetail() {
   const [copyOpen, setCopyOpen] = useState(false);
   const [renaming, setRenaming] = useState(false);   // REQ-028
   const [quoting, setQuoting] = useState(false);     // REQ-031
+  const [clienting, setClienting] = useState(false); // REQ-039
   const p = projects.find((x) => x.id === view.pid);
   if (!p) {
     return <div className="panel" style={{ padding: 40, textAlign: 'center', color: 'var(--text2)' }}>{t('项目加载中…', 'Loading project…')}</div>;
@@ -95,8 +96,36 @@ export default function ProjectDetail() {
               {p.archived && <span className="badge" style={{ background: '#eef1f4', color: '#51606f' }}>📦 {t('已归档', 'Archived')}</span>}
             </div>
             <div style={{ fontSize: 13.5, color: 'var(--text2)', marginTop: 4, display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+              {/* REQ-039: 客户名以前建完项目就改不了了(Job Record 那张只读表却在
+                  显示它)。和报价号一样,点一下就地改。 */}
+              {clienting ? (
+                <input
+                  className="in sm"
+                  autoFocus
+                  aria-label={t('客户', 'Client')}
+                  defaultValue={p.client || ''}
+                  maxLength={120}
+                  style={{ width: 200 }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Escape') { setClienting(false); return; }
+                    if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+                  }}
+                  onBlur={async (e) => {
+                    const v = e.target.value.trim();
+                    if (v !== (p.client || '')) await dispatch(p.id, { type: 'setClient', value: v });
+                    setClienting(false);
+                  }}
+                />
+              ) : (
+                <button
+                  onClick={() => canMeta(me, p) && setClienting(true)}
+                  title={canMeta(me, p) ? t('点击修改客户', 'Click to edit the client') : undefined}
+                  style={{ fontSize: 13.5, color: p.client ? 'var(--text2)' : '#b6bfc9', cursor: canMeta(me, p) ? 'text' : 'default', padding: 0 }}>
+                  {p.client || (canMeta(me, p) ? t('＋ 客户', '＋ client') : '—')}
+                </button>
+              )}
               <span>
-                {p.client || '—'} · PM {(p.owners || []).join(', ') || t('未指派', 'unassigned')}
+                · PM {(p.owners || []).join(', ') || t('未指派', 'unassigned')}
                 {p.start ? <> · {t('起', 'from')} {fmtDate(parseISO(p.start))}</> : null}
               </span>
               {/* REQ-031: 报价单号 —— 点一下就地改,不填就显示占位 */}
@@ -515,8 +544,31 @@ function OverviewTab({ p, onSchedule }: { p: Project; onSchedule: (pkg: number) 
           <div className="panel-title" style={{ fontSize: 15, marginBottom: 14 }}>{t('交付核算', 'Delivery Check')}</div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10, fontSize: 13 }}>
             <Row k={t('计划完成', 'Planned finish')} v={fin ? fmtDate(fin) : '—'} />
-            <Row k={t('交付日', 'Required delivery')} v={p.delivery ? fmtDate(parseISO(p.delivery)) : '—'} />
-            <Row k="Buffer" v={t(`${p.buffer || 0} 天`, `${p.buffer || 0} days`)} />
+            {/* REQ-039: 交付日 / Buffer 之前只有建项目时能填。Job Record 那张只读表
+                在显示交付日,总得有个地方改得动 —— 就在这里改。 */}
+            {canEd ? (
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
+                <span style={{ color: 'var(--text2)' }}>{t('交付日', 'Required delivery')}</span>
+                <input className="in sm" type="date" aria-label={t('交付日', 'Required delivery')}
+                  style={{ width: 152 }} value={p.delivery || ''}
+                  onChange={(e) => dispatch(p.id, { type: 'setDelivery', value: e.target.value })} />
+              </div>
+            ) : <Row k={t('交付日', 'Required delivery')} v={p.delivery ? fmtDate(parseISO(p.delivery)) : '—'} />}
+            {canEd ? (
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
+                <span style={{ color: 'var(--text2)' }}>Buffer</span>
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                  {/* 数字框按 onBlur 存 —— 逐键触发的话每敲一位就是一次版本写入 */}
+                  <input className="in sm" type="number" min={0} max={365} aria-label="Buffer"
+                    style={{ width: 74 }} key={p.buffer || 0} defaultValue={p.buffer || 0}
+                    onBlur={(e) => {
+                      const v = Math.max(0, Math.min(365, parseInt(e.target.value) || 0));
+                      if (v !== (p.buffer || 0)) dispatch(p.id, { type: 'setBuffer', value: v });
+                    }} />
+                  <span style={{ color: 'var(--text2)', fontSize: 12 }}>{t('天', 'days')}</span>
+                </span>
+              </div>
+            ) : <Row k="Buffer" v={t(`${p.buffer || 0} 天`, `${p.buffer || 0} days`)} />}
             <Row k={t('信息确认', 'Info checklist')} v={`${ip.done}/${ip.total} · ${ip.pct}%`} />
             <Row k={t('积分', 'Points')} v={String(projPoints(p))} />
             <div style={{ borderTop: '1px solid var(--row-line)', paddingTop: 10, fontWeight: 600, color: slack === null ? 'var(--text2)' : slack >= 0 ? 'var(--success)' : 'var(--danger)' }}>

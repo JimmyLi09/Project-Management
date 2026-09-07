@@ -30,6 +30,8 @@ export interface FieldDef {
   formula?: string;                 // 用户填的表达式,引用同卡其它字段的 key
   decimals?: number;                // 结果小数位,默认 2
   group?: string;                   // 分组名;同组字段聚在一起、组内两列排布
+  /* REQ-039 —— 关键信息:资料卡与登记表里加粗显示,一眼能找到 */
+  highlight?: boolean;
 }
 
 export interface RegisterDef {
@@ -63,6 +65,31 @@ export const statusFamily = (kind: RegisterKind) => (kind === 'install' ? INSTAL
 export const defaultStatus = (kind: RegisterKind) => (kind === 'install' ? 'pending_signoff' : 'draft');
 export const statusMeta = (kind: RegisterKind, key: string): StatusMeta =>
   statusFamily(kind).find((s) => s[0] === key) || [key, key, key, 'var(--text2)'];
+
+/* ===== REQ-039: LED 计算口径(源:《Calculator reference》)=====
+   写在这里只是「出厂默认」—— 落到界面上它们是普通的 REQ-027 公式字段,
+   PD 在「增减字段」里能改系数、能加自己的算式,不需要动代码。
+     SQM     = 长(mm) × 宽(mm) ÷ 1,000,000
+     Max KW  = SQM × 450W ÷ 1000
+     AVG KW  = Max KW × 0.5      (≈250W/㎡)
+     Heat KW = AVG KW × 0.8
+   电源线 / 数据线数量参考表里本来就是手填(无公式),保持手填。 */
+const G_BASIC = '基本信息 Basics';
+const G_DIM = '尺寸与计算 Dimension & Calc';
+const G_POWER = '电源与线缆 Power & Cable';
+const G_INSTALL = '安装与保修 Install & Warranty';
+const G_REMARK = '备注 Remarks';
+
+const opt = (...vals: ([string, string, string] | [string, string])[]): [string, string, string][] =>
+  vals.map((v) => [v[0], v[1], (v[2] ?? v[1]) as string]);
+
+const LED_PITCH = opt(...(['P0.9', 'P1.25', 'P1.53', 'P1.86', 'P2', 'P2.5', 'P3', 'P4', 'P5', 'P6', 'P8', 'P10'].map((x) => [x, x] as [string, string])));
+const LED_TYPE = opt(['fixed', 'Fixed 固装', 'Fixed'], ['rental', 'Rental 租赁', 'Rental'], ['transparent', 'Transparent 透明屏', 'Transparent'],
+  ['floor', 'Floor 地砖屏', 'Floor'], ['curved', 'Curved 弧形屏', 'Curved'], ['outdoor', 'Outdoor 户外屏', 'Outdoor']);
+const LED_LOCATION = opt(['indoor', 'Indoor 室内', 'Indoor'], ['outdoor', 'Outdoor 室外', 'Outdoor'], ['lobby', 'Lobby 大堂', 'Lobby'],
+  ['gallery', 'Sales Gallery 售楼处', 'Sales Gallery'], ['showroom', 'Showroom 展厅', 'Showroom'], ['meeting', 'Meeting Room 会议室', 'Meeting Room']);
+const YES_NO = opt(['yes', '有', 'Yes'], ['no', '无', 'No']);
+const YES_NO_CLIENT = opt(['yes', '有', 'Yes'], ['no', '无', 'No'], ['client', '客户提供', 'By client']);
 
 /* ---- the 7 registers — columns mirror the studio's Google Sheet tabs ----
    Required fields are limited to project info (name is a project-level column,
@@ -101,26 +128,39 @@ export const REGISTERS: RegisterDef[] = [
     // LED sheet: Address · Main Con · Metal Frame · Installation · Signed Off ·
     // Dimension (L/H/SQM) · Quantity (L/H/Total) · Type · DB Box · Power/Data
     // Cable · Speaker · Remarks.  PD edits: drop Launch, add Warranty.
+    /* REQ-039: LED 自带一套「内置计算器」—— 长宽填完,面积 / 功率 / 散热
+       自动算出来(口径见 LED_CALC)。它走的就是 REQ-027 的公式字段,
+       所以 PD 想换系数、加一条自己的算式,在「增减字段」里改就行,
+       不需要动代码;电源线 / 数据线参考表里本来就是手填,保持手填。 */
     svc: 'led', kind: 'install', confirmed: true,
     fields: [
-      { key: 'siteAddress', zh: 'Address 地址', en: 'Address', type: 'text', required: true },
-      { key: 'mainCon', zh: 'Main Con', en: 'Main Con', type: 'text' },
-      { key: 'metalFrame', zh: 'Metal Frame 金属框', en: 'Metal Frame', type: 'text' },
-      { key: 'installation', zh: 'Installation 安装日期', en: 'Installation', type: 'date' },
-      { key: 'signedOff', zh: 'Signed Off 签收', en: 'Signed Off', type: 'date' },
-      { key: 'dimL', zh: 'L (mm)', en: 'L (mm)', type: 'text' },
-      { key: 'dimH', zh: 'H (mm)', en: 'H (mm)', type: 'text' },
-      { key: 'sqm', zh: 'SQM 面积', en: 'SQM', type: 'text' },
-      { key: 'qtyL', zh: '数量 L', en: 'Qty L', type: 'text' },
-      { key: 'qtyH', zh: '数量 H', en: 'Qty H', type: 'text' },
-      { key: 'qtyTotal', zh: '数量 Total', en: 'Qty Total', type: 'text' },
-      { key: 'ledType', zh: 'Type 类型', en: 'Type', type: 'text' },
-      { key: 'dbBox', zh: 'DB Box (KW)', en: 'DB Box (KW)', type: 'text' },
-      { key: 'powerCable', zh: 'Power Cable (No.)', en: 'Power Cable (No.)', type: 'text' },
-      { key: 'dataCable', zh: 'Data Cable (No.)', en: 'Data Cable (No.)', type: 'text' },
-      { key: 'speaker', zh: 'Speaker 音箱', en: 'Speaker', type: 'text' },
-      { key: 'remarks', zh: 'Remarks 备注', en: 'Remarks', type: 'textarea' },
-      { key: 'warranty', zh: 'Warranty 保修到期', en: 'Warranty', type: 'date' },
+      { key: 'siteAddress', zh: 'Address 地址', en: 'Address', type: 'text', required: true, group: G_BASIC, highlight: true },
+      { key: 'mainCon', zh: 'Main Con', en: 'Main Con', type: 'text', group: G_BASIC },
+      { key: 'location', zh: 'Location 位置', en: 'Location', type: 'select', group: G_BASIC, options: LED_LOCATION },
+      { key: 'ledType', zh: 'Type 类型', en: 'Type', type: 'select', group: G_BASIC, options: LED_TYPE },
+      { key: 'resolution', zh: 'Screen Resolution 点间距', en: 'Screen Resolution', type: 'select', group: G_BASIC, options: LED_PITCH, highlight: true },
+      { key: 'metalFrame', zh: 'Metal Frame 金属框', en: 'Metal Frame', type: 'select', group: G_BASIC, options: YES_NO_CLIENT },
+      { key: 'speaker', zh: 'Speaker 音箱', en: 'Speaker', type: 'select', group: G_BASIC, options: YES_NO },
+
+      { key: 'dimL', zh: 'Length 长 (mm)', en: 'Length (mm)', type: 'number', group: G_DIM, highlight: true },
+      { key: 'dimH', zh: 'Width 宽 (mm)', en: 'Width (mm)', type: 'number', group: G_DIM, highlight: true },
+      { key: 'sqm', zh: 'SQM 面积 (㎡)', en: 'SQM', type: 'formula', formula: 'dimL * dimH / 1000000', decimals: 3, group: G_DIM, highlight: true },
+      { key: 'maxKw', zh: 'Max KW 最大功率', en: 'Max KW', type: 'formula', formula: 'sqm * 450 / 1000', decimals: 2, group: G_DIM, highlight: true },
+      { key: 'avgKw', zh: 'AVG KW 平均功率', en: 'AVG KW', type: 'formula', formula: 'maxKw * 0.5', decimals: 2, group: G_DIM, highlight: true },
+      { key: 'heatKw', zh: 'Heat KW 散热量', en: 'Heat KW', type: 'formula', formula: 'avgKw * 0.8', decimals: 2, group: G_DIM },
+      { key: 'qtyL', zh: '数量 L', en: 'Qty L', type: 'number', group: G_DIM },
+      { key: 'qtyH', zh: '数量 H', en: 'Qty H', type: 'number', group: G_DIM },
+      { key: 'qtyTotal', zh: '数量 Total', en: 'Qty Total', type: 'number', group: G_DIM },
+
+      { key: 'dbBox', zh: 'DB Box (KW)', en: 'DB Box (KW)', type: 'text', group: G_POWER },
+      { key: 'powerCable', zh: '20A 单相电源线 (条)', en: '20A single-phase power cable (No.)', type: 'number', group: G_POWER },
+      { key: 'dataCable', zh: 'Cat6 数据线 (条)', en: 'Cat6 data cable (No.)', type: 'number', group: G_POWER },
+
+      { key: 'installation', zh: 'Installation 安装日期', en: 'Installation', type: 'date', group: G_INSTALL, highlight: true },
+      { key: 'signedOff', zh: 'Signed Off 签收', en: 'Signed Off', type: 'date', group: G_INSTALL },
+      { key: 'warranty', zh: 'Warranty 保修到期', en: 'Warranty', type: 'date', group: G_INSTALL },
+
+      { key: 'remarks', zh: 'Remarks 备注', en: 'Remarks', type: 'textarea', group: G_REMARK },
     ],
   },
   {
@@ -230,6 +270,7 @@ export function validateFields(raw: unknown): { ok: true; fields: FieldDef[] } |
     const def: FieldDef = { key, zh, en: String(f?.en || zh).slice(0, 60), type };
     if (f?.required) def.required = true;
     if (f?.group) def.group = String(f.group).slice(0, 40);
+    if (f?.highlight) def.highlight = true;   // REQ-039: 关键信息加粗
     if (type === 'formula') {
       def.formula = String(f?.formula || '').slice(0, 500);
       const dp = Number(f?.decimals);
@@ -284,10 +325,22 @@ export function computeFormula(field: FieldDef, fields: FieldDef[], rec: Service
   return evalFormula(field.formula, values, resolve);
 }
 
-/* 公式结果的显示串 */
+/* 公式结果的显示串。
+   REQ-039: 算不出来时,如果这个 key 上有历史手填值(比如 SQM 以前是文本列、
+   有人直接填过数字),回落显示那个旧值,不要让改列类型把老数据「弄丢」。
+   源字段一填,算出来的值立刻盖过旧值。 */
 export function formulaText(field: FieldDef, fields: FieldDef[], rec: ServiceRecord | undefined): string {
   const v = computeFormula(field, fields, rec);
-  return v == null ? '—' : v.toFixed(field.decimals ?? 2);
+  if (v != null) return v.toFixed(field.decimals ?? 2);
+  const legacy = recordVal(rec, field.key).trim();
+  return legacy || '—';
+}
+
+/* 下拉字段的显示文字:值对得上选项就显示选项名,对不上(改类型前留下的旧值)
+   就原样显示 —— 显示不了才是真丢数据。 */
+export function optionLabel(f: FieldDef, val: string, lang: 'zh' | 'en'): string {
+  const o = (f.options || []).find((x) => x[0] === val);
+  return o ? (lang === 'zh' ? o[1] : o[2]) : val;
 }
 
 /* ---- record helpers ---- */

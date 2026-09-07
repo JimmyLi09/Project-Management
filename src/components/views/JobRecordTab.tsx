@@ -8,10 +8,11 @@ import { fmtDate, parseISO, pkgSuffix, projCode } from '@/lib/project';
 import { useLang } from '@/lib/i18n';
 import { Icon } from '../ui';
 import {
-  REGISTERS, registerDef, statusFamily, statusMeta, defaultStatus, recordVal, isIncomplete, fieldsOf, FIELD_TYPES, formulaText,
+  REGISTERS, registerDef, statusFamily, statusMeta, defaultStatus, recordVal, isIncomplete, fieldsOf, FIELD_TYPES, formulaText, optionLabel,
   type FieldDef, type FieldType, type RegisterDef,
 } from '@/lib/records';
 import type { Project, ServicePackage } from '@/lib/types';
+import JobRecordExport from './JobRecordExport';
 
 /* §2 Job Record — single project view: each service package's business record
    shown as a table. Read-only by default; "总编辑" flips the whole card into an
@@ -31,9 +32,12 @@ export default function JobRecordTab({ p }: { p: Project }) {
   const cardApi = React.useRef<Record<number, { begin: () => void; save: () => Promise<void>; cancel: () => void }>>({});
   const [editAll, setEditAll] = useState(false);
   const [savingAll, setSavingAll] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const register = React.useCallback((idx: number, api: { begin: () => void; save: () => Promise<void>; cancel: () => void } | null) => {
     if (api) cardApi.current[idx] = api; else delete cardApi.current[idx];
   }, []);
+
+  if (exporting) return <JobRecordExport p={p} onClose={() => setExporting(false)} />;
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -42,6 +46,10 @@ export default function JobRecordTab({ p }: { p: Project }) {
           {t('每个服务的业务资料集中在此维护;与「项目档案」登记表同源,任一处修改即时一致。',
              'Business records for each service live here; the same data powers the cross-project Registers — edit either place, stays in sync.')}
         </div>
+        {/* REQ-039: 整份 Job Record 可下载 —— 打印/另存 PDF 与 Excel(CSV) */}
+        <button className="btn-line sm" onClick={() => setExporting(true)} disabled={known.length === 0}>
+          <Icon name="download" size={13} />{t('下载', 'Download')}
+        </button>
         {canEd && known.length > 0 && (editAll ? (
           <>
             <button className="btn-line sm" disabled={savingAll}
@@ -64,13 +72,20 @@ export default function JobRecordTab({ p }: { p: Project }) {
         ))}
       </div>
 
-      {/* REQ-032: 同步自项目创建的信息 —— 表格化、始终只读,
-          它跟着项目档案走,不该在这里被改。 */}
+      {/* REQ-032: 同步自项目创建的信息 —— 表格化、始终只读,它跟着项目走。
+          REQ-039: 这一条保留(需求方确认),但每一项都必须在别处改得动 ——
+          项目名 / 报价号 / 客户在项目页抬头点一下就能改,交付日在「概览 ·
+          交付核算」里改,PM 在「项目团队」里指派。所以这里挂一句话说清楚
+          去哪儿改,而不是让人对着一张只读表干瞪眼。 */}
       <div className="panel clip">
-        <div style={{ padding: '12px 18px', borderBottom: '1px solid var(--row-line)', display: 'flex', alignItems: 'center', gap: 8 }}>
+        <div style={{ padding: '12px 18px', borderBottom: '1px solid var(--row-line)', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
           <span className="panel-title" style={{ fontSize: 14 }}>{t('项目信息', 'Project info')}</span>
           <span className="badge" style={{ background: 'var(--hover-bg)', color: 'var(--text2)' }}>
             {t('同步自项目创建 · 只读', 'Synced from the project · read-only')}
+          </span>
+          <span style={{ fontSize: 11.5, color: 'var(--text2)' }}>
+            {t('要改?项目名 / 报价号 / 客户在页面抬头点一下改;交付日在「概览 · 交付核算」;PM 在「概览 · 项目团队」。',
+               'To edit: name / quote no. / client in the page header; delivery date under Overview · Delivery Check; PM under Overview · Assigned Team.')}
           </span>
         </div>
         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
@@ -128,10 +143,11 @@ export default function JobRecordTab({ p }: { p: Project }) {
 /* add a business/service to the project mid-flight (production scope changed).
    Only offers the 7 register services the project doesn't already have. */
 function AddServiceBar({ p }: { p: Project }) {
-  const { dispatch } = useStore();
+  const { dispatch, recordFields } = useStore();
   const { lang, t } = useLang();
   const [svc, setSvc] = useState('');
   const [label, setLabel] = useState('');
+  const [spec, setSpec] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
 
   /* REQ-026: 同类业务可以再加一份(两块 LED / 两个沙盘),所以不再排除已有的;
@@ -139,31 +155,67 @@ function AddServiceBar({ p }: { p: Project }) {
   const countOf = (k: string) => p.packages.filter((x) => x.svc === k).length;
   const options = REGISTERS;
 
+  /* REQ-039: 选了业务之后,把这张登记表最前面两个下拉字段(LED 就是
+     Screen Resolution / Location)顺手摆出来,添加时一起带进 record ——
+     省得加完再进卡片补。哪些字段出现完全跟着字段定义走,PD 在「增减字段」
+     里把某列改成下拉,这里就自动多一个选项,不需要改代码。 */
+  const baseDef = svc ? registerDef(svc) : undefined;
+  const specFields = useMemo(
+    () => (baseDef ? fieldsOf(baseDef, recordFields).filter((f) => f.type === 'select').slice(0, 2) : []),
+    [baseDef, recordFields],
+  );
+
   return (
     <div className="panel" style={{ padding: '12px 16px', borderStyle: 'dashed' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 9, flexWrap: 'wrap' }}>
         <span style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--navy900)' }}>＋ {t('添加业务', 'Add service')}</span>
         <span style={{ fontSize: 11.5, color: 'var(--text2)' }}>{t('制作过程中新增的业务可在此加入', 'Add a service if scope changes during production')}</span>
         <div style={{ flex: 1 }} />
-        <select className="in sm" value={svc} onChange={(e) => setSvc(e.target.value)} style={{ width: 'auto' }}>
+        <select className="in sm" value={svc} onChange={(e) => { setSvc(e.target.value); setSpec({}); }} style={{ width: 'auto' }}>
           <option value="">{t('— 选择业务 —', '— select service —')}</option>
           {options.map((r) => {
             const n = countOf(r.svc);
             return <option key={r.svc} value={r.svc}>{svcName(r.svc, lang)}{n ? t(`（已有 ${n} 份）`, ` (${n} existing)`) : ''}</option>;
           })}
         </select>
+        {specFields.map((f) => (
+          <select key={f.key} className="in sm" style={{ width: 'auto' }} value={spec[f.key] || ''}
+            onChange={(e) => setSpec((s) => ({ ...s, [f.key]: e.target.value }))}>
+            <option value="">{t(`— ${f.zh} —`, `— ${f.en} —`)}</option>
+            {(f.options || []).map((o) => <option key={o[0]} value={o[0]}>{lang === 'zh' ? o[1] : o[2]}</option>)}
+          </select>
+        ))}
         <input className="in sm" style={{ width: 150 }} value={label} onChange={(e) => setLabel(e.target.value)}
           placeholder={t('实例名(可空)', 'Instance name (optional)')}
           title={t('同类多份时用来区分,例如「大堂 LED」「入口 LED」;留空则按 ①②③ 标号', 'Distinguishes multiple of the same type, e.g. "Lobby LED"; blank falls back to ①②③')} />
         <button className="btn-navy sm" disabled={busy || !svc}
           onClick={async () => {
             setBusy(true);
-            await dispatch(p.id, { type: 'addServicePackage', svc, patch: {}, asNew: true, label: label.trim() });
-            setBusy(false); setSvc(''); setLabel('');
+            const patch = Object.fromEntries(Object.entries(spec).filter(([, v]) => v));
+            await dispatch(p.id, { type: 'addServicePackage', svc, patch, asNew: true, label: label.trim() });
+            setBusy(false); setSvc(''); setLabel(''); setSpec({});
           }}>
           {busy ? t('添加中…', 'Adding…') : t('添加', 'Add')}
         </button>
       </div>
+
+      {/* REQ-039:「已添加」列表 —— 同类多块时一眼看清这个项目现在有几份、分别是什么 */}
+      {p.packages.length > 0 && (
+        <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap', alignItems: 'center', marginTop: 10, paddingTop: 10, borderTop: '1px dashed var(--row-line)' }}>
+          <span style={{ fontSize: 11.5, color: 'var(--text2)' }}>{t('已添加', 'Added')} ({p.packages.length})</span>
+          {p.packages.map((pk, i) => {
+            const d = registerDef(pk.svc);
+            const sel = d ? fieldsOf(d, recordFields).filter((f) => f.type === 'select').slice(0, 2) : [];
+            const spec2 = sel.map((f) => optionLabel(f, recordVal(pk.record, f.key), lang)).filter(Boolean).join(' · ');
+            return (
+              <span key={i} className="badge" style={{ background: 'var(--hover-bg)', color: 'var(--text2)' }}>
+                <span className="bdot" style={{ background: svcColor(pk.svc) }} />
+                {svcName(pk.svc, lang)}{pkgSuffix(p, i) ? ' ' + pkgSuffix(p, i) : ''}{spec2 ? ' · ' + spec2 : ''}
+              </span>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
@@ -282,18 +334,20 @@ function RecordCard({ p, pk, pkgIdx, def: baseDef, canEd, register }: {
                   const isF = f.type === 'formula';
                   const val = isF ? formulaText(f, def.fields, rec) : recordVal(rec, f.key);
                   const missing = !isF && f.required && !val.trim();
+                  /* REQ-039: 关键信息粗体 —— 公式算出来的结果本来就是重点,一并加粗 */
+                  const key = !!f.highlight || isF;
                   return (
                     <div key={f.key} style={{ display: 'flex', gap: 10, alignItems: 'baseline', padding: '7px 0', borderBottom: '1px solid var(--row-line)', minWidth: 0 }}>
-                      <span style={{ flex: '0 0 40%', fontSize: 12, color: 'var(--text2)', fontWeight: 600 }}>
+                      <span style={{ flex: '0 0 40%', fontSize: 12, color: key ? 'var(--navy900)' : 'var(--text2)', fontWeight: key ? 700 : 600 }}>
                         {lang === 'zh' ? f.zh : f.en}
                         {f.required && <span style={{ color: 'var(--danger)' }}> *</span>}
                         {isF && <span title={f.formula} style={{ marginLeft: 5, fontSize: 10, color: 'var(--bronze)' }}>ƒ</span>}
                       </span>
-                      <span style={{ flex: 1, minWidth: 0, fontSize: 13, background: missing ? 'var(--hl-cell, #fef3c7)' : undefined }}>
+                      <span style={{ flex: 1, minWidth: 0, fontSize: 13, fontWeight: key ? 700 : 400, background: missing ? 'var(--hl-cell, #fef3c7)' : undefined }}>
                         {isF
                           ? <b className="tnum" style={{ color: val === '—' ? '#b6bfc9' : 'var(--navy900)' }}>{val}</b>
-                          : val ? <FieldValue f={f} val={val} />
-                          : <span style={{ color: missing ? '#b8860b' : '#b6bfc9' }}>{missing ? t('待补充', 'to fill') : '—'}</span>}
+                          : val ? <FieldValue f={f} val={val} lang={lang} />
+                          : <span style={{ color: missing ? '#b8860b' : '#b6bfc9', fontWeight: 400 }}>{missing ? t('待补充', 'to fill') : '—'}</span>}
                       </span>
                     </div>
                   );
@@ -316,7 +370,7 @@ function RecordCard({ p, pk, pkgIdx, def: baseDef, canEd, register }: {
               </tr>
               {def.fields.map((f) => (
                 <tr key={f.key}>
-                  <th style={cellK}>
+                  <th style={f.highlight ? { ...cellK, color: 'var(--navy900)', fontWeight: 700 } : cellK}>
                     {lang === 'zh' ? f.zh : f.en}{f.required && <span style={{ color: 'var(--danger)' }}> *</span>}
                     {f.type === 'formula' && <span title={f.formula} style={{ marginLeft: 5, fontSize: 10, color: 'var(--bronze)' }}>ƒ</span>}
                   </th>
@@ -349,20 +403,30 @@ function RecordCard({ p, pk, pkgIdx, def: baseDef, canEd, register }: {
   );
 }
 
-function FieldValue({ f, val }: { f: FieldDef; val: string }) {
+function FieldValue({ f, val, lang }: { f: FieldDef; val: string; lang: 'zh' | 'en' }) {
   if (f.type === 'url') return <a href={val} target="_blank" rel="noreferrer" style={{ color: 'var(--info)', wordBreak: 'break-all' }}>{val}</a>;
   if (f.type === 'textarea') return <span style={{ whiteSpace: 'pre-wrap' }}>{val}</span>;
+  /* REQ-039: 下拉显示选项名而不是存的 key */
+  if (f.type === 'select') return <span>{optionLabel(f, val, lang)}</span>;
   return <span>{val}</span>;
 }
 
 function FieldInput({ f, val, onChange, lang }: { f: FieldDef; val: string; onChange: (v: string) => void; lang: 'zh' | 'en' }) {
   if (f.type === 'textarea') return <textarea className="in sm" value={val} onChange={(e) => onChange(e.target.value)} style={{ minHeight: 52 }} />;
-  if (f.type === 'select') return (
-    <select className="in sm" value={val} onChange={(e) => onChange(e.target.value)} style={{ maxWidth: 220 }}>
-      <option value="">—</option>
-      {(f.options || []).map((o) => <option key={o[0]} value={o[0]}>{lang === 'zh' ? o[1] : o[2]}</option>)}
-    </select>
-  );
+  if (f.type === 'select') {
+    /* REQ-039: 一个字段从文本改成下拉之后,老数据的值多半不在选项里。
+       把它补成一个选项显示出来,不然编辑一进来就是空的 —— 存下去等于把
+       历史值抹了。用户重新选一个新选项就自然覆盖掉。 */
+    const opts = f.options || [];
+    const legacy = val && !opts.some((o) => o[0] === val);
+    return (
+      <select className="in sm" value={val} onChange={(e) => onChange(e.target.value)} style={{ maxWidth: 220 }}>
+        <option value="">—</option>
+        {opts.map((o) => <option key={o[0]} value={o[0]}>{lang === 'zh' ? o[1] : o[2]}</option>)}
+        {legacy && <option value={val}>{val}（{lang === 'zh' ? '原值' : 'existing'}）</option>}
+      </select>
+    );
+  }
   if (f.type === 'number') return <input className="in sm" type="number" value={val} onChange={(e) => onChange(e.target.value)} style={{ maxWidth: 190 }} />;
   return <input className="in sm" type={f.type === 'date' ? 'date' : 'text'} value={val} onChange={(e) => onChange(e.target.value)} style={f.type === 'date' ? { maxWidth: 190 } : undefined} />;
 }
@@ -453,7 +517,7 @@ export function FieldEditor({ svc, builtin, current, onClose }: {
               setDrag(null);
             }}
             style={{
-              display: 'grid', gridTemplateColumns: '18px minmax(120px,1.4fr) minmax(110px,1.2fr) 116px 74px 28px',
+              display: 'grid', gridTemplateColumns: '18px minmax(120px,1.4fr) minmax(110px,1.2fr) 116px 128px 28px',
               gap: 8, alignItems: 'center', background: 'var(--card, #fff)',
               border: '1px solid var(--border)', borderRadius: 8, padding: '7px 9px',
               opacity: drag === i ? 0.45 : 1,
@@ -480,6 +544,10 @@ export function FieldEditor({ svc, builtin, current, onClose }: {
             <label style={{ fontSize: 11.5, display: 'inline-flex', gap: 5, alignItems: 'center', color: 'var(--text2)' }}>
               <input type="checkbox" checked={!!f.required} onChange={(e) => patch(i, { required: e.target.checked })} />
               {t('必填', 'Req.')}
+              {/* REQ-039: 关键信息加粗显示 */}
+              <input type="checkbox" checked={!!f.highlight} onChange={(e) => patch(i, { highlight: e.target.checked })}
+                title={t('标为关键信息 —— 在资料卡和登记表里加粗显示', 'Mark as key info — shown in bold')} />
+              {t('重点', 'Key')}
             </label>
             <button className="btn-line sm danger" title={t('删除字段', 'Remove field')} onClick={() => removeField(i)}>✕</button>
 
