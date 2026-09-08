@@ -19,6 +19,7 @@ import FinanceView from './views/FinanceView';
 import UsersView from './views/UsersView';
 import TemplatesView from './views/TemplatesView';
 import RulesView from './views/RulesView';
+import KnowledgeView from './views/KnowledgeView';
 import ProjectDetail from './views/ProjectDetail';
 
 export default function App({ user }: { user: User }) {
@@ -40,6 +41,7 @@ const PAGE_META: Record<string, { title: [string, string]; sub: [string, string]
   registers: { title: ['项目档案', 'Registers'], sub: ['按业务类型的跨项目登记表 · 7 类 · 可筛选导出', 'Cross-project registers by business type · 7 tables · filter & export'] },
   finance: { title: ['收款看板', 'Collections'], sub: ['开票与收款全局视图 · 逾期预警 · 可导出', 'Invoicing & payment across projects · overdue alerts · exportable'] },
   users: { title: ['用户管理', 'Users'], sub: ['账号、角色与访问权限', 'Accounts, roles and access'] },
+  knowledge: { title: ['运营中心 · 知识库', 'Knowledge Base'], sub: ['公司制度 / SOP / 培训资料 —— 可编辑、留版本、可导入导出', 'Company policies, SOPs and training material — versioned, importable and exportable'] },
   rules: { title: ['规则设置', 'Rules'], sub: ['积分规则:按业务分档、可改、留版本(来源《项目积分算法》)', 'Points rules: tiers per service, editable, versioned'] },
   templates: { title: ['模板管理', 'Templates'], sub: ['编辑生产排期与信息清单模板(仅影响之后新建的项目)', 'Edit schedule & checklist templates (affects new projects only)'] },
 };
@@ -137,6 +139,7 @@ function Shell() {
           {navItem('registers', 'layers', t('项目档案', 'Registers'))}
           {(isFull(me) || me.role === 'finance') && navItem('finance', 'trending', t('收款看板', 'Collections'), financeAlertCount)}
           {isFull(me) && navItem('users', 'settings', t('用户管理', 'Users'))}
+          {navItem('knowledge', 'book', t('知识库', 'Knowledge'))}
           {isFull(me) && navItem('rules', 'settings', t('规则设置', 'Rules'))}
           {isFull(me) && navItem('templates', 'layers', t('模板管理', 'Templates'))}
         </nav>
@@ -236,6 +239,7 @@ function Shell() {
             {view.name === 'registers' && <RegistersView />}
             {view.name === 'finance' && <FinanceView />}
             {view.name === 'users' && <UsersView />}
+            {view.name === 'knowledge' && <KnowledgeView />}
             {view.name === 'rules' && <RulesView />}
             {view.name === 'templates' && <TemplatesView />}
             {view.name === 'project' && <ProjectDetail />}

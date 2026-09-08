@@ -13,6 +13,7 @@ import {
 } from '@/lib/records';
 import type { Project, ServicePackage } from '@/lib/types';
 import JobRecordExport from './JobRecordExport';
+import KbLinks from '../KbLinks';
 
 /* §2 Job Record — single project view: each service package's business record
    shown as a table. Read-only by default; "总编辑" flips the whole card into an
@@ -393,6 +394,9 @@ function RecordCard({ p, pk, pkgIdx, def: baseDef, canEd, register }: {
           {/* 保存 / 取消 统一放在页面顶部,这里不再重复一套 */}
         </div>
       )}
+
+      {/* REQ-035 内嵌调用:这个业务类型下挂的知识库文档,就地列出来 */}
+      {!editing && <KbLinks svc={pk.svc} compact />}
 
       {updated && !editing && (
         <div style={{ padding: '8px 18px', fontSize: 11, color: 'var(--text2)', borderTop: '1px solid var(--row-line)' }}>
