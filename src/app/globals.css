@@ -243,3 +243,18 @@ textarea.in { width: 100%; min-height: 46px; resize: vertical }
   .ex-cover { min-height: calc(100vh - 60px); border-bottom: none; margin-bottom: 0; break-after: page; page-break-after: always }
   .ex-cover .exc-name { font-size: 26px }
 }
+
+/* ===== REQ-035: 知识库 =====
+   打印一篇文档时,只留正文 —— 工具条、版本历史、编辑器一律不上纸。
+   复用 REQ-017 那套「只显示要打印的那块」的做法。 */
+@media print {
+  body:has(.ex-print-doc) * { visibility: hidden }
+  .ex-print-doc, .ex-print-doc * { visibility: visible }
+  .ex-print-doc { position: absolute; left: 0; top: 0; width: 100%; padding: 0 }
+  .ex-print-doc .kb-bar, .ex-print-doc .kb-bar * { display: none !important }
+  .md-doc h2, .md-doc h3 { break-after: avoid-page }
+  .md-doc tr, .md-doc figure, .md-doc pre { break-inside: avoid }
+  .md-doc img { max-width: 100% }
+}
+.md-doc > *:first-child { margin-top: 0 }
+.md-table th, .md-table td { word-break: break-word }

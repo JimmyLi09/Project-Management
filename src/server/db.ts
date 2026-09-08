@@ -221,6 +221,40 @@ function migrateSchema(d: Database.Database) {
     created_at INTEGER NOT NULL,
     created_by TEXT NOT NULL DEFAULT ''
   )`);
+  /* REQ-035: 知识库。正文是 Markdown;每次保存把「上一版」压进 kb_versions,
+     所以历史可看可回退。附件单独一张表,别把文档行撑大。 */
+  d.exec(`CREATE TABLE IF NOT EXISTS kb_docs (
+    id TEXT PRIMARY KEY,
+    title TEXT NOT NULL,
+    title_en TEXT NOT NULL DEFAULT '',
+    category TEXT NOT NULL DEFAULT 'other',
+    tags TEXT NOT NULL DEFAULT '[]',
+    body TEXT NOT NULL DEFAULT '',
+    anchors TEXT NOT NULL DEFAULT '{}',
+    attachments TEXT NOT NULL DEFAULT '[]',
+    version INTEGER NOT NULL DEFAULT 1,
+    updated_at INTEGER NOT NULL,
+    updated_by TEXT NOT NULL DEFAULT '',
+    created_at INTEGER NOT NULL,
+    created_by TEXT NOT NULL DEFAULT ''
+  )`);
+  d.exec(`CREATE TABLE IF NOT EXISTS kb_versions (
+    doc_id TEXT NOT NULL,
+    version INTEGER NOT NULL,
+    title TEXT NOT NULL DEFAULT '',
+    body TEXT NOT NULL DEFAULT '',
+    summary TEXT NOT NULL DEFAULT '',
+    at INTEGER NOT NULL,
+    by TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY (doc_id, version)
+  )`);
+  d.exec(`CREATE TABLE IF NOT EXISTS kb_files (
+    id TEXT PRIMARY KEY,
+    doc_id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    mime TEXT NOT NULL DEFAULT '',
+    data TEXT NOT NULL
+  )`);
   /* REQ-038: 积分规则。只增不改 —— 每次保存写一个新版本,老版本留着,
      历史项目按它创建时生效的那一版计分。 */
   d.exec(`CREATE TABLE IF NOT EXISTS point_rules (
@@ -231,6 +265,55 @@ function migrateSchema(d: Database.Database) {
     created_at INTEGER NOT NULL,
     created_by TEXT NOT NULL DEFAULT ''
   )`);
+}
+
+/* ---- REQ-035: 知识库 ---- */
+export interface KbRow {
+  id: string; title: string; title_en: string; category: string; tags: string; body: string;
+  anchors: string; attachments: string; version: number;
+  updated_at: number; updated_by: string; created_at: number; created_by: string;
+}
+export interface KbVersionRow { doc_id: string; version: number; title: string; body: string; summary: string; at: number; by: string }
+
+export function listKbDocs(): KbRow[] {
+  return getDb().prepare('SELECT * FROM kb_docs ORDER BY updated_at DESC').all() as KbRow[];
+}
+export function getKbDoc(id: string): KbRow | undefined {
+  return getDb().prepare('SELECT * FROM kb_docs WHERE id = ?').get(id) as KbRow | undefined;
+}
+export function insertKbDoc(r: KbRow) {
+  getDb().prepare(`INSERT INTO kb_docs
+      (id, title, title_en, category, tags, body, anchors, attachments, version, updated_at, updated_by, created_at, created_by)
+      VALUES (@id, @title, @title_en, @category, @tags, @body, @anchors, @attachments, @version, @updated_at, @updated_by, @created_at, @created_by)`).run(r);
+}
+export function updateKbDoc(r: KbRow) {
+  getDb().prepare(`UPDATE kb_docs SET title=@title, title_en=@title_en, category=@category, tags=@tags,
+      body=@body, anchors=@anchors, attachments=@attachments, version=@version,
+      updated_at=@updated_at, updated_by=@updated_by WHERE id=@id`).run(r);
+}
+export function deleteKbDoc(id: string) {
+  const d = getDb();
+  d.prepare('DELETE FROM kb_versions WHERE doc_id = ?').run(id);
+  d.prepare('DELETE FROM kb_files WHERE doc_id = ?').run(id);
+  d.prepare('DELETE FROM kb_docs WHERE id = ?').run(id);
+}
+export function listKbVersions(docId: string): KbVersionRow[] {
+  return getDb().prepare('SELECT doc_id, version, title, body, summary, at, by FROM kb_versions WHERE doc_id = ? ORDER BY version DESC')
+    .all(docId) as KbVersionRow[];
+}
+export function insertKbVersion(v: KbVersionRow) {
+  getDb().prepare('INSERT INTO kb_versions (doc_id, version, title, body, summary, at, by) VALUES (@doc_id, @version, @title, @body, @summary, @at, @by)').run(v);
+}
+/* 附件另存一张表:文档行本身要频繁读列表,别让 base64 把它撑大 */
+export function insertKbFile(docId: string, id: string, name: string, mime: string, data: string) {
+  getDb().prepare('INSERT OR REPLACE INTO kb_files (id, doc_id, name, mime, data) VALUES (?, ?, ?, ?, ?)')
+    .run(id, docId, name, mime, data);
+}
+export function getKbFile(id: string): { id: string; doc_id: string; name: string; mime: string; data: string } | undefined {
+  return getDb().prepare('SELECT * FROM kb_files WHERE id = ?').get(id) as never;
+}
+export function deleteKbFile(id: string) {
+  getDb().prepare('DELETE FROM kb_files WHERE id = ?').run(id);
 }
 
 /* ---- REQ-038: 积分规则版本 ---- */

@@ -91,3 +91,10 @@ export const ROLE_LABEL: Record<Role, string> = {
   viewer: '只读',
   finance: 'Finance',
 };
+
+/* ===== REQ-035: 知识库 =====
+   需求默认口径:总监 / PM 可编辑,其余角色只读 + 可导出。
+   BD 与总监同权(平台里两者一直是一档),删除文档收得更紧一些 ——
+   知识库是公司资产,误删一篇 SOP 比误改一篇代价大。 */
+export const canEditKb = (u: Identity) => isFull(u) || u.role === 'pm';
+export const canDeleteKb = (u: Identity) => isFull(u);
