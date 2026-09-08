@@ -104,6 +104,9 @@ export const REGISTERS: RegisterDef[] = [
       { key: 'projectDetail', zh: 'Project detail 项目详情', en: 'Project detail', type: 'text' },
       { key: 'clientContact', zh: 'Client Contact 客户联系人', en: 'Client Contact Person', type: 'text' },
       { key: 'modelMaker', zh: 'Model Maker 模型师', en: 'Model Maker', type: 'text' },
+      /* REQ-038: 积分按比例分档(1:30–1:50 = 5 分,50 以上 = 3 分)。
+         填了这一栏,积分就自动落档,不用 PM 再选。 */
+      { key: 'scaleRatio', zh: '比例 1:N', en: 'Scale 1:N', type: 'number' },
       { key: 'handoverDate', zh: 'Handover Date 交付日期', en: 'Handover Date', type: 'date' },
       { key: 'expirationDate', zh: 'Expiration Date 有效期', en: 'Expiration Date', type: 'date' },
     ],
@@ -172,6 +175,8 @@ export const REGISTERS: RegisterDef[] = [
     fields: [
       { key: 'projectRecord', zh: 'Project Record 项目编号', en: 'Project Record', type: 'text' },
       { key: 'unitType', zh: 'Unit Type 单元类型', en: 'Project Unit Type', type: 'text' },
+      /* REQ-038: 积分按房数分档(1–2 房 = 2 分、3–4 房 = 3.5 分、4 房以上 = 5 分) */
+      { key: 'rooms', zh: '房数 Rooms', en: 'Rooms', type: 'number' },
       { key: 'clientContact', zh: 'Client Contact 客户联系人', en: 'Client Contact Person', type: 'text' },
       { key: 'shootingDate', zh: 'Shooting Date 拍摄日期', en: 'Shooting Date', type: 'date' },
       { key: 'handoverDate', zh: 'Handover Date 交付日期', en: 'Handover Date', type: 'date' },

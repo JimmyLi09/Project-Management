@@ -10,10 +10,10 @@ import { Avatar, healthColor } from '../ui';
 import TransferModal from '../TransferModal';
 
 export default function TeamView() {
-  const { projects, users, openProject, me } = useStore();
+  const { projects, users, openProject, me, rulesFor } = useStore();
   const { t } = useLang();
   const [transferFrom, setTransferFrom] = useState<string | null>(null);
-  const loads = useMemo(() => teamLoads(projects, users), [projects, users]);
+  const loads = useMemo(() => teamLoads(projects, users, rulesFor), [projects, users, rulesFor]);
   const pms = loads.filter((l) => l.isPM);
   const prod = loads.filter((l) => !l.isPM);
 

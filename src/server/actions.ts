@@ -51,7 +51,8 @@ export type ProjectAction =
   | { type: 'setDelivery'; value: string }
   | { type: 'setBuffer'; value: number }
   | { type: 'setDiff'; value: string }
-  | { type: 'setPoints'; value: number }
+  | { type: 'setPoints'; value: number | null }
+  | { type: 'setPkgTier'; pkg: number; id: string; value?: number | null }
   | { type: 'addOwner'; name: string }
   | { type: 'removeOwner'; name: string }
   | { type: 'transferProject'; from: string; to: string; includeTasks: boolean }
@@ -470,10 +471,33 @@ export function applyAction(u: Identity, p: Project, a: ProjectAction, ctx: Acti
       p.difficulty = a.value as Project['difficulty'];
       break;
     }
+    /* REQ-038: 手填积分现在会盖过积分规则算出来的分,所以要标记出来 ——
+       建项目时按难度自动播的种子分不是人填的,不能挡住规则。
+       value 传 null 就是「不手填了,回到按规则算」。 */
     case 'setPoints': {
       if (!canAssign(u, p)) throw new PermissionError('仅 PD/BD 可制定积分');
+      if (a.value == null) {
+        p.pointsManual = false;
+        logIt(p, u.name, '积分改回按积分规则自动计算');
+        break;
+      }
       p.points = Number(a.value) || 0;
-      logIt(p, u.name, `积分设为 ${p.points}`);
+      p.pointsManual = true;
+      logIt(p, u.name, `积分手动设为 ${p.points}`);
+      break;
+    }
+    /* REQ-038: PM 给一份业务选积分档位。区间档(LED 3–7)再带上选定的分值。
+       规则是全局的,但「这个项目这块 LED 算几分」是项目内的判断,所以放开给
+       项目编辑权 —— 需求写的就是「无法自动判定时由 PM 选档」。 */
+    case 'setPkgTier': {
+      if (!canEdit(u, p)) throw new PermissionError('无编辑权限');
+      const pk = p.packages[a.pkg];
+      if (!pk) throw new ValidationError('无效的业务');
+      const id = String(a.id || '').trim().slice(0, 40);
+      if (!id) { delete pk.pointTier; logIt(p, u.name, `${svcName(pk.svc)} 清除积分档位`); break; }
+      const val = a.value == null ? undefined : Number(a.value);
+      pk.pointTier = { id, ...(val != null && Number.isFinite(val) ? { value: Math.max(0, Math.min(1000, val)) } : {}) };
+      logIt(p, u.name, `${svcName(pk.svc)} 积分档位 ${id}${val != null ? ` = ${val}` : ''}`);
       break;
     }
     case 'addOwner': {

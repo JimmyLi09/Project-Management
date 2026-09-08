@@ -1,6 +1,7 @@
 /* ===== Isomorphic domain logic (used by both server and client) ===== */
 
 import { GENERIC, TPL, diffPoints, STAGES, stageIdx, type Template } from './templates';
+import { rulePoints, type PointRules } from './points';
 import type {
   ChecklistGroup,
   DirectorUpdate,
@@ -143,7 +144,20 @@ export function emptyUpdate(): DirectorUpdate {
   };
 }
 
-export function projPoints(p: Project): number {
+/* 积分规则对这个项目「拿得出主意」吗 —— 至少有一份业务落到了档上。
+   一份都判不出来(老项目、资料卡里还没有判档用的数)就别用规则的 0 分去
+   盖掉原来的分:上线当天不能让所有人的负载积分一夜归零。
+   PM 在项目里选完档,规则自然就接管了。 */
+function rulesDecide(p: Project, rules: PointRules): boolean {
+  return rulePoints(rules, p).parts.some((x) => x.source !== 'none');
+}
+
+/* REQ-038: 优先级 —— 手填 > 积分规则 > 按难度播的旧口径。
+   建项目时会按难度自动播一个种子分,那不是人填的,所以不能拿它挡住规则;
+   只有 pointsManual 为 true(有人真的在项目里改过)才盖过规则。
+   不传 rules 时行为和以前完全一致,老调用点不受影响。 */
+export function projPoints(p: Project, rules?: PointRules): number {
+  if (rules && !p.pointsManual && rulesDecide(p, rules)) return rulePoints(rules, p).total;
   return p.points != null
     ? p.points
     : diffPoints(p.difficulty) * ((p.services && p.services.length) || 1);
