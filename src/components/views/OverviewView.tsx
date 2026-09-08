@@ -13,7 +13,7 @@ import { Avatar, HM, Icon, Pill, ProgressBar, healthColor } from '../ui';
 import type { Project } from '@/lib/types';
 
 export default function OverviewView() {
-  const { projects, users, me, setView, go, openProject } = useStore();
+  const { projects, users, me, setView, go, openProject, rulesFor } = useStore();
   const { lang, t } = useLang();
   const t0 = todayMid();
   /* REQ-011: which KPI is drilled open (null = none) */
@@ -105,7 +105,7 @@ export default function OverviewView() {
     return items.slice(0, 5);
   }, [projects, me, lang, t]);
 
-  const loads = useMemo(() => teamLoads(projects, users).slice(0, 5), [projects, users]);
+  const loads = useMemo(() => teamLoads(projects, users, rulesFor).slice(0, 5), [projects, users, rulesFor]);
   const boardList = [...active].sort((a, b) => b.created - a.created).slice(0, 6);
 
   return (

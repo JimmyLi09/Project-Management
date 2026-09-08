@@ -18,6 +18,7 @@ import RegistersView from './views/RegistersView';
 import FinanceView from './views/FinanceView';
 import UsersView from './views/UsersView';
 import TemplatesView from './views/TemplatesView';
+import RulesView from './views/RulesView';
 import ProjectDetail from './views/ProjectDetail';
 
 export default function App({ user }: { user: User }) {
@@ -39,6 +40,7 @@ const PAGE_META: Record<string, { title: [string, string]; sub: [string, string]
   registers: { title: ['项目档案', 'Registers'], sub: ['按业务类型的跨项目登记表 · 7 类 · 可筛选导出', 'Cross-project registers by business type · 7 tables · filter & export'] },
   finance: { title: ['收款看板', 'Collections'], sub: ['开票与收款全局视图 · 逾期预警 · 可导出', 'Invoicing & payment across projects · overdue alerts · exportable'] },
   users: { title: ['用户管理', 'Users'], sub: ['账号、角色与访问权限', 'Accounts, roles and access'] },
+  rules: { title: ['规则设置', 'Rules'], sub: ['积分规则:按业务分档、可改、留版本(来源《项目积分算法》)', 'Points rules: tiers per service, editable, versioned'] },
   templates: { title: ['模板管理', 'Templates'], sub: ['编辑生产排期与信息清单模板(仅影响之后新建的项目)', 'Edit schedule & checklist templates (affects new projects only)'] },
 };
 
@@ -135,6 +137,7 @@ function Shell() {
           {navItem('registers', 'layers', t('项目档案', 'Registers'))}
           {(isFull(me) || me.role === 'finance') && navItem('finance', 'trending', t('收款看板', 'Collections'), financeAlertCount)}
           {isFull(me) && navItem('users', 'settings', t('用户管理', 'Users'))}
+          {isFull(me) && navItem('rules', 'settings', t('规则设置', 'Rules'))}
           {isFull(me) && navItem('templates', 'layers', t('模板管理', 'Templates'))}
         </nav>
         <div className="side-user">
@@ -233,6 +236,7 @@ function Shell() {
             {view.name === 'registers' && <RegistersView />}
             {view.name === 'finance' && <FinanceView />}
             {view.name === 'users' && <UsersView />}
+            {view.name === 'rules' && <RulesView />}
             {view.name === 'templates' && <TemplatesView />}
             {view.name === 'project' && <ProjectDetail />}
           </div>

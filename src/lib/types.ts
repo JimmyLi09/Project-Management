@@ -147,6 +147,9 @@ export interface ServicePackage {
   record?: ServiceRecord; // business "资料 record" — single source for Job Record & Registers
   noCategories?: boolean; // REQ-014: flat checklist (no fixed categories) for this package
   label?: string;         // REQ-026: 同类业务有多份时的实例名(如「大堂 LED」);留空则按序号显示
+  /* REQ-038: PM 给这份业务选的积分档位。区间档(LED 3–7)再带上选定的分值。
+     没选就按资料卡里的数自动落档;都判不出来就等 PM 选。 */
+  pointTier?: { id: string; value?: number };
 }
 
 /* business record attached to a service package (Job Record / Project Registers).
@@ -217,6 +220,9 @@ export interface Project {
   stage: string;
   difficulty: Difficulty;
   points: number;
+  /* REQ-038: 有人手填过积分。建项目时按难度自动播的种子分不算手填 ——
+     只有它为 true 时,手填的分才盖过积分规则算出来的分。 */
+  pointsManual?: boolean;
   owners: string[]; // PM names
   perm: string[]; // extra names with production edit permission
   start: string;

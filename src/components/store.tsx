@@ -7,9 +7,10 @@ import type { Project, User } from '@/lib/types';
 import type { ProjectAction } from '@/server/actions';
 import type { Identity } from '@/lib/permissions';
 import type { FieldOverrides } from '@/lib/records';
+import { DEFAULT_POINT_RULES, rulesAt, type PointRuleVersion, type PointRules } from '@/lib/points';
 
 export interface View {
-  name: 'overview' | 'projects' | 'team' | 'mytasks' | 'dupdate' | 'stats' | 'contacts' | 'finance' | 'registers' | 'users' | 'templates' | 'project';
+  name: 'overview' | 'projects' | 'team' | 'mytasks' | 'dupdate' | 'stats' | 'contacts' | 'finance' | 'registers' | 'users' | 'templates' | 'rules' | 'project';
   pid?: string;
   tab?: 'overview' | 'schedule' | 'checklist' | 'jobrecord';
   pkg?: number;
@@ -34,6 +35,11 @@ interface Store {
   /* REQ-023: 用户改过的资料卡字段定义,按服务类型覆盖出厂默认 */
   recordFields: FieldOverrides;
   refreshRecordFields: () => Promise<void>;
+  /* REQ-038: 积分规则的全部版本 + 「当下这一版」。按项目创建日取版本用 rulesFor。 */
+  pointRuleVersions: PointRuleVersion[];
+  pointRules: PointRules;
+  rulesFor: (createdAt: number) => PointRules;
+  refreshPointRules: () => Promise<void>;
 }
 
 const Ctx = createContext<Store | null>(null);
@@ -47,6 +53,7 @@ export function StoreProvider({ user, children }: { user: User; children: React.
   const [projects, setProjects] = useState<Project[]>([]);
   const [users, setUsers] = useState<User[]>([]);
   const [recordFields, setRecordFields] = useState<FieldOverrides>({});
+  const [pointRuleVersions, setPointRuleVersions] = useState<PointRuleVersion[]>([]);
   const [view, setView] = useState<View>({ name: 'overview' });
   const [toast, setToast] = useState('');
   /* latest known version per project (updated synchronously on every write) and
@@ -74,14 +81,21 @@ export function StoreProvider({ user, children }: { user: User; children: React.
     if (res.ok) setRecordFields(((await res.json()).overrides || {}) as FieldOverrides);
   }, []);
 
+  /* REQ-038: 积分规则同样是全局的,取一次即可 */
+  const refreshPointRules = useCallback(async () => {
+    const res = await fetch('/api/point-rules');
+    if (res.ok) setPointRuleVersions(((await res.json()).versions || []) as PointRuleVersion[]);
+  }, []);
+
   useEffect(() => {
     refresh();
     refreshUsers();
     refreshRecordFields();
+    refreshPointRules();
     /* light polling so teammates' changes appear without manual reload */
     const t = setInterval(refresh, 30_000);
     return () => clearInterval(t);
-  }, [refresh, refreshUsers, refreshRecordFields]);
+  }, [refresh, refreshUsers, refreshRecordFields, refreshPointRules]);
 
   const dispatch = useCallback((pid: string, action: ProjectAction) => {
     /* v2.2 [P0-3] strict optimistic lock. Serialize per project so a user's own
@@ -165,7 +179,11 @@ export function StoreProvider({ user, children }: { user: User; children: React.
     refreshUsers,
     recordFields,
     refreshRecordFields,
-  }), [user, projects, users, view, toast, dispatch, createProject, removeProject, refresh, refreshUsers, recordFields, refreshRecordFields]);
+    pointRuleVersions,
+    pointRules: rulesAt(pointRuleVersions, Date.now()),
+    rulesFor: (createdAt: number) => (pointRuleVersions.length ? rulesAt(pointRuleVersions, createdAt) : DEFAULT_POINT_RULES),
+    refreshPointRules,
+  }), [user, projects, users, view, toast, dispatch, createProject, removeProject, refresh, refreshUsers, recordFields, refreshRecordFields, pointRuleVersions, refreshPointRules]);
 
   return <Ctx.Provider value={store}>{children}</Ctx.Provider>;
 }

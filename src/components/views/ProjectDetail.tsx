@@ -5,8 +5,9 @@ import { useStore } from '../store';
 import {
   deliverySlack, fmtDate, infoProgress, isRiskDismissed, nextFreeze, overdueItems, parseISO,
   pkgProgress, pkgStart, planDates, plannedFinish, projectHealth, projPoints,
-  projStage, riskKey, schedProgress, todayMid,
+  projStage, riskKey, schedProgress, todayMid, pkgSuffix,
 } from '@/lib/project';
+import { rulePoints, ruleFor } from '@/lib/points';
 import {
   canAssign, canCommercial, canCreate, canDecide, canDelete, canEdit, canEditFinance, isFull,
   canSeeWorkflow, canSeeWorkflowTimeline, canSeeHandoverBlock, canSeeCompletionBlock,
@@ -23,7 +24,7 @@ import TransferModal from '../TransferModal';
 import type { Project, ProjectContact } from '@/lib/types';
 
 export default function ProjectDetail() {
-  const { projects, view, setView, me, dispatch, removeProject, go, users, refresh, openProject, setToast } = useStore();
+  const { projects, view, setView, me, dispatch, removeProject, go, users, refresh, openProject, setToast, rulesFor } = useStore();
   const { lang, t } = useLang();
   const [exportScope, setExportScope] = useState<null | 'all' | 'schedule' | 'checklist'>(null);
   const [transferFrom, setTransferFrom] = useState<string | null>(null);
@@ -38,6 +39,8 @@ export default function ProjectDetail() {
   }
 
   const ed = canEdit(me, p);
+  /* REQ-038: 这个项目按它创建时生效的那一版积分规则计分 */
+  const pts = projPoints(p, rulesFor(p.created));
   const tab = view.tab || 'overview';
   const pkgIdx = Math.min(view.pkg || 0, p.packages.length - 1);
   const stage = projStage(p);
@@ -249,10 +252,17 @@ export default function ProjectDetail() {
               {Object.entries(DIFF).map(([k, v]) => <option key={k} value={k}>{v[0]}</option>)}
             </select>
           </div>
+          {/* REQ-038: 积分默认按「积分规则」算(见下方积分卡)。这里手填等于人工
+              盖过规则 —— 所以标出来,并留一个回到自动的入口。 */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <span className="mini-label">{t('积分', 'Points')}</span>
-            <input type="number" min={0} className="in sm" style={{ width: 70 }} defaultValue={projPoints(p)} key={projPoints(p)}
-              onBlur={(e) => { const v = parseInt(e.target.value) || 0; if (v !== projPoints(p)) dispatch(p.id, { type: 'setPoints', value: v }); }} />
+            <input type="number" min={0} className="in sm" style={{ width: 70 }} defaultValue={pts} key={pts}
+              title={p.pointsManual ? t('手填,已盖过积分规则', 'Manual — overrides the points rules') : t('按积分规则自动算出;在这里填数会盖过规则', 'From the points rules; typing here overrides them')}
+              onBlur={(e) => { const v = parseInt(e.target.value) || 0; if (v !== pts) dispatch(p.id, { type: 'setPoints', value: v }); }} />
+            {p.pointsManual && (
+              <button className="btn-line sm" title={t('改回按积分规则自动计算', 'Go back to the rule-based score')}
+                onClick={() => dispatch(p.id, { type: 'setPoints', value: null })}>↺ {t('按规则', 'Auto')}</button>
+            )}
           </div>
         </div>
       )}
@@ -432,9 +442,99 @@ function CopyProjectModal({ p, onClose, onDone, onError }: {
   );
 }
 
+/* ===== REQ-038: 这个项目的积分怎么来的 =====
+   规则本身在「规则设置 · 积分规则」里定,是全公司口径;这里只做两件事:
+   ① 把每份业务落到哪一档、几分摊开给人看(不是一个凭空的总分);
+   ② 自动判不出来的(资料卡里没那个数、或落到 LED 3–7 这种区间档上),
+      让 PM 就地选 —— 需求写的「无法自动判定时由 PM 选档」就是这里。 */
+function PointsPanel({ p, canEd }: { p: Project; canEd: boolean }) {
+  const { lang, t } = useLang();
+  const { dispatch, rulesFor } = useStore();
+  const rules = rulesFor(p.created);
+  const { total, parts } = rulePoints(rules, p);
+  const pending = parts.filter((x) => x.needsPick).length;
+  const shown = projPoints(p, rules);
+  /* 一份业务都没落到档上 —— 规则还接管不了,显示的是旧口径的分 */
+  const fallback = !p.pointsManual && !parts.some((x) => x.source !== 'none');
+
+  return (
+    <div className="panel" style={{ padding: 20 }}>
+      <div className="panel-title" style={{ fontSize: 15, marginBottom: 4, display: 'flex', alignItems: 'center', gap: 8 }}>
+        {t('积分明细', 'Points breakdown')}
+        <span className="tnum" style={{ marginLeft: 'auto', fontSize: 18, fontWeight: 700, color: 'var(--navy900)' }}>{shown}</span>
+      </div>
+      <div style={{ fontSize: 11.5, color: 'var(--text2)', marginBottom: 10 }}>
+        {p.pointsManual
+          ? t(`当前是手填分,已盖过下面按规则算出的 ${total} 分。`, `Manual score in force — overrides the rule-based ${total}.`)
+          : fallback
+            ? t('下面各业务都还没落到档上,暂时按旧口径(难度 × 业务数)显示。选完档就按规则算。',
+                'No package is tiered yet, so the legacy score (difficulty × services) still shows. Pick tiers below and the rules take over.')
+            : t('按「规则设置 · 积分规则」自动计算。', 'Computed from Rules · Points rules.')}
+        {pending > 0 && <b style={{ color: '#b8860b' }}> {t(`还有 ${pending} 项待选档。`, ` ${pending} still need a tier.`)}</b>}
+      </div>
+
+      {p.packages.map((pk, i) => {
+        const rule = ruleFor(rules, pk.svc);
+        const part = parts[i];
+        const label = svcName(pk.svc, lang) + (pkgSuffix(p, i) ? ' ' + pkgSuffix(p, i) : '');
+        if (!rule) return (
+          <div key={i} style={{ display: 'flex', gap: 8, padding: '8px 0', borderTop: '1px solid var(--row-line2)', fontSize: 12.5 }}>
+            <span style={{ flex: 1 }}>{label}</span>
+            <span style={{ color: 'var(--text2)' }}>{t('未定积分规则', 'no rule')}</span>
+          </div>
+        );
+        const tier = part.tier;
+        const range = tier && tier.min != null && tier.max != null;
+        return (
+          <div key={i} style={{ padding: '9px 0', borderTop: '1px solid var(--row-line2)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12.5 }}>
+              <span style={{ width: 8, height: 8, borderRadius: 2, background: svcColor(pk.svc), flexShrink: 0 }} />
+              <span style={{ flex: 1, minWidth: 0 }}>{label}</span>
+              <span className="tnum" style={{ fontWeight: 700, color: part.needsPick ? '#b8860b' : 'var(--navy900)' }}>
+                {part.needsPick ? t('待选', 'pick') : part.points}
+              </span>
+              {part.source === 'auto' && (
+                <span className="badge" style={{ background: 'var(--hover-bg)', color: 'var(--text2)', fontSize: 10 }}
+                  title={rule.metric ? t(`按资料卡的「${rule.metric.zh}」自动落档`, `auto-tiered from "${rule.metric.en}"`) : undefined}>
+                  {t('自动', 'auto')}
+                </span>
+              )}
+            </div>
+            {canEd && (
+              <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginTop: 6, flexWrap: 'wrap' }}>
+                <select className="in sm" style={{ flex: 1, minWidth: 150 }} value={pk.pointTier?.id || ''}
+                  onChange={(e) => dispatch(p.id, { type: 'setPkgTier', pkg: i, id: e.target.value })}>
+                  <option value="">{t('— 自动判档 —', '— auto —')}</option>
+                  {rule.tiers.map((tr) => (
+                    <option key={tr.id} value={tr.id}>
+                      {(lang === 'zh' ? tr.zh : tr.en)} · {tr.min != null ? `${tr.min}–${tr.max}` : tr.points}
+                    </option>
+                  ))}
+                </select>
+                {range && (
+                  <input className="in sm" type="number" step={0.5} min={tier!.min} max={tier!.max} style={{ width: 76 }}
+                    title={t(`区间 ${tier!.min}–${tier!.max},按规模 / 复杂度选一个分值`, `Range ${tier!.min}–${tier!.max} — pick by scale / complexity`)}
+                    key={String(pk.pointTier?.value)} defaultValue={pk.pointTier?.value ?? ''}
+                    placeholder={`${tier!.min}–${tier!.max}`}
+                    onBlur={(e) => {
+                      const v = Number(e.target.value);
+                      if (!Number.isFinite(v) || !e.target.value) return;
+                      dispatch(p.id, { type: 'setPkgTier', pkg: i, id: tier!.id, value: v });
+                    }} />
+                )}
+              </div>
+            )}
+          </div>
+        );
+      })}
+      {p.packages.length === 0 && <div style={{ fontSize: 12.5, color: 'var(--text2)', padding: '8px 0' }}>{t('此项目暂无业务。', 'No services yet.')}</div>}
+    </div>
+  );
+}
+
 function OverviewTab({ p, onSchedule }: { p: Project; onSchedule: (pkg: number) => void }) {
   const { lang, t } = useLang();
-  const { dispatch, me, users } = useStore();
+  const { dispatch, me, users, rulesFor } = useStore();
   const canEd = canEdit(me, p);
   const sp = schedProgress(p);
   const ip = infoProgress(p);
@@ -570,7 +670,7 @@ function OverviewTab({ p, onSchedule }: { p: Project; onSchedule: (pkg: number) 
               </div>
             ) : <Row k="Buffer" v={t(`${p.buffer || 0} 天`, `${p.buffer || 0} days`)} />}
             <Row k={t('信息确认', 'Info checklist')} v={`${ip.done}/${ip.total} · ${ip.pct}%`} />
-            <Row k={t('积分', 'Points')} v={String(projPoints(p))} />
+            <Row k={t('积分', 'Points')} v={String(projPoints(p, rulesFor(p.created)))} />
             <div style={{ borderTop: '1px solid var(--row-line)', paddingTop: 10, fontWeight: 600, color: slack === null ? 'var(--text2)' : slack >= 0 ? 'var(--success)' : 'var(--danger)' }}>
               {slack === null ? t('填交付日后自动核算', 'Set a delivery date to auto-check')
                 : slack >= 0 ? t(`✓ 富余 ${slack} 天(含 buffer)`, `✓ ${slack} days slack (incl. buffer)`)
@@ -578,6 +678,8 @@ function OverviewTab({ p, onSchedule }: { p: Project; onSchedule: (pkg: number) 
             </div>
           </div>
         </div>
+
+        <PointsPanel p={p} canEd={canEd} />
 
         <div className="panel" style={{ padding: 20 }}>
           <div className="panel-title" style={{ fontSize: 15, marginBottom: 8 }}><Icon name="users" style={{ color: 'var(--navy700)' }} />{t('项目团队', 'Assigned Team')}</div>

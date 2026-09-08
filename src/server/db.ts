@@ -221,6 +221,30 @@ function migrateSchema(d: Database.Database) {
     created_at INTEGER NOT NULL,
     created_by TEXT NOT NULL DEFAULT ''
   )`);
+  /* REQ-038: 积分规则。只增不改 —— 每次保存写一个新版本,老版本留着,
+     历史项目按它创建时生效的那一版计分。 */
+  d.exec(`CREATE TABLE IF NOT EXISTS point_rules (
+    version INTEGER PRIMARY KEY AUTOINCREMENT,
+    rules TEXT NOT NULL,
+    effective_from TEXT NOT NULL DEFAULT '',
+    note TEXT NOT NULL DEFAULT '',
+    created_at INTEGER NOT NULL,
+    created_by TEXT NOT NULL DEFAULT ''
+  )`);
+}
+
+/* ---- REQ-038: 积分规则版本 ---- */
+export interface PointRuleRow {
+  version: number; rules: string; effective_from: string; note: string; created_at: number; created_by: string;
+}
+export function listPointRules(): PointRuleRow[] {
+  return getDb().prepare('SELECT * FROM point_rules ORDER BY version ASC').all() as PointRuleRow[];
+}
+export function insertPointRules(rulesJson: string, effectiveFrom: string, note: string, by: string): number {
+  const info = getDb()
+    .prepare('INSERT INTO point_rules (rules, effective_from, note, created_at, created_by) VALUES (?, ?, ?, ?, ?)')
+    .run(rulesJson, effectiveFrom, note, Date.now(), by);
+  return Number(info.lastInsertRowid);
 }
 
 /* ---- REQ-012: user-saved templates (schedule / checklist snippets) ---- */
