@@ -98,3 +98,12 @@ export const ROLE_LABEL: Record<Role, string> = {
    知识库是公司资产,误删一篇 SOP 比误改一篇代价大。 */
 export const canEditKb = (u: Identity) => isFull(u) || u.role === 'pm';
 export const canDeleteKb = (u: Identity) => isFull(u);
+
+/* REQ-036: 新人培训 —— 路径与题库由 总监 / BD / PM 维护(和知识库同一档);
+   学员进度所有人都能看自己的,管理视图另判。 */
+export const canEditTraining = (u: Identity) => canEditKb(u);
+export const canSeeAllTraining = (u: Identity) => canEditKb(u);
+/* 具体到某一条路径:勾了「仅总监维护」的,PM 就碰不了了。
+   题库和学员在同一批人里(全体 PM)的时候,这是唯一能真正把答案挡住的办法。 */
+export const canEditPath = (u: Identity, adminOnly: boolean) =>
+  (adminOnly ? isFull(u) : canEditTraining(u));
