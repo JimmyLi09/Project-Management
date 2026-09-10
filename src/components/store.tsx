@@ -10,7 +10,7 @@ import type { FieldOverrides } from '@/lib/records';
 import { DEFAULT_POINT_RULES, rulesAt, type PointRuleVersion, type PointRules } from '@/lib/points';
 
 export interface View {
-  name: 'overview' | 'projects' | 'team' | 'mytasks' | 'dupdate' | 'stats' | 'contacts' | 'finance' | 'registers' | 'users' | 'templates' | 'rules' | 'knowledge' | 'project';
+  name: 'overview' | 'projects' | 'team' | 'mytasks' | 'dupdate' | 'stats' | 'contacts' | 'finance' | 'registers' | 'users' | 'templates' | 'rules' | 'knowledge' | 'training' | 'project';
   pid?: string;
   tab?: 'overview' | 'schedule' | 'checklist' | 'jobrecord';
   pkg?: number;
