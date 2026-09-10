@@ -291,6 +291,15 @@ function migrateSchema(d: Database.Database) {
     passed INTEGER NOT NULL DEFAULT 0,
     at INTEGER NOT NULL
   )`);
+  /* REQ-037: KPI 规则。和积分规则同一套做法 —— 只增不改,带生效日。 */
+  d.exec(`CREATE TABLE IF NOT EXISTS kpi_rules (
+    version INTEGER PRIMARY KEY AUTOINCREMENT,
+    rules TEXT NOT NULL,
+    effective_from TEXT NOT NULL DEFAULT '',
+    note TEXT NOT NULL DEFAULT '',
+    created_at INTEGER NOT NULL,
+    created_by TEXT NOT NULL DEFAULT ''
+  )`);
   /* REQ-038: 积分规则。只增不改 —— 每次保存写一个新版本,老版本留着,
      历史项目按它创建时生效的那一版计分。 */
   d.exec(`CREATE TABLE IF NOT EXISTS point_rules (
@@ -408,6 +417,17 @@ export interface PointRuleRow {
 export function listPointRules(): PointRuleRow[] {
   return getDb().prepare('SELECT * FROM point_rules ORDER BY version ASC').all() as PointRuleRow[];
 }
+/* ---- REQ-037: KPI 规则版本(结构与积分规则一致) ---- */
+export function listKpiRules(): PointRuleRow[] {
+  return getDb().prepare('SELECT * FROM kpi_rules ORDER BY version ASC').all() as PointRuleRow[];
+}
+export function insertKpiRules(rulesJson: string, effectiveFrom: string, note: string, by: string): number {
+  const info = getDb()
+    .prepare('INSERT INTO kpi_rules (rules, effective_from, note, created_at, created_by) VALUES (?, ?, ?, ?, ?)')
+    .run(rulesJson, effectiveFrom, note, Date.now(), by);
+  return Number(info.lastInsertRowid);
+}
+
 export function insertPointRules(rulesJson: string, effectiveFrom: string, note: string, by: string): number {
   const info = getDb()
     .prepare('INSERT INTO point_rules (rules, effective_from, note, created_at, created_by) VALUES (?, ?, ?, ?, ?)')

@@ -9,13 +9,28 @@ import {
   DEFAULT_POINT_RULES, isRangeTier,
   type PointRule, type PointRules, type PointTier,
 } from '@/lib/points';
+import KpiRulesTab from './KpiRulesTab';
 
 /* ===== REQ-038: 规则设置 · 积分规则 =====
    出厂值来自《项目积分算法》,但这里改的那一版才是准的。
    保存 = 写一个**新版本**(带生效日),老版本一律不动 —— 历史项目按它创建时
    生效的那一版计分,所以旧版本不能被覆盖掉。
-   (REQ-037 的 KPI 规则以后作为本页第二个标签页并进来。) */
+   REQ-037 的 KPI 规则是本页第二个标签页。 */
 export default function RulesView() {
+  const { t } = useLang();
+  const [tab, setTab] = useState<'points' | 'kpi'>('points');
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+      <div className="detail-tabs" style={{ borderTop: 'none' }}>
+        <button className={`detail-tab${tab === 'points' ? ' active' : ''}`} onClick={() => setTab('points')}>{t('积分规则', 'Points rules')}</button>
+        <button className={`detail-tab${tab === 'kpi' ? ' active' : ''}`} onClick={() => setTab('kpi')}>{t('KPI 规则', 'KPI rules')}</button>
+      </div>
+      {tab === 'points' ? <PointRulesTab /> : <KpiRulesTab />}
+    </div>
+  );
+}
+
+function PointRulesTab() {
   const { me, pointRuleVersions, pointRules, refreshPointRules, setToast } = useStore();
   const { lang, t } = useLang();
   const isAdmin = me.role === 'director' || me.role === 'bd';

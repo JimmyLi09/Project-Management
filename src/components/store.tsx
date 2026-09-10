@@ -8,9 +8,10 @@ import type { ProjectAction } from '@/server/actions';
 import type { Identity } from '@/lib/permissions';
 import type { FieldOverrides } from '@/lib/records';
 import { DEFAULT_POINT_RULES, rulesAt, type PointRuleVersion, type PointRules } from '@/lib/points';
+import { DEFAULT_KPI_RULES, kpiRulesAt, type KpiRuleVersion, type KpiRules } from '@/lib/kpi';
 
 export interface View {
-  name: 'overview' | 'projects' | 'team' | 'mytasks' | 'dupdate' | 'stats' | 'contacts' | 'finance' | 'registers' | 'users' | 'templates' | 'rules' | 'knowledge' | 'training' | 'project';
+  name: 'overview' | 'projects' | 'team' | 'mytasks' | 'dupdate' | 'stats' | 'contacts' | 'finance' | 'registers' | 'users' | 'templates' | 'rules' | 'knowledge' | 'training' | 'kpi' | 'project';
   pid?: string;
   tab?: 'overview' | 'schedule' | 'checklist' | 'jobrecord';
   pkg?: number;
@@ -40,6 +41,10 @@ interface Store {
   pointRules: PointRules;
   rulesFor: (createdAt: number) => PointRules;
   refreshPointRules: () => Promise<void>;
+  /* REQ-037: KPI 规则,和积分规则同一套版本机制 */
+  kpiRuleVersions: KpiRuleVersion[];
+  kpiRules: KpiRules;
+  refreshKpiRules: () => Promise<void>;
 }
 
 const Ctx = createContext<Store | null>(null);
@@ -54,6 +59,7 @@ export function StoreProvider({ user, children }: { user: User; children: React.
   const [users, setUsers] = useState<User[]>([]);
   const [recordFields, setRecordFields] = useState<FieldOverrides>({});
   const [pointRuleVersions, setPointRuleVersions] = useState<PointRuleVersion[]>([]);
+  const [kpiRuleVersions, setKpiRuleVersions] = useState<KpiRuleVersion[]>([]);
   const [view, setView] = useState<View>({ name: 'overview' });
   const [toast, setToast] = useState('');
   /* latest known version per project (updated synchronously on every write) and
@@ -87,15 +93,21 @@ export function StoreProvider({ user, children }: { user: User; children: React.
     if (res.ok) setPointRuleVersions(((await res.json()).versions || []) as PointRuleVersion[]);
   }, []);
 
+  const refreshKpiRules = useCallback(async () => {
+    const res = await fetch('/api/kpi-rules');
+    if (res.ok) setKpiRuleVersions(((await res.json()).versions || []) as KpiRuleVersion[]);
+  }, []);
+
   useEffect(() => {
     refresh();
     refreshUsers();
     refreshRecordFields();
     refreshPointRules();
+    refreshKpiRules();
     /* light polling so teammates' changes appear without manual reload */
     const t = setInterval(refresh, 30_000);
     return () => clearInterval(t);
-  }, [refresh, refreshUsers, refreshRecordFields, refreshPointRules]);
+  }, [refresh, refreshUsers, refreshRecordFields, refreshPointRules, refreshKpiRules]);
 
   const dispatch = useCallback((pid: string, action: ProjectAction) => {
     /* v2.2 [P0-3] strict optimistic lock. Serialize per project so a user's own
@@ -183,7 +195,10 @@ export function StoreProvider({ user, children }: { user: User; children: React.
     pointRules: rulesAt(pointRuleVersions, Date.now()),
     rulesFor: (createdAt: number) => (pointRuleVersions.length ? rulesAt(pointRuleVersions, createdAt) : DEFAULT_POINT_RULES),
     refreshPointRules,
-  }), [user, projects, users, view, toast, dispatch, createProject, removeProject, refresh, refreshUsers, recordFields, refreshRecordFields, pointRuleVersions, refreshPointRules]);
+    kpiRuleVersions,
+    kpiRules: kpiRuleVersions.length ? kpiRulesAt(kpiRuleVersions, Date.now()) : DEFAULT_KPI_RULES,
+    refreshKpiRules,
+  }), [user, projects, users, view, toast, dispatch, createProject, removeProject, refresh, refreshUsers, recordFields, refreshRecordFields, pointRuleVersions, refreshPointRules, kpiRuleVersions, refreshKpiRules]);
 
   return <Ctx.Provider value={store}>{children}</Ctx.Provider>;
 }
