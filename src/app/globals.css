@@ -228,7 +228,8 @@ textarea.in { width: 100%; min-height: 46px; resize: vertical }
 .ex-cover .exc-top { display: flex; align-items: baseline; gap: 12px; border-bottom: 3px solid var(--navy900); padding-bottom: 10px }
 .ex-cover .exc-brand { font-size: 19px; font-weight: 700; letter-spacing: .22em; color: var(--navy900) }
 .ex-cover .exc-kind { margin-left: auto; font-size: 12px; font-weight: 600; letter-spacing: .1em; text-transform: uppercase; color: var(--bronze) }
-.ex-cover .exc-mid { flex: 1; display: flex; flex-direction: column; justify-content: center; padding: 44px 0 34px }
+/* 0917 变更单:封面中部原来上下各留 44/34px,加上垂直居中显得更空 —— 收紧一档 */
+.ex-cover .exc-mid { flex: 1; display: flex; flex-direction: column; justify-content: center; padding: 26px 0 22px }
 .ex-cover .exc-no { font-size: 13px; font-weight: 700; letter-spacing: .1em; color: var(--bronze); margin-bottom: 8px; font-variant-numeric: tabular-nums }
 .ex-cover .exc-name { font-size: 30px; font-weight: 600; line-height: 1.25; color: var(--navy900); margin: 0 0 10px; max-width: 22ch }
 .ex-cover .exc-client { font-size: 15px; color: #555 }

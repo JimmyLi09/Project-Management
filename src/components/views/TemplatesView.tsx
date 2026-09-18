@@ -109,8 +109,8 @@ function TemplateEditor({ svc, onBack }: { svc: string; onBack: () => void }) {
           <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 820 }}>
             <tbody>
               <tr style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '.04em', color: 'var(--text2)', background: 'var(--hover-bg)' }}>
-                <th style={thL}>#</th><th style={thL}>{t('阶段名(中/EN)', 'Phase (ZH/EN)')}</th><th style={thL}>{t('任务(中)', 'Task ZH')}</th><th style={thL}>Task EN</th>
-                <th style={thL}>{t('角色', 'Owner')}</th><th style={thL}>{t('周', 'Wk')}</th><th style={thL}>{t('冻结点提示', 'Gate note')}</th><th style={thL}>❄</th><th style={thL}></th>
+                <th style={thL}>#</th><th style={thL}>{t('阶段', 'Phase')}</th><th style={thL}>{t('任务(中)', 'Task ZH')}</th><th style={thL}>Task EN</th>
+                <th style={thL}>{t('角色', 'Owner')}</th><th style={thL}>{t('周', 'Wk')}</th><th style={thL}>{t('工期备注', 'Duration note')}</th><th style={thL}>{t('冻结点提示', 'Gate note')}</th><th style={thL}>❄</th><th style={thL}></th>
               </tr>
               {tpl.schedule.map((r, i) => (
                 <tr key={i} style={{ borderTop: '1px solid var(--row-line)' }}>
@@ -122,6 +122,9 @@ function TemplateEditor({ svc, onBack }: { svc: string; onBack: () => void }) {
                   <td style={tdL}><input className="in sm" style={{ minWidth: 150 }} value={r[3]} onChange={(e) => editRow(i, 3, e.target.value)} /></td>
                   <td style={tdL}><input className="in sm" style={{ width: 92 }} value={r[4]} onChange={(e) => editRow(i, 4, e.target.value)} /></td>
                   <td style={tdL}><input className="in sm" type="number" step={0.5} min={0} style={{ width: 56 }} value={r[5]} onChange={(e) => editRow(i, 5, parseFloat(e.target.value) || 0)} /></td>
+                  {/* 0917 变更单 · REQ-023:典型工期这一格排期表里明明显示着,
+                      模板里却改不动 —— 补上,不然只能连带整行重建。 */}
+                  <td style={tdL}><input className="in sm" style={{ width: 96 }} value={r[6]} onChange={(e) => editRow(i, 6, e.target.value)} placeholder="—" /></td>
                   <td style={tdL}><input className="in sm" style={{ minWidth: 160 }} value={r[7]} onChange={(e) => editRow(i, 7, e.target.value)} /></td>
                   <td style={{ ...tdL, textAlign: 'center' }}><input type="checkbox" checked={!!r[8]} onChange={(e) => editRow(i, 8, e.target.checked)} title={t('冻结点', 'Freeze point')} /></td>
                   <td style={tdL}><button style={{ color: 'var(--danger)', fontWeight: 700 }} title={t('删除', 'Delete')} onClick={() => setSched(tpl.schedule.filter((_, k) => k !== i))}>✕</button></td>

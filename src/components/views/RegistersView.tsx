@@ -9,7 +9,7 @@ import { useLang } from '@/lib/i18n';
 import { Icon } from '../ui';
 import { FieldEditor } from './JobRecordTab';
 import {
-  REGISTERS, registerDef, statusFamily, statusMeta, defaultStatus, recordVal, fieldsOf, formulaText,
+  REGISTERS, baseDefOf, customRegisterSvcs, statusFamily, statusMeta, defaultStatus, recordVal, fieldsOf, formulaText,
   isIncomplete, isExpiring, type RegisterDef, type FieldDef,
 } from '@/lib/records';
 import type { Project, ServicePackage } from '@/lib/types';
@@ -45,9 +45,16 @@ export default function RegistersView() {
   const [imp, setImp] = useState<ImportPreview | null>(null);
   const canImport = isFull(me);
 
+  /* 0917 变更单 · REQ-023:PD 在 Job Record 的空白资料卡上加过字段的业务,
+     这里也要有自己的一页 —— 同源就该两边都看得见。 */
+  const tabs = useMemo(
+    () => [...REGISTERS.map((r) => r.svc), ...customRegisterSvcs(recordFields)],
+    [recordFields],
+  );
+
   /* REQ-023: 把用户改过的字段并进 def —— 下游所有 def.fields(表头、导出、
      导入模板、编辑弹窗…)自动跟着走,不用一处处改。 */
-  const baseDef = registerDef(svc)!;
+  const baseDef = baseDefOf(svc);
   const def = useMemo<RegisterDef>(() => ({ ...baseDef, fields: fieldsOf(baseDef, recordFields) }), [baseDef, recordFields]);
   const t0 = todayMid();
 
@@ -161,13 +168,13 @@ export default function RegistersView() {
 
   return (
     <>
-      {/* register tabs */}
+      {/* register tabs —— 内置 7 张 + 0917 变更单 REQ-023 里 PD 自己加过列的业务 */}
       <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap', marginBottom: 18 }}>
-        {REGISTERS.map((r) => (
-          <button key={r.svc} className={`chip ${svc === r.svc ? 'active' : ''}`} onClick={() => setSvc(r.svc)}
-            style={svc === r.svc ? { borderColor: svcColor(r.svc), boxShadow: `inset 0 0 0 1px ${svcColor(r.svc)}` } : undefined}>
-            <span style={{ width: 8, height: 8, borderRadius: 2, background: svcColor(r.svc), display: 'inline-block' }} />
-            {svcName(r.svc, lang)}
+        {tabs.map((sv) => (
+          <button key={sv} className={`chip ${svc === sv ? 'active' : ''}`} onClick={() => setSvc(sv)}
+            style={svc === sv ? { borderColor: svcColor(sv), boxShadow: `inset 0 0 0 1px ${svcColor(sv)}` } : undefined}>
+            <span style={{ width: 8, height: 8, borderRadius: 2, background: svcColor(sv), display: 'inline-block' }} />
+            {svcName(sv, lang)}
           </button>
         ))}
       </div>
