@@ -14,8 +14,9 @@ import {
   canSeeVerifyBlock, canSeeFinanceBlock, isPM, canMeta,
 } from '@/lib/permissions';
 import { DIFF, STAGES, stageIdx, svcColor, svcName } from '@/lib/templates';
+import { contactRoleTerm, diffTerm, fieldGroupTerm } from '@/lib/terms';
 import { useLang } from '@/lib/i18n';
-import { Avatar, HM, Icon, Pill, ProgressBar, TM } from '../ui';
+import { Avatar, Ell, HM, Icon, Pill, ProgressBar, TM } from '../ui';
 import ScheduleTab from './ScheduleTab';
 import ChecklistTab from './ChecklistTab';
 import JobRecordTab from './JobRecordTab';
@@ -249,7 +250,7 @@ export default function ProjectDetail() {
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <span className="mini-label">{t('难度', 'Difficulty')}</span>
             <select className="in sm" value={p.difficulty} onChange={(e) => dispatch(p.id, { type: 'setDiff', value: e.target.value })}>
-              {Object.entries(DIFF).map(([k, v]) => <option key={k} value={k}>{v[0]}</option>)}
+              {Object.keys(DIFF).map((k) => <option key={k} value={k}>{diffTerm(k, lang)}</option>)}
             </select>
           </div>
           {/* REQ-038: 积分默认按「积分规则」算(见下方积分卡)。这里手填等于人工
@@ -565,7 +566,9 @@ function OverviewTab({ p, onSchedule }: { p: Project; onSchedule: (pkg: number) 
   }));
   if (nf && !risks.length) risks.push({
     key: '', // the "next freeze" hint is informational, not a clearable risk
-    title: t(`下一冻结点:${nf.row.phase}`, `Next freeze point: ${nf.row.phase}`),
+    /* REQ-041: phase 只有中文,EN 下退到任务的英文名 —— 「Next freeze point: 信息」
+       那种半截英文比什么都别扭。 */
+    title: t(`下一冻结点:${nf.row.phase}`, `Next freeze point: ${nf.row.taskEn || nf.row.phase}`),
     detail: `${svcName(nf.svc, lang)}${nf.date ? ' · ' + fmtDate(nf.date) : ''} — ${t('冻结前须客户确认', 'client sign-off required before freeze')}`,
     color: 'var(--bronze)', icon: 'lock',
   });
@@ -846,7 +849,7 @@ function WorkflowPanel({ p, users, me, dispatch }: {
                 {isCur && !s.done && <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--bronze)' }} />}
               </div>
               <div style={{ fontSize: 10.5, fontWeight: s.done || isCur ? 700 : 500, color: txt, marginTop: 5, textAlign: 'center', whiteSpace: 'nowrap' }}>{i + 1}. {lang === 'zh' ? s.zh : s.en}</div>
-              {(s.at || s.who) && <div className="tnum" style={{ fontSize: 9.5, color: 'var(--text2)', marginTop: 1, textAlign: 'center', whiteSpace: 'nowrap', maxWidth: 76, overflow: 'hidden', textOverflow: 'ellipsis' }}>{[s.who, s.at].filter(Boolean).join(' · ')}</div>}
+              {(s.at || s.who) && <Ell className="tnum" style={{ fontSize: 9.5, color: 'var(--text2)', marginTop: 1, textAlign: 'center', maxWidth: 76 }}>{[s.who, s.at].filter(Boolean).join(' · ')}</Ell>}
             </div>
           );
         })}
@@ -1164,7 +1167,7 @@ const CONTACT_ROLES: [string, string][] = [
 
 function ContactsPanel({ p, canEd }: { p: Project; canEd: boolean }) {
   const { dispatch, setToast } = useStore();
-  const { t } = useLang();
+  const { lang, t } = useLang();
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState<ProjectContact[]>([]);
   const [busy, setBusy] = useState(false);
@@ -1225,7 +1228,7 @@ function ContactsPanel({ p, canEd }: { p: Project; canEd: boolean }) {
             <div key={ci} style={{ borderTop: ci ? '1px solid var(--row-line2)' : 'none', paddingTop: ci ? 12 : 0 }}>
               <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--navy900)' }}>
                 {c.company || c.person || '—'}
-                {c.role && <span style={{ fontSize: 11, fontWeight: 500, color: 'var(--text2)' }}> · {c.role}</span>}
+                {c.role && <span style={{ fontSize: 11, fontWeight: 500, color: 'var(--text2)' }}> · {contactRoleTerm(c.role, lang)}</span>}
               </div>
               <div style={{ fontSize: 12, color: 'var(--text2)' }}>
                 {[c.person, c.phone, c.email].filter(Boolean).join(' · ') || t('无联系方式', 'no contact details')}

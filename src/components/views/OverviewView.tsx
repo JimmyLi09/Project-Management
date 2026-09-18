@@ -9,7 +9,7 @@ import {
 import { teamLoads } from '@/lib/alloc';
 import { svcColor } from '@/lib/templates';
 import { useLang } from '@/lib/i18n';
-import { Avatar, HM, Icon, Pill, ProgressBar, healthColor } from '../ui';
+import { Avatar, Ell, healthColor, HM, Icon, Pill, ProgressBar } from '../ui';
 import type { Project } from '@/lib/types';
 
 export default function OverviewView() {
@@ -132,7 +132,7 @@ export default function OverviewView() {
             <div key={p.id} className="row-hover" style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 22px', borderTop: '1px solid var(--row-line)', cursor: 'pointer' }} onClick={() => openProject(p.id)}>
               <span className="badge" style={{ background: '#fbf0dc', color: '#a8690b', flexShrink: 0 }}>{lang === 'zh' ? label : labelEn}</span>
               <div style={{ minWidth: 0 }}>
-                <div style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--navy900)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.name}</div>
+                <Ell style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--navy900)' }}>{p.name}</Ell>
                 <div style={{ fontSize: 11.5, color: 'var(--text2)' }}>{p.client || '—'}</div>
               </div>
               <div style={{ flex: 1 }} />
@@ -170,7 +170,7 @@ export default function OverviewView() {
                   <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
                     <Avatar name={a.name} size={30} />
                     <div style={{ minWidth: 0 }}>
-                      <div style={{ fontSize: 13, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{a.name}</div>
+                      <Ell style={{ fontSize: 13, fontWeight: 600 }}>{a.name}</Ell>
                       <div style={{ fontSize: 11, color: 'var(--text2)' }}>{a.isPM ? t('项目经理', 'Project Manager') : t('制作', 'Production')}</div>
                     </div>
                   </div>
@@ -193,8 +193,8 @@ export default function OverviewView() {
               <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '13px 22px', borderBottom: '1px solid var(--row-line2)' }}>
                 <span style={{ width: 8, height: 8, borderRadius: '50%', flexShrink: 0, background: tk.over ? 'var(--danger)' : tk.status === 'wip' ? 'var(--info)' : '#c4d0dd' }} />
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 13.5, fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{lang === 'zh' ? tk.title : tk.titleEn}</div>
-                  <div style={{ fontSize: 11.5, color: 'var(--text2)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{tk.project}</div>
+                  <Ell style={{ fontSize: 13.5, fontWeight: 500 }}>{lang === 'zh' ? tk.title : tk.titleEn}</Ell>
+                  <Ell style={{ fontSize: 11.5, color: 'var(--text2)' }}>{tk.project}</Ell>
                 </div>
                 <span className="tnum" style={{ fontSize: 12, fontWeight: 600, color: tk.over ? 'var(--danger)' : 'var(--text2)' }}>
                   {tk.due ? fmtDate(tk.due).slice(0, 6) : '—'}
@@ -214,7 +214,7 @@ export default function OverviewView() {
                 onClick={() => setView({ name: 'project', pid: d.pid, tab: 'overview', pkg: 0 })}>
                 <span style={{ color: d.color, flexShrink: 0, marginTop: 1, display: 'flex' }}><Icon name={d.icon} size={16} /></span>
                 <div style={{ minWidth: 0 }}>
-                  <div style={{ fontSize: 13, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{d.title}</div>
+                  <Ell style={{ fontSize: 13, fontWeight: 600 }}>{d.title}</Ell>
                   <div style={{ fontSize: 12, color: 'var(--text2)', marginTop: 1 }}>{d.detail}</div>
                 </div>
               </div>
@@ -245,9 +245,9 @@ export default function OverviewView() {
                     <div key={p.id} className="row-hover" style={{ display: 'flex', alignItems: 'center', gap: 11, padding: '11px 8px', borderTop: '1px solid var(--row-line)', cursor: 'pointer' }}
                       onClick={() => { setDrill(null); openProject(p.id); }}>
                       <div style={{ minWidth: 0, flex: 1 }}>
-                        <div style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--navy900)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                        <Ell style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--navy900)' }}>
                           {projCode(p) && <span className="tnum" style={{ color: 'var(--bronze)', marginRight: 5 }}>{projCode(p)}</span>}{p.name}
-                        </div>
+                        </Ell>
                         <div style={{ fontSize: 11.5, color: 'var(--text2)' }}>{p.client || '—'} · {(p.owners || [])[0] || t('未指派', 'unassigned')} · {sp.pct}%</div>
                       </div>
                       <Pill m={HM[h]} />
@@ -276,7 +276,7 @@ export default function OverviewView() {
                     onClick={() => { setDrill(null); openProject(it.pid); }}>
                     <span style={{ width: 8, height: 8, borderRadius: 4, background: it.color, flexShrink: 0 }} />
                     <div style={{ minWidth: 0, flex: 1 }}>
-                      <div style={{ fontSize: 13, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{it.title}</div>
+                      <Ell style={{ fontSize: 13, fontWeight: 600 }}>{it.title}</Ell>
                       <div style={{ fontSize: 11.5, color: 'var(--text2)' }}>{it.detail}</div>
                     </div>
                     <Icon name="back" size={14} style={{ transform: 'rotate(180deg)', color: 'var(--text2)' }} />
@@ -295,9 +295,10 @@ export default function OverviewView() {
 function Kpi({ label, value, icon, tint, tintBg, delta, deltaColor, onClick }: {
   label: string; value: string; icon: string; tint: string; tintBg: string; delta: string; deltaColor: string; onClick?: () => void;
 }) {
+  const { t } = useLang();
   return (
     <div className="kpi" onClick={onClick} role={onClick ? 'button' : undefined}
-      style={onClick ? { cursor: 'pointer' } : undefined} title={onClick ? '点击查看明细 Click for details' : undefined}>
+      style={onClick ? { cursor: 'pointer' } : undefined} title={onClick ? t('点击查看明细', 'Click for details') : undefined}>
       <div className="kpi-top">
         <div className="kpi-label">{label}</div>
         <span className="kpi-icon" style={{ background: tintBg, color: tint }}><Icon name={icon} size={18} /></span>
@@ -325,10 +326,10 @@ function BoardRow({ p, onOpen }: { p: Project; onOpen: () => void }) {
       style={{ display: 'grid', gridTemplateColumns: 'minmax(150px,1.7fr) 34px minmax(90px,1.1fr) 108px', gap: 16, alignItems: 'center', padding: '15px 22px', borderBottom: '1px solid var(--row-line)', cursor: 'pointer' }}
     >
       <div style={{ minWidth: 0 }}>
-        <div style={{ fontSize: 14.5, fontWeight: 600, color: 'var(--navy900)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.name}</div>
-        <div style={{ fontSize: 12.5, color: 'var(--text2)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+        <Ell style={{ fontSize: 14.5, fontWeight: 600, color: 'var(--navy900)' }}>{p.name}</Ell>
+        <Ell style={{ fontSize: 12.5, color: 'var(--text2)' }}>
           {p.client || '—'} · {stageLabel} · {t('交付', 'Del')} {p.delivery ? fmtDate(new Date(p.delivery + 'T00:00:00')).slice(0, 6) : '—'}
-        </div>
+        </Ell>
       </div>
       <div>{pm ? <Avatar name={pm} size={30} /> : <span style={{ color: 'var(--text2)', fontSize: 12 }}>—</span>}</div>
       <ProgressBar pct={sp.pct} color={svcColor(p.services[0])} />

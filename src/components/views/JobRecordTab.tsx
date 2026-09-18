@@ -14,6 +14,7 @@ import {
 import type { Project, ServicePackage } from '@/lib/types';
 import JobRecordExport from './JobRecordExport';
 import KbLinks from '../KbLinks';
+import { fieldGroupTerm } from '@/lib/terms';
 
 /* §2 Job Record — single project view: each service package's business record
    shown as a table. Read-only by default; "总编辑" flips the whole card into an
@@ -327,7 +328,8 @@ function RecordCard({ p, pk, pkgIdx, def: baseDef, canEd, register }: {
             <div key={gname || '_'}>
               {gname && (
                 <div style={{ padding: '10px 18px 4px', fontSize: 11, fontWeight: 700, letterSpacing: '.05em', textTransform: 'uppercase', color: 'var(--text2)' }}>
-                  {gname}
+                  {/* REQ-041: 出厂分组名是「中文 English」混排的一串,EN 下只留英文 */}
+                  {fieldGroupTerm(gname, lang)}
                 </div>
               )}
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(260px,1fr))', gap: '0 18px', padding: '0 18px' }}>

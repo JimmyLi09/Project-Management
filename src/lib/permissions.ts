@@ -6,6 +6,7 @@
    Viewer   — read-only */
 
 import type { Project, Role, ScheduleRow, User } from './types';
+import { ROLE_TERMS } from './terms';
 
 export interface Identity {
   name: string;
@@ -82,14 +83,17 @@ export const canSaveTemplate = (u: Identity) => isFull(u) || u.role === 'sales' 
    wipe another team's saved layout. */
 export const canDeleteTemplate = (u: Identity, createdBy: string) => isFull(u) || u.name === createdBy;
 
+/* REQ-041: 角色名的两语词条集中在 lib/terms.ts,这里只保留中文一份
+   给旧调用点用;界面上取名请用 roleTerm(role, lang),不要直接读这张表
+   —— 直接读等于把 EN 模式下的角色名又写死成中文。 */
 export const ROLE_LABEL: Record<Role, string> = {
-  director: 'PD',
-  bd: 'BD',
-  sales: '销售',
-  pm: 'PM',
-  member: '成员',
-  viewer: '只读',
-  finance: 'Finance',
+  director: ROLE_TERMS.director[0],
+  bd: ROLE_TERMS.bd[0],
+  sales: ROLE_TERMS.sales[0],
+  pm: ROLE_TERMS.pm[0],
+  member: ROLE_TERMS.member[0],
+  viewer: ROLE_TERMS.viewer[0],
+  finance: ROLE_TERMS.finance[0],
 };
 
 /* ===== REQ-035: 知识库 =====

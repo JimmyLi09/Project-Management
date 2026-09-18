@@ -11,7 +11,7 @@ import type { Template, TplChecklistGroup, TplScheduleRow } from '@/lib/template
 interface SvcRow { key: string; label: string; en: string; color: string; customized: boolean }
 
 export default function TemplatesView() {
-  const { t } = useLang();
+  const { lang, t } = useLang();
   const [services, setServices] = useState<SvcRow[]>([]);
   const [editing, setEditing] = useState<string | null>(null);
 
@@ -36,8 +36,9 @@ export default function TemplatesView() {
             <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
               <span style={{ width: 12, height: 12, borderRadius: 3, background: s.color }} />
               <div style={{ flex: 1 }}>
-                <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--navy900)' }}>{s.label}</div>
-                <div style={{ fontSize: 11.5, color: 'var(--text2)' }}>{s.en}</div>
+                {/* REQ-041: 当前语言在上,另一语言在下 —— EN 模式下主名不再是中文 */}
+                <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--navy900)' }}>{lang === 'zh' ? s.label : s.en}</div>
+                <div style={{ fontSize: 11.5, color: 'var(--text2)' }}>{lang === 'zh' ? s.en : s.label}</div>
               </div>
               {s.customized && (
                 <span className="badge" style={{ background: '#fff3e4', color: '#8f5b1d' }}>{t('已定制', 'Customized')}</span>
@@ -85,10 +86,14 @@ function TemplateEditor({ svc, onBack }: { svc: string; onBack: () => void }) {
     if (res.ok) { setCustomized(false); await load(); setMsg(t('✓ 已恢复默认', '✓ Reset to default')); }
   }
 
+  /* REQ-041: 老模板只有 9 位(没有 typicalEn / gateEn)。要写第 9/10 位时
+     先把行补齐再写,免得写出一个带空洞的稀疏数组存回服务端。 */
   const editRow = (i: number, field: number, value: string | number | boolean) => {
-    const rows = tpl.schedule.map((r) => [...r] as TplScheduleRow);
-    (rows[i][field] as string | number | boolean) = value;
-    setSched(rows);
+    const rows = tpl.schedule.map((r) => [...r] as unknown as (string | number | boolean)[]);
+    while (rows[i].length < 9) rows[i].push('');
+    if (field >= 9) while (rows[i].length < 11) rows[i].push('');
+    rows[i][field] = value;
+    setSched(rows as unknown as TplScheduleRow[]);
   };
 
   return (
@@ -109,8 +114,12 @@ function TemplateEditor({ svc, onBack }: { svc: string; onBack: () => void }) {
           <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 820 }}>
             <tbody>
               <tr style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '.04em', color: 'var(--text2)', background: 'var(--hover-bg)' }}>
-                <th style={thL}>#</th><th style={thL}>{t('阶段名(中/EN)', 'Phase (ZH/EN)')}</th><th style={thL}>{t('任务(中)', 'Task ZH')}</th><th style={thL}>Task EN</th>
-                <th style={thL}>{t('角色', 'Owner')}</th><th style={thL}>{t('周', 'Wk')}</th><th style={thL}>{t('冻结点提示', 'Gate note')}</th><th style={thL}>❄</th><th style={thL}></th>
+                <th style={thL}>#</th><th style={thL}>{t('阶段', 'Phase')}</th><th style={thL}>{t('任务(中)', 'Task ZH')}</th><th style={thL}>Task EN</th>
+                <th style={thL}>{t('角色', 'Owner')}</th><th style={thL}>{t('周', 'Wk')}</th>
+                {/* REQ-041: 这两列以前只有中文,EN 模式下排期页就是半截英文 —— 补上英文格 */}
+                <th style={thL}>{t('工期(中)', 'Duration ZH')}</th><th style={thL}>Duration EN</th>
+                <th style={thL}>{t('冻结点提示(中)', 'Gate note ZH')}</th><th style={thL}>Gate note EN</th>
+                <th style={thL}>❄</th><th style={thL}></th>
               </tr>
               {tpl.schedule.map((r, i) => (
                 <tr key={i} style={{ borderTop: '1px solid var(--row-line)' }}>
@@ -122,7 +131,12 @@ function TemplateEditor({ svc, onBack }: { svc: string; onBack: () => void }) {
                   <td style={tdL}><input className="in sm" style={{ minWidth: 150 }} value={r[3]} onChange={(e) => editRow(i, 3, e.target.value)} /></td>
                   <td style={tdL}><input className="in sm" style={{ width: 92 }} value={r[4]} onChange={(e) => editRow(i, 4, e.target.value)} /></td>
                   <td style={tdL}><input className="in sm" type="number" step={0.5} min={0} style={{ width: 56 }} value={r[5]} onChange={(e) => editRow(i, 5, parseFloat(e.target.value) || 0)} /></td>
-                  <td style={tdL}><input className="in sm" style={{ minWidth: 160 }} value={r[7]} onChange={(e) => editRow(i, 7, e.target.value)} /></td>
+                  <td style={tdL}><input className="in sm" style={{ width: 92 }} value={r[6]} onChange={(e) => editRow(i, 6, e.target.value)} placeholder="—" /></td>
+                  <td style={tdL}><input className="in sm" style={{ width: 92 }} value={r[9] || ''} onChange={(e) => editRow(i, 9, e.target.value)}
+                    placeholder={t('留空=按中文自动换算', 'blank = auto')} title={t('留空时按「3 周 → 3 weeks」自动换算', 'Left blank, "3 周" is rendered as "3 weeks" automatically')} /></td>
+                  <td style={tdL}><input className="in sm" style={{ minWidth: 150 }} value={r[7]} onChange={(e) => editRow(i, 7, e.target.value)} /></td>
+                  <td style={tdL}><input className="in sm" style={{ minWidth: 150 }} value={r[10] || ''} onChange={(e) => editRow(i, 10, e.target.value)}
+                    placeholder={t('留空=沿用中文', 'blank = same as ZH')} /></td>
                   <td style={{ ...tdL, textAlign: 'center' }}><input type="checkbox" checked={!!r[8]} onChange={(e) => editRow(i, 8, e.target.checked)} title={t('冻结点', 'Freeze point')} /></td>
                   <td style={tdL}><button style={{ color: 'var(--danger)', fontWeight: 700 }} title={t('删除', 'Delete')} onClick={() => setSched(tpl.schedule.filter((_, k) => k !== i))}>✕</button></td>
                 </tr>
@@ -131,7 +145,7 @@ function TemplateEditor({ svc, onBack }: { svc: string; onBack: () => void }) {
           </table>
         </div>
         <div style={{ padding: 12 }}>
-          <button className="btn-line sm" onClick={() => setSched([...tpl.schedule, [String(tpl.schedule.length), t('新阶段', 'New'), t('新阶段', 'New phase'), 'New phase', 'Audax', 1, '—', ' ', false]])}>
+          <button className="btn-line sm" onClick={() => setSched([...tpl.schedule, [String(tpl.schedule.length), t('新阶段', 'New'), t('新阶段', 'New phase'), 'New phase', 'Audax', 1, '—', ' ', false, '', '']])}>
             + {t('添加阶段', 'Add phase')}
           </button>
         </div>

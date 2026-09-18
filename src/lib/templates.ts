@@ -49,8 +49,12 @@ export const DIFF: Record<string, [string, number]> = {
 };
 export const diffPoints = (d: string) => (DIFF[d] ? DIFF[d][1] : 1);
 
-/* Template row: [no, phase, task, taskEn, owner, weeks, typical, gate, freeze] */
-export type TplScheduleRow = [string, string, string, string, string, number, string, string, boolean];
+/* Template row: [no, phase, task, taskEn, owner, weeks, typical, gate, freeze]
+   REQ-041: 后面可选再跟 [typicalEn, gateEn] —— 老模板(存过的定制)只有 9 位,
+   读出来这两位是 undefined,界面自动回落到中文那份,不需要迁移数据。 */
+export type TplScheduleRow =
+  | [string, string, string, string, string, number, string, string, boolean]
+  | [string, string, string, string, string, number, string, string, boolean, string, string];
 /* Template checklist group: [group, groupEn, color, items[[zh,en]]] */
 export type TplChecklistGroup = [string, string, string, [string, string][]];
 export interface Template {
@@ -85,7 +89,7 @@ export const TPL: Record<string, Template> = {
     checklist: [
       ['建筑方 · 外观', 'From Architect (Exterior)', '#D98A2B', [
         ['Siteplan / google map', '建周边建筑'],
-        ['最终 CAD + 3D 模型', '至少 WP approval'],
+        ['最终 CAD + 3D 模型', 'Final CAD + 3D model (min. WP approval)'],
         ['立面材料分区 + 色号 + 参考', 'Façade demarcation + colour code'],
         ['建筑灯光信息 + 参考', 'Building lighting info + ref'],
         ['Key plan 标注单元号', 'unit number labels'],
@@ -163,20 +167,20 @@ export const TPL: Record<string, Template> = {
     ],
     checklist: [
       ['场地/市场/需求', 'Site / Marketing / Requirements', '#2C6E8F', [
-        ['比例 Scale', '1:150 / 1:1000'],
-        ['模型类型', 'study/marketing/location'],
-        ['是否需 App 控制', 'lighting/AR'],
-        ['特殊要求', 'water/smoke/mechanism'],
+        ['比例 Scale', 'Scale (1:150 / 1:1000)'],
+        ['模型类型', 'Model type (study / marketing / location)'],
+        ['是否需 App 控制', 'App control needed? (lighting / AR)'],
+        ['特殊要求', 'Special requirements (water / smoke / mechanism)'],
         ['场地边界', 'Site boundary'],
-        ['标题牌', 'logos, north arrow, scale'],
-        ['模型台信息', 'base dim, access panel, power'],
-        ['周边地标/道路名', 'landmark / road name'],
-        ['单元命名/灯光逻辑/UI配色', 'if app'],
-        ['Mock-up 部位决定', 'inform client first'],
+        ['标题牌', 'Title board (logos, north arrow, scale)'],
+        ['模型台信息', 'Model stand info (base dim, access panel, power)'],
+        ['周边地标/道路名', 'Surrounding landmarks / road names'],
+        ['单元命名/灯光逻辑/UI配色', 'Unit naming / lighting logic / UI colours (if app)'],
+        ['Mock-up 部位决定', 'Mock-up area decision (inform the client first)'],
       ]],
       ['建筑方', 'From Architect', '#D98A2B', [
-        ['CAD vs SKP 以哪个为准', 'Info accuracy'],
-        ['最终 CAD + SKP + 平面/立面/屋顶', 'Final drawings'],
+        ['CAD vs SKP 以哪个为准', 'CAD or SKP as the master (info accuracy)'],
+        ['最终 CAD + SKP + 平面/立面/屋顶', 'Final CAD + SKP + plans / elevations / roof'],
         ['立面:色号/玻璃/门窗框/分区', 'Façade full spec'],
         ['门窗表', 'Window & door schedule'],
         ['阳台地面铺贴 + 参考', 'Balcony floor finish'],

@@ -4,9 +4,10 @@ import React, { useEffect, useMemo, useState } from 'react';
 import type { User } from '@/lib/types';
 import { StoreProvider, useStore } from './store';
 import { allOverdue, fmtDate, isMyProject, pendingWorkflowAction } from '@/lib/project';
-import { canCreate, isFull, ROLE_LABEL } from '@/lib/permissions';
+import { canCreate, isFull } from '@/lib/permissions';
+import { roleTerm } from '@/lib/terms';
 import { useLang } from '@/lib/i18n';
-import { Avatar, AvatarSrcProvider, Icon } from './ui';
+import { Avatar, AvatarSrcProvider, Ell, Icon } from './ui';
 import OverviewView from './views/OverviewView';
 import ProjectsView, { NewProjectModal } from './views/ProjectsView';
 import TeamView from './views/TeamView';
@@ -153,7 +154,7 @@ function Shell() {
           <Avatar name={user.name} size={34} />
           <div style={{ flex: 1, lineHeight: 1.2, minWidth: 0 }}>
             <div className="nm">{user.name}</div>
-            <div className="rl">{user.position || ROLE_LABEL[user.role]}</div>
+            <div className="rl">{user.position || roleTerm(user.role, lang)}</div>
           </div>
           <button title={t('修改密码', 'Change password')} onClick={() => setShowPw(true)} style={{ color: 'var(--text2)', display: 'flex' }}>
             <Icon name="lock" size={15} />
@@ -224,7 +225,7 @@ function Shell() {
                 >
                   <span className="badge" style={{ background: '#fbe9e7', color: '#b23a32', flexShrink: 0 }}>{t(`逾期 ${o.days} 天`, `${o.days}d late`)}</span>
                   <div style={{ minWidth: 0 }}>
-                    <div style={{ fontSize: 13, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{o.p.name}</div>
+                    <Ell style={{ fontSize: 13, fontWeight: 600 }}>{o.p.name}</Ell>
                     <div style={{ fontSize: 11.5, color: 'var(--text2)' }}>{o.row.task} · {t('应完成', 'due')} {fmtDate(o.due)}</div>
                   </div>
                 </div>

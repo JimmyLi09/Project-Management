@@ -4,6 +4,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useStore } from '../store';
 import { useLang } from '@/lib/i18n';
 import { canDeleteKb, canEditPath, canEditTraining, ROLE_LABEL } from '@/lib/permissions';
+import { roleTerm } from '@/lib/terms';
 import type { Role } from '@/lib/types';
 import { Avatar, Icon, ProgressBar } from '../ui';
 import Markdown from '../Markdown';
@@ -149,7 +150,7 @@ function ManageList({ paths, progress, onOpen, onChanged }: {
             <div style={{ flex: 1, minWidth: 220 }}>
               <div style={{ fontSize: 14.5, fontWeight: 700, color: 'var(--navy900)' }}>{lang === 'zh' ? p.title : (p.titleEn || p.title)}</div>
               <div style={{ fontSize: 12, color: 'var(--text2)', marginTop: 4 }}>
-                {p.role ? ROLE_LABEL[p.role as Role] || p.role : t('不限角色', 'any role')}
+                {p.role ? roleTerm(p.role, lang) : t('不限角色', 'any role')}
                 {p.assignees.length ? ` · ${t('指派', 'assigned')} ${p.assignees.length}` : ''}
                 {' · '}{p.steps.length} {t('步', 'steps')}
                 {' · '}{p.quiz.length ? t(`${p.quiz.length} 题 / 及格 ${p.passScore}%`, `${p.quiz.length} questions / pass ${p.passScore}%`) : t('无考核', 'no quiz')}
@@ -213,7 +214,7 @@ function People({ paths, progress, users }: { paths: TrainingPath[]; progress: T
                       <Avatar name={u.name} size={26} />
                       <span>
                         <span style={{ fontWeight: 600 }}>{u.name}</span>
-                        <span style={{ display: 'block', fontSize: 11, color: 'var(--text2)' }}>{ROLE_LABEL[u.role as Role] || u.role}</span>
+                        <span style={{ display: 'block', fontSize: 11, color: 'var(--text2)' }}>{roleTerm(u.role, lang)}</span>
                       </span>
                     </span>
                   </td>
@@ -508,7 +509,7 @@ function PathEditor({ path, docs, users, onBack, onSaved }: {
         <label style={fieldL}>{t('面向角色', 'Target role')}
           <select className="in sm" value={d.role} onChange={(e) => setD({ ...d, role: e.target.value })}>
             <option value="">{t('— 不限(只按下面点名指派)—', '— none (assign by name only) —')}</option>
-            {Object.entries(ROLE_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+            {Object.keys(ROLE_LABEL).map((k) => <option key={k} value={k}>{roleTerm(k, lang)}</option>)}
           </select>
         </label>
         <label style={fieldL}>{t('及格线 %', 'Pass score %')}

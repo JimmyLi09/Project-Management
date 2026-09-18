@@ -33,7 +33,8 @@ function validTemplate(t: unknown): t is Template {
   if (!t || typeof t !== 'object') return false;
   const tt = t as Template;
   if (!Array.isArray(tt.schedule) || !Array.isArray(tt.checklist)) return false;
-  if (!tt.schedule.every((r) => Array.isArray(r) && r.length === 9)) return false;
+  /* REQ-041: 9 位是老格式,11 位多带 typicalEn / gateEn */
+  if (!tt.schedule.every((r) => Array.isArray(r) && (r.length === 9 || r.length === 11))) return false;
   if (!tt.checklist.every((g) => Array.isArray(g) && g.length === 4 && Array.isArray(g[3]))) return false;
   return true;
 }

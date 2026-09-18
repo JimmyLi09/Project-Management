@@ -4,6 +4,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { useStore } from '../store';
 import { useLang } from '@/lib/i18n';
 import { ROLE_LABEL } from '@/lib/permissions';
+import { roleTerm } from '@/lib/terms';
 import { SVC, svcColor } from '@/lib/templates';
 import { fmtDate, parseISO, projCode, projPoints } from '@/lib/project';
 import { Avatar, Icon, ProgressBar } from '../ui';
@@ -80,7 +81,7 @@ export default function KpiView() {
         <div style={{ flex: 1 }} />
         <select className="in sm" style={{ width: 'auto' }} value={roleF} onChange={(e) => setRoleF(e.target.value)}>
           <option value="">{t('全部角色', 'All roles')}</option>
-          {Object.entries(ROLE_LABEL).filter(([k]) => k !== 'viewer').map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+          {Object.keys(ROLE_LABEL).filter((k) => k !== 'viewer').map((k) => <option key={k} value={k}>{roleTerm(k, lang)}</option>)}
         </select>
         <select className="in sm" style={{ width: 'auto' }} value={svc} onChange={(e) => setSvc(e.target.value)}
           title={t('按业务筛选,同时会套用这个业务自己的 KPI 规则', 'Filters by service and applies that service’s own rule set')}>
@@ -136,7 +137,7 @@ export default function KpiView() {
                       <span>
                         <span style={{ fontWeight: 600 }}>{r.name}</span>
                         <span style={{ display: 'block', fontSize: 11, color: 'var(--text2)' }}>
-                          {ROLE_LABEL[r.role as Role] || r.role} · {r.projects.length} {t('个项目', 'projects')}
+                          {roleTerm(r.role, lang)} · {r.projects.length} {t('个项目', 'projects')}
                         </span>
                       </span>
                     </span>
@@ -178,7 +179,7 @@ function Detail({ p, onClose, svc }: { p: PersonKpi; onClose: () => void; svc: s
         <Avatar name={p.name} size={26} />
         <span className="panel-title">{p.name} · {t('四维明细', 'Breakdown')}</span>
         <span style={{ fontSize: 11.5, color: 'var(--text2)' }}>
-          {t(`用的是「${set.role ? ROLE_LABEL[set.role as Role] : '不限角色'} / ${set.svc ? SVC[set.svc]?.label : '不限业务'}」那套规则,权重合计 ${ws}%`,
+          {t(`用的是「${set.role ? roleTerm(set.role, 'zh') : '不限角色'} / ${set.svc ? SVC[set.svc]?.label : '不限业务'}」那套规则,权重合计 ${ws}%`,
              `Rule set: ${set.role || 'any role'} / ${set.svc || 'any service'}, weights total ${ws}%`)}
         </span>
         <div style={{ flex: 1 }} />

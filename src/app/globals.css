@@ -60,6 +60,8 @@ button { cursor: pointer; border: none; background: none; color: inherit; font-s
 .side-badge { min-width: 20px; height: 20px; padding: 0 6px; border-radius: 10px; background: var(--navy700); color: #fff; font-size: 11px; font-weight: 700; display: flex; align-items: center; justify-content: center }
 .side-item.active .side-badge { background: rgba(255, 255, 255, .22) }
 .side-user { border-top: 1px solid var(--border); padding: 14px; display: flex; align-items: center; gap: 11px }
+/* REQ-041: 单行省略号的统一写法,配 ui.tsx 的 <Ell>(溢出才挂 tooltip) */
+.ell { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0 }
 .side-user .nm { font-size: 13px; font-weight: 600; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis }
 .side-user .rl { font-size: 11px; color: var(--text2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis }
 

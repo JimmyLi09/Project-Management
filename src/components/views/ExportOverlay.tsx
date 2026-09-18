@@ -41,7 +41,8 @@ export default function ExportOverlay({ p, onClose, scope = 'all' }: { p: Projec
   }, []);
   async function saveDefaultNotes() {
     const r = await fetch('/api/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key: 'exportNotes', value: notes }) });
-    setToast(r.ok ? '已保存为全局默认说明' : '保存失败(仅 PD/BD 可存默认)');
+    setToast(r.ok ? T('已保存为全局默认说明', 'Saved as the global default note')
+                  : T('保存失败(仅 PD/BD 可存默认)', 'Could not save — only PD / BD can set the default'));
   }
 
   const L = lang;
@@ -323,9 +324,9 @@ export default function ExportOverlay({ p, onClose, scope = 'all' }: { p: Projec
           </span>
         )}
         {T('栏位', 'Columns')}:
-        {showSched && <span className="ex-grp">排期 {colToggle('owner', '负责', 'Owner')}{colToggle('start', '开始', 'Start')}{colToggle('due', '到期', 'Due')}{colToggle('status', '状态', 'Status')}</span>}
+        {showSched && <span className="ex-grp">{T('排期', 'Schedule')} {colToggle('owner', '负责', 'Owner')}{colToggle('start', '开始', 'Start')}{colToggle('due', '到期', 'Due')}{colToggle('status', '状态', 'Status')}</span>}
         {showCl && (
-          <span className="ex-grp">清单 {colToggle('clStatus', '状态', 'Status')}{colToggle('clDate', '日期', 'Date')}{colToggle('clRemark', '备注', 'Remark')}
+          <span className="ex-grp">{T('清单', 'Checklist')} {colToggle('clStatus', '状态', 'Status')}{colToggle('clDate', '日期', 'Date')}{colToggle('clRemark', '备注', 'Remark')}
             <label className="ex-col" title={T('未收到的空白项也一并导出(状态 Pending)', 'Export blank items too (kept Pending)')}>
               <input type="checkbox" checked={blanks} onChange={() => setBlanks(!blanks)} /> {T('含空白项', 'Include blanks')}
             </label>
