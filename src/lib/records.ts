@@ -148,14 +148,17 @@ export const REGISTERS: RegisterDef[] = [
       { key: 'dimL', zh: 'Length 长 (mm)', en: 'Length (mm)', type: 'number', group: G_DIM, highlight: true },
       { key: 'dimH', zh: 'Width 宽 (mm)', en: 'Width (mm)', type: 'number', group: G_DIM, highlight: true },
       { key: 'sqm', zh: 'SQM 面积 (㎡)', en: 'SQM', type: 'formula', formula: 'dimL * dimH / 1000000', decimals: 3, group: G_DIM, highlight: true },
-      { key: 'maxKw', zh: 'Max KW 最大功率', en: 'Max KW', type: 'formula', formula: 'sqm * 450 / 1000', decimals: 2, group: G_DIM, highlight: true },
-      { key: 'avgKw', zh: 'AVG KW 平均功率', en: 'AVG KW', type: 'formula', formula: 'maxKw * 0.5', decimals: 2, group: G_DIM, highlight: true },
-      { key: 'heatKw', zh: 'Heat KW 散热量', en: 'Heat KW', type: 'formula', formula: 'avgKw * 0.8', decimals: 2, group: G_DIM },
       { key: 'qtyL', zh: '数量 L', en: 'Qty L', type: 'number', group: G_DIM },
       { key: 'qtyH', zh: '数量 H', en: 'Qty H', type: 'number', group: G_DIM },
-      { key: 'qtyTotal', zh: '数量 Total', en: 'Qty Total', type: 'number', group: G_DIM },
+      /* 0917 变更单:数量 Total = 数量L × 数量H,不再手填 */
+      { key: 'qtyTotal', zh: '数量 Total', en: 'Qty Total', type: 'formula', formula: 'qtyL * qtyH', decimals: 0, group: G_DIM, highlight: true },
 
-      { key: 'dbBox', zh: 'DB Box (KW)', en: 'DB Box (KW)', type: 'text', group: G_POWER },
+      /* 0917 变更单按 Calculator reference 对齐字段名:
+         DB Box (KW) 就是原来的 Max KW(SQM × 450 / 1000),散热 = DB × 0.5 × 0.8。
+         原先中间那个 AVG KW 去掉 —— 它是派生值,不落库,去掉不丢任何数据,
+         而变更单给的字段清单里也没有它。 */
+      { key: 'dbBox', zh: 'DB Box (KW)', en: 'DB Box (KW)', type: 'formula', formula: 'sqm * 450 / 1000', decimals: 2, group: G_POWER, highlight: true },
+      { key: 'heatKw', zh: 'Heat 散热 (KW)', en: 'Heat (KW)', type: 'formula', formula: 'dbBox * 0.5 * 0.8', decimals: 2, group: G_POWER, highlight: true },
       { key: 'powerCable', zh: '20A 单相电源线 (条)', en: '20A single-phase power cable (No.)', type: 'number', group: G_POWER },
       { key: 'dataCable', zh: 'Cat6 数据线 (条)', en: 'Cat6 data cable (No.)', type: 'number', group: G_POWER },
 
