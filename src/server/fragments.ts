@@ -12,40 +12,47 @@ export interface ScheduleFragment { schedule: ScheduleRow[]; schedStyle?: string
 export interface ChecklistFragment { checklist: ChecklistGroup[]; noCategories?: boolean }
 export type Fragment = ScheduleFragment | ChecklistFragment;
 
-/* fresh schedule rows: keep the plan (task/duration/gates), drop progress —
-   status back to todo, date overrides and delay notes cleared so the rows
-   re-plan from the destination project's own start date. */
-export function freshSchedule(rows: ScheduleRow[]): ScheduleRow[] {
-  return (rows || []).map((r) => ({
-    ...r, id: newId(), status: 'todo' as const, s: '', e: '', note: '', delayNote: '', assignee: '',
-  }));
+/* 0917 变更单:复制 / 套用时可以选「连内容一起复制」。
+   withContent = false(默认,老行为):只带走计划骨架 —— 状态回 todo,
+     日期 / 备注 / 延误说明 / 指派全清,到了新项目按它自己的起始日重排。
+   withContent = true:连进度一起搬 —— 同一个客户的第二期、或者从一个
+     排到一半的项目起一个副本时,重新填一遍状态和日期是白费功夫。
+   两种情况下 id 都要换新的:同一个 id 出现在两个项目里,拖拽排序和
+   React key 都会串。 */
+export function freshSchedule(rows: ScheduleRow[], withContent = false): ScheduleRow[] {
+  return (rows || []).map((r) => (withContent
+    ? { ...r, id: newId() }
+    : { ...r, id: newId(), status: 'todo' as const, s: '', e: '', note: '', delayNote: '', assignee: '' }));
 }
 
-/* fresh checklist: keep categories and item names, reset every received/date/
-   remark/photo so the copy starts as an empty tracking sheet. */
-export function freshChecklist(groups: ChecklistGroup[]): ChecklistGroup[] {
+/* 同上。withContent = true 时保留状态 / 日期 / 备注 / 参考图 / 收料记录,
+   等于把这份清单连同它的进度整份搬过去。 */
+export function freshChecklist(groups: ChecklistGroup[], withContent = false): ChecklistGroup[] {
   return (groups || []).map((g) => ({
     ...g,
-    items: (g.items || []).map((it) => ({
-      ...it, id: newId(), status: 'pending' as const, date: '', remark: '', received: '',
-      shot: undefined, shots: [], highlight: false, updatedAt: undefined,
-    })),
+    items: (g.items || []).map((it) => (withContent
+      ? { ...it, id: newId() }
+      : {
+          ...it, id: newId(), status: 'pending' as const, date: '', remark: '', received: '',
+          shot: undefined, shots: [], highlight: false, updatedAt: undefined,
+          receipts: [],   // REQ-042: 不带内容时收料记录也一并清空
+        })),
   }));
 }
 
-export function extractFragment(pkg: ServicePackage, kind: FragmentKind, schedStyle?: string): Fragment {
+export function extractFragment(pkg: ServicePackage, kind: FragmentKind, schedStyle?: string, withContent = false): Fragment {
   return kind === 'schedule'
-    ? { schedule: freshSchedule(pkg.schedule), schedStyle }
-    : { checklist: freshChecklist(pkg.checklist), noCategories: !!pkg.noCategories };
+    ? { schedule: freshSchedule(pkg.schedule, withContent), schedStyle }
+    : { checklist: freshChecklist(pkg.checklist, withContent), noCategories: !!pkg.noCategories };
 }
 
 /* apply a fragment onto a package — replace swaps the section, append adds to it */
-export function applyFragment(pkg: ServicePackage, kind: FragmentKind, frag: Fragment, mode: 'replace' | 'append') {
+export function applyFragment(pkg: ServicePackage, kind: FragmentKind, frag: Fragment, mode: 'replace' | 'append', withContent = false) {
   if (kind === 'schedule') {
-    const rows = freshSchedule((frag as ScheduleFragment).schedule || []);
+    const rows = freshSchedule((frag as ScheduleFragment).schedule || [], withContent);
     pkg.schedule = mode === 'replace' ? rows : [...pkg.schedule, ...rows];
   } else {
-    const groups = freshChecklist((frag as ChecklistFragment).checklist || []);
+    const groups = freshChecklist((frag as ChecklistFragment).checklist || [], withContent);
     pkg.checklist = mode === 'replace' ? groups : [...pkg.checklist, ...groups];
     const nc = (frag as ChecklistFragment).noCategories;
     if (mode === 'replace' && typeof nc === 'boolean') pkg.noCategories = nc;
@@ -78,4 +85,26 @@ export function trimPackage(pkg: ServicePackage, mode: 'entire' | 'schedule' | '
   out.record = undefined;
   out.status = 'notstarted';
   return out;
+}
+
+
+/* 0917 变更单:向导第三步的「预览」—— 这次会带进来几个分区 / 几项 /
+   其中几项是带着内容的。数出来给人看,而不是让人点完才知道搬了什么。 */
+export interface FragmentStats { groups: number; items: number; withContent: number }
+
+export function statFragment(frag: Fragment, kind: FragmentKind): FragmentStats {
+  if (kind === 'schedule') {
+    const rows = (frag as ScheduleFragment).schedule || [];
+    return {
+      groups: new Set(rows.map((r) => r.phase || '')).size,
+      items: rows.length,
+      withContent: rows.filter((r) => r.status !== 'todo' || r.s || r.e || r.note || r.assignee).length,
+    };
+  }
+  const groups = (frag as ChecklistFragment).checklist || [];
+  const items = groups.reduce((n, g) => n + (g.items || []).length, 0);
+  const withContent = groups.reduce((n, g) => n + (g.items || []).filter(
+    (it) => it.status !== 'pending' || it.date || it.remark || it.received || (it.shots || []).length,
+  ).length, 0);
+  return { groups: groups.length, items, withContent };
 }

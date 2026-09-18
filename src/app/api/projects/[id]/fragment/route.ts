@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { appendAudit, getProject, getUserTemplate, saveProjectCAS } from '@/server/db';
 import { currentUser } from '@/server/session';
 import { canEdit, identityOf } from '@/lib/permissions';
-import { applyFragment, matchPackage, extractFragment, type Fragment, type FragmentKind } from '@/server/fragments';
+import { applyFragment, matchPackage, extractFragment, statFragment, type Fragment, type FragmentKind } from '@/server/fragments';
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -10,7 +10,11 @@ type Params = { params: Promise<{ id: string }> };
    Source is either another project (sourceId) or a saved template (templateId) —
    both are read server-side, so the client never supplies the payload.
    Body: { pkg, kind: 'schedule'|'checklist', mode: 'replace'|'append',
-           sourceId? , templateId? } */
+           sourceId? , templateId?, withContent?, preview? }
+   0917 变更单:
+   - withContent —— 连内容一起复制(状态 / 日期 / 路径 / 参考图),默认关;
+   - preview     —— 只数一数会带进来几个分区 / 几项 / 其中几项含内容,
+                    什么都不写。向导第三步用它,免得点完才知道搬了什么。 */
 export async function POST(req: NextRequest, { params }: Params) {
   const user = await currentUser();
   if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
@@ -20,8 +24,11 @@ export async function POST(req: NextRequest, { params }: Params) {
   if (!canEdit(identityOf(user), p)) return NextResponse.json({ error: '无编辑权限' }, { status: 403 });
 
   const body = (await req.json().catch(() => null)) as {
-    pkg?: number; kind?: string; mode?: string; sourceId?: string; templateId?: number; baseVersion?: number;
+    pkg?: number; kind?: string; mode?: string; sourceId?: string; templateId?: number;
+    baseVersion?: number; withContent?: boolean; preview?: boolean;
   } | null;
+  const withContent = !!body?.withContent;
+  const preview = !!body?.preview;
   const kind = String(body?.kind || '') as FragmentKind;
   const mode = (String(body?.mode || 'replace') === 'append' ? 'append' : 'replace') as 'replace' | 'append';
   if (kind !== 'schedule' && kind !== 'checklist') return NextResponse.json({ error: '无效的内容类型' }, { status: 400 });
@@ -30,9 +37,10 @@ export async function POST(req: NextRequest, { params }: Params) {
   const dest = p.packages[pkgIdx];
   if (!dest) return NextResponse.json({ error: '无效的服务包' }, { status: 400 });
 
-  /* strict optimistic lock, same contract as PATCH /api/projects/:id */
+  /* strict optimistic lock, same contract as PATCH /api/projects/:id.
+     预览不写库,所以不参与版本校验。 */
   const expectedVersion = p.version || 0;
-  if (typeof body?.baseVersion === 'number' && body.baseVersion !== expectedVersion) {
+  if (!preview && typeof body?.baseVersion === 'number' && body.baseVersion !== expectedVersion) {
     return NextResponse.json({ error: '此项目刚被他人修改,已为你刷新,请核对后重新操作。', stale: true }, { status: 409 });
   }
 
@@ -51,15 +59,18 @@ export async function POST(req: NextRequest, { params }: Params) {
     const ordinal = p.packages.filter((x, i) => x.svc === dest.svc && i < pkgIdx).length;
     const srcPkg = matchPackage(src, dest.svc, ordinal);
     if (!srcPkg) return NextResponse.json({ error: '源项目没有可用的服务包' }, { status: 400 });
-    frag = extractFragment(srcPkg, kind, src.schedStyle);
+    frag = extractFragment(srcPkg, kind, src.schedStyle, withContent);
     label = `项目「${src.name}」`;
   } else {
     return NextResponse.json({ error: '请指定来源项目或模板' }, { status: 400 });
   }
 
-  applyFragment(dest, kind, frag, mode);
+  /* 预览:数完就返回,一个字节都不写 */
+  if (preview) return NextResponse.json({ preview: statFragment(frag, kind), label });
+
+  applyFragment(dest, kind, frag, mode, withContent);
   const now = Date.now();
-  const text = `${mode === 'replace' ? '覆盖' : '追加'}导入${kind === 'schedule' ? '排期' : '信息清单'} ← ${label}`;
+  const text = `${mode === 'replace' ? '覆盖' : '追加'}导入${kind === 'schedule' ? '排期' : '信息清单'}${withContent ? '(含内容)' : ''} ← ${label}`;
   p.log = [{ at: now, by: user.name, text }, ...(p.log || [])].slice(0, 200);
 
   const v = saveProjectCAS(p, expectedVersion);
