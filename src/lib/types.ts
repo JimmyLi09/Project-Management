@@ -104,6 +104,22 @@ export interface ScheduleRow {
   kind?: 'milestone' | 'holiday';
 }
 
+/* ===== REQ-042: 一个信息项的一条「收料记录」 =====
+   同一份文件在项目周期里会收到好几版(v01/v02/v03),以前只能记一条、
+   后面覆盖前面,历史就没了。现在每收一次追加一条,最新的置顶标 Latest。 */
+export interface ReceiptRecord {
+  id: string;
+  date: string;        // 收到日期 ISO
+  fileName: string;    // 文件名称
+  from: string;        // 来自(谁给的)
+  via: string;         // 收到方式 Email / WhatsApp / …
+  path: string;        // 保存路径(server location)—— 只记路径,不托管文件
+  status: ChecklistStatus;
+  remark: string;
+  at: number;          // 录入时间,用于同日多条时的排序
+  by: string;          // 谁录的
+}
+
 export interface ChecklistItem {
   id?: string; // stable key (survives add/remove/reorder without remounting)
   zh: string;
@@ -117,6 +133,11 @@ export interface ChecklistItem {
   owner?: string; // responsible person (name), shown with an avatar
   highlight?: boolean; // mark this item's remark as important (bright colour)
   updatedAt?: number; // last time this item changed (for "last update" column)
+  /* REQ-042: 全部收料记录,时间倒序(第 0 条 = Latest)。
+     老数据由 migrate() 把原来那一条搬成第一条,原字段(status/date/received/
+     remark)继续保留并跟着 Latest 走 —— 导出、KPI、看板那些地方读的还是它们,
+     不需要跟着一起改。 */
+  receipts?: ReceiptRecord[];
 }
 
 export interface ChecklistGroup {

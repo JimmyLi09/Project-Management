@@ -2,8 +2,10 @@
 
 import { GENERIC, TPL, diffPoints, STAGES, stageIdx, type Template } from './templates';
 import { rulePoints, type PointRules } from './points';
+import { seedReceipt } from './receipts';
 import type {
   ChecklistGroup,
+  ChecklistItem,
   DirectorUpdate,
   Project,
   ScheduleRow,
@@ -190,6 +192,15 @@ export function migrate(p: any): Project {
       /* fold a legacy single shot into the shots[] array */
       if (!Array.isArray(it.shots)) it.shots = it.shot ? [it.shot] : [];
       if (it.shot) delete it.shot;
+      /* REQ-042: 老数据里那一条收料信息搬成 receipts 的第一条(Latest)。
+         真收到过东西才生成 —— 空项凭空多一条什么都没有的记录更难看。 */
+      /* 空数组也要再看一眼 —— 项目是「先建(那时什么都没收到,种子为空)、
+         后填收到内容」的,如果只判 undefined,这些项就永远补不上第一条。 */
+      if (!Array.isArray(it.receipts)) it.receipts = [];
+      if (it.receipts.length === 0) {
+        const seed = seedReceipt(it as ChecklistItem);
+        if (seed) it.receipts = [seed];
+      }
     }));
   });
   if (!p.update) p.update = {};
