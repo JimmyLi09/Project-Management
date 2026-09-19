@@ -3,7 +3,7 @@
 import React, { useMemo, useState } from 'react';
 import { useStore } from '../store';
 import { canAdmin, canDelete, canEdit } from '@/lib/permissions';
-import { svcName, svcColor } from '@/lib/templates';
+import { SVC, svcName, svcColor } from '@/lib/templates';
 import { fmtDate, parseISO, pkgSuffix, projCode } from '@/lib/project';
 import { useLang } from '@/lib/i18n';
 import { Icon } from '../ui';
@@ -193,7 +193,14 @@ function AddServiceBar({ p }: { p: Project }) {
   /* REQ-026: 同类业务可以再加一份(两块 LED / 两个沙盘),所以不再排除已有的;
      已经有的在下拉里标一下「已有 N 份」,免得手滑重复添加。 */
   const countOf = (k: string) => p.packages.filter((x) => x.svc === k).length;
-  const options = REGISTERS;
+  /* 0917 变更单:业务下拉给**全量 17 类**,不再只列有登记表的 7 类 ——
+     Shermin 要的是「一个完整 list,选完加入列表,可多块」。
+     没有登记表的那几类(网站 / 无人机 / 灯箱 …)加进来也有意义:排期和信息清单
+     照常生成,资料卡那边按 REQ-023 自己加字段。下拉里标出来哪些自带登记表,
+     免得加完发现没有资料表还以为是 bug。 */
+  /* 「有没有登记表」按现在的实际情况判:出厂自带的 7 类算,0917 变更单 REQ-023
+     里 PD 自己加过字段的也算 —— 加完字段还标「无登记表」会让人以为没生效。 */
+  const options = Object.keys(SVC).map((svc) => ({ svc, hasRegister: hasRecordDef(svc, recordFields) }));
 
   /* REQ-039: 选了业务之后,把这张登记表最前面两个下拉字段(LED 就是
      Screen Resolution / Location)顺手摆出来,添加时一起带进 record ——
@@ -215,7 +222,13 @@ function AddServiceBar({ p }: { p: Project }) {
           <option value="">{t('— 选择业务 —', '— select service —')}</option>
           {options.map((r) => {
             const n = countOf(r.svc);
-            return <option key={r.svc} value={r.svc}>{svcName(r.svc, lang)}{n ? t(`（已有 ${n} 份）`, ` (${n} existing)`) : ''}</option>;
+            return (
+              <option key={r.svc} value={r.svc}>
+                {svcName(r.svc, lang)}
+                {n ? t(`（已有 ${n} 份）`, ` (${n} existing)`) : ''}
+                {r.hasRegister ? '' : t(' · 无资料表(可后补字段)', ' · no record table yet')}
+              </option>
+            );
           })}
         </select>
         {specFields.map((f) => (

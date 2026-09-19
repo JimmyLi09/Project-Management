@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
+import { ItemReceipts, ReceivingLog } from './ReceiptLog';
 import { useStore } from '../store';
 import { canEdit } from '@/lib/permissions';
 import { getBuiltinTemplate, svcColor, svcName } from '@/lib/templates';
@@ -43,6 +44,10 @@ export default function ChecklistTab({ p, pkgIdx, onExport, onPkg }: {
   /* REQ-012: drag-to-reorder items inside a category (gi:ii identifies a row) */
   const [drag, setDrag] = useState<{ gi: number; ii: number } | null>(null);
   const [dragOver, setDragOver] = useState<string | null>(null);
+  /* REQ-042: 两套视图 —— 对外清单(每项只看最新)/ 内部收料记录(全部记录+路径)。
+     展开某一项看它的全部收料历史时记下 gi:ii。 */
+  const [view, setView] = useState<'external' | 'log'>('external');
+  const [openRec, setOpenRec] = useState<string | null>(null);
   const ed = canEdit(me, p);
   const fe = ed && fieldEdit;
   const pkg = p.packages[pkgIdx];
@@ -182,6 +187,24 @@ export default function ChecklistTab({ p, pkgIdx, onExport, onPkg }: {
         <button className="btn-line sm" onClick={onExport}><Icon name="download" size={13} />{t('导出清单', 'Export Checklist')}</button>
       </div>
 
+      {/* REQ-042: 对外清单 / 内部收料记录 两套视图 */}
+      <div className="detail-tabs" style={{ borderTop: 'none', marginBottom: 4 }}>
+        <button className={`detail-tab${view === 'external' ? ' active' : ''}`} onClick={() => setView('external')}
+          title={t('给顾问 / 客户看的:每项只显示最新状态,不含服务器路径与内部备注',
+                   'For consultants / clients: latest status per item, no server paths or internal remarks')}>
+          {t('对外清单', 'External checklist')}
+        </button>
+        <button className={`detail-tab${view === 'log' ? ' active' : ''}`} onClick={() => setView('log')}
+          title={t('团队内部用:每项的全部收料记录,含路径与备注', 'Internal: every receiving record with paths and remarks')}>
+          {t('内部收料记录', 'Receiving log')}
+        </button>
+      </div>
+
+      {view === 'log' ? (
+        <ReceivingLog p={p} pkgIdx={pkgIdx} canEd={ed}
+          onOpenItem={(gi, ii) => { setView('external'); setOpenRec(`${gi}:${ii}`); }} />
+      ) : (
+      <>
       {/* REQ-012: import this package's checklist from another project / a saved template */}
       {ed && <FragmentBar p={p} pkgIdx={pkgIdx} kind="checklist" />}
 
@@ -245,7 +268,8 @@ export default function ChecklistTab({ p, pkgIdx, onExport, onPkg }: {
                 const shots = it.shots && it.shots.length ? it.shots : (it.shot ? [it.shot] : []);
                 const over = dragOver === `${gi}:${ii}` && drag && drag.gi === gi && drag.ii !== ii;
                 return (
-                  <div key={it.id || ii}
+                  <React.Fragment key={it.id || ii}>
+                  <div
                     onDragOver={editMode && ed ? (e) => { if (drag && drag.gi === gi) { e.preventDefault(); setDragOver(`${gi}:${ii}`); } } : undefined}
                     onDrop={editMode && ed ? (e) => {
                       e.preventDefault();
@@ -374,6 +398,18 @@ export default function ChecklistTab({ p, pkgIdx, onExport, onPkg }: {
                       ) : it.received ? (
                         <span style={{ fontSize: 12, color: 'var(--text)', wordBreak: 'break-word' }}>📄 {it.received}</span>
                       ) : null}
+                      {/* REQ-042: 这一项收过几次 —— 点开看全部历史 */}
+                      <button className="btn-line sm" style={{ alignSelf: 'flex-start', marginTop: 2 }}
+                        title={t('查看 / 追加这一项的收料记录(多次收料不会互相覆盖)',
+                                 'View / append this item’s receiving records — versions never overwrite each other')}
+                        onClick={() => setOpenRec(openRec === `${gi}:${ii}` ? null : `${gi}:${ii}`)}>
+                        🗂 {t('记录', 'Records')} ({(it.receipts || []).length})
+                        {(it.receipts || []).length > 1 && (
+                          <span className="badge" style={{ background: 'var(--navy900)', color: '#fff', marginLeft: 5 }}>
+                            {t(`${(it.receipts || []).length} 版`, `${(it.receipts || []).length} versions`)}
+                          </span>
+                        )}
+                      </button>
                     </div>
 
                     {/* ── Date received ── */}
@@ -401,6 +437,13 @@ export default function ChecklistTab({ p, pkgIdx, onExport, onPkg }: {
                       </div>
                     )}
                   </div>
+                  {/* REQ-042: 展开这一项的全部收料记录(Item History) */}
+                  {openRec === `${gi}:${ii}` && (
+                    <ItemReceipts p={p} pkgIdx={pkgIdx} gi={gi} ii={ii}
+                      receipts={it.receipts || []} canEd={ed}
+                      onClose={() => setOpenRec(null)} />
+                  )}
+                  </React.Fragment>
                 );
               })}
 
@@ -423,6 +466,9 @@ export default function ChecklistTab({ p, pkgIdx, onExport, onPkg }: {
             const nm = prompt(t('新栏目名称(中文):', 'New section name:'), t('特殊需求', 'Special requirements'));
             if (nm) dispatch(p.id, { type: 'addGroup', pkg: pkgIdx, name: nm });
           }}>+ {t('添加新栏目', 'Add section')}</button>
+      )}
+
+      </>
       )}
 
       <datalist id="cl-owner-names">{assigneeNames.map((n) => <option key={n} value={n} />)}</datalist>

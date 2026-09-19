@@ -7,7 +7,8 @@ import {
   canAssign, canCommercial, canDecide, canEdit, canEditFinance, canRowEdit, isFull, canDelete , canMeta } from '@/lib/permissions';
 import { buildPackage, deriveStatuses, fitWindow, newId, parseISO, isoDate, totalDays } from '@/lib/project';
 import { SVC, type Template } from '@/lib/templates';
-import type { ChecklistStatus, Project, ScheduleStatus } from '@/lib/types';
+import type { ChecklistStatus, Project, ReceiptRecord, ScheduleStatus } from '@/lib/types';
+import { cleanReceipt, sortReceipts, syncFromLatest, syncToLatest } from '@/lib/receipts';
 
 /* Optional context the route supplies so we can rebuild from edited templates
    without importing the DB layer here (keeps this file client-safe for types). */
@@ -29,6 +30,10 @@ export type ProjectAction =
   | { type: 'addSpecialRow'; pkg: number; kind: 'milestone' | 'holiday'; text: string; date: string }
   | { type: 'setClStatus'; pkg: number; gi: number; ii: number; value: ChecklistStatus }
   | { type: 'editCl'; pkg: number; gi: number; ii: number; field: 'date' | 'remark' | 'zh' | 'en' | 'owner' | 'received'; value: string }
+  /* REQ-042: 收料记录(多条、不覆盖) */
+  | { type: 'addReceipt'; pkg: number; gi: number; ii: number; rec: Partial<ReceiptRecord> }
+  | { type: 'editReceipt'; pkg: number; gi: number; ii: number; id: string; rec: Partial<ReceiptRecord> }
+  | { type: 'removeReceipt'; pkg: number; gi: number; ii: number; id: string }
   | { type: 'renameGroup'; pkg: number; gi: number; name: string; nameEn?: string }
   | { type: 'renameProject'; name: string }
   | { type: 'setQuotationNo'; value: string }
@@ -224,8 +229,55 @@ export function applyAction(u: Identity, p: Project, a: ProjectAction, ctx: Acti
       const { it } = getItem(p, a.pkg, a.gi, a.ii);
       const was = it.status;
       it.status = a.value;
+      syncToLatest(it, u.name);   // REQ-042: 行上改状态 = 改 Latest 那条
       it.updatedAt = Date.now();
       logIt(p, u.name, `清单「${it.zh}」: ${was}→${a.value}`);
+      break;
+    }
+    /* ===== REQ-042: 每个信息项的多条收料记录 =====
+       追加不覆盖:收到 v02 是新增一条,v01 留在历史里。
+       每次动完都把 Latest 同步回 item 的老字段(status/date/received/remark)——
+       导出、KPI、进度统计读的都还是那几个字段,这样它们一行都不用改。 */
+    case 'addReceipt': {
+      if (!canEdit(u, p)) throw new PermissionError('无编辑权限');
+      const { it } = getItem(p, a.pkg, a.gi, a.ii);
+      if (!Array.isArray(it.receipts)) it.receipts = [];
+      if (it.receipts.length >= 60) throw new ValidationError('一个信息项最多 60 条收料记录');
+      const fresh = cleanReceipt(a.rec || {}, u.name);
+      /* 接收人默认就是录的人(多数时候是同一个),留个默认免得每条都要手填;
+         想改在表单里改,编辑时清空就是真清空,服务端不再回填。 */
+      if (!fresh.receivedBy) fresh.receivedBy = u.name;
+      it.receipts = sortReceipts([fresh, ...it.receipts]);
+      syncFromLatest(it);
+      it.updatedAt = Date.now();
+      logIt(p, u.name, `清单「${it.zh}」新增收料记录${a.rec?.fileName ? `:${String(a.rec.fileName).slice(0, 60)}` : ''}`);
+      break;
+    }
+    case 'editReceipt': {
+      if (!canEdit(u, p)) throw new PermissionError('无编辑权限');
+      const { it } = getItem(p, a.pkg, a.gi, a.ii);
+      const list = it.receipts || [];
+      const cur = list.find((r) => r.id === a.id);
+      if (!cur) throw new ValidationError('找不到这条收料记录');
+      /* 保留原 id 与首次录入人,改的是内容 */
+      const next = { ...cleanReceipt(a.rec || {}, cur.by || u.name, cur.id), at: cur.at || Date.now() };
+      it.receipts = sortReceipts(list.map((r) => (r.id === a.id ? next : r)));
+      syncFromLatest(it);
+      it.updatedAt = Date.now();
+      logIt(p, u.name, `清单「${it.zh}」修改了一条收料记录`);
+      break;
+    }
+    case 'removeReceipt': {
+      if (!canEdit(u, p)) throw new PermissionError('无编辑权限');
+      const { it } = getItem(p, a.pkg, a.gi, a.ii);
+      const list = it.receipts || [];
+      if (!list.some((r) => r.id === a.id)) throw new ValidationError('找不到这条收料记录');
+      it.receipts = list.filter((r) => r.id !== a.id);
+      /* 全删光了就把老字段退回未收到,不要留一个「已收到」却查无记录的状态 */
+      if (it.receipts.length) syncFromLatest(it);
+      else { it.status = 'pending'; it.date = ''; it.received = ''; }
+      it.updatedAt = Date.now();
+      logIt(p, u.name, `清单「${it.zh}」删除了一条收料记录`);
       break;
     }
     case 'editCl': {
@@ -241,6 +293,10 @@ export function applyAction(u: Identity, p: Project, a: ProjectAction, ctx: Acti
         if (it.status === 'pending') it.status = 'received';
         if (!it.date) it.date = isoDate(new Date());
       }
+      /* REQ-042: 行上直接改「收到内容 / 日期」时,把改动落到 Latest ——
+         否则行上写着已收到、展开记录却是空的,两套表示会分叉。
+         备注不在其列:清单项备注是对外的,记录备注是内部的,两者不互通。 */
+      if (a.field === 'received' || a.field === 'date') syncToLatest(it, u.name);
       it.updatedAt = Date.now();
       break;
     }
