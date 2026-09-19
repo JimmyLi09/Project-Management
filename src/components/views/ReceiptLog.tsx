@@ -74,6 +74,7 @@ export function ItemReceipts({ p, pkgIdx, gi, ii, receipts, canEd, onClose }: {
               <b style={{ minWidth: 0, wordBreak: 'break-all' }}>{r.fileName || t('(未填文件名)', '(no file name)')}</b>
               {r.from && <span style={{ color: 'var(--text2)' }}>· {t('来自', 'from')} {r.from}</span>}
               {r.via && <span style={{ color: 'var(--text2)' }}>· {viaName(r.via, lang)}</span>}
+              {r.receivedBy && <span style={{ color: 'var(--text2)' }}>· {t('接收', 'received by')} {r.receivedBy}</span>}
               <div style={{ flex: 1 }} />
               {canEd && (
                 <>
@@ -104,9 +105,12 @@ function ReceiptForm({ init, lang, onSave, onCancel }: {
   onSave: (r: Partial<ReceiptRecord>) => Promise<void>; onCancel: () => void;
 }) {
   const { t } = useLang();
+  const { me } = useStore();
+  /* 接收人默认填当前登录人 —— 多数时候收东西的就是在录的人;
+     不是的话改掉即可。编辑已有记录时保持原值,不去覆盖。 */
   const [d, setD] = useState<Partial<ReceiptRecord>>(() => init
     ? { ...init }
-    : { date: new Date().toISOString().slice(0, 10), status: 'received' as ChecklistStatus, fileName: '', from: '', via: 'email', path: '', remark: '' });
+    : { date: new Date().toISOString().slice(0, 10), status: 'received' as ChecklistStatus, fileName: '', from: '', via: 'email', path: '', remark: '', receivedBy: me.name });
   const [busy, setBusy] = useState(false);
   const set = (k: keyof ReceiptRecord, v: string) => setD((x) => ({ ...x, [k]: v }));
 
@@ -127,6 +131,10 @@ function ReceiptForm({ init, lang, onSave, onCancel }: {
             <option value="">—</option>
             {RECEIVE_VIA.map((v) => <option key={v[0]} value={v[0]}>{lang === 'zh' ? v[1] : v[2]}</option>)}
           </select>
+        </label>
+        <label style={fl}>{t('接收人', 'Received by')}
+          <input className="in sm" aria-label={t('接收人', 'Received by')} value={d.receivedBy || ''} maxLength={60}
+            placeholder={t('默认当前登录人', 'defaults to you')} onChange={(e) => set('receivedBy', e.target.value)} />
         </label>
         <label style={fl}>{t('状态', 'Status')}
           <select className="in sm" aria-label={t('记录状态', 'Record status')} value={d.status || 'received'} onChange={(e) => set('status', e.target.value)}>
@@ -181,15 +189,17 @@ export function ReceivingLog({ p, pkgIdx, canEd, onOpenItem }: {
     if (to && (x.r.date || '') > to) return false;
     if (!q.trim()) return true;
     const s = q.trim().toLowerCase();
-    return (x.item + x.group + x.r.fileName + x.r.from + x.r.path + x.r.remark).toLowerCase().includes(s);
+    return (x.item + x.group + x.r.fileName + x.r.from + (x.r.receivedBy || '') + x.r.path + x.r.remark).toLowerCase().includes(s);
   });
 
   function exportCsv() {
     const qt = (s: string) => `"${String(s ?? '').replace(/"/g, '""')}"`;
     const head = [t('分类', 'Section'), t('信息项', 'Item'), t('收到日期', 'Date'), t('文件名称', 'File name'),
-      t('来自', 'From'), t('收到方式', 'Via'), t('保存路径', 'Path'), t('状态', 'Status'), t('备注', 'Remark'), t('录入人', 'Logged by')];
+      t('来自', 'From'), t('收到方式', 'Via'), t('接收人', 'Received by'), t('保存路径', 'Path'),
+      t('状态', 'Status'), t('备注', 'Remark'), t('录入人', 'Logged by')];
     const body = shown.map((x) => [x.group, x.item, x.r.date, x.r.fileName, x.r.from,
-      viaName(x.r.via, lang), x.r.path, lang === 'zh' ? statusMeta(x.r.status).zh : statusMeta(x.r.status).label, x.r.remark, x.r.by]);
+      viaName(x.r.via, lang), x.r.receivedBy || '', x.r.path,
+      lang === 'zh' ? statusMeta(x.r.status).zh : statusMeta(x.r.status).label, x.r.remark, x.r.by]);
     const csv = '﻿' + [head, ...body].map((r) => r.map(qt).join(',')).join('\r\n');
     const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8;' }));
     const a = document.createElement('a');
@@ -203,7 +213,7 @@ export function ReceivingLog({ p, pkgIdx, canEd, onOpenItem }: {
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
       <div className="panel" style={{ padding: '12px 16px', display: 'flex', gap: 9, alignItems: 'center', flexWrap: 'wrap' }}>
         <input className="in sm" style={{ flex: 1, minWidth: 180 }} value={q} onChange={(e) => setQ(e.target.value)}
-          placeholder={t('搜索 信息项 / 文件名 / 来自 / 路径 / 备注…', 'Search item, file, sender, path or remark…')} />
+          placeholder={t('搜索 信息项 / 文件名 / 来自 / 接收人 / 路径 / 备注…', 'Search item, file, sender, receiver, path or remark…')} />
         <select className="in sm" style={{ width: 'auto' }} value={st} onChange={(e) => setSt(e.target.value)}>
           <option value="">{t('全部状态', 'All statuses')}</option>
           {Object.entries(CM).map(([k, v]) => <option key={k} value={k}>{lang === 'zh' ? v.zh : v.label}</option>)}
@@ -231,7 +241,7 @@ export function ReceivingLog({ p, pkgIdx, canEd, onOpenItem }: {
             <thead>
               <tr>
                 {[t('收到日期', 'Date'), t('信息项', 'Item'), t('文件名称', 'File name'), t('来自 / 方式', 'From / via'),
-                  t('保存路径', 'Path'), t('状态', 'Status'), t('备注', 'Remark')].map((h, i) => <th key={i} style={th}>{h}</th>)}
+                  t('接收人', 'Received by'), t('保存路径', 'Path'), t('状态', 'Status'), t('备注', 'Remark')].map((h, i) => <th key={i} style={th}>{h}</th>)}
               </tr>
             </thead>
             <tbody>
@@ -248,6 +258,7 @@ export function ReceivingLog({ p, pkgIdx, canEd, onOpenItem }: {
                   </td>
                   <td style={{ ...cell, wordBreak: 'break-all' }}>{x.r.fileName || '—'}</td>
                   <td style={cell}>{x.r.from || '—'}{x.r.via ? <span style={{ display: 'block', fontSize: 11, color: 'var(--text2)' }}>{viaName(x.r.via, lang)}</span> : null}</td>
+                  <td style={{ ...cell, whiteSpace: 'nowrap' }}>{x.r.receivedBy || '—'}</td>
                   <td style={{ ...cell, wordBreak: 'break-all', fontSize: 11.5, color: 'var(--text2)' }}>{x.r.path || '—'}</td>
                   <td style={cell}><StatusBadge s={x.r.status} lang={lang} /></td>
                   <td style={{ ...cell, fontSize: 11.5, color: 'var(--text2)', whiteSpace: 'pre-wrap' }}>{x.r.remark || '—'}</td>

@@ -119,7 +119,11 @@ export interface ReceiptRecord {
   status: ChecklistStatus;
   remark: string;
   at: number;          // 录入时间,用于同日多条时的排序
-  by: string;          // 谁录的
+  by: string;          // 谁录的(服务端写,不可改)
+  /* 0917:Shermin PPT 第 5 页那一列。与 by 是两回事 —— 东西可能是 A 收的、
+     B 代录的,多数时候同一个人,所以新建时默认填录入人,但可以改。
+     老记录没有这一位,读出来是 undefined,显示成「—」,不去猜。 */
+  receivedBy?: string; // 接收人
 }
 
 export interface ChecklistItem {

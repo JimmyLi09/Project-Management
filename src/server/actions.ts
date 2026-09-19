@@ -243,7 +243,11 @@ export function applyAction(u: Identity, p: Project, a: ProjectAction, ctx: Acti
       const { it } = getItem(p, a.pkg, a.gi, a.ii);
       if (!Array.isArray(it.receipts)) it.receipts = [];
       if (it.receipts.length >= 60) throw new ValidationError('一个信息项最多 60 条收料记录');
-      it.receipts = sortReceipts([cleanReceipt(a.rec || {}, u.name), ...it.receipts]);
+      const fresh = cleanReceipt(a.rec || {}, u.name);
+      /* 接收人默认就是录的人(多数时候是同一个),留个默认免得每条都要手填;
+         想改在表单里改,编辑时清空就是真清空,服务端不再回填。 */
+      if (!fresh.receivedBy) fresh.receivedBy = u.name;
+      it.receipts = sortReceipts([fresh, ...it.receipts]);
       syncFromLatest(it);
       it.updatedAt = Date.now();
       logIt(p, u.name, `清单「${it.zh}」新增收料记录${a.rec?.fileName ? `:${String(a.rec.fileName).slice(0, 60)}` : ''}`);

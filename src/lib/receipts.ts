@@ -98,5 +98,6 @@ export function cleanReceipt(raw: Partial<ReceiptRecord>, by: string, keepId?: s
     remark: s(raw.remark, 1000),
     at: Date.now(),
     by: s(by, 60),
+    receivedBy: s(raw.receivedBy, 60),
   };
 }
