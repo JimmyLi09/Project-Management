@@ -6,6 +6,7 @@ import {
   type LocalDate,
   type StageSchedule
 } from '../domain/schedule'
+import { useLang } from '@/lib/i18n'
 
 export interface PrintScheduleMeta {
   title: string
@@ -50,8 +51,9 @@ function formatPrintDuration(duration: number): string {
 }
 
 export function PrintSchedule({ meta, schedules }: PrintScheduleProps) {
+  const { t } = useLang()
   const today = todayLocalDate()
-  const title = meta.title.trim() || '项目排期'
+  const title = meta.title.trim() || t('项目排期', 'Production schedule')
   const projectStart = schedules[0]?.start ?? null
   const projectEnd = schedules.at(-1)?.end ?? null
   const subtitleParts = [

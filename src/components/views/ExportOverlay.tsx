@@ -31,7 +31,12 @@ export default function ExportOverlay({ p, onClose, scope = 'all' }: { p: Projec
   const [orient, setOrient] = useState<'portrait' | 'landscape'>('portrait');
   const [pkgSel, setPkgSel] = useState<boolean[]>(() => p.packages.map(() => true));
   const [blanks, setBlanks] = useState(true); // REQ-013: include blank (Pending) items — default on
-  const [cover, setCover] = useState(true);   // REQ-021: 封面页,默认开
+  /* REQ-021 封面页。0917 变更单:「Checklist 导出第一页空白太多」——
+     量过正文本身已经很紧凑(标题在最顶、表格 103px 处就开始),空白来自
+     默认开着的封面:封面独占一页,对外发的信息清单上那一页确实是白费。
+     所以**清单导出默认不带封面**,排期 / 全量导出保持原样默认开;
+     需要封面随时勾回来。 */
+  const [cover, setCover] = useState(scope !== 'checklist');
   /* REQ-016: company notes — global default, per-export toggle + tweak */
   const [notesOn, setNotesOn] = useState(true);
   const [notes, setNotes] = useState(DEFAULT_NOTES);
@@ -41,7 +46,8 @@ export default function ExportOverlay({ p, onClose, scope = 'all' }: { p: Projec
   }, []);
   async function saveDefaultNotes() {
     const r = await fetch('/api/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key: 'exportNotes', value: notes }) });
-    setToast(r.ok ? '已保存为全局默认说明' : '保存失败(仅 PD/BD 可存默认)');
+    setToast(r.ok ? T('已保存为全局默认说明', 'Saved as the global default note')
+                  : T('保存失败(仅 PD/BD 可存默认)', 'Could not save — only PD / BD can set the default'));
   }
 
   const L = lang;
@@ -125,7 +131,9 @@ export default function ExportOverlay({ p, onClose, scope = 'all' }: { p: Projec
           <table className="t-fix">
             <thead>
               <tr>
-                <th style={{ width: '6%' }}>#</th><th>{T('阶段 / 任务', 'Phase / Task')}</th>
+                {/* 0917 变更单:导出的生产排期表去掉最左 # 序号列 ——
+                    顺序仍按排期先后,只是不再显示这个系统序号。 */}
+                <th>{T('阶段 / 任务', 'Phase / Task')}</th>
                 <th style={{ width: '26%' }}>{T('日期', 'Dates')}</th>
                 <th style={{ width: '13%' }}>{T('时长', 'Duration')}</th>
               </tr>
@@ -136,7 +144,6 @@ export default function ExportOverlay({ p, onClose, scope = 'all' }: { p: Projec
                 const d = pd[i];
                 return (
                   <tr key={r.id || i}>
-                    <td>{i}</td>
                     <td>{(L === 'zh' ? r.task : r.taskEn)}{r.freeze ? ' ★' : ''}</td>
                     <td>{d ? `${fmtDate(d.start)} – ${fmtDate(d.end)}` : '—'}</td>
                     <td>{r.weeks ? T(`${r.weeks} 周`, `${r.weeks} week${r.weeks > 1 ? 's' : ''}`) : '—'}</td>
@@ -144,7 +151,8 @@ export default function ExportOverlay({ p, onClose, scope = 'all' }: { p: Projec
                 );
               })}
               <tr>
-                <td colSpan={3} style={{ textAlign: 'right', fontWeight: 700 }}>{T('小计 Subtotal', 'Subtotal')}</td>
+                {/* 去掉 # 列后本表 3 列,小计跨前 2 列 */}
+                <td colSpan={2} style={{ textAlign: 'right', fontWeight: 700 }}>{T('小计 Subtotal', 'Subtotal')}</td>
                 <td style={{ fontWeight: 700 }}>{T(`${sub} 周`, `${sub} weeks`)}</td>
               </tr>
             </tbody>
@@ -153,7 +161,8 @@ export default function ExportOverlay({ p, onClose, scope = 'all' }: { p: Projec
         <table className="t-fix">
           <thead>
             <tr>
-              <th style={{ width: '5%' }}>#</th><th>{T('阶段/任务', 'Phase / Task')}</th>
+              {/* 0917 变更单:同上,去掉 # 序号列 */}
+              <th>{T('阶段/任务', 'Phase / Task')}</th>
               {cols.owner && <th style={{ width: '14%' }}>{T('负责', 'Owner')}</th>}
               {cols.start && <th style={{ width: '11%' }}>{T('开始', 'Start')}</th>}
               {cols.due && <th style={{ width: '11%' }}>{T('到期', 'Due')}</th>}
@@ -169,8 +178,6 @@ export default function ExportOverlay({ p, onClose, scope = 'all' }: { p: Projec
               }[r.status];
               return (
                 <tr key={r.id || i}>
-                  {/* REQ-017: number by current position so deletions renumber */}
-                  <td>{i}</td>
                   <td>{(L === 'zh' ? r.task : r.taskEn)}{r.freeze ? ' ★' : ''}{r.custom ? ` (${T('自定义', 'custom')})` : ''}</td>
                   {cols.owner && <td>{r.owner}</td>}
                   {cols.start && <td>{d ? fmtDate(d.start) : '—'}</td>}
@@ -323,9 +330,9 @@ export default function ExportOverlay({ p, onClose, scope = 'all' }: { p: Projec
           </span>
         )}
         {T('栏位', 'Columns')}:
-        {showSched && <span className="ex-grp">排期 {colToggle('owner', '负责', 'Owner')}{colToggle('start', '开始', 'Start')}{colToggle('due', '到期', 'Due')}{colToggle('status', '状态', 'Status')}</span>}
+        {showSched && <span className="ex-grp">{T('排期', 'Schedule')} {colToggle('owner', '负责', 'Owner')}{colToggle('start', '开始', 'Start')}{colToggle('due', '到期', 'Due')}{colToggle('status', '状态', 'Status')}</span>}
         {showCl && (
-          <span className="ex-grp">清单 {colToggle('clStatus', '状态', 'Status')}{colToggle('clDate', '日期', 'Date')}{colToggle('clRemark', '备注', 'Remark')}
+          <span className="ex-grp">{T('清单', 'Checklist')} {colToggle('clStatus', '状态', 'Status')}{colToggle('clDate', '日期', 'Date')}{colToggle('clRemark', '备注', 'Remark')}
             <label className="ex-col" title={T('未收到的空白项也一并导出(状态 Pending)', 'Export blank items too (kept Pending)')}>
               <input type="checkbox" checked={blanks} onChange={() => setBlanks(!blanks)} /> {T('含空白项', 'Include blanks')}
             </label>

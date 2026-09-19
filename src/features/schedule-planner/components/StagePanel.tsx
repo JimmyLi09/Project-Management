@@ -3,6 +3,7 @@ import { Fragment, useState } from 'react'
 import { formatDisplayDate, formatRangeParts } from '../domain/calendar'
 import { calculateDuration, formatDuration } from '../domain/duration'
 import { MAX_STAGES, MIN_STAGES, type StageSchedule } from '../domain/schedule'
+import { useLang } from '@/lib/i18n'
 
 export interface StagePanelProps {
   schedules: readonly StageSchedule[]
@@ -46,6 +47,7 @@ export function StagePanel({
   onRestoreStages,
   onMoveStage
 }: StagePanelProps) {
+  const { t } = useLang()
   const completeCount = schedules.filter((stage) => stage.end).length
   const canAdd = schedules.length < MAX_STAGES
   const canRemove = schedules.length > MIN_STAGES
@@ -154,7 +156,7 @@ export function StagePanel({
                       <input
                         // eslint-disable-next-line jsx-a11y/no-autofocus
                         autoFocus
-                        aria-label={`阶段 ${stage.index + 1} 名称`}
+                        aria-label={t(`阶段 ${stage.index + 1} 名称`, `Stage ${stage.index + 1} name`)}
                         className="stage-name-input"
                         data-testid={`stage-name-input-${stage.index}`}
                         maxLength={60}
@@ -183,7 +185,7 @@ export function StagePanel({
                           }
                         }}
                         tabIndex={0}
-                        title="点击编辑阶段名称"
+                        title={t('点击编辑阶段名称', 'Click to rename this stage')}
                       >
                         {stage.name}
                       </h3>
@@ -215,10 +217,10 @@ export function StagePanel({
                   {onNoteChange && (
                     <input
                       className="stage-note-input"
-                      aria-label={`阶段 ${stage.index + 1} 备注`}
+                      aria-label={t(`阶段 ${stage.index + 1} 备注`, `Stage ${stage.index + 1} note`)}
                       data-testid={`stage-note-${stage.index}`}
                       maxLength={200}
-                      placeholder="备注(如:客户出差,顺延一周)"
+                      placeholder={t('备注(如:客户出差,顺延一周)', 'Note (e.g. client away — pushed back a week)')}
                       value={notes?.[stage.id] ?? ''}
                       onChange={(event) => onNoteChange(stage.id, event.target.value)}
                     />
@@ -226,7 +228,7 @@ export function StagePanel({
                 </div>
                 <div className="stage-side-actions">
                   <button
-                    aria-label={`删除阶段 ${stage.index + 1}`}
+                    aria-label={t(`删除阶段 ${stage.index + 1}`, `Delete stage ${stage.index + 1}`)}
                     className="icon-button-small icon-button-small-danger"
                     data-testid={`stage-delete-${stage.index}`}
                     disabled={!canRemove}
@@ -236,13 +238,13 @@ export function StagePanel({
                       }
                       onRemoveStage(stage.index)
                     }}
-                    title={canRemove ? `删除阶段 ${stage.index + 1}` : '至少保留一个阶段'}
+                    title={canRemove ? t(`删除阶段 ${stage.index + 1}`, `Delete stage ${stage.index + 1}`) : t('至少保留一个阶段', 'Keep at least one stage')}
                     type="button"
                   >
                     ×
                   </button>
                   <span
-                    aria-label={`拖动排序阶段 ${stage.index + 1}，也可用上下方向键移动`}
+                    aria-label={t(`拖动排序阶段 ${stage.index + 1}，也可用上下方向键移动`, `Reorder stage ${stage.index + 1} — drag, or use the arrow keys`)}
                     className="drag-handle"
                     data-testid={`stage-drag-${stage.index}`}
                     draggable
@@ -267,7 +269,7 @@ export function StagePanel({
                     }}
                     role="button"
                     tabIndex={0}
-                    title="拖动调整顺序"
+                    title={t('拖动调整顺序', 'Drag to reorder')}
                   >
                     ⋮⋮
                   </span>
@@ -287,10 +289,10 @@ export function StagePanel({
           data-testid="stage-add"
           disabled={!canAdd}
           onClick={onAddStage}
-          title={canAdd ? `添加阶段（最多 ${MAX_STAGES} 个）` : `已达上限 ${MAX_STAGES} 个`}
+          title={canAdd ? t(`添加阶段（最多 ${MAX_STAGES} 个）`, `Add a stage (max ${MAX_STAGES})`) : t(`已达上限 ${MAX_STAGES} 个`, `Limit of ${MAX_STAGES} reached`)}
           type="button"
         >
-          + 添加阶段
+          + {t('添加阶段', 'Add stage')}
         </button>
         <button
           className="link-button"
@@ -301,7 +303,7 @@ export function StagePanel({
           }}
           type="button"
         >
-          恢复默认阶段
+          {t('恢复默认阶段', 'Restore default stages')}
         </button>
       </div>
 
@@ -317,7 +319,7 @@ export function StagePanel({
         {onSave && (
           <button className="button button-primary" disabled={!canComplete || !!saving} onClick={onSave} type="button"
             data-testid="stage-save">
-            {saving ? '保存中…' : (saveLabel || '保存到项目')}
+            {saving ? t('保存中…', 'Saving…') : (saveLabel || t('保存到项目', 'Save to project'))}
           </button>
         )}
       </div>

@@ -1,6 +1,7 @@
 import { useState } from 'react'
 
 import { formatArchiveDate, type ScheduleArchive } from '../domain/archives'
+import { useLang } from '@/lib/i18n'
 
 export interface ArchivePanelProps {
   archives: readonly ScheduleArchive[]
@@ -21,20 +22,21 @@ export function ArchivePanel({
   onDelete,
   canSave
 }: ArchivePanelProps) {
+  const { t } = useLang()
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
 
   return (
-    <section className="stage-panel archive-panel" aria-label="存档与读档">
+    <section className="stage-panel archive-panel" aria-label={t('存档与读档', 'Saved versions')}>
       <div className="panel-heading-row">
         <div>
-          <h2>存档 / 读档</h2>
-          <p className="panel-intro">存档保存在本机浏览器，可随时读档继续调整。</p>
+          <h2>{t('存档 / 读档', 'Save / restore')}</h2>
+          <p className="panel-intro">{t('存档保存在项目里,可随时读档继续调整。', 'Versions are saved with the project and can be restored any time.')}</p>
         </div>
       </div>
 
       <div className="archive-save-row">
         <input
-          aria-label="存档名称"
+          aria-label={t('存档名称', 'Version name')}
           className="archive-name-input"
           data-testid="archive-name-input"
           maxLength={60}
@@ -44,7 +46,7 @@ export function ArchivePanel({
               onSave()
             }
           }}
-          placeholder="存档名称，如：A项目-初版"
+          placeholder={t('存档名称，如：A项目-初版', 'Version name, e.g. Phase 1 — first pass')}
           type="text"
           value={draftName}
         />
@@ -55,12 +57,12 @@ export function ArchivePanel({
           onClick={onSave}
           type="button"
         >
-          保存存档
+          {t('保存存档', 'Save version')}
         </button>
       </div>
 
       {archives.length === 0 ? (
-        <p className="archive-empty" data-testid="archive-empty">暂无存档，先在日历上排好日期再保存。</p>
+        <p className="archive-empty" data-testid="archive-empty">{t('暂无存档，先在日历上排好日期再保存。', 'No saved versions yet — set the dates on the calendar first, then save.')}</p>
       ) : (
         <ul className="archive-list" data-testid="archive-list">
           {archives.map((archive) => (
@@ -68,7 +70,7 @@ export function ArchivePanel({
               <div className="archive-item-main">
                 <strong className="archive-item-name">{archive.name}</strong>
                 <span className="archive-item-meta">
-                  {formatArchiveDate(archive.savedAt)} · {archive.stages.length} 阶段 · {archive.boundaries.length} 边界点
+                  {formatArchiveDate(archive.savedAt)} · {archive.stages.length} {t('阶段', 'stages')} · {archive.boundaries.length} {t('边界点', 'boundaries')}
                 </span>
               </div>
               <div className="archive-item-actions">
@@ -78,7 +80,7 @@ export function ArchivePanel({
                   onClick={() => onLoad(archive.id)}
                   type="button"
                 >
-                  读档
+                  {t('读档', 'Restore')}
                 </button>
                 {confirmDeleteId === archive.id ? (
                   <>
@@ -91,14 +93,14 @@ export function ArchivePanel({
                       }}
                       type="button"
                     >
-                      确认删？
+                      {t('确认删？', 'Delete?')}
                     </button>
                     <button
                       className="link-button"
                       onClick={() => setConfirmDeleteId(null)}
                       type="button"
                     >
-                      取消
+                      {t('取消', 'Cancel')}
                     </button>
                   </>
                 ) : (
@@ -108,7 +110,7 @@ export function ArchivePanel({
                     onClick={() => setConfirmDeleteId(archive.id)}
                     type="button"
                   >
-                    删除
+                    {t('删除', 'Delete')}
                   </button>
                 )}
               </div>

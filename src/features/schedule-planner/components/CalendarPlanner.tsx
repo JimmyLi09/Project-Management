@@ -49,6 +49,7 @@ import { ArchivePanel } from './ArchivePanel'
 import { ExportPanel } from './ExportPanel'
 import { DEFAULT_EXPORT_NOTE, PrintSchedule, type PrintScheduleMeta } from './PrintSchedule'
 import { StagePanel } from './StagePanel'
+import { useLang } from '@/lib/i18n'
 
 const WEEKDAYS = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN']
 
@@ -159,6 +160,7 @@ export function CalendarPlanner({
   saveLabel,
   busy,
 }: CalendarPlannerProps = {}) {
+  const { t } = useLang()
   const initialCursorRef = useRef<MonthCursor>(monthFromDate(todayLocalDate()))
   const initialCursor = initialCursorRef.current
   const [stages, setStages] = useState<StageDefinition[]>(
@@ -417,7 +419,7 @@ export function CalendarPlanner({
       if (current.length >= MAX_STAGES) {
         return current
       }
-      return [...current, createStage(`新阶段 ${current.length + 1}`, current.length)]
+      return [...current, createStage(t(`新阶段 ${current.length + 1}`, `New stage ${current.length + 1}`), current.length)]
     })
     setIsDone(false)
     setNotice(null)
@@ -442,7 +444,7 @@ export function CalendarPlanner({
     setHoverDate(null)
     setDrag(null)
     setIsDone(false)
-    setNotice('已恢复默认6阶段。')
+    setNotice(t('已恢复默认 6 阶段。', 'Restored the default 6 stages.'))
   }
 
   function handleMoveStage(fromIndex: number, toIndex: number) {
@@ -468,7 +470,7 @@ export function CalendarPlanner({
     const archive = buildArchive(archiveName, stages, boundaries)
     setArchives((current) => [archive, ...current].slice(0, 30))
     setArchiveName('')
-    setNotice(`已保存存档「${archive.name}」。`)
+    setNotice(t(`已保存存档「${archive.name}」。`, `Saved version “${archive.name}”.`))
   }
 
   function handleLoadArchive(id: string) {
@@ -485,12 +487,12 @@ export function CalendarPlanner({
     if (first) {
       setCursor(monthFromDate(first))
     }
-    setNotice(`已读档「${archive.name}」。`)
+    setNotice(t(`已读档「${archive.name}」。`, `Restored version “${archive.name}”.`))
   }
 
   function handleDeleteArchive(id: string) {
     setArchives((current) => current.filter((entry) => entry.id !== id))
-    setNotice('已删除存档。')
+    setNotice(t('已删除存档。', 'Version deleted.'))
   }
 
   function handleExportPdf() {

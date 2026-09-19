@@ -9,7 +9,7 @@ import {
 import { canRowEdit } from '@/lib/permissions';
 import { STAGES, stageColor, stageIdx, svcName } from '@/lib/templates';
 import { useLang } from '@/lib/i18n';
-import { Avatar, HM, Icon, Pill, TM } from '../ui';
+import { Avatar, Ell, HM, Icon, Pill, TM } from '../ui';
 import type { PlanDate } from '@/lib/project';
 import type { Project, ScheduleRow } from '@/lib/types';
 
@@ -106,7 +106,7 @@ export default function MyTasksView() {
             <div key={p.id} className="row-hover" style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '11px 20px', borderTop: '1px solid var(--row-line)', cursor: 'pointer' }} onClick={() => openProject(p.id)}>
               <span className="badge" style={{ background: '#fbf0dc', color: '#a8690b', flexShrink: 0 }}>{lang === 'zh' ? label : labelEn}</span>
               <div style={{ minWidth: 0 }}>
-                <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--navy900)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{projCode(p) && <span className="tnum" style={{ color: 'var(--bronze)', marginRight: 5 }}>{projCode(p)}</span>}{p.name}</div>
+                <Ell style={{ fontSize: 13, fontWeight: 600, color: 'var(--navy900)' }}>{projCode(p) && <span className="tnum" style={{ color: 'var(--bronze)', marginRight: 5 }}>{projCode(p)}</span>}{p.name}</Ell>
               </div>
               <div style={{ flex: 1 }} />
               <Icon name="back" size={15} style={{ transform: 'rotate(180deg)', color: 'var(--text2)' }} />
@@ -141,13 +141,13 @@ export default function MyTasksView() {
                 <button className={`ckbox ${rowEd ? '' : 'locked'}`}
                   onClick={rowEd ? () => dispatch(x.p.id, { type: 'toggleDone', pkg: x.pi, idx: x.i }) : undefined} />
                 <div style={{ minWidth: 0, cursor: 'pointer' }} onClick={() => setSel(x.p.id)}>
-                  <div style={{ fontSize: 13, fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <Ell style={{ fontSize: 13, fontWeight: 500, display: 'flex', alignItems: 'center', gap: 6 }}>
                     {x.r.assignee && <Avatar name={x.r.assignee} size={20} />}
                     {lang === 'zh' ? x.r.task : x.r.taskEn || x.r.task}
-                  </div>
-                  <div style={{ fontSize: 11, color: 'var(--text2)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                  </Ell>
+                  <Ell style={{ fontSize: 11, color: 'var(--text2)' }}>
                     {projCode(x.p) && <span className="tnum" style={{ color: 'var(--bronze)', marginRight: 4 }}>{projCode(x.p)}</span>}{x.p.name}{x.p.packages.length > 1 ? ` · ${svcName(x.svc, lang)}` : ''}
-                  </div>
+                  </Ell>
                 </div>
                 <div className="tnum" style={{ fontSize: 11.5, color: 'var(--text2)' }}>{x.year}</div>
                 <div className="tnum" style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 12, fontWeight: 500, color: over ? 'var(--danger)' : 'var(--text2)' }}>

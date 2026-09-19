@@ -4,6 +4,7 @@ import React, { useMemo, useState } from 'react';
 import { useStore } from '../store';
 import { useLang } from '@/lib/i18n';
 import { ROLE_LABEL } from '@/lib/permissions';
+import { roleTerm } from '@/lib/terms';
 import { SVC } from '@/lib/templates';
 import type { Role } from '@/lib/types';
 import {
@@ -110,7 +111,7 @@ export default function KpiRulesTab() {
               <span className="panel-title">
                 {isDefault
                   ? t('默认规则(其他都没配到时走这套)', 'Default (fallback for everything else)')
-                  : `${s.role ? ROLE_LABEL[s.role as Role] || s.role : t('不限角色', 'any role')} · ${s.svc ? (lang === 'zh' ? SVC[s.svc]?.label : SVC[s.svc]?.en) || s.svc : t('不限业务', 'any service')}`}
+                  : `${s.role ? roleTerm(s.role, lang) : t('不限角色', 'any role')} · ${s.svc ? (lang === 'zh' ? SVC[s.svc]?.label : SVC[s.svc]?.en) || s.svc : t('不限业务', 'any service')}`}
               </span>
               <span className="badge" style={{ background: ws === 100 ? '#e6f2ec' : '#fbf0dc', color: ws === 100 ? '#0f6a48' : '#a8690b' }}
                 title={t('建议合计 100%,不强制 —— 不到 100% 时按实际权重归一', 'Suggested total is 100%; anything else is normalised by actual weights')}>
@@ -245,7 +246,7 @@ function AddSet({ existing, onAdd }: { existing: KpiRuleSet[]; onAdd: (role: str
       <div style={{ flex: 1 }} />
       <select className="in sm" style={{ width: 'auto' }} value={role} onChange={(e) => setRole(e.target.value)}>
         <option value="">{t('不限角色', 'Any role')}</option>
-        {Object.entries(ROLE_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+        {Object.keys(ROLE_LABEL).map((k) => <option key={k} value={k}>{roleTerm(k, lang)}</option>)}
       </select>
       <select className="in sm" style={{ width: 'auto' }} value={svc} onChange={(e) => setSvc(e.target.value)}>
         <option value="">{t('不限业务', 'Any service')}</option>
