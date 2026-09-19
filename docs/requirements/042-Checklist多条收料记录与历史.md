@@ -35,6 +35,8 @@
 - [ ] 老数据兼容：原来的单条记录迁移为该项的第一条 Latest。
 
 ## 7. 备注（含默认假设，如需调整请在 PR 指出）
-- 记录字段默认：日期 / 文件名 / 来自 / 方式 / 路径 / 状态 / 备注；如需增减（如「接收人」），请指出。
+- 记录字段：日期 / 文件名 / 来自 / 方式 / **接收人** / 路径 / 状态 / 备注；另自动记录「录入人」。
+  （「接收人」为 0917 追加确认的字段，见 Shermin《Platform improvement》第 5 页；
+  新建记录时默认填当前登录人，可改。它与「录入人」是两回事 —— 东西可能是 A 收的、B 代录的。）
 - 「对外清单」默认只给最新状态，不暴露内部备注 / 路径；导出沿用现有导出能力（并配合 REQ-017 版式修复）。
 - 参考设计：Shermin《Platform improvement》第 5、6 页（Internal Document Receiving Log / External Checklist / Item History / Document Checklist）。

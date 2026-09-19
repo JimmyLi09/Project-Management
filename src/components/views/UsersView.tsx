@@ -3,6 +3,7 @@
 import React, { useState } from 'react';
 import { useStore } from '../store';
 import { ROLE_LABEL } from '@/lib/permissions';
+import { roleTerm } from '@/lib/terms';
 import { useLang } from '@/lib/i18n';
 import { Avatar } from '../ui';
 import type { Role, User } from '@/lib/types';
@@ -79,7 +80,7 @@ export default function UsersView() {
                 <td style={{ ...cell, color: 'var(--text2)' }} className="tnum">{u.username}</td>
                 <td style={{ ...cell, color: 'var(--text2)', fontSize: 12 }}>{u.email || '—'}</td>
                 <td style={{ ...cell, fontSize: 12.5 }}>{u.position || '—'}</td>
-                <td style={cell} title={lang === 'zh' ? ROLE_DESC[u.role][0] : ROLE_DESC[u.role][1]}>{ROLE_LABEL[u.role]}</td>
+                <td style={cell} title={lang === 'zh' ? ROLE_DESC[u.role][0] : ROLE_DESC[u.role][1]}>{roleTerm(u.role, lang)}</td>
                 <td style={cell}><button className="btn-line sm" onClick={() => setEditUser(u)}>{t('编辑', 'Edit')}</button></td>
               </tr>
             ))}
@@ -102,7 +103,7 @@ export default function UsersView() {
           <label>{t('系统角色(决定权限)', 'Role (controls permissions)')}</label>
           <select value={role} onChange={(e) => setRole(e.target.value as Role)}>
             {(Object.keys(ROLE_LABEL) as Role[]).map((r) => (
-              <option key={r} value={r}>{ROLE_LABEL[r]} — {lang === 'zh' ? ROLE_DESC[r][0] : ROLE_DESC[r][1]}</option>
+              <option key={r} value={r}>{roleTerm(r, lang)} — {lang === 'zh' ? ROLE_DESC[r][0] : ROLE_DESC[r][1]}</option>
             ))}
           </select>
         </div>
@@ -221,7 +222,7 @@ function EditUserModal({ u, onClose, onSaved }: { u: User; onClose: () => void; 
           <label>{t('系统角色', 'Role')}</label>
           <select value={role} onChange={(e) => setRole(e.target.value as Role)}>
             {(Object.keys(ROLE_LABEL) as Role[]).map((r) => (
-              <option key={r} value={r}>{ROLE_LABEL[r]} — {lang === 'zh' ? ROLE_DESC[r][0] : ROLE_DESC[r][1]}</option>
+              <option key={r} value={r}>{roleTerm(r, lang)} — {lang === 'zh' ? ROLE_DESC[r][0] : ROLE_DESC[r][1]}</option>
             ))}
           </select>
         </div>

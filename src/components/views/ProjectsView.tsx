@@ -5,8 +5,9 @@ import { useStore } from '../store';
 import { fmtDate, isoDate, parseISO, projectHealth, projStage, schedProgress } from '@/lib/project';
 import { canCreate } from '@/lib/permissions';
 import { DIFF, SVC, stageIdx, svcColor, svcName } from '@/lib/templates';
+import { diffTerm } from '@/lib/terms';
 import { useLang } from '@/lib/i18n';
-import { Avatar, AvatarStack, HM, Icon, Pill, ProgressBar } from '../ui';
+import { Avatar, AvatarStack, Ell, HM, Icon, Pill, ProgressBar } from '../ui';
 import type { Project } from '@/lib/types';
 
 type ViewMode = 'cards' | 'compact' | 'list';
@@ -117,10 +118,10 @@ function CompactCard({ p, onOpen }: { p: Project; onOpen: () => void }) {
       onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.boxShadow = 'var(--shadow)'; }}>
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8 }}>
         <div style={{ minWidth: 0 }}>
-          <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--navy900)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+          <Ell style={{ fontSize: 14, fontWeight: 600, color: 'var(--navy900)' }}>
             {p.name}
-          </div>
-          <div style={{ fontSize: 11.5, color: 'var(--text2)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.client || '—'}</div>
+          </Ell>
+          <Ell style={{ fontSize: 11.5, color: 'var(--text2)' }}>{p.client || '—'}</Ell>
         </div>
         <Pill m={HM[h]} />
       </div>
@@ -210,10 +211,10 @@ function ProjectList({ list, onOpen }: { list: Project[]; onOpen: (id: string) =
         return (
           <div key={p.id} className="row-hover" style={{ display: 'grid', gridTemplateColumns: cols, gap: 12, alignItems: 'center', padding: '13px 16px', borderBottom: '1px solid var(--row-line)', cursor: 'pointer' }} onClick={() => onOpen(p.id)}>
             <div style={{ minWidth: 0 }}>
-              <div style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--navy900)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+              <Ell style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--navy900)' }}>
                 {p.name}
-              </div>
-              <div style={{ fontSize: 11.5, color: 'var(--text2)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.client || '—'}</div>
+              </Ell>
+              <Ell style={{ fontSize: 11.5, color: 'var(--text2)' }}>{p.client || '—'}</Ell>
             </div>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, minWidth: 0 }}>
               {p.services.slice(0, 2).map((k) => <span key={k} className="svc-chip" style={{ color: svcColor(k), fontSize: 10.5 }}>{svcName(k, lang)}</span>)}
@@ -424,7 +425,7 @@ export function NewProjectModal({ onClose }: { onClose: () => void }) {
           <div className="field">
             <label>{t('难度', 'Difficulty')}</label>
             <select value={difficulty} onChange={(e) => setDifficulty(e.target.value)}>
-              {Object.entries(DIFF).map(([k, v]) => <option key={k} value={k}>{v[0]} · {v[1]}{t('分', ' pts')}</option>)}
+              {Object.entries(DIFF).map(([k, v]) => <option key={k} value={k}>{diffTerm(k, lang)} · {v[1]}{t('分', ' pts')}</option>)}
             </select>
           </div>
           <div className="field"><label>{t('起始日(=最终信息确认日)', 'Start (= info confirmed date)')}</label><input type="date" value={start} onChange={(e) => setStart(e.target.value)} /></div>

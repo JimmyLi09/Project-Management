@@ -4,7 +4,8 @@ import React, { useMemo, useState } from 'react';
 import { useStore } from '../store';
 import { fmtDate, todayMid } from '@/lib/project';
 import { useLang } from '@/lib/i18n';
-import { Icon } from '../ui';
+import { contactRoleTerm } from '@/lib/terms';
+import { Ell, Icon } from '../ui';
 import type { Project } from '@/lib/types';
 
 interface Row {
@@ -46,7 +47,7 @@ function collect(projects: Project[]): Row[] {
 
 export default function ContactsView() {
   const { projects, openProject } = useStore();
-  const { t } = useLang();
+  const { lang, t } = useLang();
   const [q, setQ] = useState('');
   const [fRole, setFRole] = useState('');
   const [fCompany, setFCompany] = useState('');
@@ -92,7 +93,7 @@ export default function ContactsView() {
         </div>
         <select className="in sm" value={fRole} onChange={(e) => setFRole(e.target.value)} style={{ width: 'auto' }}>
           <option value="">{t('全部角色', 'All roles')}</option>
-          {roleOpts.map((r) => <option key={r} value={r}>{r}</option>)}
+          {roleOpts.map((r) => <option key={r} value={r}>{contactRoleTerm(r, lang)}</option>)}
         </select>
         <select className="in sm" value={fCompany} onChange={(e) => setFCompany(e.target.value)} style={{ width: 'auto', maxWidth: 200 }}>
           <option value="">{t('全部公司', 'All companies')}</option>
@@ -120,14 +121,14 @@ export default function ContactsView() {
         )}
         {shown.map((r, i) => (
           <div key={i} className="row-hover" style={{ display: 'grid', gridTemplateColumns: cols, gap: 12, alignItems: 'center', padding: '13px 18px', borderBottom: '1px solid var(--row-line)' }}>
-            <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--navy700)', cursor: 'pointer', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} onClick={() => openProject(r.pid)}>{r.project}</div>
-            <div style={{ fontSize: 12.5, color: 'var(--text2)' }}>{r.role || '—'}</div>
+            <Ell onClick={() => openProject(r.pid)} style={{ fontSize: 13, fontWeight: 600, color: 'var(--navy700)', cursor: 'pointer' }}>{r.project}</Ell>
+            <div style={{ fontSize: 12.5, color: 'var(--text2)' }}>{r.role ? contactRoleTerm(r.role, lang) : '—'}</div>
             <div style={{ fontSize: 13 }}>{r.company || '—'}</div>
             <div style={{ fontSize: 13 }}>{r.person || '—'}</div>
             <div className="tnum" style={{ fontSize: 12.5 }}>{r.phone || '—'}</div>
-            <div style={{ fontSize: 12.5, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+            <Ell style={{ fontSize: 12.5 }}>
               {r.email ? <a href={`mailto:${r.email}`}>{r.email}</a> : '—'}
-            </div>
+            </Ell>
           </div>
         ))}
       </div>

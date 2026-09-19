@@ -148,14 +148,17 @@ export const REGISTERS: RegisterDef[] = [
       { key: 'dimL', zh: 'Length 长 (mm)', en: 'Length (mm)', type: 'number', group: G_DIM, highlight: true },
       { key: 'dimH', zh: 'Width 宽 (mm)', en: 'Width (mm)', type: 'number', group: G_DIM, highlight: true },
       { key: 'sqm', zh: 'SQM 面积 (㎡)', en: 'SQM', type: 'formula', formula: 'dimL * dimH / 1000000', decimals: 3, group: G_DIM, highlight: true },
-      { key: 'maxKw', zh: 'Max KW 最大功率', en: 'Max KW', type: 'formula', formula: 'sqm * 450 / 1000', decimals: 2, group: G_DIM, highlight: true },
-      { key: 'avgKw', zh: 'AVG KW 平均功率', en: 'AVG KW', type: 'formula', formula: 'maxKw * 0.5', decimals: 2, group: G_DIM, highlight: true },
-      { key: 'heatKw', zh: 'Heat KW 散热量', en: 'Heat KW', type: 'formula', formula: 'avgKw * 0.8', decimals: 2, group: G_DIM },
       { key: 'qtyL', zh: '数量 L', en: 'Qty L', type: 'number', group: G_DIM },
       { key: 'qtyH', zh: '数量 H', en: 'Qty H', type: 'number', group: G_DIM },
-      { key: 'qtyTotal', zh: '数量 Total', en: 'Qty Total', type: 'number', group: G_DIM },
+      /* 0917 变更单:数量 Total = 数量L × 数量H,不再手填 */
+      { key: 'qtyTotal', zh: '数量 Total', en: 'Qty Total', type: 'formula', formula: 'qtyL * qtyH', decimals: 0, group: G_DIM, highlight: true },
 
-      { key: 'dbBox', zh: 'DB Box (KW)', en: 'DB Box (KW)', type: 'text', group: G_POWER },
+      /* 0917 变更单按 Calculator reference 对齐字段名:
+         DB Box (KW) 就是原来的 Max KW(SQM × 450 / 1000),散热 = DB × 0.5 × 0.8。
+         原先中间那个 AVG KW 去掉 —— 它是派生值,不落库,去掉不丢任何数据,
+         而变更单给的字段清单里也没有它。 */
+      { key: 'dbBox', zh: 'DB Box (KW)', en: 'DB Box (KW)', type: 'formula', formula: 'sqm * 450 / 1000', decimals: 2, group: G_POWER, highlight: true },
+      { key: 'heatKw', zh: 'Heat 散热 (KW)', en: 'Heat (KW)', type: 'formula', formula: 'dbBox * 0.5 * 0.8', decimals: 2, group: G_POWER, highlight: true },
       { key: 'powerCable', zh: '20A 单相电源线 (条)', en: '20A single-phase power cable (No.)', type: 'number', group: G_POWER },
       { key: 'dataCable', zh: 'Cat6 数据线 (条)', en: 'Cat6 data cable (No.)', type: 'number', group: G_POWER },
 
@@ -243,6 +246,24 @@ export function fieldsOf(def: RegisterDef, ov?: FieldOverrides): FieldDef[] {
   const custom = ov && ov[def.svc];
   return custom && custom.length ? custom : def.fields;
 }
+
+/* ===== 0917 变更单 · REQ-023:出厂没有登记表的业务也能自己加字段 =====
+   出厂只给 7 类业务配了登记表,别的业务(网站 / 无人机 / 宣传册…)在 Job Record
+   里只有一句「暂无资料登记表」,连一个格子都填不了。PD 在那张卡上点「加字段」
+   之后,record_fields 里就有了这个 svc 的列定义,它跟内置的 7 张表走同一条路:
+   同一份覆盖表、同一个 setRecord、同一张 record —— 只是出厂默认是空的。
+   状态按交付类走(没装机概念的业务多半是交付型),confirmed 置 true,
+   因为这几列本来就是 PD 自己定的,没有「待确认」一说。 */
+export const baseDefOf = (svc: string): RegisterDef =>
+  registerDef(svc) || { svc, kind: 'delivery', confirmed: true, fields: [] };
+
+/* 这个业务现在有没有登记表可看 —— 内置的有,或者 PD 自己加过列 */
+export const hasRecordDef = (svc: string, ov?: FieldOverrides): boolean =>
+  !!registerDef(svc) || !!(ov && ov[svc] && ov[svc].length);
+
+/* PD 自建的登记表(内置 7 张之外的),按 svc 排一下给跨项目档案页做页签 */
+export const customRegisterSvcs = (ov?: FieldOverrides): string[] =>
+  Object.keys(ov || {}).filter((svc) => !registerDef(svc) && (ov as FieldOverrides)[svc].length).sort();
 
 export const FIELD_TYPES: [FieldType, string, string][] = [
   ['text', '文本', 'Text'],
