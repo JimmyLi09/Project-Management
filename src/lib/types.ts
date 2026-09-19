@@ -91,7 +91,9 @@ export interface ScheduleRow {
   assignee: string; // individual person name
   weeks: number;
   typical: string;
+  typicalEn?: string;   // REQ-041: 典型工期的英文;缺省时回落到中文那一份
   gate: string;
+  gateEn?: string;      // REQ-041: 冻结点提示的英文;同上
   freeze: boolean;
   status: ScheduleStatus;
   note: string;

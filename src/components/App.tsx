@@ -4,9 +4,10 @@ import React, { useEffect, useMemo, useState } from 'react';
 import type { User } from '@/lib/types';
 import { StoreProvider, useStore } from './store';
 import { allOverdue, fmtDate, isMyProject, pendingWorkflowAction } from '@/lib/project';
-import { canCreate, isFull, ROLE_LABEL } from '@/lib/permissions';
+import { canCreate, isFull } from '@/lib/permissions';
+import { roleTerm } from '@/lib/terms';
 import { useLang } from '@/lib/i18n';
-import { Avatar, AvatarSrcProvider, Icon } from './ui';
+import { Avatar, AvatarSrcProvider, Ell, Icon } from './ui';
 import OverviewView from './views/OverviewView';
 import ProjectsView, { NewProjectModal } from './views/ProjectsView';
 import TeamView from './views/TeamView';
@@ -58,7 +59,7 @@ function Shell() {
     users.forEach((u) => { if (u.avatar) m[u.name] = u.avatar; });
     return m;
   }, [users]);
-  const { lang, setLang, t } = useLang();
+  const { lang, setLang, t, dual, setDual } = useLang();
   const [showNew, setShowNew] = useState(false);
   const [notifOpen, setNotifOpen] = useState(false);
   const [search, setSearch] = useState('');
@@ -153,7 +154,7 @@ function Shell() {
           <Avatar name={user.name} size={34} />
           <div style={{ flex: 1, lineHeight: 1.2, minWidth: 0 }}>
             <div className="nm">{user.name}</div>
-            <div className="rl">{user.position || ROLE_LABEL[user.role]}</div>
+            <div className="rl">{user.position || roleTerm(user.role, lang)}</div>
           </div>
           <button title={t('修改密码', 'Change password')} onClick={() => setShowPw(true)} style={{ color: 'var(--text2)', display: 'flex' }}>
             <Icon name="lock" size={15} />
@@ -197,6 +198,27 @@ function Shell() {
           >
             {lang === 'zh' ? 'EN' : '中文'}
           </button>
+          {/* REQ-041 双语并排开关 —— 管的是排期任务 / 清单信息项 / 模板卡片
+              这些**内容**下面那行另一种语言的小字,不影响界面文案。
+              中文模式默认开(对着中文图纸干活好核对),英文模式默认关
+              (给客户看时下面挂一行中文不像话),点一下就改,记住选择。 */}
+          <button
+            className={`icon-btn${dual ? ' on' : ''}`}
+            title={dual
+              ? t('双语并排:开 —— 任务 / 信息项下面压一行英文。点一下收起来。',
+                  'Bilingual: on — the other language sits under each task / item. Click to collapse it.')
+              : t('双语并排:关 —— 只显示当前语言。点一下把另一种语言显示出来。',
+                  'Bilingual: off — current language only. Click to show the other one too.')}
+            aria-pressed={dual}
+            style={{
+              width: 'auto', padding: '0 10px', fontSize: 11, fontWeight: 700, letterSpacing: '.03em',
+              color: dual ? 'var(--navy900)' : 'var(--text2)',
+              borderColor: dual ? 'var(--navy700)' : undefined,
+            }}
+            onClick={() => setDual(!dual)}
+          >
+            {t('中/EN', 'ZH/EN')}
+          </button>
           <button className="icon-btn bell-btn" aria-label="Notifications" onClick={(e) => { e.stopPropagation(); setNotifOpen(!notifOpen); }}>
             <Icon name="bell" />
             {overdue.length > 0 && <span className="dot-badge" />}
@@ -224,7 +246,7 @@ function Shell() {
                 >
                   <span className="badge" style={{ background: '#fbe9e7', color: '#b23a32', flexShrink: 0 }}>{t(`逾期 ${o.days} 天`, `${o.days}d late`)}</span>
                   <div style={{ minWidth: 0 }}>
-                    <div style={{ fontSize: 13, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{o.p.name}</div>
+                    <Ell style={{ fontSize: 13, fontWeight: 600 }}>{o.p.name}</Ell>
                     <div style={{ fontSize: 11.5, color: 'var(--text2)' }}>{o.row.task} · {t('应完成', 'due')} {fmtDate(o.due)}</div>
                   </div>
                 </div>

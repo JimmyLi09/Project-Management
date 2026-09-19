@@ -250,7 +250,7 @@ function ServiceCard({ rule, lang, readOnly, onPatch, onPatchTier, onRemoveTier,
           {candidates.map((f) => <option key={f.key} value={f.key}>{lang === 'zh' ? f.zh : f.en}</option>)}
           {/* 资料卡里没有这个字段(比如效果图的「张数」还没建列)也要显示得出来 */}
           {rule.metric?.field && !candidates.some((c) => c.key === rule.metric!.field) && (
-            <option value={rule.metric.field}>{rule.metric.zh}（{t('资料卡里暂无此列', 'no such column yet')}）</option>
+            <option value={rule.metric.field}>{lang === 'zh' ? rule.metric.zh : rule.metric.en}（{t('资料卡里暂无此列', 'no such column yet')}）</option>
           )}
         </select>
         {!readOnly && <button className="btn-line sm danger" onClick={onRemove}>✕</button>}

@@ -67,7 +67,7 @@ export function buildPackage(svc: string, start: string, tpl?: Template): Servic
     status: 'active',
     schedule: t.schedule.map((p) => ({
       id: newId(), no: p[0], phase: p[1], task: p[2], taskEn: p[3], owner: p[4], assignee: '',
-      weeks: p[5], typical: p[6], gate: p[7], freeze: p[8], status: 'todo' as const,
+      weeks: p[5], typical: p[6], typicalEn: p[9] || '', gate: p[7], gateEn: p[10] || '', freeze: p[8], status: 'todo' as const,
       note: '', s: '', e: '',
     })),
     checklist: t.checklist.map((g) => ({

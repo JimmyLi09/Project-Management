@@ -551,8 +551,10 @@ function Stat({ label, value, color }: { label: string; value: number; color?: s
 
 function CellVal({ f, val }: { f: FieldDef; val: string }) {
   if (!val) return <span style={{ color: '#c3ccd4' }}>—</span>;
-  if (f.type === 'url') return <a href={val} target="_blank" rel="noreferrer" style={{ color: 'var(--info)', wordBreak: 'break-all', fontSize: 12.5 }}>{val.length > 34 ? val.slice(0, 34) + '…' : val}</a>;
-  return <span style={{ fontSize: 12.5, whiteSpace: f.type === 'textarea' ? 'normal' : 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', display: 'inline-block', maxWidth: 210 }}>{val}</span>;
+  /* REQ-041: 截断的格子一律挂上全文 tooltip —— 英文比中文长,同样的 210px
+     中文放得下、英文就被切掉,hover 至少能看全,不用点进编辑弹窗。 */
+  if (f.type === 'url') return <a href={val} target="_blank" rel="noreferrer" title={val} style={{ color: 'var(--info)', wordBreak: 'break-all', fontSize: 12.5 }}>{val.length > 34 ? val.slice(0, 34) + '…' : val}</a>;
+  return <span title={val} style={{ fontSize: 12.5, whiteSpace: f.type === 'textarea' ? 'normal' : 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', display: 'inline-block', maxWidth: 210 }}>{val}</span>;
 }
 
 function EditModal({ row, def, onClose, onSave }: { row: Row; def: RegisterDef; onClose: () => void; onSave: (patch: Record<string, string>) => void }) {

@@ -60,6 +60,8 @@ button { cursor: pointer; border: none; background: none; color: inherit; font-s
 .side-badge { min-width: 20px; height: 20px; padding: 0 6px; border-radius: 10px; background: var(--navy700); color: #fff; font-size: 11px; font-weight: 700; display: flex; align-items: center; justify-content: center }
 .side-item.active .side-badge { background: rgba(255, 255, 255, .22) }
 .side-user { border-top: 1px solid var(--border); padding: 14px; display: flex; align-items: center; gap: 11px }
+/* REQ-041: 单行省略号的统一写法,配 ui.tsx 的 <Ell>(溢出才挂 tooltip) */
+.ell { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0 }
 .side-user .nm { font-size: 13px; font-weight: 600; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis }
 .side-user .rl { font-size: 11px; color: var(--text2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis }
 
@@ -72,6 +74,8 @@ button { cursor: pointer; border: none; background: none; color: inherit; font-s
 .searchbox svg { color: var(--text2); flex-shrink: 0 }
 .icon-btn { position: relative; width: 44px; height: 44px; border-radius: 8px; border: 1px solid var(--border); background: var(--card); color: var(--text2); display: flex; align-items: center; justify-content: center; flex-shrink: 0 }
 .icon-btn:hover { background: var(--row-line2) }
+/* REQ-041: 双语并排开关的「开」态 —— 底色轻轻压一下,一眼看出现在是开着的 */
+.icon-btn.on { background: var(--hover-bg) }
 .icon-btn .dot-badge { position: absolute; top: 10px; right: 11px; width: 7px; height: 7px; border-radius: 50%; background: var(--danger); border: 1.5px solid var(--card) }
 .btn-navy { display: inline-flex; align-items: center; gap: 8px; height: 44px; padding: 0 17px; border-radius: 8px; background: var(--navy900); color: #fff; font-weight: 600; font-size: 14px; border: none; flex-shrink: 0 }
 .btn-navy:hover { background: #0a1c34 }

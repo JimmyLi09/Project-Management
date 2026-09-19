@@ -2,7 +2,7 @@
 
 /* ===== Shared UI primitives (icons, avatars, badges, progress) — from the Audax Platform design file ===== */
 
-import React, { createContext, useContext } from 'react';
+import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { useLang } from '@/lib/i18n';
 import type { Health } from '@/lib/project';
 import type { ChecklistStatus, ScheduleStatus } from '@/lib/types';
@@ -151,4 +151,35 @@ export function ProgressBar({ pct, color, showPct = true }: { pct: number; color
 
 export function healthColor(pct: number): string {
   return pct >= 85 ? '#D4483F' : pct >= 70 ? '#D98A12' : '#16865B';
+}
+
+/* ===== REQ-041 —— 一行放不下就省略号,并且 hover 能看全文 =====
+   列表里那些单行省略的格子(项目名 / 客户 / 任务 / 联系人…)以前只是
+   `text-overflow: ellipsis`,切到 EN 之后同一个宽度放不下更长的英文,
+   被切掉的部分就彻底看不到了。这里统一成一个件:真的溢出了才挂 title,
+   没溢出不挂 —— 免得每个格子都弹一个多余的 tooltip。
+
+   `full` 用来指定 tooltip 文本;不给就取渲染出来的可见文字。 */
+export function Ell({ full, className, style, children, onClick }: {
+  full?: string;
+  className?: string;
+  style?: React.CSSProperties;
+  children: React.ReactNode;
+  onClick?: () => void;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [tip, setTip] = useState('');
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const cut = el.scrollWidth > el.clientWidth + 1;
+    const next = cut ? (full ?? el.innerText).trim() : '';
+    setTip((cur) => (cur === next ? cur : next));   // 值没变就不触发重渲染
+  });
+  return (
+    <div ref={ref} className={'ell' + (className ? ' ' + className : '')}
+      style={style} title={tip || undefined} onClick={onClick}>
+      {children}
+    </div>
+  );
 }
