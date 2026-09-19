@@ -8,7 +8,7 @@ import { fmtDate, parseISO, pkgSuffix, projCode } from '@/lib/project';
 import { useLang } from '@/lib/i18n';
 import { Icon } from '../ui';
 import {
-  REGISTERS, registerDef, statusFamily, statusMeta, defaultStatus, recordVal, isIncomplete, fieldsOf, FIELD_TYPES, formulaText, optionLabel,
+  REGISTERS, baseDefOf, hasRecordDef, statusFamily, statusMeta, defaultStatus, recordVal, isIncomplete, fieldsOf, FIELD_TYPES, formulaText, optionLabel,
   type FieldDef, type FieldType, type RegisterDef,
 } from '@/lib/records';
 import type { Project, ServicePackage } from '@/lib/types';
@@ -20,12 +20,14 @@ import { fieldGroupTerm } from '@/lib/terms';
    shown as a table. Read-only by default; "总编辑" flips the whole card into an
    edit form with one bottom Save (a single setRecord per package). */
 export default function JobRecordTab({ p }: { p: Project }) {
-  const { me } = useStore();
+  const { me, recordFields } = useStore();
   const { lang, t } = useLang();
   const canEd = canEdit(me, p);
 
-  const known = p.packages.filter((pk) => registerDef(pk.svc));
-  const other = p.packages.filter((pk) => !registerDef(pk.svc));
+  /* 0917 变更单 · REQ-023:「有没有资料卡」不再只看出厂的 7 张表 ——
+     PD 给某个业务加过列之后,它就该像内置的一样出一张完整的资料卡。 */
+  const known = p.packages.filter((pk) => hasRecordDef(pk.svc, recordFields));
+  const other = p.packages.filter((pk) => !hasRecordDef(pk.svc, recordFields));
 
   /* REQ-032: 一个「总编辑」管整页 —— 不要每块各自一个铅笔。
      各张资料卡把自己的 进入编辑 / 保存 / 取消 注册进来,页面顶部统一调度;
@@ -118,26 +120,62 @@ export default function JobRecordTab({ p }: { p: Project }) {
 
       {known.map((pk) => {
         const gi = p.packages.indexOf(pk);
-        return <RecordCard key={gi} p={p} pk={pk} pkgIdx={gi} def={registerDef(pk.svc)!} canEd={canEd} register={register} />;
+        return <RecordCard key={gi} p={p} pk={pk} pkgIdx={gi} def={baseDefOf(pk.svc)} canEd={canEd} register={register} />;
       })}
 
       {other.map((pk) => {
         const gi = p.packages.indexOf(pk);
-        return (
-          <div key={gi} className="panel" style={{ padding: '14px 18px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
-              <span style={{ width: 9, height: 9, borderRadius: 3, background: svcColor(pk.svc) }} />
-              <span style={{ fontSize: 14, fontWeight: 700 }}>{svcName(pk.svc, 'zh')}</span>
-            </div>
-            <div style={{ fontSize: 12, color: 'var(--text2)', marginTop: 6 }}>
-              {t('该服务类型暂无资料登记表(仅 7 类业务有:沙盘/LED/投影/3D/MAXHUB/AV/其他)。',
-                 'No register defined for this service type (only the 7 business types have one).')}
-            </div>
-          </div>
-        );
+        return <EmptyRecordCard key={gi} p={p} pk={pk} pkgIdx={gi} />;
       })}
 
       {canEd && <AddServiceBar p={p} />}
+    </div>
+  );
+}
+
+/* 0917 变更单 · REQ-023 —— 「暂无资料」的业务卡也要能用起来。
+   出厂只给 7 类业务配了登记表,别的业务以前在这里就是一句「没有登记表」,
+   连一个格子都填不了。现在 PD 可以当场「加字段」把这张表定出来:
+   列定义存进 record_fields(按业务类型全局生效),存完这张卡马上变成一张
+   正常的资料卡,可以填值、可以在跨项目「项目档案」里看到 —— 跟内置那 7 张
+   走的是同一条路,只是出厂默认为空。 */
+function EmptyRecordCard({ p, pk, pkgIdx }: { p: Project; pk: ServicePackage; pkgIdx: number }) {
+  const { me } = useStore();
+  const { lang, t } = useLang();
+  const [fieldEdit, setFieldEdit] = useState(false);
+  const admin = canAdmin(me);
+
+  return (
+    <div className="panel clip">
+      <div className="panel-head" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <span style={{ width: 10, height: 10, borderRadius: 3, background: svcColor(pk.svc) }} />
+        <span className="panel-title">
+          {svcName(pk.svc, lang)}
+          {pkgSuffix(p, pkgIdx) && <span style={{ color: 'var(--bronze)', marginLeft: 6 }}>{pkgSuffix(p, pkgIdx)}</span>}
+          <span style={{ color: 'var(--text2)', fontWeight: 400 }}> · {t('资料', 'Record')}</span>
+        </span>
+        <span className="badge" style={{ background: 'var(--hover-bg)', color: 'var(--text2)', fontSize: 10.5 }}>
+          {t('未建表', 'no columns yet')}
+        </span>
+        <div style={{ flex: 1 }} />
+        {admin && (
+          <button className="btn-navy sm" onClick={() => setFieldEdit(!fieldEdit)}>
+            {fieldEdit ? t('完成', 'Done') : <>＋ {t('加字段', 'Add fields')}</>}
+          </button>
+        )}
+      </div>
+
+      {fieldEdit
+        ? <FieldEditor svc={pk.svc} builtin={[]} current={[]} onClose={() => setFieldEdit(false)} />
+        : (
+          <div style={{ padding: '16px 18px', fontSize: 12.5, color: 'var(--text2)' }}>
+            {admin
+              ? t('这个业务类型还没有资料表。点「加字段」定几列(例如 尺寸 / 交付日 / 链接),保存后就能在这里填值,该业务下所有项目一致。',
+                  'No record columns for this service type yet. Use "Add fields" to define a few — they apply to every project of this service.')
+              : t('这个业务类型还没有资料表。需要的话请 PD / BD 在这张卡上添加字段。',
+                  'No record columns for this service type yet. Ask PD / BD to add fields on this card.')}
+          </div>
+        )}
     </div>
   );
 }
@@ -161,7 +199,7 @@ function AddServiceBar({ p }: { p: Project }) {
      Screen Resolution / Location)顺手摆出来,添加时一起带进 record ——
      省得加完再进卡片补。哪些字段出现完全跟着字段定义走,PD 在「增减字段」
      里把某列改成下拉,这里就自动多一个选项,不需要改代码。 */
-  const baseDef = svc ? registerDef(svc) : undefined;
+  const baseDef = svc ? baseDefOf(svc) : undefined;
   const specFields = useMemo(
     () => (baseDef ? fieldsOf(baseDef, recordFields).filter((f) => f.type === 'select').slice(0, 2) : []),
     [baseDef, recordFields],
@@ -206,8 +244,7 @@ function AddServiceBar({ p }: { p: Project }) {
         <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap', alignItems: 'center', marginTop: 10, paddingTop: 10, borderTop: '1px dashed var(--row-line)' }}>
           <span style={{ fontSize: 11.5, color: 'var(--text2)' }}>{t('已添加', 'Added')} ({p.packages.length})</span>
           {p.packages.map((pk, i) => {
-            const d = registerDef(pk.svc);
-            const sel = d ? fieldsOf(d, recordFields).filter((f) => f.type === 'select').slice(0, 2) : [];
+            const sel = fieldsOf(baseDefOf(pk.svc), recordFields).filter((f) => f.type === 'select').slice(0, 2);
             const spec2 = sel.map((f) => optionLabel(f, recordVal(pk.record, f.key), lang)).filter(Boolean).join(' · ');
             return (
               <span key={i} className="badge" style={{ background: 'var(--hover-bg)', color: 'var(--text2)' }}>

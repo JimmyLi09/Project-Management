@@ -116,7 +116,9 @@ function TemplateEditor({ svc, onBack }: { svc: string; onBack: () => void }) {
               <tr style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '.04em', color: 'var(--text2)', background: 'var(--hover-bg)' }}>
                 <th style={thL}>#</th><th style={thL}>{t('阶段', 'Phase')}</th><th style={thL}>{t('任务(中)', 'Task ZH')}</th><th style={thL}>Task EN</th>
                 <th style={thL}>{t('角色', 'Owner')}</th><th style={thL}>{t('周', 'Wk')}</th>
-                {/* REQ-041: 这两列以前只有中文,EN 模式下排期页就是半截英文 —— 补上英文格 */}
+                {/* 0917 变更单 · REQ-023:典型工期这一格排期表里明明显示着,模板里却改不动。
+                    REQ-041:它和冻结点提示又都只有中文,EN 模式下就是半截英文 ——
+                    所以两列各给一个中文格 + 一个英文格。 */}
                 <th style={thL}>{t('工期(中)', 'Duration ZH')}</th><th style={thL}>Duration EN</th>
                 <th style={thL}>{t('冻结点提示(中)', 'Gate note ZH')}</th><th style={thL}>Gate note EN</th>
                 <th style={thL}>❄</th><th style={thL}></th>

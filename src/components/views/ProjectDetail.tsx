@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { useStore } from '../store';
 import {
   deliverySlack, fmtDate, infoProgress, isRiskDismissed, nextFreeze, overdueItems, parseISO,
@@ -1166,13 +1166,29 @@ const CONTACT_ROLES: [string, string][] = [
 ];
 
 function ContactsPanel({ p, canEd }: { p: Project; canEd: boolean }) {
-  const { dispatch, setToast } = useStore();
+  const { dispatch, setToast, projects } = useStore();
   const { lang, t } = useLang();
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState<ProjectContact[]>([]);
   const [busy, setBusy] = useState(false);
 
   const list = p.contacts || [];
+
+  /* 公司下拉的选项 = 全平台已经录过的公司名。没有单独一张「公司表」,
+     也不该为这个建一张 —— 录过一次就进下拉,这已经够用了。
+     大小写/前后空格不同视作同一家,显示时用第一次录入的写法。 */
+  const knownCompanies = useMemo(() => {
+    const seen = new Map<string, string>();
+    for (const pr of projects) {
+      for (const c of pr.contacts || []) {
+        const name = String(c.company || '').trim();
+        if (!name) continue;
+        const key = name.toLowerCase();
+        if (!seen.has(key)) seen.set(key, name);
+      }
+    }
+    return [...seen.values()].sort((a, b) => a.localeCompare(b, 'zh-Hans-CN'));
+  }, [projects]);
 
   function begin() {
     setDraft(list.map((c) => ({ ...c })));
@@ -1247,7 +1263,11 @@ function ContactsPanel({ p, canEd }: { p: Project; canEd: boolean }) {
           {draft.map((c, ci) => (
             <div key={ci} style={{ borderTop: ci ? '1px solid var(--row-line2)' : 'none', paddingTop: ci ? 12 : 0, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 7 }}>
               <RoleSelect value={c.role} onChange={(v) => set(ci, 'role', v)} />
-              <input className="in sm" value={c.company} placeholder={t('公司', 'Company')} onChange={(e) => set(ci, 'company', e.target.value)} />
+              {/* 0917 变更单:公司也改下拉。选项来自全平台已经录过的公司名 ——
+                  同一个建筑师 / 总包会在很多项目里反复出现,每次重打一遍
+                  既费事又容易打出三种写法。选「其他」照样手填。 */}
+              <PickOrType value={c.company} options={knownCompanies} placeholder={t('公司', 'Company')}
+                onChange={(v) => set(ci, 'company', v)} />
               <input className="in sm" value={c.person} placeholder={t('联系人', 'Contact person')} onChange={(e) => set(ci, 'person', e.target.value)} />
               <input className="in sm" value={c.phone} placeholder={t('电话', 'Phone')} onChange={(e) => set(ci, 'phone', e.target.value)} />
               <input className="in sm" style={{ gridColumn: '1 / -1' }} value={c.email} placeholder={t('邮箱', 'Email')} onChange={(e) => set(ci, 'email', e.target.value)} />
@@ -1272,22 +1292,41 @@ function ContactsPanel({ p, canEd }: { p: Project; canEd: boolean }) {
 /* 角色下拉:命中固定枚举就选枚举,否则落到「其他」并露出手填框 ——
    老数据里那些手打的角色不会因为换成下拉就丢掉。 */
 function RoleSelect({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const { lang, t } = useLang();
+  /* REQ-041: 下拉里显示的名字与只读态那一行走同一个词条(中文只显示「客户」,
+     不再是存进库的那串「客户 Client」);存的值一个字都不变。 */
+  return <PickOrType value={value} placeholder={t('角色', 'Role')}
+    options={CONTACT_ROLES.map(([zh]) => zh)} labelOf={(v) => contactRoleTerm(v, lang)}
+    onChange={onChange} />;
+}
+
+/* 下拉 + 「其他(手填)」。值不在选项里(老数据手打的)就直接进手填态,
+   不会因为换成下拉把已有内容丢掉 —— 这是 REQ-030 定下的规矩,
+   0917 变更单把公司也纳进来,所以抽成一个共用件。 */
+function PickOrType({ value, options, placeholder, labelOf, onChange }: {
+  value: string; options: string[]; placeholder: string;
+  labelOf?: (v: string) => string; onChange: (v: string) => void;
+}) {
   const { t } = useLang();
-  const known = CONTACT_ROLES.some(([zh]) => zh === value);
+  const known = options.includes(value);
   const [other, setOther] = useState(!known && !!value);
-  if (other) {
+  if (other || options.length === 0) {
     return (
       <div style={{ display: 'flex', gap: 5 }}>
-        <input className="in sm" value={value} placeholder={t('角色', 'Role')} onChange={(e) => onChange(e.target.value)} />
-        <button className="btn-line sm" title={t('回到下拉选择', 'Back to the list')} onClick={() => { setOther(false); onChange(''); }}>↺</button>
+        <input className="in sm" style={{ minWidth: 0 }} value={value} placeholder={placeholder}
+          onChange={(e) => onChange(e.target.value)} />
+        {options.length > 0 && (
+          <button className="btn-line sm" title={t('回到下拉选择', 'Back to the list')}
+            onClick={() => { setOther(false); onChange(''); }}>↺</button>
+        )}
       </div>
     );
   }
   return (
     <select className="in sm" value={known ? value : ''}
       onChange={(e) => { if (e.target.value === '__other') { setOther(true); onChange(''); } else onChange(e.target.value); }}>
-      <option value="">{t('— 角色 —', '— Role —')}</option>
-      {CONTACT_ROLES.map(([zh, en]) => <option key={zh} value={zh}>{t(zh, en)}</option>)}
+      <option value="">— {placeholder} —</option>
+      {options.map((o) => <option key={o} value={o}>{labelOf ? labelOf(o) : o}</option>)}
       <option value="__other">{t('其他(手填)', 'Other (type it)')}</option>
     </select>
   );
