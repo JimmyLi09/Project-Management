@@ -31,7 +31,9 @@ export function freshChecklist(groups: ChecklistGroup[], withContent = false): C
   return (groups || []).map((g) => ({
     ...g,
     items: (g.items || []).map((it) => (withContent
-      ? { ...it, id: newId() }
+      /* 收料记录的 id 也要换 —— 和上面行 id 同一个道理:同一个 id 出现在
+         两个项目里迟早出事(React key、按 id 找记录改 / 删)。 */
+      ? { ...it, id: newId(), receipts: (it.receipts || []).map((r) => ({ ...r, id: newId() })) }
       : {
           ...it, id: newId(), status: 'pending' as const, date: '', remark: '', received: '',
           shot: undefined, shots: [], highlight: false, updatedAt: undefined,
@@ -103,8 +105,11 @@ export function statFragment(frag: Fragment, kind: FragmentKind): FragmentStats 
   }
   const groups = (frag as ChecklistFragment).checklist || [];
   const items = groups.reduce((n, g) => n + (g.items || []).length, 0);
+  /* 「有内容」也要把收料记录算进去 —— 一个项只有收料记录、老字段还空着的
+     情况是有的(记录是后加的),预览里说「0 项有内容」会骗人。 */
   const withContent = groups.reduce((n, g) => n + (g.items || []).filter(
-    (it) => it.status !== 'pending' || it.date || it.remark || it.received || (it.shots || []).length,
+    (it) => it.status !== 'pending' || it.date || it.remark || it.received
+      || (it.shots || []).length || (it.receipts || []).length,
   ).length, 0);
   return { groups: groups.length, items, withContent };
 }
