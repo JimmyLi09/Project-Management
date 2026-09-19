@@ -247,6 +247,24 @@ export function fieldsOf(def: RegisterDef, ov?: FieldOverrides): FieldDef[] {
   return custom && custom.length ? custom : def.fields;
 }
 
+/* ===== 0917 变更单 · REQ-023:出厂没有登记表的业务也能自己加字段 =====
+   出厂只给 7 类业务配了登记表,别的业务(网站 / 无人机 / 宣传册…)在 Job Record
+   里只有一句「暂无资料登记表」,连一个格子都填不了。PD 在那张卡上点「加字段」
+   之后,record_fields 里就有了这个 svc 的列定义,它跟内置的 7 张表走同一条路:
+   同一份覆盖表、同一个 setRecord、同一张 record —— 只是出厂默认是空的。
+   状态按交付类走(没装机概念的业务多半是交付型),confirmed 置 true,
+   因为这几列本来就是 PD 自己定的,没有「待确认」一说。 */
+export const baseDefOf = (svc: string): RegisterDef =>
+  registerDef(svc) || { svc, kind: 'delivery', confirmed: true, fields: [] };
+
+/* 这个业务现在有没有登记表可看 —— 内置的有,或者 PD 自己加过列 */
+export const hasRecordDef = (svc: string, ov?: FieldOverrides): boolean =>
+  !!registerDef(svc) || !!(ov && ov[svc] && ov[svc].length);
+
+/* PD 自建的登记表(内置 7 张之外的),按 svc 排一下给跨项目档案页做页签 */
+export const customRegisterSvcs = (ov?: FieldOverrides): string[] =>
+  Object.keys(ov || {}).filter((svc) => !registerDef(svc) && (ov as FieldOverrides)[svc].length).sort();
+
 export const FIELD_TYPES: [FieldType, string, string][] = [
   ['text', '文本', 'Text'],
   ['number', '数字', 'Number'],

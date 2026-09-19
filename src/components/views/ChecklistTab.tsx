@@ -35,7 +35,7 @@ export default function ChecklistTab({ p, pkgIdx, onExport, onPkg }: {
   p: Project; pkgIdx: number; onExport: () => void; onPkg: (i: number) => void;
 }) {
   const { me, dispatch, users } = useStore();
-  const { lang, t } = useLang();
+  const { lang, t, dual } = useLang();
   const [editMode, setEditMode] = useState(false);
   /* REQ-005: 信息清单默认只读,点「编辑」才可改字段(状态/日期/备注/图片) */
   const [fieldEdit, setFieldEdit] = useState(false);
@@ -238,7 +238,8 @@ export default function ChecklistTab({ p, pkgIdx, onExport, onPkg }: {
                   <span style={{ transform: isCol ? 'rotate(-90deg)' : 'none', transition: 'transform .15s', color: 'var(--text2)', fontSize: 12 }}>▾</span>
                   <span style={{ width: 9, height: 9, borderRadius: 2, background: g.color, flexShrink: 0 }} />
                   <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--navy900)' }}>{lang === 'zh' ? g.group : g.groupEn}</span>
-                  <span style={{ fontWeight: 400, color: 'var(--text2)', fontSize: 12 }}>{lang === 'zh' ? g.groupEn : g.group}</span>
+                  {/* REQ-041: 另一种语言的栏目名,受「双语并排」开关控制 */}
+                  {dual && <span style={{ fontWeight: 400, color: 'var(--text2)', fontSize: 12 }}>{lang === 'zh' ? g.groupEn : g.group}</span>}
                   <span className="badge" style={{ background: 'var(--hover-bg)', color: 'var(--text2)' }}>{applicable.length}</span>
                   <div style={{ flex: 1 }} />
                   <span className="tnum" style={{ fontSize: 12.5, fontWeight: 600, color: gpct >= 100 ? 'var(--success)' : 'var(--text2)' }}>{gpct}%</span>
@@ -295,7 +296,7 @@ export default function ChecklistTab({ p, pkgIdx, onExport, onPkg }: {
                       ) : (
                         <>
                           <div style={{ fontSize: 13.5, fontWeight: 500 }}>{lang === 'zh' ? it.zh : it.en || it.zh}</div>
-                          <div style={{ fontSize: 11.5, color: 'var(--text2)' }}>{lang === 'zh' ? it.en : it.zh}</div>
+                          {dual && <div style={{ fontSize: 11.5, color: 'var(--text2)' }}>{lang === 'zh' ? it.en : it.zh}</div>}
                         </>
                       )}
 

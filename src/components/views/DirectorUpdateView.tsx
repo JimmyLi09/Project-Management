@@ -5,7 +5,7 @@ import { useStore } from '../store';
 import { fmtDate, overdueItems, projectHealth, projStage, staleInfo, todayMid } from '@/lib/project';
 import { canDecide, canEdit } from '@/lib/permissions';
 import { useLang } from '@/lib/i18n';
-import { Avatar, HM, Icon, Pill } from '../ui';
+import { Avatar, Ell, HM, Icon, Pill } from '../ui';
 import type { Project } from '@/lib/types';
 
 const UF: [keyof UFields, string, string][] = [
@@ -67,7 +67,7 @@ export default function DirectorUpdateView() {
                   {p.commercialStatus === 'overdue' ? t('逾期未收款', 'Payment overdue') : t('收款高风险', 'High risk')}
                 </span>
                 <div style={{ minWidth: 0 }}>
-                  <div style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--navy900)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.name}</div>
+                  <Ell style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--navy900)' }}>{p.name}</Ell>
                   <div style={{ fontSize: 11.5, color: 'var(--text2)' }}>
                     {p.client || '—'}
                     {inv?.invoiceRef ? ` · ${t('发票', 'Inv')} ${inv.invoiceRef}` : ''}

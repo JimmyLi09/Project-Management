@@ -6,10 +6,19 @@ import { fmtDate, isoDate, MACRO, macroStage, parseISO, pkgStart, planDates, tod
 import { canEdit, canRowEdit, canSubmitCompletionHere } from '@/lib/permissions';
 import { svcColor, svcName } from '@/lib/templates';
 import { useLang } from '@/lib/i18n';
-import { Avatar, Icon, Pill, TM } from '../ui';
+import { Avatar, Ell, Icon, Pill, TM } from '../ui';
 import FragmentBar from '../FragmentBar';
 import type { PlanDate } from '@/lib/project';
 import type { Project, ScheduleStatus } from '@/lib/types';
+import { durationTerm, gateTerm } from '@/lib/terms';
+
+/* REQ-041: 典型工期 / 冻结点提示的显示值。优先级:
+   模板里显式填的 EN > terms.ts 里的出厂词条 > 中文原值。 */
+const typicalOf = (r: { typical: string; typicalEn?: string }, lang: 'zh' | 'en') =>
+  (lang === 'zh' ? r.typical : r.typicalEn || durationTerm(r.typical, 'en')) || '';
+const gateOf = (r: { gate: string; gateEn?: string }, lang: 'zh' | 'en') =>
+  (lang === 'zh' ? r.gate : r.gateEn || gateTerm(r.gate, 'en')) || '';
+
 
 const NEXT: Record<ScheduleStatus, ScheduleStatus> = { todo: 'wip', wip: 'done', done: 'block', block: 'todo' };
 
@@ -17,7 +26,7 @@ export default function ScheduleTab({ p, pkgIdx, onExport, onPkg }: {
   p: Project; pkgIdx: number; onExport: () => void; onPkg: (i: number) => void;
 }) {
   const { me, dispatch, users, setToast } = useStore();
-  const { lang, t } = useLang();
+  const { lang, t, dual } = useLang();
   const [editMode, setEditMode] = useState(false);
   const [showCal, setShowCal] = useState(false);
   const [dragIdx, setDragIdx] = useState<number | null>(null);
@@ -216,9 +225,15 @@ export default function ScheduleTab({ p, pkgIdx, onExport, onPkg }: {
                   const over = r.status !== 'done' && d && d.end < t0;
                   const done = r.status === 'done';
                   const rowEd = canRowEdit(me, p, r);
-                  const gateTxt = r.gate && r.gate.trim() ? r.gate.replace(/★\s*/, '') : '';
+                  /* REQ-041: 冻结点提示 / 典型工期原来只有中文。模板里补了 EN 位
+                     (gateEn / typicalEn),没填就回落到中文 —— 老项目和老定制模板
+                     不会因此变空。 */
+                  const gateRaw = gateOf(r, lang);
+                  const gateTxt = gateRaw.trim() ? gateRaw.replace(/★\s*/, '') : '';
                   const taskMain = lang === 'zh' ? r.task : r.taskEn || r.task;
-                  const taskSub = lang === 'zh' ? r.taskEn : r.task;
+                  /* REQ-041: 另一种语言的任务名只在「双语并排」开着时压在下面;
+                     关掉之后这一行只剩负责人 —— EN 模式默认就是关的。 */
+                  const taskSub = dual ? (lang === 'zh' ? r.taskEn : r.task) : '';
                   return (
                     <div key={r.id || i} className="row-hover"
                       onDragOver={ed && !editMode ? (e) => { e.preventDefault(); if (overIdx !== i) setOverIdx(i); } : undefined}
@@ -296,7 +311,7 @@ export default function ScheduleTab({ p, pkgIdx, onExport, onPkg }: {
                               {r.custom && <span style={{ fontSize: 10, fontWeight: 700, color: '#7c5bd6', background: '#efe9fb', borderRadius: 5, padding: '1px 6px', letterSpacing: '.02em' }}>＋{t('自定义', 'Custom')}</span>}
                               {taskMain}
                             </div>
-                            <div style={{ fontSize: 11.5, color: 'var(--text2)' }}>{taskSub}{r.owner ? ` · ${r.owner}` : ''}{r.assignee && r.custom ? ` · ${r.assignee}` : ''}</div>
+                            <div style={{ fontSize: 11.5, color: 'var(--text2)' }}>{[taskSub, r.owner, r.assignee && r.custom ? r.assignee : ''].filter(Boolean).join(' · ')}</div>
                             {gateTxt && (
                               <div style={{ display: 'inline-flex', gap: 5, marginTop: 5, fontSize: 11.5, color: r.freeze ? '#8f5b1d' : 'var(--text2)', background: r.freeze ? '#f6ecdd' : 'var(--row-line2)', borderRadius: 6, padding: '3px 8px' }}>
                                 {r.freeze ? '★' : '›'} {gateTxt}
@@ -326,12 +341,12 @@ export default function ScheduleTab({ p, pkgIdx, onExport, onPkg }: {
                           <input type="date" className="in sm" style={{ fontSize: 11, padding: '2px 5px', ...(over ? { borderColor: '#e7a19b', color: '#b23a32' } : {}) }}
                             title={t('结束(可改)', 'End (editable)')} value={r.e || (d ? isoDate(d.end) : '')}
                             onChange={(e) => dispatch(p.id, { type: 'editSched', pkg: pkgIdx, idx: i, field: 'e', value: e.target.value })} />
-                          <div style={{ fontSize: 10.5, color: 'var(--text2)' }}>{r.typical}</div>
+                          <div style={{ fontSize: 10.5, color: 'var(--text2)' }}>{typicalOf(r, lang)}</div>
                         </div>
                       ) : (
                         <div className="tnum" style={{ fontSize: 12, color: over ? 'var(--danger)' : 'var(--text2)', fontWeight: over ? 600 : 400 }}>
                           {d ? <>{fmtDate(d.start).slice(0, 6)} → {fmtDate(d.end).slice(0, 6)}</> : '—'}
-                          <div style={{ fontSize: 10.5, color: 'var(--text2)', fontWeight: 400 }}>{r.typical}</div>
+                          <div style={{ fontSize: 10.5, color: 'var(--text2)', fontWeight: 400 }}>{typicalOf(r, lang)}</div>
                         </div>
                       )}
                       <div style={{ justifySelf: 'end' }}>
@@ -718,9 +733,9 @@ function DeliveryCalendar({ p, pkg, pd, t0, lang, t }: {
             const over = r.status !== 'done' && d.end < t0;
             return (
               <div key={r.id || i} style={{ display: 'grid', gridTemplateColumns: '150px 1fr', columnGap: 10, alignItems: 'center', padding: '3px 0' }}>
-                <div style={{ fontSize: 11.5, color: r.status === 'done' ? 'var(--text2)' : 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={lang === 'zh' ? r.task : r.taskEn}>
+                <Ell full={lang === 'zh' ? r.task : r.taskEn} style={{ fontSize: 11.5, color: r.status === 'done' ? 'var(--text2)' : 'var(--text)' }}>
                   {r.freeze ? '🔒 ' : ''}{lang === 'zh' ? r.task : r.taskEn || r.task}
-                </div>
+                </Ell>
                 <div style={{ position: 'relative', height: 20 }}>
                   {lines.map((ln, k) => <span key={`v${k}`} style={{ position: 'absolute', left: `${pct(ln.at)}%`, top: 0, bottom: 0, width: 1, background: ln.color, opacity: 0.5 }} />)}
                   <div title={`${fmtDate(d.start)} → ${fmtDate(d.end)}`}

@@ -9,7 +9,7 @@ import { useLang } from '@/lib/i18n';
 import { Icon } from '../ui';
 import { FieldEditor } from './JobRecordTab';
 import {
-  REGISTERS, registerDef, statusFamily, statusMeta, defaultStatus, recordVal, fieldsOf, formulaText,
+  REGISTERS, baseDefOf, customRegisterSvcs, statusFamily, statusMeta, defaultStatus, recordVal, fieldsOf, formulaText,
   isIncomplete, isExpiring, type RegisterDef, type FieldDef,
 } from '@/lib/records';
 import type { Project, ServicePackage } from '@/lib/types';
@@ -45,9 +45,16 @@ export default function RegistersView() {
   const [imp, setImp] = useState<ImportPreview | null>(null);
   const canImport = isFull(me);
 
+  /* 0917 变更单 · REQ-023:PD 在 Job Record 的空白资料卡上加过字段的业务,
+     这里也要有自己的一页 —— 同源就该两边都看得见。 */
+  const tabs = useMemo(
+    () => [...REGISTERS.map((r) => r.svc), ...customRegisterSvcs(recordFields)],
+    [recordFields],
+  );
+
   /* REQ-023: 把用户改过的字段并进 def —— 下游所有 def.fields(表头、导出、
      导入模板、编辑弹窗…)自动跟着走,不用一处处改。 */
-  const baseDef = registerDef(svc)!;
+  const baseDef = baseDefOf(svc);
   const def = useMemo<RegisterDef>(() => ({ ...baseDef, fields: fieldsOf(baseDef, recordFields) }), [baseDef, recordFields]);
   const t0 = todayMid();
 
@@ -161,13 +168,13 @@ export default function RegistersView() {
 
   return (
     <>
-      {/* register tabs */}
+      {/* register tabs —— 内置 7 张 + 0917 变更单 REQ-023 里 PD 自己加过列的业务 */}
       <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap', marginBottom: 18 }}>
-        {REGISTERS.map((r) => (
-          <button key={r.svc} className={`chip ${svc === r.svc ? 'active' : ''}`} onClick={() => setSvc(r.svc)}
-            style={svc === r.svc ? { borderColor: svcColor(r.svc), boxShadow: `inset 0 0 0 1px ${svcColor(r.svc)}` } : undefined}>
-            <span style={{ width: 8, height: 8, borderRadius: 2, background: svcColor(r.svc), display: 'inline-block' }} />
-            {svcName(r.svc, lang)}
+        {tabs.map((sv) => (
+          <button key={sv} className={`chip ${svc === sv ? 'active' : ''}`} onClick={() => setSvc(sv)}
+            style={svc === sv ? { borderColor: svcColor(sv), boxShadow: `inset 0 0 0 1px ${svcColor(sv)}` } : undefined}>
+            <span style={{ width: 8, height: 8, borderRadius: 2, background: svcColor(sv), display: 'inline-block' }} />
+            {svcName(sv, lang)}
           </button>
         ))}
       </div>
@@ -544,8 +551,10 @@ function Stat({ label, value, color }: { label: string; value: number; color?: s
 
 function CellVal({ f, val }: { f: FieldDef; val: string }) {
   if (!val) return <span style={{ color: '#c3ccd4' }}>—</span>;
-  if (f.type === 'url') return <a href={val} target="_blank" rel="noreferrer" style={{ color: 'var(--info)', wordBreak: 'break-all', fontSize: 12.5 }}>{val.length > 34 ? val.slice(0, 34) + '…' : val}</a>;
-  return <span style={{ fontSize: 12.5, whiteSpace: f.type === 'textarea' ? 'normal' : 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', display: 'inline-block', maxWidth: 210 }}>{val}</span>;
+  /* REQ-041: 截断的格子一律挂上全文 tooltip —— 英文比中文长,同样的 210px
+     中文放得下、英文就被切掉,hover 至少能看全,不用点进编辑弹窗。 */
+  if (f.type === 'url') return <a href={val} target="_blank" rel="noreferrer" title={val} style={{ color: 'var(--info)', wordBreak: 'break-all', fontSize: 12.5 }}>{val.length > 34 ? val.slice(0, 34) + '…' : val}</a>;
+  return <span title={val} style={{ fontSize: 12.5, whiteSpace: f.type === 'textarea' ? 'normal' : 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', display: 'inline-block', maxWidth: 210 }}>{val}</span>;
 }
 
 function EditModal({ row, def, onClose, onSave }: { row: Row; def: RegisterDef; onClose: () => void; onSave: (patch: Record<string, string>) => void }) {
