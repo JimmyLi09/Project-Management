@@ -198,7 +198,9 @@ function AddServiceBar({ p }: { p: Project }) {
      没有登记表的那几类(网站 / 无人机 / 灯箱 …)加进来也有意义:排期和信息清单
      照常生成,资料卡那边按 REQ-023 自己加字段。下拉里标出来哪些自带登记表,
      免得加完发现没有资料表还以为是 bug。 */
-  const options = Object.keys(SVC).map((svc) => ({ svc, hasRegister: !!registerDef(svc) }));
+  /* 「有没有登记表」按现在的实际情况判:出厂自带的 7 类算,0917 变更单 REQ-023
+     里 PD 自己加过字段的也算 —— 加完字段还标「无登记表」会让人以为没生效。 */
+  const options = Object.keys(SVC).map((svc) => ({ svc, hasRegister: hasRecordDef(svc, recordFields) }));
 
   /* REQ-039: 选了业务之后,把这张登记表最前面两个下拉字段(LED 就是
      Screen Resolution / Location)顺手摆出来,添加时一起带进 record ——
@@ -224,7 +226,7 @@ function AddServiceBar({ p }: { p: Project }) {
               <option key={r.svc} value={r.svc}>
                 {svcName(r.svc, lang)}
                 {n ? t(`（已有 ${n} 份）`, ` (${n} existing)`) : ''}
-                {r.hasRegister ? '' : t(' · 无登记表', ' · no register')}
+                {r.hasRegister ? '' : t(' · 无资料表(可后补字段)', ' · no record table yet')}
               </option>
             );
           })}

@@ -193,7 +193,8 @@ export function ReceivingLog({ p, pkgIdx, canEd, onOpenItem }: {
     const csv = '﻿' + [head, ...body].map((r) => r.map(qt).join(',')).join('\r\n');
     const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8;' }));
     const a = document.createElement('a');
-    a.href = url; a.download = `收料记录_${p.name.replace(/[\\/:*?"<>|]/g, '_')}.csv`;
+    /* REQ-041: 文件名也跟着界面语言走 —— 导出的东西是要发出去的 */
+    a.href = url; a.download = `${t('收料记录', 'Receiving log')}_${p.name.replace(/[\\/:*?"<>|]/g, '_')}.csv`;
     document.body.appendChild(a); a.click(); a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
