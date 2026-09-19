@@ -26,7 +26,7 @@ export default function ScheduleTab({ p, pkgIdx, onExport, onPkg }: {
   p: Project; pkgIdx: number; onExport: () => void; onPkg: (i: number) => void;
 }) {
   const { me, dispatch, users, setToast } = useStore();
-  const { lang, t } = useLang();
+  const { lang, t, dual } = useLang();
   const [editMode, setEditMode] = useState(false);
   const [showCal, setShowCal] = useState(false);
   const [dragIdx, setDragIdx] = useState<number | null>(null);
@@ -231,7 +231,9 @@ export default function ScheduleTab({ p, pkgIdx, onExport, onPkg }: {
                   const gateRaw = gateOf(r, lang);
                   const gateTxt = gateRaw.trim() ? gateRaw.replace(/★\s*/, '') : '';
                   const taskMain = lang === 'zh' ? r.task : r.taskEn || r.task;
-                  const taskSub = lang === 'zh' ? r.taskEn : r.task;
+                  /* REQ-041: 另一种语言的任务名只在「双语并排」开着时压在下面;
+                     关掉之后这一行只剩负责人 —— EN 模式默认就是关的。 */
+                  const taskSub = dual ? (lang === 'zh' ? r.taskEn : r.task) : '';
                   return (
                     <div key={r.id || i} className="row-hover"
                       onDragOver={ed && !editMode ? (e) => { e.preventDefault(); if (overIdx !== i) setOverIdx(i); } : undefined}
@@ -309,7 +311,7 @@ export default function ScheduleTab({ p, pkgIdx, onExport, onPkg }: {
                               {r.custom && <span style={{ fontSize: 10, fontWeight: 700, color: '#7c5bd6', background: '#efe9fb', borderRadius: 5, padding: '1px 6px', letterSpacing: '.02em' }}>＋{t('自定义', 'Custom')}</span>}
                               {taskMain}
                             </div>
-                            <div style={{ fontSize: 11.5, color: 'var(--text2)' }}>{taskSub}{r.owner ? ` · ${r.owner}` : ''}{r.assignee && r.custom ? ` · ${r.assignee}` : ''}</div>
+                            <div style={{ fontSize: 11.5, color: 'var(--text2)' }}>{[taskSub, r.owner, r.assignee && r.custom ? r.assignee : ''].filter(Boolean).join(' · ')}</div>
                             {gateTxt && (
                               <div style={{ display: 'inline-flex', gap: 5, marginTop: 5, fontSize: 11.5, color: r.freeze ? '#8f5b1d' : 'var(--text2)', background: r.freeze ? '#f6ecdd' : 'var(--row-line2)', borderRadius: 6, padding: '3px 8px' }}>
                                 {r.freeze ? '★' : '›'} {gateTxt}

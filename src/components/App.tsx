@@ -59,7 +59,7 @@ function Shell() {
     users.forEach((u) => { if (u.avatar) m[u.name] = u.avatar; });
     return m;
   }, [users]);
-  const { lang, setLang, t } = useLang();
+  const { lang, setLang, t, dual, setDual } = useLang();
   const [showNew, setShowNew] = useState(false);
   const [notifOpen, setNotifOpen] = useState(false);
   const [search, setSearch] = useState('');
@@ -197,6 +197,27 @@ function Shell() {
             onClick={() => setLang(lang === 'zh' ? 'en' : 'zh')}
           >
             {lang === 'zh' ? 'EN' : '中文'}
+          </button>
+          {/* REQ-041 双语并排开关 —— 管的是排期任务 / 清单信息项 / 模板卡片
+              这些**内容**下面那行另一种语言的小字,不影响界面文案。
+              中文模式默认开(对着中文图纸干活好核对),英文模式默认关
+              (给客户看时下面挂一行中文不像话),点一下就改,记住选择。 */}
+          <button
+            className={`icon-btn${dual ? ' on' : ''}`}
+            title={dual
+              ? t('双语并排:开 —— 任务 / 信息项下面压一行英文。点一下收起来。',
+                  'Bilingual: on — the other language sits under each task / item. Click to collapse it.')
+              : t('双语并排:关 —— 只显示当前语言。点一下把另一种语言显示出来。',
+                  'Bilingual: off — current language only. Click to show the other one too.')}
+            aria-pressed={dual}
+            style={{
+              width: 'auto', padding: '0 10px', fontSize: 11, fontWeight: 700, letterSpacing: '.03em',
+              color: dual ? 'var(--navy900)' : 'var(--text2)',
+              borderColor: dual ? 'var(--navy700)' : undefined,
+            }}
+            onClick={() => setDual(!dual)}
+          >
+            {t('中/EN', 'ZH/EN')}
           </button>
           <button className="icon-btn bell-btn" aria-label="Notifications" onClick={(e) => { e.stopPropagation(); setNotifOpen(!notifOpen); }}>
             <Icon name="bell" />

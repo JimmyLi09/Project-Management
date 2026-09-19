@@ -11,7 +11,7 @@ import type { Template, TplChecklistGroup, TplScheduleRow } from '@/lib/template
 interface SvcRow { key: string; label: string; en: string; color: string; customized: boolean }
 
 export default function TemplatesView() {
-  const { lang, t } = useLang();
+  const { lang, t, dual } = useLang();
   const [services, setServices] = useState<SvcRow[]>([]);
   const [editing, setEditing] = useState<string | null>(null);
 
@@ -38,7 +38,7 @@ export default function TemplatesView() {
               <div style={{ flex: 1 }}>
                 {/* REQ-041: 当前语言在上,另一语言在下 —— EN 模式下主名不再是中文 */}
                 <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--navy900)' }}>{lang === 'zh' ? s.label : s.en}</div>
-                <div style={{ fontSize: 11.5, color: 'var(--text2)' }}>{lang === 'zh' ? s.en : s.label}</div>
+                {dual && <div style={{ fontSize: 11.5, color: 'var(--text2)' }}>{lang === 'zh' ? s.en : s.label}</div>}
               </div>
               {s.customized && (
                 <span className="badge" style={{ background: '#fff3e4', color: '#8f5b1d' }}>{t('已定制', 'Customized')}</span>
