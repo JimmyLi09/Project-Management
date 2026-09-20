@@ -472,7 +472,7 @@ export function CalendarPlanner({
   }
 
   function handleSaveArchive() {
-    const archive = buildArchive(archiveName, stages, boundaries)
+    const archive = buildArchive(archiveName, stages, boundaries, lang)
     setArchives((current) => [archive, ...current].slice(0, 30))
     setArchiveName('')
     setNotice(t(`已保存存档「${archive.name}」。`, `Saved version “${archive.name}”.`))
