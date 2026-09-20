@@ -2,7 +2,12 @@ import { Fragment, useState } from 'react'
 
 import { formatDisplayDate, formatRangeParts } from '../domain/calendar'
 import { calculateDuration, formatDuration } from '../domain/duration'
-import { MAX_STAGES, MIN_STAGES, type StageSchedule } from '../domain/schedule'
+import {
+  MAX_STAGES,
+  MIN_STAGES,
+  stageName,
+  type StageSchedule
+} from '../domain/schedule'
 import { useLang } from '@/lib/i18n'
 
 export interface StagePanelProps {
@@ -47,7 +52,7 @@ export function StagePanel({
   onRestoreStages,
   onMoveStage
 }: StagePanelProps) {
-  const { t } = useLang()
+  const { lang, t } = useLang()
   const completeCount = schedules.filter((stage) => stage.end).length
   const canAdd = schedules.length < MAX_STAGES
   const canRemove = schedules.length > MIN_STAGES
@@ -168,7 +173,7 @@ export function StagePanel({
                           }
                         }}
                         type="text"
-                        value={stage.name}
+                        value={stageName(stage, lang)}
                       />
                     ) : (
                       <h3
@@ -187,7 +192,7 @@ export function StagePanel({
                         tabIndex={0}
                         title={t('点击编辑阶段名称', 'Click to rename this stage')}
                       >
-                        {stage.name}
+                        {stageName(stage, lang)}
                       </h3>
                     )}
                     {isActive && <span className="stage-current-label">CURRENT</span>}

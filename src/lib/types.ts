@@ -152,6 +152,9 @@ export interface ChecklistItem {
 export interface CalendarStage {
   id: string;
   name: string;
+  /* 出厂阶段名的英文位;用户改名后丢弃。老数据没有这一位,回落到 name。
+     详见 docs/i18n-词条维护.md §3。 */
+  nameEn?: string;
   tone: string;
   note?: string;
 }
