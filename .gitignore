@@ -6,3 +6,6 @@ data/
 next-env.d.ts
 .env*.local
 .DS_Store
+
+# 端到端脚本没设 S 环境变量时会把截图写到 ./undefined/ —— 别跟进版本库
+undefined/
