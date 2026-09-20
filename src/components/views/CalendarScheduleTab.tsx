@@ -7,7 +7,7 @@ import { canEdit } from '@/lib/permissions';
 import { pkgSuffix, projCode } from '@/lib/project';
 import { svcName } from '@/lib/templates';
 import { CalendarPlanner } from '@/features/schedule-planner/components/CalendarPlanner';
-import type { LocalDate, StageDefinition } from '@/features/schedule-planner/domain/schedule';
+import { stageName, type LocalDate, type StageDefinition } from '@/features/schedule-planner/domain/schedule';
 import type { ScheduleArchive } from '@/features/schedule-planner/domain/archives';
 import type { CalendarStage, Project } from '@/lib/types';
 import '@/features/schedule-planner/planner.css';
@@ -31,7 +31,9 @@ export default function CalendarScheduleTab({ p, pkgIdx }: { p: Project; pkgIdx:
 
   /* 项目里存的 → planner 认的形状。备注单独抽成 stageId → 文字。 */
   const initialStages = useMemo<StageDefinition[] | undefined>(
-    () => (cal?.stages?.length ? cal.stages.map((s) => ({ id: s.id, name: s.name, tone: s.tone })) : undefined),
+    () => (cal?.stages?.length
+      ? cal.stages.map((s) => ({ id: s.id, name: s.name, nameEn: s.nameEn, tone: s.tone }))
+      : undefined),
     [cal],
   );
   const initialBoundaries = useMemo<LocalDate[] | undefined>(
@@ -47,7 +49,7 @@ export default function CalendarScheduleTab({ p, pkgIdx }: { p: Project; pkgIdx:
   const archives = useMemo<ScheduleArchive[]>(
     () => (cal?.archives || []).map((a) => ({
       id: a.id, name: a.name, savedAt: a.savedAt,
-      stages: a.stages.map((s) => ({ id: s.id, name: s.name, tone: s.tone })),
+      stages: a.stages.map((s) => ({ id: s.id, name: s.name, nameEn: s.nameEn, tone: s.tone })),
       boundaries: a.boundaries as LocalDate[],
     })),
     [cal],
@@ -55,8 +57,11 @@ export default function CalendarScheduleTab({ p, pkgIdx }: { p: Project; pkgIdx:
 
   async function save(payload: { stages: StageDefinition[]; boundaries: LocalDate[]; notes: Record<string, string> }) {
     setBusy(true);
+    /* nameEn 只是出厂英文位,用户改过名的阶段 planner 已经把它丢掉了 ——
+       这里原样带过去就行,不要自作主张补。 */
     const stages: CalendarStage[] = payload.stages.map((s) => ({
-      id: s.id, name: s.name, tone: s.tone, note: payload.notes[s.id] || '',
+      id: s.id, name: s.name, ...(s.nameEn ? { nameEn: s.nameEn } : {}), tone: s.tone,
+      note: payload.notes[s.id] || '',
     }));
     const ok = await dispatch(p.id, {
       type: 'saveCalendar', pkg: pkgIdx, stages, boundaries: payload.boundaries, syncDelivery,
@@ -97,7 +102,7 @@ export default function CalendarScheduleTab({ p, pkgIdx }: { p: Project; pkgIdx:
         `DTSTAMP:${now}`,
         `DTSTART;VALUE=DATE:${stamp(b[i])}`,
         `DTEND;VALUE=DATE:${plusDay(b[i + 1])}`,
-        `SUMMARY:${esc(`${title} — ${s.name}`)}`,
+        `SUMMARY:${esc(`${title} — ${stageName(s, lang)}`)}`,
         ...(s.note ? [`DESCRIPTION:${esc(s.note)}`] : []),
         'END:VEVENT',
       );
@@ -149,7 +154,7 @@ export default function CalendarScheduleTab({ p, pkgIdx }: { p: Project; pkgIdx:
               type: 'saveCalendarArchives', pkg: pkgIdx,
               archives: next.map((a) => ({
                 id: a.id, name: a.name, savedAt: a.savedAt,
-                stages: a.stages.map((s) => ({ id: s.id, name: s.name, tone: s.tone })),
+                stages: a.stages.map((s) => ({ id: s.id, name: s.name, ...(s.nameEn ? { nameEn: s.nameEn } : {}), tone: s.tone })),
                 boundaries: a.boundaries as string[],
               })),
             });

@@ -558,6 +558,9 @@ export function applyAction(u: Identity, p: Project, a: ProjectAction, ctx: Acti
       const stages = (Array.isArray(a.stages) ? a.stages : []).slice(0, 50).map((x, i) => ({
         id: String(x?.id || `stage-${i}`).slice(0, 80),
         name: String(x?.name || `阶段 ${i + 1}`).slice(0, 120),
+        /* 空串不落库 —— 存一个空的英文位和没有这一位是两回事,
+           前者会让回落逻辑白跑一趟。 */
+        ...(x?.nameEn ? { nameEn: String(x.nameEn).slice(0, 120) } : {}),
         tone: String(x?.tone || 'coral').slice(0, 20),
         note: String(x?.note || '').slice(0, 200),
       }));

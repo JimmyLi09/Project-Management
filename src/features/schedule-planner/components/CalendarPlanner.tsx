@@ -31,11 +31,12 @@ import {
   deriveSchedules,
   distributeStagesEvenly,
   inclusiveDays,
+  type LocalDate,
   MAX_STAGES,
   replaceBoundary,
-  STAGES,
-  type LocalDate,
-  type StageDefinition
+  type StageDefinition,
+  stageName,
+  STAGES
 } from '../domain/schedule'
 import {
   buildArchive,
@@ -160,7 +161,7 @@ export function CalendarPlanner({
   saveLabel,
   busy,
 }: CalendarPlannerProps = {}) {
-  const { t } = useLang()
+  const { lang, t } = useLang()
   const initialCursorRef = useRef<MonthCursor>(monthFromDate(todayLocalDate()))
   const initialCursor = initialCursorRef.current
   const [stages, setStages] = useState<StageDefinition[]>(
@@ -408,9 +409,13 @@ export function CalendarPlanner({
 
   function handleRenameStage(index: number, name: string) {
     const nextName = name.slice(0, 60)
-    setStages((current) => current.map((stage, position) =>
-      position === index ? { ...stage, name: nextName } : stage
-    ))
+    setStages((current) => current.map((stage, position) => {
+      if (position !== index) return stage
+      /* 改过名就把出厂英文位丢掉:用户自己写的名字是内容,拿一句出厂英文
+         当它的翻译只会驴唇不对马嘴。丢掉之后两种语言显示同一个名字。 */
+      const { nameEn: _drop, ...rest } = stage
+      return { ...rest, name: nextName }
+    }))
     setIsDone(false)
   }
 
@@ -834,6 +839,7 @@ export function CalendarPlanner({
                     )}
                     {weekDays.map((day) => renderCalendarDay({
                       day,
+                      lang,
                       gridRow: weekIndex + 1,
                       schedules,
                       displayBoundaries,
@@ -912,6 +918,8 @@ export function CalendarPlanner({
 
 interface CalendarDayProps {
   day: CalendarDay
+  /* 阶段名要按语言显示,而这是个普通函数不是组件,用不了 hook —— 传进来 */
+  lang: 'zh' | 'en'
   gridRow: number
   schedules: ReturnType<typeof deriveSchedules>
   displayBoundaries: readonly LocalDate[]
@@ -932,6 +940,7 @@ interface CalendarDayProps {
 
 function renderCalendarDay({
   day,
+  lang,
   gridRow,
   schedules,
   displayBoundaries,
@@ -1022,17 +1031,17 @@ function renderCalendarDay({
               style={{ maxWidth: !isSingleDayStage && stage.end
                 ? `min(560px, calc(${Math.min(7 - day.column, inclusiveDays(day.date, stage.end)) * 100}% - 16px))`
                 : undefined }}
-              title={stage.name}
+              title={stageName(stage, lang)}
             >
               {isSingleDayStage ? (
                 <>
                   <span className="stage-band-single-meta">
                     {String(stage.index + 1).padStart(2, '0')} · {formatDuration(stage.duration)}
                   </span>
-                  <span className="stage-band-single-name">{stage.name}</span>
+                  <span className="stage-band-single-name">{stageName(stage, lang)}</span>
                 </>
               ) : (
-                <>{String(stage.index + 1).padStart(2, '0')} · {stage.name} · {formatDuration(stage.duration)}</>
+                <>{String(stage.index + 1).padStart(2, '0')} · {stageName(stage, lang)} · {formatDuration(stage.duration)}</>
               )}
             </span>
           )}

@@ -2,9 +2,10 @@ import { formatExportDate, todayLocalDate } from '../domain/calendar'
 import { formatDuration } from '../domain/duration'
 import {
   compareDates,
-  stageStatus,
   type LocalDate,
-  type StageSchedule
+  stageName,
+  type StageSchedule,
+  stageStatus
 } from '../domain/schedule'
 import { useLang } from '@/lib/i18n'
 
@@ -51,7 +52,7 @@ function formatPrintDuration(duration: number): string {
 }
 
 export function PrintSchedule({ meta, schedules }: PrintScheduleProps) {
-  const { t } = useLang()
+  const { lang, t } = useLang()
   const today = todayLocalDate()
   const title = meta.title.trim() || t('项目排期', 'Production schedule')
   const projectStart = schedules[0]?.start ?? null
@@ -86,7 +87,7 @@ export function PrintSchedule({ meta, schedules }: PrintScheduleProps) {
           {schedules.map((stage) => (
             <tr key={stage.id} data-testid={`print-row-${stage.index}`}>
               <td>{stage.index}</td>
-              <td>{stage.name}</td>
+              <td>{stageName(stage, lang)}</td>
               <td>{stage.start ? formatExportDate(stage.start) : '—'}</td>
               <td>{stage.end ? formatExportDate(stage.end) : '—'}</td>
               <td>{stage.duration !== null ? formatPrintDuration(stage.duration) : '—'}</td>

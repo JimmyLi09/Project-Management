@@ -3,6 +3,11 @@ export type LocalDate = `${number}-${number}-${number}`
 export interface StageDefinition {
   id: string
   name: string
+  /* REQ-041 的老规矩在这儿再用一次(见 docs/i18n-词条维护.md §3):
+     出厂阶段名给一个可选的英文位,EN 界面优先用它。用户一旦改名,这一位就
+     丢掉 —— 改过的名字是用户内容,不该拿一句出厂英文去冒充它的翻译。
+     老数据没有这一位,读出来是 undefined,自动回落到 name,不需要迁移。 */
+  nameEn?: string
   tone: string
 }
 
@@ -43,13 +48,19 @@ export function createStage(name: string, index: number): StageDefinition {
  * sequencing tool, not an editable project-template form.
  */
 export const STAGES: readonly StageDefinition[] = [
-  { id: 'brief', name: '信息收集（见信息清单）', tone: 'coral' },
-  { id: 'concept', name: '搭建 3D 建筑模型', tone: 'peach' },
-  { id: 'development', name: '出角度草图，客户审阅（含 2–3 轮）', tone: 'sage' },
-  { id: 'documentation', name: '灯光 / 材质渲染草图（含 2–3 轮）', tone: 'sky' },
-  { id: 'delivery', name: '合成 / 调色 / 配景（含 2–3 轮）', tone: 'lavender' },
-  { id: 'handover', name: '导出成品格式，客户签收', tone: 'sand' }
+  { id: 'brief', name: '信息收集（见信息清单）', nameEn: 'Information gathering (see checklist)', tone: 'coral' },
+  { id: 'concept', name: '搭建 3D 建筑模型', nameEn: 'Build the 3D architectural model', tone: 'peach' },
+  { id: 'development', name: '出角度草图，客户审阅（含 2–3 轮）', nameEn: 'Angle drafts, client review (2–3 rounds)', tone: 'sage' },
+  { id: 'documentation', name: '灯光 / 材质渲染草图（含 2–3 轮）', nameEn: 'Lighting / material draft renders (2–3 rounds)', tone: 'sky' },
+  { id: 'delivery', name: '合成 / 调色 / 配景（含 2–3 轮）', nameEn: 'Compositing / grading / entourage (2–3 rounds)', tone: 'lavender' },
+  { id: 'handover', name: '导出成品格式，客户签收', nameEn: 'Export final formats, client sign-off', tone: 'sand' }
 ]
+
+/* 当前语言下这个阶段该显示的名字。没有英文位就回落到 name —— 用户改过名的
+   阶段两种语言显示的是同一个名字,这正是「用户内容不翻译」要的效果。 */
+export function stageName(stage: { name: string; nameEn?: string }, lang: 'zh' | 'en'): string {
+  return lang === 'en' ? (stage.nameEn || stage.name) : stage.name
+}
 
 const LOCAL_DATE_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/
 const MILLISECONDS_PER_DAY = 86_400_000
