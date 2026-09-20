@@ -8,8 +8,30 @@ import { useLang } from '@/lib/i18n';
 import { STAGES, stageIdx, SVC, svcColor } from '@/lib/templates';
 import type { Project, ServicePackage } from '@/lib/types';
 
-/* REQ-016: built-in fallback when no global note has been saved yet */
-const DEFAULT_NOTES = '注 Note:资料不齐可能影响交付时间;确认后如需多次修改,可能酌收修改费。\nIncomplete information may affect the delivery schedule; repeated revisions after confirmation may incur additional charges.';
+/* REQ-016: built-in fallback when no global note has been saved yet.
+   0917 收尾:导出是发给客户的,一份文件不该中英各来一段 —— 拆成两份,
+   按导出时的语言出对应那一份,各自可编辑、各自存全局默认。 */
+const DEFAULT_NOTES_ZH = '注:资料不齐可能影响交付时间;确认后如需多次修改,可能酌收修改费。';
+const DEFAULT_NOTES_EN = 'Note: incomplete information may affect the delivery schedule; repeated revisions after confirmation may incur additional charges.';
+
+/* 拆之前那一版是中英拼在一起的一整段。库里存的如果**一字不差**就是这一段,
+   说明没人改过,可以放心拆开;改过的就是人家自己写的东西,不拆 —— 见下面
+   resolveNotes 的注释。 */
+const LEGACY_DEFAULT_NOTES = '注 Note:资料不齐可能影响交付时间;确认后如需多次修改,可能酌收修改费。\nIncomplete information may affect the delivery schedule; repeated revisions after confirmation may incur additional charges.';
+
+/* 把库里存的(可能只有老的那一个键)解析成中英两份。
+   规矩是「不猜、不抹」:
+   · 老键存的正好是出厂那段 → 是我们自己的字符串,拆成两份出厂文案;
+   · 老键存的是别的 → 那是 PD 自己写的免责声明,**原样**当中文那份用,
+     英文那份在有人专门存过之前也跟着它 —— 也就是维持今天的行为,
+     不拿一段出厂英文去顶掉人家写好的东西;
+   · 两个键都没有 → 出厂两份。 */
+function resolveNotes(zhRaw: string | null, enRaw: string | null): { zh: string; en: string } {
+  const factory = !zhRaw || zhRaw === LEGACY_DEFAULT_NOTES;
+  const zh = factory ? DEFAULT_NOTES_ZH : zhRaw;
+  const en = enRaw || (factory ? DEFAULT_NOTES_EN : zhRaw);
+  return { zh, en };
+}
 
 type Cols = { owner: boolean; start: boolean; due: boolean; status: boolean; clStatus: boolean; clDate: boolean; clRemark: boolean };
 export type ExportScope = 'all' | 'schedule' | 'checklist';
@@ -39,19 +61,36 @@ export default function ExportOverlay({ p, onClose, scope = 'all' }: { p: Projec
   const [cover, setCover] = useState(scope !== 'checklist');
   /* REQ-016: company notes — global default, per-export toggle + tweak */
   const [notesOn, setNotesOn] = useState(true);
-  const [notes, setNotes] = useState(DEFAULT_NOTES);
+  const [notesZh, setNotesZh] = useState(DEFAULT_NOTES_ZH);
+  const [notesEn, setNotesEn] = useState(DEFAULT_NOTES_EN);
+  /* 英文那份有没有被人单独存过 —— 没有的话编辑区提示一句,免得 PD 以为
+     改了中文英文就跟着变了。 */
+  const [enOwn, setEnOwn] = useState(true);
   const [notesEdit, setNotesEdit] = useState(false);
   useEffect(() => {
-    fetch('/api/settings?key=exportNotes').then((r) => (r.ok ? r.json() : null)).then((d) => { if (d && d.value) setNotes(d.value); }).catch(() => {});
+    const get = (k: string) => fetch(`/api/settings?key=${k}`)
+      .then((r) => (r.ok ? r.json() : null)).then((d) => (d && d.value) || null).catch(() => null);
+    Promise.all([get('exportNotes'), get('exportNotesEn')]).then(([zhRaw, enRaw]) => {
+      const r = resolveNotes(zhRaw, enRaw);
+      setNotesZh(r.zh); setNotesEn(r.en); setEnOwn(!!enRaw);
+    });
   }, []);
   async function saveDefaultNotes() {
-    const r = await fetch('/api/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key: 'exportNotes', value: notes }) });
-    setToast(r.ok ? T('已保存为全局默认说明', 'Saved as the global default note')
-                  : T('保存失败(仅 PD/BD 可存默认)', 'Could not save — only PD / BD can set the default'));
+    /* 存的是**当前导出语言**那一份 —— 中文模式存中文那段,英文模式存英文那段 */
+    const key = L === 'zh' ? 'exportNotes' : 'exportNotesEn';
+    const r = await fetch('/api/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key, value: L === 'zh' ? notesZh : notesEn }) });
+    if (r.ok && L === 'en') setEnOwn(true);
+    setToast(r.ok
+      ? T('已保存为全局默认说明(中文版)', 'Saved as the global default note (English)')
+      : T('保存失败(仅 PD/BD 可存默认)', 'Could not save — only PD / BD can set the default'));
   }
 
   const L = lang;
   const T = (zh: string, en: string) => (L === 'zh' ? zh : en);
+  /* 导出文档与编辑区用的都是「当前导出语言」那一份 */
+  const notes = L === 'zh' ? notesZh : notesEn;
+  const setNotes = L === 'zh' ? setNotesZh : setNotesEn;
   const showSched = sec !== 'checklist';
   const showCl = sec !== 'schedule';
   const scopeLabel = sec === 'schedule' ? T('生产排期', 'Schedule') : sec === 'checklist' ? T('信息清单', 'Checklist') : '';
@@ -345,9 +384,22 @@ export default function ExportOverlay({ p, onClose, scope = 'all' }: { p: Projec
       </div>
       {notesOn && notesEdit && (
         <div className="ex-noteedit" style={{ maxWidth: 860, margin: '0 auto 10px', padding: '0 10px' }}>
+          <div style={{ fontSize: 11.5, color: 'var(--text2)', marginBottom: 4 }}>
+            {T('正在编辑「中文」那一份 —— 导出成英文时用的是另一份,切到 English 再改。',
+               'Editing the English version — the Chinese export uses a separate one; switch to 中文 to edit that.')}
+            {/* 只在英文这一份还没被单独存过时提醒 —— 它现在显示的是中文那份的
+                文字(维持拆分前的行为),存一次就分开了。 */}
+            {!enOwn && L === 'en' && (
+              <span style={{ color: '#8f5b1d' }}>
+                {' '}This one has never been saved separately, so it still shows the Chinese version’s text. Save it to split the two.
+              </span>
+            )}
+          </div>
           <textarea className="in" value={notes} onChange={(e) => setNotes(e.target.value)}
             style={{ width: '100%', minHeight: 64, fontSize: 12.5 }} placeholder={T('公司说明 / 免责声明…', 'Company notes / disclaimer…')} />
-          {isFull(me) && <button className="btn-line sm" style={{ marginTop: 4 }} onClick={saveDefaultNotes}>{T('存为全局默认', 'Save as global default')}</button>}
+          {isFull(me) && <button className="btn-line sm" style={{ marginTop: 4 }} onClick={saveDefaultNotes}>
+            {T('存为全局默认(中文)', 'Save as global default (English)')}
+          </button>}
         </div>
       )}
 
