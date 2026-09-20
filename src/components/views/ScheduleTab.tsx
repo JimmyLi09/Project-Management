@@ -2,6 +2,7 @@
 
 import React, { useState } from 'react';
 import { useStore } from '../store';
+import CalendarScheduleTab from './CalendarScheduleTab';
 import { fmtDate, isoDate, MACRO, macroStage, parseISO, pkgStart, planDates, todayMid , pkgSuffix } from '@/lib/project';
 import { canEdit, canRowEdit, canSubmitCompletionHere } from '@/lib/permissions';
 import { svcColor, svcName } from '@/lib/templates';
@@ -28,6 +29,11 @@ export default function ScheduleTab({ p, pkgIdx, onExport, onPkg }: {
   const { me, dispatch, users, setToast } = useStore();
   const { lang, t, dual } = useLang();
   const [editMode, setEditMode] = useState(false);
+  /* REQ-040(方案 A):日历排期与经典排期并存。
+     已经排过日历的服务包默认打开日历视图,其余仍是经典 —— 老项目一行不动。 */
+  const [schedView, setSchedView] = useState<'classic' | 'calendar'>(
+    () => (p.packages[pkgIdx]?.calendar?.boundaries?.length ? 'calendar' : 'classic'),
+  );
   const [showCal, setShowCal] = useState(false);
   const [dragIdx, setDragIdx] = useState<number | null>(null);
   const [overIdx, setOverIdx] = useState<number | null>(null);
@@ -65,6 +71,24 @@ export default function ScheduleTab({ p, pkgIdx, onExport, onPkg }: {
 
   return (
     <>
+      {/* REQ-040: 两种排期方式的切换。经典 = 阶段行表格(导出 / KPI / 进度统计
+          读的都是它);日历 = stage-calendar-planner,在月历上排、拖分界点。 */}
+      <div className="detail-tabs" style={{ borderTop: 'none', marginBottom: 12 }}>
+        <button className={`detail-tab${schedView === 'classic' ? ' active' : ''}`} onClick={() => setSchedView('classic')}
+          title={t('阶段行表格 —— 导出、KPI、进度统计读的是这一套', 'Phase table — exports, KPI and progress read this one')}>
+          {t('经典排期', 'Classic')}
+        </button>
+        <button className={`detail-tab${schedView === 'calendar' ? ' active' : ''}`} onClick={() => setSchedView('calendar')}
+          title={t('在月历上点排 + 拖分界点微调', 'Plan on a month calendar and drag the boundaries')}>
+          {t('日历排期', 'Calendar')}
+          {pkg.calendar?.boundaries?.length ? <span className="badge" style={{ background: 'var(--navy900)', color: '#fff', marginLeft: 6 }}>v{pkg.calendar.version}</span> : null}
+        </button>
+      </div>
+
+      {schedView === 'calendar' ? (
+        <CalendarScheduleTab p={p} pkgIdx={pkgIdx} />
+      ) : (
+      <>
       {p.packages.length > 1 && (
         <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap', marginBottom: 16 }}>
           {p.packages.map((pk, i) => (
@@ -384,6 +408,8 @@ export default function ScheduleTab({ p, pkgIdx, onExport, onPkg }: {
       {/* REQ-022: 「提交完工」的新家 —— 售后工作流整块对 PM 不可见后,
           这个动作挪到排期页底部,紧挨着 PM 真正在做的生产内容。 */}
       <CompletionCard p={p} />
+    </>
+      )}
     </>
   );
 }

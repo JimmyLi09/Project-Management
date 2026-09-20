@@ -146,6 +146,25 @@ export interface ChecklistItem {
   receipts?: ReceiptRecord[];
 }
 
+/* REQ-040: 日历式排期的落库形态。boundaries 是 N+1 个本地日期
+   (N 个阶段的分界点),阶段起止 / 工期由它派生 —— 派生值不存,
+   免得和 boundaries 对不上。 */
+export interface CalendarStage {
+  id: string;
+  name: string;
+  tone: string;
+  note?: string;
+}
+export interface CalendarSchedule {
+  stages: CalendarStage[];
+  boundaries: string[];      // ISO 本地日期
+  version: number;           // 每存一次 +1,用来看改过几轮
+  updatedAt: number;
+  updatedBy: string;
+  /* 项目级命名存档(替掉浏览器 localStorage) */
+  archives?: { id: string; name: string; savedAt: string; stages: CalendarStage[]; boundaries: string[] }[];
+}
+
 export interface ChecklistGroup {
   group: string;
   groupEn: string;
@@ -177,6 +196,11 @@ export interface ServicePackage {
   /* REQ-038: PM 给这份业务选的积分档位。区间档(LED 3–7)再带上选定的分值。
      没选就按资料卡里的数自动落档;都判不出来就等 PM 选。 */
   pointTier?: { id: string; value?: number };
+  /* REQ-040: 日历排期(stage-calendar-planner)。与老的 schedule 数组**并存** ——
+     导出 / KPI / 进度统计读的都是 schedule,所以那套一行不动;
+     日历排期是另一种排法,项目可以两种都用、也可以只用一种。
+     只存 boundaries + 阶段 + 备注,起止和工期是派生值,不入库。 */
+  calendar?: CalendarSchedule;
 }
 
 /* business record attached to a service package (Job Record / Project Registers).

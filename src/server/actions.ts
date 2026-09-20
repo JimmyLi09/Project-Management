@@ -7,7 +7,7 @@ import {
   canAssign, canCommercial, canDecide, canEdit, canEditFinance, canRowEdit, isFull, canDelete , canMeta } from '@/lib/permissions';
 import { buildPackage, deriveStatuses, fitWindow, newId, parseISO, isoDate, totalDays } from '@/lib/project';
 import { SVC, type Template } from '@/lib/templates';
-import type { ChecklistStatus, Project, ReceiptRecord, ScheduleStatus } from '@/lib/types';
+import type { CalendarSchedule, CalendarStage, ChecklistStatus, Project, ReceiptRecord, ScheduleStatus } from '@/lib/types';
 import { cleanReceipt, sortReceipts, syncFromLatest, syncToLatest } from '@/lib/receipts';
 
 /* Optional context the route supplies so we can rebuild from edited templates
@@ -58,6 +58,9 @@ export type ProjectAction =
   | { type: 'setDiff'; value: string }
   | { type: 'setPoints'; value: number | null }
   | { type: 'setPkgTier'; pkg: number; id: string; value?: number | null }
+  /* REQ-040: 日历排期存回项目 */
+  | { type: 'saveCalendar'; pkg: number; stages: CalendarStage[]; boundaries: string[]; syncDelivery?: boolean }
+  | { type: 'saveCalendarArchives'; pkg: number; archives: NonNullable<CalendarSchedule['archives']> }
   | { type: 'addOwner'; name: string }
   | { type: 'removeOwner'; name: string }
   | { type: 'transferProject'; from: string; to: string; includeTasks: boolean }
@@ -545,6 +548,55 @@ export function applyAction(u: Identity, p: Project, a: ProjectAction, ctx: Acti
     /* REQ-038: PM 给一份业务选积分档位。区间档(LED 3–7)再带上选定的分值。
        规则是全局的,但「这个项目这块 LED 算几分」是项目内的判断,所以放开给
        项目编辑权 —— 需求写的就是「无法自动判定时由 PM 选档」。 */
+    /* ===== REQ-040: 日历排期 =====
+       只存 boundaries + 阶段 + 备注;起止和工期是派生值,存下来早晚对不上。
+       与老的 schedule 数组并存 —— 导出 / KPI / 进度统计读的还是那一套。 */
+    case 'saveCalendar': {
+      if (!canEdit(u, p)) throw new PermissionError('无编辑权限');
+      const pk = p.packages[a.pkg];
+      if (!pk) throw new ValidationError('无效的服务包');
+      const stages = (Array.isArray(a.stages) ? a.stages : []).slice(0, 50).map((x, i) => ({
+        id: String(x?.id || `stage-${i}`).slice(0, 80),
+        name: String(x?.name || `阶段 ${i + 1}`).slice(0, 120),
+        tone: String(x?.tone || 'coral').slice(0, 20),
+        note: String(x?.note || '').slice(0, 200),
+      }));
+      if (!stages.length) throw new ValidationError('至少要有一个阶段');
+      const boundaries = (Array.isArray(a.boundaries) ? a.boundaries : [])
+        .map((d) => String(d)).filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d)).slice(0, 51);
+      /* N 个阶段要 N+1 个分界点 —— 对不上就是还没排完,不落库 */
+      if (boundaries.length && boundaries.length !== stages.length + 1) {
+        throw new ValidationError('阶段数与分界点数对不上,请重新排一次');
+      }
+      const prev = pk.calendar;
+      pk.calendar = {
+        stages, boundaries,
+        version: (prev?.version || 0) + 1,
+        updatedAt: Date.now(), updatedBy: u.name,
+        archives: prev?.archives || [],
+      };
+      /* 打通交付日:最后一个分界点就是这份业务排到的交付日。
+         只在用户勾了同步时才动项目的交付日 —— 不声不响改掉交付日太吓人。 */
+      const last = boundaries[boundaries.length - 1];
+      if (last) {
+        pk.delivery = last;
+        if (a.syncDelivery) {
+          const was = p.delivery;
+          p.delivery = last;
+          if (was !== last) logIt(p, u.name, `交付日按日历排期更新:${was || '—'} → ${last}`);
+        }
+      }
+      logIt(p, u.name, `${svcName(pk.svc)} 保存日历排期(第 ${pk.calendar.version} 版,${stages.length} 阶段)`);
+      break;
+    }
+    case 'saveCalendarArchives': {
+      if (!canEdit(u, p)) throw new PermissionError('无编辑权限');
+      const pk = p.packages[a.pkg];
+      if (!pk) throw new ValidationError('无效的服务包');
+      if (!pk.calendar) throw new ValidationError('还没有日历排期');
+      pk.calendar.archives = (Array.isArray(a.archives) ? a.archives : []).slice(0, 30);
+      break;
+    }
     case 'setPkgTier': {
       if (!canEdit(u, p)) throw new PermissionError('无编辑权限');
       const pk = p.packages[a.pkg];
