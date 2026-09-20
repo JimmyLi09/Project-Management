@@ -22,7 +22,7 @@ export function ArchivePanel({
   onDelete,
   canSave
 }: ArchivePanelProps) {
-  const { t } = useLang()
+  const { lang, t } = useLang()
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
 
   return (
@@ -70,7 +70,7 @@ export function ArchivePanel({
               <div className="archive-item-main">
                 <strong className="archive-item-name">{archive.name}</strong>
                 <span className="archive-item-meta">
-                  {formatArchiveDate(archive.savedAt)} · {archive.stages.length} {t('阶段', 'stages')} · {archive.boundaries.length} {t('边界点', 'boundaries')}
+                  {formatArchiveDate(archive.savedAt, lang)} · {archive.stages.length} {t('阶段', 'stages')} · {archive.boundaries.length} {t('边界点', 'boundaries')}
                 </span>
               </div>
               <div className="archive-item-actions">

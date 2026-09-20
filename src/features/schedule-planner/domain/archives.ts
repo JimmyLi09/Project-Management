@@ -58,9 +58,12 @@ export function sanitizeArchive(value: unknown): ScheduleArchive | null {
   if (!boundaries) {
     return null
   }
+  /* 修数据用的兜底:正常路径下 buildArchive 一定给了名字,走到这儿说明
+     读到的是一条残缺记录。两语都不合适(它不属于任何一种界面语言),
+     用一个中性符号,免得给用户一个看着像正经名字的假名字。 */
   const name = typeof entry.name === 'string' && entry.name.trim()
     ? entry.name.trim().slice(0, 60)
-    : '未命名存档'
+    : '—'
   const id = typeof entry.id === 'string' && entry.id.trim()
     ? entry.id.trim().slice(0, 80)
     : createArchiveId()
@@ -103,9 +106,15 @@ export function persistArchives(archives: readonly ScheduleArchive[]): void {
 export function buildArchive(
   name: string,
   stages: readonly StageDefinition[],
-  boundaries: readonly LocalDate[]
+  boundaries: readonly LocalDate[],
+  lang: 'zh' | 'en' = 'zh'
 ): ScheduleArchive {
-  const label = name.trim().slice(0, 60) || `存档 ${new Date().toLocaleString('zh-CN')}`
+  /* 没起名时的兜底名是**落库的值**,不是界面文案 —— 存下去之后就固定了,
+     不会跟着以后切语言变。所以按存的那一刻的界面语言写一个,合情合理。 */
+  const label = name.trim().slice(0, 60)
+    || (lang === 'en'
+      ? `Version ${new Date().toLocaleString('en-GB')}`
+      : `存档 ${new Date().toLocaleString('zh-CN')}`)
   return {
     id: createArchiveId(),
     name: label,
@@ -115,13 +124,17 @@ export function buildArchive(
   }
 }
 
-export function formatArchiveDate(iso: string): string {
+/* 存档时间的显示格式跟着界面语言走 —— 这是显示,不是落库的值。
+   存的一直是 ISO 字符串,两种语言看到的是同一个时刻的两种写法。 */
+const DATE_LOCALE: Record<'zh' | 'en', string> = { zh: 'zh-CN', en: 'en-GB' }
+
+export function formatArchiveDate(iso: string, lang: 'zh' | 'en' = 'zh'): string {
   const time = Date.parse(iso)
   if (Number.isNaN(time)) {
     return iso
   }
   try {
-    return new Intl.DateTimeFormat('zh-CN', {
+    return new Intl.DateTimeFormat(DATE_LOCALE[lang] || DATE_LOCALE.zh, {
       year: 'numeric',
       month: '2-digit',
       day: '2-digit',
