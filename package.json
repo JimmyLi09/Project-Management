@@ -5,7 +5,9 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "start": "next start"
+    "start": "next start",
+    "test": "node --experimental-strip-types --test \"src/av/core/__tests__/*.test.ts\"",
+    "led:regression": "node --experimental-strip-types scripts/led-regression.ts"
   },
   "dependencies": {
     "better-sqlite3": "^11.10.0",
