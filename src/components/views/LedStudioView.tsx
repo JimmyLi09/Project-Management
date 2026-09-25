@@ -20,6 +20,7 @@ import { canExportLed } from '@/lib/permissions';
 import { useLang } from '@/lib/i18n';
 import { useStore } from '../store';
 import { Icon } from '../ui';
+import AvSteps from './AvSteps';
 
 const SEVERITY: Record<Severity, { bg: string; fg: string; zh: string; en: string }> = {
   block: { bg: 'var(--danger-bg, #FDF0EC)', fg: 'var(--danger)', zh: '阻断', en: 'Blocking' },
@@ -60,6 +61,7 @@ export default function LedStudioView() {
   useEffect(() => {
     if (!ledHandoff) return;
     setCfg((prev) => ({ ...prev, ...ledHandoff.fields }));
+    if (ledHandoff.packVersion) setPackVersion(ledHandoff.packVersion);
     setFromDrawing(ledHandoff);
     setLedHandoff(null);
   }, [ledHandoff, setLedHandoff]);
@@ -133,6 +135,8 @@ export default function LedStudioView() {
   };
 
   return (
+    <>
+    <AvSteps />
     <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,330px) minmax(0,1fr)', gap: 20, alignItems: 'start' }}>
 
       {/* ── 参数 ─────────────────────────────────────────────── */}
@@ -155,9 +159,14 @@ export default function LedStudioView() {
           )}
 
           <Field label={t('规则包', 'Rule pack')}>
-            <select value={packVersion} onChange={(e) => setPackVersion(e.target.value)}>
+            <select value={packVersion} onChange={(e) => setPackVersion(e.target.value)} disabled={!!fromDrawing?.packVersion}>
               {listRulePacks().map((p) => <option key={p.version} value={p.version}>{p.version}</option>)}
             </select>
+            {fromDrawing?.packVersion && (
+              <div style={{ fontSize: 11, color: 'var(--text2)', marginTop: 4 }}>
+                {t('立项时绑定，锁定不可改（历史项目按创建时版本计算）', 'Bound at inquiry; locked')}
+              </div>
+            )}
           </Field>
 
           <Field label={t('屏体类型（参数组）', 'Screen type (parameter group)')}>
@@ -377,6 +386,7 @@ export default function LedStudioView() {
         )}
       </div>
     </div>
+    </>
   );
 }
 

@@ -71,11 +71,12 @@ export const isPending = (r: IngestRecord): boolean =>
 export interface Handoff {
   drawing: string;
   project?: string;       // project name, shown on 05 and in the drawing's information panel
+  packVersion?: string;   // rule pack the project was opened on (01); 05 computes with it, locked
   fields: Partial<Pick<LedConfig, DrawingElement>>;
   prov: Partial<Record<keyof LedConfig, Provenance>>;
 }
 
-export function toHandoff(result: IngestResult, project?: string): Handoff {
+export function toHandoff(result: IngestResult, project?: string, packVersion?: string): Handoff {
   const fields: Handoff['fields'] = {};
   const prov: Handoff['prov'] = {};
   for (const r of result.extractions) {
@@ -94,5 +95,5 @@ export function toHandoff(result: IngestResult, project?: string): Handoff {
           note: r.prov.note ?? undefined,
         };
   }
-  return { drawing: result.drawing, project, fields, prov };
+  return { drawing: result.drawing, project, packVersion, fields, prov };
 }

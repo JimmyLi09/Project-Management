@@ -18,6 +18,7 @@ import { fmtDate } from '@/lib/project';
 import { useLang } from '@/lib/i18n';
 import { useStore } from '../store';
 import { Icon } from '../ui';
+import AvSteps from './AvSteps';
 
 const ELEMENT_LABEL: Record<DrawingElement, [string, string]> = {
   led_opening_w: ['屏体开口宽', 'Opening width'],
@@ -54,6 +55,8 @@ export default function LedIngestView() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [list, setList] = useState<DrawingSummary[]>([]);
+  /* Rule pack the project was opened on (01); null = opened outside 01. */
+  const [boundPack, setBoundPack] = useState<string | null>(null);
   /* In-progress corrections, as typed; saved with the record on 确认. */
   const [draft, setDraft] = useState<Partial<Record<DrawingElement, string>>>({});
 
@@ -76,6 +79,14 @@ export default function LedIngestView() {
   }, [ledProjectId]);
 
   useEffect(() => { refreshList(); }, [refreshList]);
+
+  useEffect(() => {
+    setBoundPack(null);
+    if (!ledProjectId) return;
+    call<{ inquiry: { packs: Record<string, string> } | null }>(`/api/av/inquiry?project=${encodeURIComponent(ledProjectId)}`)
+      .then((r) => setBoundPack(r.inquiry?.packs.led ?? null))
+      .catch(() => setBoundPack(null));
+  }, [ledProjectId]);
 
   function pickProject(id: string) {
     setLedProjectId(id);
@@ -127,7 +138,7 @@ export default function LedIngestView() {
   }
 
   function loadInto05(d: StoredDrawing) {
-    setLedHandoff(toHandoff(d, project?.name));
+    setLedHandoff(toHandoff(d, project?.name, boundPack ?? undefined));
     go('ledstudio');
   }
 
@@ -151,6 +162,8 @@ export default function LedIngestView() {
   const pending = ledIngest ? ledIngest.extractions.filter(isPending) : [];
 
   return (
+    <>
+    <AvSteps />
     <div style={{ display: 'grid', gap: 20 }}>
 
       {/* ── 项目与图纸清单 ─────────────────────────────────────── */}
@@ -169,9 +182,16 @@ export default function LedIngestView() {
               ))}
             </select>
           </div>
+          {project && (
+            <div style={{ fontSize: 12, color: 'var(--text2)' }}>
+              {boundPack
+                ? t(`LED 规则包 ${boundPack}（立项时绑定）`, `LED rule pack ${boundPack} (bound at inquiry)`)
+                : t('该项目未经 01 立项询价，05 将按最新规则包计算。', 'Not opened through 01; 05 uses the latest rule pack.')}
+            </div>
+          )}
           {!ledProjects.length && (
             <p style={{ fontSize: 13, color: 'var(--text2)' }}>
-              {t('还没有含 LED 服务包的项目。先在「项目」里新建项目并勾选 LED 服务。', 'No project has an LED package yet.')}
+              {t('还没有含 LED 服务包的项目。先到「01 立项询价」立项。', 'No LED project yet — open one in 01.')}
             </p>
           )}
         </div>
@@ -377,6 +397,7 @@ export default function LedIngestView() {
         </div>
       )}
     </div>
+    </>
   );
 }
 

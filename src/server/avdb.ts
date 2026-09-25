@@ -10,6 +10,7 @@
 
 import { getDb } from './db';
 import type { DrawingElement, DrawingSummary, IngestRecord, IngestResult, StoredDrawing } from '@/av/core/handoff';
+import type { BusinessLine } from '@/av/core/types';
 
 export type { DrawingSummary, StoredDrawing };
 
@@ -33,6 +34,17 @@ function db() {
         reviewed_at INTEGER NOT NULL DEFAULT 0
       );
       CREATE INDEX IF NOT EXISTS idx_av_drawing_project ON av_drawing(project_id, uploaded_at DESC);
+      /* 01 立项询价: what the project was opened for, and which rule-pack version
+         each business line is bound to (§5: 历史项目锁定其创建时的版本). */
+      CREATE TABLE IF NOT EXISTS av_inquiry (
+        project_id TEXT PRIMARY KEY,
+        location TEXT NOT NULL DEFAULT '',
+        notes TEXT NOT NULL DEFAULT '',
+        lines TEXT NOT NULL,
+        packs TEXT NOT NULL,
+        created_by TEXT NOT NULL,
+        created_at INTEGER NOT NULL
+      );
       CREATE TABLE IF NOT EXISTS av_extraction (
         drawing_id INTEGER NOT NULL REFERENCES av_drawing(id) ON DELETE CASCADE,
         element TEXT NOT NULL,
@@ -182,10 +194,46 @@ export function markReviewed(id: number, by: string): void {
   db().prepare('UPDATE av_drawing SET reviewed_by = ?, reviewed_at = ? WHERE id = ? AND reviewed_at = 0').run(by, Date.now(), id);
 }
 
-/* Called when a project is deleted, so its drawings do not outlive it. */
+export interface Inquiry {
+  projectId: string;
+  location: string;
+  notes: string;
+  lines: BusinessLine[];
+  packs: Partial<Record<BusinessLine, string>>;
+  createdBy: string;
+  createdAt: number;
+}
+
+/* Runs `createProject` and records the inquiry in one transaction, so a project
+   never exists half-opened. */
+export function openInquiry(inq: Omit<Inquiry, 'createdAt'>, createProject: () => void): Inquiry {
+  const d = db();
+  const createdAt = Date.now();
+  d.transaction(() => {
+    createProject();
+    d.prepare(`INSERT INTO av_inquiry (project_id, location, notes, lines, packs, created_by, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?)`)
+      .run(inq.projectId, inq.location, inq.notes, JSON.stringify(inq.lines), JSON.stringify(inq.packs), inq.createdBy, createdAt);
+  })();
+  return { ...inq, createdAt };
+}
+
+export function getInquiry(projectId: string): Inquiry | null {
+  const r = db().prepare('SELECT * FROM av_inquiry WHERE project_id = ?').get(projectId) as {
+    project_id: string; location: string; notes: string; lines: string; packs: string; created_by: string; created_at: number;
+  } | undefined;
+  if (!r) return null;
+  return {
+    projectId: r.project_id, location: r.location, notes: r.notes,
+    lines: JSON.parse(r.lines), packs: JSON.parse(r.packs), createdBy: r.created_by, createdAt: r.created_at,
+  };
+}
+
+/* Called when a project is deleted, so its drawings and inquiry do not outlive it. */
 export function deleteProjectDrawings(projectId: string): void {
   const d = db();
   d.transaction(() => {
+    d.prepare('DELETE FROM av_inquiry WHERE project_id = ?').run(projectId);
     d.prepare('DELETE FROM av_extraction WHERE drawing_id IN (SELECT id FROM av_drawing WHERE project_id = ?)').run(projectId);
     d.prepare('DELETE FROM av_drawing WHERE project_id = ?').run(projectId);
   })();
