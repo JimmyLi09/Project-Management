@@ -76,7 +76,7 @@ export default function LedStudioView() {
     [cfg, lib, packVersion, fromDrawing],
   );
   const drawing = useMemo(
-    () => buildDrawing(result, { project: fromDrawing?.drawing ?? t('方案配置', 'Configuration') }),
+    () => buildDrawing(result, { project: fromDrawing?.project ?? fromDrawing?.drawing ?? t('方案配置', 'Configuration') }),
     [result, t, fromDrawing],
   );
   const svg = useMemo(() => (drawing ? toSvg(drawing) : ''), [drawing]);
@@ -142,7 +142,8 @@ export default function LedStudioView() {
 
           {fromDrawing ? (
             <div style={{ fontSize: 12, lineHeight: 1.7, padding: '9px 11px', borderRadius: 6, background: 'var(--hover-bg)' }}>
-              {t('已载入校核结果：', 'Loaded from review: ')}<strong>{fromDrawing.drawing}</strong>
+              {t('已载入校核结果：', 'Loaded from review: ')}
+              {fromDrawing.project && <><strong>{fromDrawing.project}</strong> · </>}<strong>{fromDrawing.drawing}</strong>
               {t('。图纸带入字段只读。', '. Drawing fields are read-only.')}{' '}
               <button style={{ fontSize: 12, textDecoration: 'underline', color: 'var(--text2)' }}
                 onClick={() => setFromDrawing(null)}>{t('改为手动输入', 'Switch to manual')}</button>

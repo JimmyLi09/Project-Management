@@ -1,7 +1,7 @@
 """Command-line entry for the web app — JSON in, JSON out.
 
     python -m avdrawing.ingest.cli ingest <drawing> [--scale 50] [--threshold 0.85]
-    python -m avdrawing.ingest.cli writeback <store.jsonl>      # reviewed ingest JSON on stdin; re-checks the A10 gate
+    python -m avdrawing.ingest.cli writeback <store.jsonl>      # reviewed ingest JSON on stdin; re-checks the A10 gate, writes samples only if it passes
 
 The Next.js server spawns this per request, so the platform deploys as one app
 on the intranet server (§14) without a second long-running service. Failures
@@ -52,7 +52,10 @@ def main(argv: list[str]) -> int:
             # The gate is re-evaluated here, on the server's copy, so the screen
             # cannot talk its way past A10.
             gate = reviewed.may_enter_configuration(threshold)
-            _emit({"written": write_back_samples(reviewed, args.store), "may_enter_configuration": gate})
+            # Samples are written only when the review passes: a rejected submit
+            # followed by a successful one must not record the corrections twice.
+            written = write_back_samples(reviewed, args.store) if gate else 0
+            _emit({"written": written, "may_enter_configuration": gate})
     except (ValueError, RuntimeError, OSError) as exc:
         _emit({"error": str(exc)})
         return 2

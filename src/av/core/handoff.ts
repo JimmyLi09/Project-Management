@@ -38,6 +38,28 @@ export interface IngestResult {
   extractions: IngestRecord[];
 }
 
+/* A drawing as stored against a project (spec §10 drawing + extraction). */
+export interface StoredDrawing extends IngestResult {
+  id: number;
+  project_id: string;
+  uploaded_by: string;
+  uploaded_at: number;
+  reviewed_by: string;
+  reviewed_at: number;    // 0 until the A10 gate has passed; then the drawing is locked
+}
+
+export interface DrawingSummary {
+  id: number;
+  projectId: string;
+  fileName: string;
+  grade: IngestResult['grade'];
+  uploadedBy: string;
+  uploadedAt: number;
+  reviewedBy: string;
+  reviewedAt: number;
+  pending: number;
+}
+
 export const finalValue = (r: IngestRecord): number | null => r.corrected ?? r.value;
 
 /* Still open for this record: flagged for review and not yet confirmed, or a
@@ -48,11 +70,12 @@ export const isPending = (r: IngestRecord): boolean =>
 
 export interface Handoff {
   drawing: string;
+  project?: string;       // project name, shown on 05 and in the drawing's information panel
   fields: Partial<Pick<LedConfig, DrawingElement>>;
   prov: Partial<Record<keyof LedConfig, Provenance>>;
 }
 
-export function toHandoff(result: IngestResult): Handoff {
+export function toHandoff(result: IngestResult, project?: string): Handoff {
   const fields: Handoff['fields'] = {};
   const prov: Handoff['prov'] = {};
   for (const r of result.extractions) {
@@ -71,5 +94,5 @@ export function toHandoff(result: IngestResult): Handoff {
           note: r.prov.note ?? undefined,
         };
   }
-  return { drawing: result.drawing, fields, prov };
+  return { drawing: result.drawing, project, fields, prov };
 }

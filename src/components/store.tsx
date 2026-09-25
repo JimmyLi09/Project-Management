@@ -6,7 +6,7 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useR
 import type { Project, User } from '@/lib/types';
 import type { ProjectAction } from '@/server/actions';
 import type { Identity } from '@/lib/permissions';
-import type { Handoff, IngestResult } from '@/av/core/handoff';
+import type { Handoff, StoredDrawing } from '@/av/core/handoff';
 
 export interface View {
   name: 'overview' | 'projects' | 'team' | 'mytasks' | 'dupdate' | 'stats' | 'contacts' | 'finance' | 'registers' | 'ledingest' | 'ledstudio' | 'users' | 'templates' | 'project';
@@ -33,8 +33,10 @@ interface Store {
   refreshUsers: () => Promise<void>;
   /* AV · LED: the drawing under 04 review survives switching views, and the
      reviewed values are handed to 05 exactly once. */
-  ledIngest: IngestResult | null;
-  setLedIngest: (r: IngestResult | null) => void;
+  ledProjectId: string;
+  setLedProjectId: (id: string) => void;
+  ledIngest: StoredDrawing | null;
+  setLedIngest: (r: StoredDrawing | null) => void;
   ledHandoff: Handoff | null;
   setLedHandoff: (h: Handoff | null) => void;
 }
@@ -51,7 +53,8 @@ export function StoreProvider({ user, children }: { user: User; children: React.
   const [users, setUsers] = useState<User[]>([]);
   const [view, setView] = useState<View>({ name: 'overview' });
   const [toast, setToast] = useState('');
-  const [ledIngest, setLedIngest] = useState<IngestResult | null>(null);
+  const [ledProjectId, setLedProjectId] = useState('');
+  const [ledIngest, setLedIngest] = useState<StoredDrawing | null>(null);
   const [ledHandoff, setLedHandoff] = useState<Handoff | null>(null);
   /* latest known version per project (updated synchronously on every write) and
      a per-project promise chain, so a single user's rapid successive edits
@@ -160,11 +163,13 @@ export function StoreProvider({ user, children }: { user: User; children: React.
     removeProject,
     refresh,
     refreshUsers,
+    ledProjectId,
+    setLedProjectId,
     ledIngest,
     setLedIngest,
     ledHandoff,
     setLedHandoff,
-  }), [user, projects, users, view, toast, dispatch, createProject, removeProject, refresh, refreshUsers, ledIngest, ledHandoff]);
+  }), [user, projects, users, view, toast, dispatch, createProject, removeProject, refresh, refreshUsers, ledProjectId, ledIngest, ledHandoff]);
 
   return <Ctx.Provider value={store}>{children}</Ctx.Provider>;
 }

@@ -342,7 +342,13 @@ def test_cli_writeback_round_trips_the_reviewed_json(dxf_drawing: Path, tmp_path
     item.update(confirmed=True, corrected=4500.0, corrected_by="PM-Jimmy", corrected_at="2026-09-25T10:00:00+00:00")
     store = tmp_path / "led.jsonl"
     code, res = _cli(["writeback", str(store)], stdin=json.dumps(out))
-    assert code == 0 and res == {"written": 1, "may_enter_configuration": False}
+    # Other items are still pending, so the gate fails and nothing is written yet.
+    assert code == 0 and res == {"written": 0, "may_enter_configuration": False}
+    assert not store.exists()
+    for e in out["extractions"]:
+        e["confirmed"] = True
+    code, res = _cli(["writeback", str(store)], stdin=json.dumps(out))
+    assert res == {"written": 1, "may_enter_configuration": True}
     row = json.loads(store.read_text(encoding="utf-8"))
     assert row["predicted"] == pytest.approx(OPENING_W) and row["label"] == 4500.0
 

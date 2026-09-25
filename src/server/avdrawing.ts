@@ -42,3 +42,12 @@ export function runDrawingCli(args: string[], stdin?: string): Promise<Record<st
     else child.stdin.end();
   });
 }
+
+/* Drawings for the LED line hang off a project that carries an LED service
+   package (spec 01: 业务线勾选 = LED). */
+export function ledProjectError(p: { packages?: { svc: string }[]; archived?: boolean } | undefined): string | null {
+  if (!p) return '项目不存在';
+  if (p.archived) return '项目已归档';
+  if (!(p.packages || []).some((k) => k.svc === 'led')) return '该项目没有 LED 服务包，请先在项目中添加 LED 服务。';
+  return null;
+}
