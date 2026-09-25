@@ -31,7 +31,7 @@ export default function AvPricesView() {
   const { me } = useStore();
   const { t } = useLang();
   const mayEdit = canEditPrices(me);
-  const [line, setLine] = useState<'led' | 'projector'>('led');
+  const [line, setLine] = useState<'led' | 'projector' | 'elv'>('led');
   const [items, setItems] = useState<PriceItem[]>([]);
   const [floor, setFloor] = useState<number | null>(null);
   const [floorDraft, setFloorDraft] = useState('');
@@ -104,7 +104,7 @@ export default function AvPricesView() {
     <tr key={key} style={{ background: 'var(--hover-bg)' }}>
       <td style={td}>{field('categoryLabel', 130, 'text', t('类别 *', 'Category *'))}</td>
       <td style={td}>{field('model', 110, 'text', t('型号', 'Model'))}</td>
-      <td style={td}>{field('pitch', 90, 'text', line === 'projector' ? '12000 lm' : 'P2')}</td>
+      <td style={td}>{field('pitch', 90, 'text', line === 'projector' ? '12000 lm' : line === 'elv' ? '650 W' : 'P2')}</td>
       <td style={td}>{field('moduleSize', 100)}</td>
       <td style={td}>{field('cabinetSize', 130)}</td>
       <td style={td}>{field('unit', 50, 'text', '㎡')}</td>
@@ -139,9 +139,10 @@ export default function AvPricesView() {
       <div className="panel clip" style={{ padding: 0 }}>
         <div className="panel-head">
           <span className="panel-title" style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-            <select className="in sm" value={line} onChange={(e) => setLine(e.target.value as 'led' | 'projector')} aria-label={t('业务线', 'Line')}>
+            <select className="in sm" value={line} onChange={(e) => setLine(e.target.value as 'led' | 'projector' | 'elv')} aria-label={t('业务线', 'Line')}>
               <option value="led">{t('LED 价格库', 'LED price library')}</option>
               <option value="projector">{t('投影价格库', 'Projection price library')}</option>
+              <option value="elv">{t('弱电价格库', 'ELV price library')}</option>
             </select>
             <span style={{ fontWeight: 400, color: 'var(--text2)', fontSize: 12 }}>· {items.length} {t('条', 'items')}</span></span>
           {mayEdit && (
@@ -157,6 +158,9 @@ export default function AvPricesView() {
             {line === 'led'
               ? t('成本价取 PDF 的 Partner Price，售价取 MSRP；价格会变，可随时修改，每次改价都留有历史。价格留空表示待定价，成本表会拦住未定价的条目。线材、控制系统、钢结构、安装人工等不在 PDF 中，需要逐条添加。',
                 'Cost = Partner Price, sell = MSRP. Every price change is kept in history. Blank prices block costing.')
+              : line === 'elv'
+              ? t('弱电暂无价格表，逐条录入。功放的「规格」栏填功率（如 650 W），成本核算据此核对是否满足每区负载；六类线按箱（305 m）、录像硬盘按 TB、门禁按套、其余按台 / 个 / 只计价。',
+                'No price list yet. Put amplifier power in the spec column (e.g. 650 W); Cat6 per 305 m box, storage per TB.')
               : t('投影暂无价格表，逐条录入。投影机的「规格」栏填亮度（如 12000 lm），成本核算据此核对是否满足单机所需亮度；幕布按 ㎡、信号线按根、吊架与融合处理器按套计价。',
                 'No price list yet. Put brightness in the spec column (e.g. 12000 lm) for projectors.')}
           </p>
@@ -183,7 +187,7 @@ export default function AvPricesView() {
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5, minWidth: 1180 }}>
               <tbody>
                 <tr>
-                  {[t('类别', 'Category'), t('型号', 'Model'), line === 'projector' ? t('规格 / 亮度', 'Spec / lumens') : t('点间距', 'Pitch'), t('模组尺寸', 'Module'), t('箱体 / 产品尺寸', 'Cabinet / product'),
+                  {[t('类别', 'Category'), t('型号', 'Model'), line === 'projector' ? t('规格 / 亮度', 'Spec / lumens') : line === 'elv' ? t('规格 / 功率', 'Spec / power') : t('点间距', 'Pitch'), t('模组尺寸', 'Module'), t('箱体 / 产品尺寸', 'Cabinet / product'),
                     t('单位', 'Unit'), t('成本价 Partner', 'Cost (Partner)'), t('售价 MSRP', 'Sell (MSRP)'), t('有效期至', 'Valid until'), t('更新', 'Updated'), ''].map((h, i) => <th key={i} style={th}>{h}</th>)}
                 </tr>
                 {adding && editRow('new')}

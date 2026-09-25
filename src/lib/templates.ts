@@ -19,6 +19,7 @@ export const SVC: Record<string, { label: string; en: string; color: string; tpl
   maxhub: { label: 'MAXHUB', en: 'MAXHUB', color: '#117A65' },
   lightbox: { label: '灯箱', en: 'Lightbox', color: '#CA9A2C' },
   av: { label: 'AV', en: 'AV', color: '#6C3483' },
+  elv: { label: '弱电', en: 'ELV', color: '#5D6D7E' },
   brochure: { label: '宣传册', en: 'Brochure', color: '#A04000' },
   video: { label: '视频拍摄', en: 'Video Shooting', color: '#884EA0' },
   interior: { label: '室内设计', en: 'Interior Design', color: '#B7950B' },

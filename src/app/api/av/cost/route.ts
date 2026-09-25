@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { lineInfo, LINES } from '@/av/core/lines';
 import {
-  buildLedLines, buildPrjLines, checkSheet, prjChecks, totals,
-  type LedSummary, type ManualLine, type Picks, type PrjPicks, type PrjSummary, type SavedConfig,
+  buildElvLines, buildLedLines, buildPrjLines, checkSheet, elvChecks, prjChecks, totals,
+  type ElvPicks, type ElvSummary, type LedSummary, type ManualLine, type Picks, type PrjPicks, type PrjSummary, type SavedConfig,
 } from '@/av/core/pricing';
 import type { BusinessLine } from '@/av/core/types';
 import { canCostProject, canViewPrices, identityOf } from '@/lib/permissions';
@@ -12,7 +12,7 @@ import { appendAudit, getProject } from '@/server/db';
 import { currentUser } from '@/server/session';
 
 /* 06 成本核算, per business line.
-   GET ?project=ID&line=led|projector   the line's latest saved configuration,
+   GET ?project=ID&line=led|projector|elv  the line's latest saved configuration,
         latest cost sheet with its checks against today's price library, the
         line's library, and a summary row for every line of the project.
    POST { projectId, line, picks, manual, confirm }
@@ -20,12 +20,19 @@ import { currentUser } from '@/server/session';
         snapshotted, confirming requires no blocking check. */
 
 const today = () => new Date().toISOString().slice(0, 10);
-const COSTED: BusinessLine[] = ['led', 'projector'];
-const lineOf = (v: unknown): BusinessLine => (v === 'projector' ? 'projector' : 'led');
+const COSTED: BusinessLine[] = ['led', 'projector', 'elv'];
+const lineOf = (v: unknown): BusinessLine => (v === 'projector' || v === 'elv' ? v : 'led');
+type AnySummary = LedSummary | PrjSummary | ElvSummary;
 
-function price(line: BusinessLine, config: SavedConfig<LedSummary | PrjSummary>, picks: Record<string, unknown>, manual: ManualLine[]) {
+function price(line: BusinessLine, config: SavedConfig<AnySummary>, picks: Record<string, unknown>, manual: ManualLine[]) {
   const items = listPriceItems(line);
   const num = (v: unknown) => (v === null || v === undefined || v === '' ? null : Number(v));
+  if (line === 'elv') {
+    const cfg = config as SavedConfig<ElvSummary>;
+    const p = Object.fromEntries(Object.entries(picks).map(([k, v]) => [k, num(v)])) as ElvPicks;
+    const lines = buildElvLines(cfg, p, manual, items);
+    return { items, lines, extra: elvChecks(lines, cfg, items) };
+  }
   if (line === 'projector') {
     const cfg = config as SavedConfig<PrjSummary>;
     const p: PrjPicks = { projector: num(picks.projector), screen: num(picks.screen), signal_cable: num(picks.signal_cable), mount: num(picks.mount), blend: num(picks.blend) };
@@ -46,12 +53,14 @@ export async function GET(req: NextRequest) {
   if (!project) return NextResponse.json({ error: '项目不存在' }, { status: 404 });
 
   const inquiry = getInquiry(projectId);
-  const config = latestConfig<LedSummary | PrjSummary>(projectId, line);
+  const config = latestConfig<AnySummary>(projectId, line);
   const sheet = latestCostSheet(projectId, line);
   const items = listPriceItems(line);
   const marginFloor = getMarginFloor();
   const current = sheet && config && sheet.configId === config.id;
-  const extra = current && line === 'projector' ? prjChecks(sheet.lines, config as SavedConfig<PrjSummary>, items) : [];
+  const extra = !current ? []
+    : line === 'projector' ? prjChecks(sheet.lines, config as SavedConfig<PrjSummary>, items)
+    : line === 'elv' ? elvChecks(sheet.lines, config as SavedConfig<ElvSummary>, items) : [];
 
   /* one row per business line the project carries */
   const svcs = new Set(project.packages.map((k) => k.svc));
@@ -84,7 +93,7 @@ export async function POST(req: NextRequest) {
   if (bad) return NextResponse.json({ error: bad }, { status: 400 });
   if (!canCostProject(identityOf(user), project)) return NextResponse.json({ error: '仅该项目的 PM 可核算成本' }, { status: 403 });
 
-  const config = latestConfig<LedSummary | PrjSummary>(project!.id, line);
+  const config = latestConfig<AnySummary>(project!.id, line);
   if (!config) return NextResponse.json({ error: `该项目还没有保存的${info.label}方案` }, { status: 400 });
 
   const manual: ManualLine[] = [];

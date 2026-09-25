@@ -66,6 +66,28 @@ export interface PrjSummary extends SummaryBase {
   content: string;
 }
 
+export interface ElvSummary extends SummaryBase {
+  area: number;
+  floors: number;
+  space: string;
+  subsystems: string[];      // cctv / access / net / pa
+  nOutlet: number;
+  nAp: number;
+  nCam: number;
+  nDoor: number;
+  nPort: number;
+  nSwitch: number;
+  poeW: number;
+  nBox: number;
+  nPatch: number;
+  nSpk: number;
+  ampW: number;
+  nPaZone: number;
+  nvrTb: number;
+  nNvr: number;
+  nRack: number;
+}
+
 export interface SavedConfig<S extends SummaryBase = LedSummary> {
   id: number;
   projectId: string;
@@ -165,11 +187,13 @@ export function checkSheet(
 
 /* ===== projection line ===== */
 
-/* Brightness as printed in the library's spec column, e.g. "12,000 lm" → 12000. */
-export const lumensOf = (spec: string): number | null => {
+/* The rating printed in the library's spec column: "12,000 lm" → 12000,
+   "650 W" → 650. */
+export const specNumber = (spec: string): number | null => {
   const m = /(\d+(?:\.\d+)?)/.exec(spec.replace(/,/g, ''));
   return m ? Number(m[1]) : null;
 };
+export const lumensOf = specNumber;
 
 export interface PrjPicks { projector: number | null; screen: number | null; signal_cable: number | null; mount: number | null; blend: number | null }
 
@@ -201,6 +225,49 @@ export function prjChecks(lines: CostLine[], cfg: SavedConfig<PrjSummary>, items
   return lm < cfg.summary.lmProj
     ? [{ code: 'PRJ-COST-LM', severity: 'block', message: `所选投影机 ${lm.toLocaleString('en-US')} lm 低于单机所需 ${Math.ceil(cfg.summary.lmProj).toLocaleString('en-US')} lm。` }]
     : [];
+}
+
+/* ===== ELV line ===== */
+
+export type ElvPicks = Partial<Record<'outlet' | 'ap' | 'cam' | 'door' | 'switch' | 'patch' | 'cable' | 'spk' | 'amp' | 'nvr' | 'hdd' | 'rack', number | null>>;
+
+export function buildElvLines(cfg: SavedConfig<ElvSummary>, picks: ElvPicks, manual: ManualLine[], items: PriceItem[]): CostLine[] {
+  const byId = new Map(items.map((i) => [i.id, i]));
+  const s = cfg.summary;
+  const rows: [keyof ElvPicks, string, number, string, string][] = [
+    ['outlet', '数据点位（面板 + 模块）', s.nOutlet, '个', 'E1'],
+    ['ap', '无线 AP', s.nAp, '台', 'E2'],
+    ['cam', '网络摄像机', s.nCam, '台', 'E3'],
+    ['door', '门禁点（读卡器 + 电锁 + 按钮）', s.nDoor, '套', 'E4'],
+    ['switch', '接入交换机（PoE）', s.nSwitch, '台', 'E6'],
+    ['patch', '配线架', s.nPatch, '个', 'E9'],
+    ['cable', '六类线（305 m / 箱）', s.nBox, '箱', 'E8'],
+    ['spk', '吸顶扬声器', s.nSpk, '只', 'E10'],
+    ['amp', `功放（每区 ≥ ${Math.ceil(s.nPaZone ? s.ampW / s.nPaZone : 0)} W）`, s.nPaZone, '台', 'E11'],
+    ['nvr', '网络录像机 NVR', s.nNvr, '台', 'E12'],
+    ['hdd', `录像硬盘（${s.nvrTb.toFixed(1)} TB）`, Math.ceil(s.nvrTb), 'TB', 'E12'],
+    ['rack', '机柜 42U', s.nRack, '台', 'E13'],
+  ];
+  const line = (key: string, name: string, qty: number, unit: string, qtySource: string, itemId: number | null): CostLine => {
+    const it = itemId == null ? undefined : byId.get(itemId);
+    return { key, name, qty, unit, qtySource, itemId: it ? it.id : null, itemLabel: it ? itemLabel(it) : '',
+      unitCost: it?.costPrice ?? null, unitList: it?.listPrice ?? null };
+  };
+  return [
+    ...rows.filter((r) => r[2] > 0).map(([k, n, q, u, src]) => line(k, n, q, u, src, picks[k] ?? null)),
+    ...manual.map((m) => line(m.key, m.name, m.qty, m.unit, '人工', m.itemId)),
+  ];
+}
+
+/* Each zone's amplifier must carry that zone's speaker load (E11). */
+export function elvChecks(lines: CostLine[], cfg: SavedConfig<ElvSummary>, items: PriceItem[]): CostCheck[] {
+  const l = lines.find((x) => x.key === 'amp');
+  const it = l?.itemId == null ? undefined : items.find((i) => i.id === l.itemId);
+  if (!it || !cfg.summary.nPaZone) return [];
+  const need = cfg.summary.ampW / cfg.summary.nPaZone;
+  const w = specNumber(it.pitch);
+  if (w === null) return [{ code: 'ELV-COST-AMP', severity: 'warn', message: `「${itemLabel(it)}」未注明功率（规格栏如 650 W），无法核对是否满足每区 ${Math.ceil(need)} W。` }];
+  return w < need ? [{ code: 'ELV-COST-AMP', severity: 'block', message: `所选功放 ${w} W 低于每区所需 ${Math.ceil(need)} W。` }] : [];
 }
 
 export const round2 = (x: number) => Math.round(x * 100) / 100;

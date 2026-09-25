@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { compute } from '@/av/core/compute';
 import { toHandoff } from '@/av/core/handoff';
-import type { LedSummary, PrjSummary } from '@/av/core/pricing';
+import { computeElv, type ElvConfig } from '@/av/core/elv/compute';
+import { LATEST_ELV_PACK } from '@/av/core/elv/rulepack';
+import type { ElvSummary, LedSummary, PrjSummary } from '@/av/core/pricing';
 import { computePrj, type PrjConfig } from '@/av/core/prj/compute';
 import { LATEST_PRJ_PACK } from '@/av/core/prj/rulepack';
 import { LATEST_LED_PACK } from '@/av/core/rulepack';
@@ -20,13 +22,39 @@ export async function POST(req: NextRequest) {
   const user = await currentUser();
   if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
   const body = (await req.json().catch(() => ({}))) as { projectId?: string; line?: string; drawingId?: number | null; cfg?: unknown };
-  const line = body.line === 'projector' ? 'projector' : 'led';
+  const line = body.line === 'projector' || body.line === 'elv' ? body.line : 'led';
   const project = getProject(String(body.projectId || ''));
-  const bad = line === 'led' ? lineProjectError(project, 'led', ' LED ') : lineProjectError(project, 'projector', '投影');
+  const bad = lineProjectError(project, line, line === 'led' ? ' LED ' : line === 'projector' ? '投影' : '弱电');
   if (bad) return NextResponse.json({ error: bad }, { status: 400 });
   if (!canCostProject(identityOf(user), project)) return NextResponse.json({ error: '仅该项目的 PM 可保存方案' }, { status: 403 });
   if (!body.cfg) return NextResponse.json({ error: '缺少方案参数' }, { status: 400 });
   const inquiry = getInquiry(project!.id);
+
+  if (line === 'elv') {
+    const cfg = body.cfg as ElvConfig;
+    const packVersion = inquiry?.packs.elv ?? LATEST_ELV_PACK;
+    let r;
+    try { r = computeElv(cfg, packVersion); }
+    catch (e) { return NextResponse.json({ error: e instanceof Error ? e.message : '方案参数无效' }, { status: 400 }); }
+    if (!r.ok) return NextResponse.json({ error: r.findings.filter((f) => f.gate === 'compute' && f.severity === 'block').map((f) => f.message).join(' ') }, { status: 400 });
+    const v = (k: string) => r.trace[k].value;
+    const saved = saveConfig<ElvSummary>({
+      projectId: project!.id, line, packVersion, drawingId: null, createdBy: user.name,
+      summary: {
+        area: cfg.elv_area, floors: cfg.elv_floors, space: cfg.elv_space,
+        subsystems: (['cctv', 'access', 'net', 'pa'] as const).filter((k) => cfg[`elv_${k}`]),
+        nOutlet: v('n_outlet'), nAp: v('n_ap'), nCam: v('n_cam'), nDoor: v('n_door'), nPort: v('n_port'), nSwitch: v('n_switch'),
+        poeW: v('poe_w'), nBox: v('n_box'), nPatch: v('n_patch'), nSpk: v('n_spk'), ampW: v('amp_w'), nPaZone: v('n_pa_zone'),
+        nvrTb: v('nvr_tb'), nNvr: v('n_nvr'), nRack: v('n_rack'),
+        exportable: r.exportable, blocking: r.findings.filter((f) => f.severity === 'block').map((f) => f.code),
+      },
+    }, cfg);
+    appendAudit(project!.id, [{
+      at: Date.now(), by: user.name,
+      text: `保存弱电方案：${cfg.elv_area} ㎡ · 端口 ${v('n_port')} · 摄像机 ${v('n_cam')} · 扬声器 ${v('n_spk')}（规则包 ${packVersion}）`,
+    }]);
+    return NextResponse.json({ config: saved });
+  }
 
   if (line === 'projector') {
     const cfg = body.cfg as PrjConfig;
