@@ -213,7 +213,8 @@ export default function LedIngestView() {
                             background: conf >= ledIngest.threshold ? 'var(--success)' : 'var(--warning)' }} />
                         </div>
                         <div className="tnum" style={{ fontSize: 11, color: 'var(--text2)', marginTop: 3 }}>
-                          {typeof r.prov.confidence === 'number' ? `${Math.round(r.prov.confidence * 100)}%` : r.prov.confidence}
+                          {/* floor, not round: 0.846 must not read as "85%" next to an 85% threshold it fails */}
+                          {typeof r.prov.confidence === 'number' ? `${Math.floor(r.prov.confidence * 100)}%` : r.prov.confidence}
                         </div>
                       </td>
                       <td style={{ ...td, whiteSpace: 'nowrap' }}>
