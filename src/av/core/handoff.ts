@@ -72,6 +72,8 @@ export interface Handoff {
   drawing: string;
   project?: string;       // project name, shown on 05 and in the drawing's information panel
   packVersion?: string;   // rule pack the project was opened on (01); 05 computes with it, locked
+  projectId?: string;     // set when the values come from a stored drawing; lets 05 save to the project
+  drawingId?: number;
   fields: Partial<Pick<LedConfig, DrawingElement>>;
   prov: Partial<Record<keyof LedConfig, Provenance>>;
 }

@@ -138,7 +138,7 @@ export default function LedIngestView() {
   }
 
   function loadInto05(d: StoredDrawing) {
-    setLedHandoff(toHandoff(d, project?.name, boundPack ?? undefined));
+    setLedHandoff({ ...toHandoff(d, project?.name, boundPack ?? undefined), projectId: d.project_id, drawingId: d.id });
     go('ledstudio');
   }
 

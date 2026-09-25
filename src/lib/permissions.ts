@@ -53,6 +53,14 @@ export const canReviewDrawing = (u: Identity, p?: Project) =>
   isFull(u) || (u.role === 'pm' && (!p || canEdit(u, p)));
 export const canExportLed = (u: Identity) => isFull(u) || u.role === 'pm';
 
+/* Price library and costing. Cost prices are commercial data: production
+   members and read-only viewers do not see them. Only PD / BD edit prices and
+   company parameters (管理员, §11). Saving a configuration or a cost sheet is
+   the project PM's job, like review. */
+export const canViewPrices = (u: Identity) => u.role !== 'member' && u.role !== 'viewer';
+export const canEditPrices = (u: Identity) => isFull(u);
+export const canCostProject = (u: Identity, p?: Project) => canReviewDrawing(u, p);
+
 export const ROLE_LABEL: Record<Role, string> = {
   director: 'PD',
   bd: 'BD',

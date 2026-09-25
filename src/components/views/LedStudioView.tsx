@@ -16,7 +16,7 @@ import { getRulePack, LATEST_LED_PACK, listRulePacks } from '@/av/core/rulepack'
 import { toSvg } from '@/av/core/svg';
 import type { DrawingElement, Handoff } from '@/av/core/handoff';
 import type { LedConfig, ScreenType, Severity, Size, TraceNode } from '@/av/core/types';
-import { canExportLed } from '@/lib/permissions';
+import { canCostProject, canExportLed } from '@/lib/permissions';
 import { useLang } from '@/lib/i18n';
 import { useStore } from '../store';
 import { Icon } from '../ui';
@@ -47,7 +47,7 @@ const parseLib = (s: string): Size[] =>
 const fmtLib = (lib: Size[]) => lib.map((s) => `${s[0]}x${s[1]}`).join(', ');
 
 export default function LedStudioView() {
-  const { me, ledHandoff, setLedHandoff, go } = useStore();
+  const { me, projects, ledHandoff, setLedHandoff, setLedProjectId, go } = useStore();
   const { t, lang } = useLang();
 
   const [packVersion, setPackVersion] = useState(LATEST_LED_PACK);
@@ -67,6 +67,22 @@ export default function LedStudioView() {
   }, [ledHandoff, setLedHandoff]);
 
   const locked = (k: DrawingElement) => !!fromDrawing && k in fromDrawing.fields;
+
+  /* §10 config_result — save this configuration against the project the
+     drawing belongs to; the server recomputes it with the same core. */
+  const project = fromDrawing?.projectId ? projects.find((p) => p.id === fromDrawing.projectId) : undefined;
+  const maySave = !!project && canCostProject(me, project);
+  const [saved, setSaved] = useState('');
+  async function saveToProject() {
+    if (!project) return;
+    setSaved('');
+    const res = await fetch('/api/av/config', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ projectId: project.id, drawingId: fromDrawing?.drawingId ?? null, cfg: { ...cfg, led_cab_lib: lib.length ? lib : undefined } }),
+    }).catch(() => null);
+    const body = res ? await res.json().catch(() => ({})) : { error: t('网络错误', 'Network error') };
+    setSaved(!res?.ok || body.error ? `✕ ${body.error || t('保存失败', 'Save failed')}` : 'ok');
+  }
 
   const pack = getRulePack(packVersion);
   const profile = pack.profiles[cfg.led_screen_type];
@@ -151,6 +167,22 @@ export default function LedStudioView() {
               {t('。图纸带入字段只读。', '. Drawing fields are read-only.')}{' '}
               <button style={{ fontSize: 12, textDecoration: 'underline', color: 'var(--text2)' }}
                 onClick={() => setFromDrawing(null)}>{t('改为手动输入', 'Switch to manual')}</button>
+              {maySave && (
+                <div style={{ marginTop: 8, display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+                  <button className="btn-navy" disabled={!result.layout} onClick={saveToProject}
+                    style={!result.layout ? { opacity: 0.45, cursor: 'not-allowed' } : undefined}>
+                    {t('保存方案到项目', 'Save to project')}
+                  </button>
+                  {saved === 'ok' && (
+                    <span style={{ color: 'var(--success)' }}>
+                      {t('已保存。', 'Saved. ')}
+                      <button style={{ textDecoration: 'underline', color: 'var(--navy700)', fontSize: 12 }}
+                        onClick={() => { setLedProjectId(project!.id); go('avcost'); }}>{t('去 06 成本核算', 'Open 06 costing')}</button>
+                    </span>
+                  )}
+                  {saved.startsWith('✕') && <span style={{ color: 'var(--danger)' }}>{saved}</span>}
+                </div>
+              )}
             </div>
           ) : (
             <button className="btn-line" style={{ justifySelf: 'start' }} onClick={() => go('ledingest')}>

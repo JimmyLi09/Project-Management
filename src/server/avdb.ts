@@ -10,7 +10,8 @@
 
 import { getDb } from './db';
 import type { DrawingElement, DrawingSummary, IngestRecord, IngestResult, StoredDrawing } from '@/av/core/handoff';
-import type { BusinessLine } from '@/av/core/types';
+import type { CostLine, PriceItem, SavedConfig } from '@/av/core/pricing';
+import type { BusinessLine, LedConfig } from '@/av/core/types';
 
 export type { DrawingSummary, StoredDrawing };
 
@@ -44,6 +45,69 @@ function db() {
         packs TEXT NOT NULL,
         created_by TEXT NOT NULL,
         created_at INTEGER NOT NULL
+      );
+      /* Price library. Prices change: every edit to a price or its validity
+         leaves a row in av_price_history, and cost sheets keep their own
+         snapshot of the prices they used. */
+      CREATE TABLE IF NOT EXISTS av_price_item (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        line TEXT NOT NULL,
+        category TEXT NOT NULL,
+        category_label TEXT NOT NULL,
+        model TEXT NOT NULL DEFAULT '',
+        pitch TEXT NOT NULL DEFAULT '',
+        module_size TEXT NOT NULL DEFAULT '',
+        cabinet_size TEXT NOT NULL DEFAULT '',
+        unit TEXT NOT NULL,
+        cost_price REAL,
+        list_price REAL,
+        currency TEXT NOT NULL DEFAULT 'SGD',
+        source TEXT NOT NULL DEFAULT '',
+        valid_until TEXT NOT NULL DEFAULT '',
+        active INTEGER NOT NULL DEFAULT 1,
+        updated_by TEXT NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS av_price_history (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        item_id INTEGER NOT NULL,
+        cost_price REAL,
+        list_price REAL,
+        valid_until TEXT NOT NULL DEFAULT '',
+        changed_by TEXT NOT NULL,
+        changed_at INTEGER NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS av_setting (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL,
+        updated_by TEXT NOT NULL DEFAULT '',
+        updated_at INTEGER NOT NULL DEFAULT 0
+      );
+      /* §10 config_result: each save of a 05 configuration against a project. */
+      CREATE TABLE IF NOT EXISTS av_config (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        project_id TEXT NOT NULL,
+        line TEXT NOT NULL,
+        pack_version TEXT NOT NULL,
+        drawing_id INTEGER,
+        cfg TEXT NOT NULL,
+        summary TEXT NOT NULL,
+        created_by TEXT NOT NULL,
+        created_at INTEGER NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS av_cost_sheet (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        project_id TEXT NOT NULL,
+        line TEXT NOT NULL,
+        config_id INTEGER NOT NULL,
+        lines TEXT NOT NULL,
+        cost REAL NOT NULL,
+        list REAL NOT NULL,
+        status TEXT NOT NULL DEFAULT 'draft',
+        created_by TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        confirmed_by TEXT NOT NULL DEFAULT '',
+        confirmed_at INTEGER NOT NULL DEFAULT 0
       );
       CREATE TABLE IF NOT EXISTS av_extraction (
         drawing_id INTEGER NOT NULL REFERENCES av_drawing(id) ON DELETE CASCADE,
@@ -234,7 +298,170 @@ export function deleteProjectDrawings(projectId: string): void {
   const d = db();
   d.transaction(() => {
     d.prepare('DELETE FROM av_inquiry WHERE project_id = ?').run(projectId);
+    d.prepare('DELETE FROM av_config WHERE project_id = ?').run(projectId);
+    d.prepare('DELETE FROM av_cost_sheet WHERE project_id = ?').run(projectId);
     d.prepare('DELETE FROM av_extraction WHERE drawing_id IN (SELECT id FROM av_drawing WHERE project_id = ?)').run(projectId);
     d.prepare('DELETE FROM av_drawing WHERE project_id = ?').run(projectId);
   })();
+}
+
+/* ===== price library ===== */
+
+type PriceRow = {
+  id: number; line: string; category: string; category_label: string; model: string; pitch: string;
+  module_size: string; cabinet_size: string; unit: string; cost_price: number | null; list_price: number | null;
+  currency: string; source: string; valid_until: string; active: number; updated_by: string; updated_at: number;
+};
+const toItem = (r: PriceRow): PriceItem => ({
+  id: r.id, line: r.line as BusinessLine, category: r.category, categoryLabel: r.category_label, model: r.model,
+  pitch: r.pitch, moduleSize: r.module_size, cabinetSize: r.cabinet_size, unit: r.unit, costPrice: r.cost_price,
+  listPrice: r.list_price, currency: r.currency, source: r.source, validUntil: r.valid_until, active: !!r.active,
+  updatedBy: r.updated_by, updatedAt: r.updated_at,
+});
+
+export function listPriceItems(line?: BusinessLine): PriceItem[] {
+  const rows = (line
+    ? db().prepare('SELECT * FROM av_price_item WHERE line = ? ORDER BY id').all(line)
+    : db().prepare('SELECT * FROM av_price_item ORDER BY line, id').all()) as PriceRow[];
+  return rows.map(toItem);
+}
+
+export type PriceInput = Omit<PriceItem, 'id' | 'updatedBy' | 'updatedAt'>;
+
+export function createPriceItem(it: PriceInput, by: string): PriceItem {
+  const d = db();
+  const now = Date.now();
+  const { lastInsertRowid } = d.prepare(`
+    INSERT INTO av_price_item (line, category, category_label, model, pitch, module_size, cabinet_size, unit,
+      cost_price, list_price, currency, source, valid_until, active, updated_by, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+    .run(it.line, it.category, it.categoryLabel, it.model, it.pitch, it.moduleSize, it.cabinetSize, it.unit,
+      it.costPrice, it.listPrice, it.currency, it.source, it.validUntil, it.active ? 1 : 0, by, now);
+  const id = Number(lastInsertRowid);
+  d.prepare('INSERT INTO av_price_history (item_id, cost_price, list_price, valid_until, changed_by, changed_at) VALUES (?, ?, ?, ?, ?, ?)')
+    .run(id, it.costPrice, it.listPrice, it.validUntil, by, now);
+  return toItem(d.prepare('SELECT * FROM av_price_item WHERE id = ?').get(id) as PriceRow);
+}
+
+/* Edit an item. A change to either price or to the validity date is kept in
+   the history, so "what did this cost in June" stays answerable. */
+export function updatePriceItem(id: number, patch: Partial<PriceInput>, by: string): PriceItem {
+  const d = db();
+  const cur = d.prepare('SELECT * FROM av_price_item WHERE id = ?').get(id) as PriceRow | undefined;
+  if (!cur) throw new Error('价格条目不存在');
+  const next = { ...toItem(cur), ...patch };
+  const now = Date.now();
+  d.transaction(() => {
+    d.prepare(`UPDATE av_price_item SET category = ?, category_label = ?, model = ?, pitch = ?, module_size = ?,
+      cabinet_size = ?, unit = ?, cost_price = ?, list_price = ?, currency = ?, source = ?, valid_until = ?, active = ?,
+      updated_by = ?, updated_at = ? WHERE id = ?`)
+      .run(next.category, next.categoryLabel, next.model, next.pitch, next.moduleSize, next.cabinetSize, next.unit,
+        next.costPrice, next.listPrice, next.currency, next.source, next.validUntil, next.active ? 1 : 0, by, now, id);
+    if (next.costPrice !== cur.cost_price || next.listPrice !== cur.list_price || next.validUntil !== cur.valid_until) {
+      d.prepare('INSERT INTO av_price_history (item_id, cost_price, list_price, valid_until, changed_by, changed_at) VALUES (?, ?, ?, ?, ?, ?)')
+        .run(id, next.costPrice, next.listPrice, next.validUntil, by, now);
+    }
+  })();
+  return toItem(d.prepare('SELECT * FROM av_price_item WHERE id = ?').get(id) as PriceRow);
+}
+
+export function priceHistory(itemId: number) {
+  return db().prepare('SELECT cost_price, list_price, valid_until, changed_by, changed_at FROM av_price_history WHERE item_id = ? ORDER BY changed_at DESC, id DESC')
+    .all(itemId) as { cost_price: number | null; list_price: number | null; valid_until: string; changed_by: string; changed_at: number }[];
+}
+
+/* Import a price list. Rows already present (same source, category, model,
+   pitch and cabinet) are skipped, so importing twice does not duplicate. */
+export function importPriceItems(items: PriceInput[], by: string): { added: number; skipped: number } {
+  const d = db();
+  const exists = d.prepare(`SELECT 1 FROM av_price_item WHERE source = ? AND category = ? AND model = ? AND pitch = ? AND cabinet_size = ? AND line = ?`);
+  let added = 0, skipped = 0;
+  d.transaction(() => {
+    for (const it of items) {
+      if (exists.get(it.source, it.category, it.model, it.pitch, it.cabinetSize, it.line)) { skipped++; continue; }
+      createPriceItem(it, by);
+      added++;
+    }
+  })();
+  return { added, skipped };
+}
+
+/* ===== company settings ===== */
+
+export const MARGIN_FLOOR_DEFAULT = 0.18; // the prototype's 公司下限 18%
+
+export function getMarginFloor(): number {
+  const r = db().prepare("SELECT value FROM av_setting WHERE key = 'margin_floor'").get() as { value: string } | undefined;
+  return r ? Number(r.value) : MARGIN_FLOOR_DEFAULT;
+}
+
+export function setMarginFloor(v: number, by: string): void {
+  db().prepare(`INSERT INTO av_setting (key, value, updated_by, updated_at) VALUES ('margin_floor', ?, ?, ?)
+    ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_by = excluded.updated_by, updated_at = excluded.updated_at`)
+    .run(String(v), by, Date.now());
+}
+
+/* ===== 05 configuration saves (§10 config_result) ===== */
+
+export function saveConfig(c: Omit<SavedConfig, 'id' | 'createdAt'>, cfg: LedConfig, line: BusinessLine): SavedConfig {
+  const createdAt = Date.now();
+  const { lastInsertRowid } = db().prepare(`INSERT INTO av_config (project_id, line, pack_version, drawing_id, cfg, summary, created_by, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
+    .run(c.projectId, line, c.packVersion, c.drawingId, JSON.stringify(cfg), JSON.stringify(c.summary), c.createdBy, createdAt);
+  return { ...c, id: Number(lastInsertRowid), createdAt };
+}
+
+type ConfigRow = { id: number; project_id: string; pack_version: string; drawing_id: number | null; cfg: string; summary: string; created_by: string; created_at: number };
+const toConfig = (r: ConfigRow): SavedConfig => ({
+  id: r.id, projectId: r.project_id, packVersion: r.pack_version, drawingId: r.drawing_id,
+  summary: JSON.parse(r.summary), createdBy: r.created_by, createdAt: r.created_at,
+});
+
+export function latestConfig(projectId: string, line: BusinessLine): (SavedConfig & { cfg: LedConfig }) | null {
+  const r = db().prepare('SELECT * FROM av_config WHERE project_id = ? AND line = ? ORDER BY id DESC LIMIT 1').get(projectId, line) as ConfigRow | undefined;
+  return r ? { ...toConfig(r), cfg: JSON.parse(r.cfg) } : null;
+}
+
+export function getConfig(id: number): SavedConfig | null {
+  const r = db().prepare('SELECT * FROM av_config WHERE id = ?').get(id) as ConfigRow | undefined;
+  return r ? toConfig(r) : null;
+}
+
+/* ===== cost sheets ===== */
+
+export interface CostSheet {
+  id: number;
+  projectId: string;
+  line: BusinessLine;
+  configId: number;
+  lines: CostLine[];
+  cost: number;
+  list: number;
+  status: 'draft' | 'confirmed';
+  createdBy: string;
+  createdAt: number;
+  confirmedBy: string;
+  confirmedAt: number;
+}
+
+type SheetRow = { id: number; project_id: string; line: string; config_id: number; lines: string; cost: number; list: number;
+  status: string; created_by: string; created_at: number; confirmed_by: string; confirmed_at: number };
+const toSheet = (r: SheetRow): CostSheet => ({
+  id: r.id, projectId: r.project_id, line: r.line as BusinessLine, configId: r.config_id, lines: JSON.parse(r.lines),
+  cost: r.cost, list: r.list, status: r.status as CostSheet['status'], createdBy: r.created_by, createdAt: r.created_at,
+  confirmedBy: r.confirmed_by, confirmedAt: r.confirmed_at,
+});
+
+export function saveCostSheet(s: Pick<CostSheet, 'projectId' | 'line' | 'configId' | 'lines' | 'cost' | 'list'>, by: string, confirm: boolean): CostSheet {
+  const now = Date.now();
+  const { lastInsertRowid } = db().prepare(`INSERT INTO av_cost_sheet (project_id, line, config_id, lines, cost, list, status, created_by, created_at, confirmed_by, confirmed_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+    .run(s.projectId, s.line, s.configId, JSON.stringify(s.lines), s.cost, s.list, confirm ? 'confirmed' : 'draft', by, now,
+      confirm ? by : '', confirm ? now : 0);
+  return toSheet(db().prepare('SELECT * FROM av_cost_sheet WHERE id = ?').get(Number(lastInsertRowid)) as SheetRow);
+}
+
+export function latestCostSheet(projectId: string, line: BusinessLine): CostSheet | null {
+  const r = db().prepare('SELECT * FROM av_cost_sheet WHERE project_id = ? AND line = ? ORDER BY id DESC LIMIT 1').get(projectId, line) as SheetRow | undefined;
+  return r ? toSheet(r) : null;
 }
