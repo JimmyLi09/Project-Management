@@ -61,6 +61,25 @@ npm run build && npm start
 
 登录 PD 后在「用户 Users」页为 PM / 团队成员创建账号;项目中的「负责 PM / 指派👤」按**姓名**匹配账号姓名。
 
+## AV 方案成本平台 · LED 业务线(第一期)
+
+依据《LED 业务线开发交付规格说明书 v1.0》。代码自成一块,落地位置待定,可整体抽离为独立的 AV 平台仓库:
+
+```
+src/av/core/          # TypeScript 确定性计算内核,无框架依赖(参数三层、公式库 F1–F10、箱体排布、线路、校验、出图)
+services/drawing/     # Python 制图服务:DXF 生成(ezdxf)、图纸分级与解析(DXF / 矢量 PDF / OCR / 视觉)
+src/components/views/LedStudioView.tsx   # 05 方案配置 + 05b 出图界面(侧栏「LED 方案配置」)
+```
+
+```bash
+npm test                          # 内核验收测试
+npm run led:regression            # 9 个历史项目回归对照
+npm run led:drawing -- 144 out    # 出图:drawing JSON + SVG + 箱体清单
+cd services/drawing && .venv/bin/python -m pytest   # 制图服务测试
+```
+
+需求与待决事项见 `docs/requirements/010`、`011`。
+
 ## 后续路线(规划文件 Phase 2–4)
 
 - 文件上传(原图存储)、评论与 @成员
