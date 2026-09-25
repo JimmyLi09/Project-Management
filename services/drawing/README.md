@@ -43,6 +43,32 @@ cd services/drawing
 中文字符使用文字样式 `AV-HZ`（字体 `simsun.ttc`）。CAD 找不到该字体时会回退到自带字体，
 字形会变但几何不受影响。
 
+## 图纸解析（03 解析提取 / 04 人工校核）
+
+```python
+from pathlib import Path
+from avdrawing.ingest import pipeline
+from avdrawing.ingest.pdf_reader import Calibration
+
+pipeline.ingest(Path("01_平面图.dxf"))                                   # A 级
+pipeline.ingest(Path("02_立面图.pdf"), calibration=Calibration.from_scale(50))  # B 级
+pipeline.ingest(Path("03_扫描件.pdf"), ocr_backend=PaddleOcrBackend())   # C 级
+```
+
+产出六条带 provenance 三标签的要素记录。B 级必须先标定比例尺、C 级必须提供 OCR 引擎，
+两者都不会被推断 —— 错误的比例或缺失的引擎会产出看起来很正常的错数字。
+
+扫描件按 §13.2 不可作为算量依据：置信度上限压到 0.75，且必须逐项人工确认才放行到 05。
+
+### 可选依赖
+
+```bash
+.venv/bin/pip install -r requirements-ocr.txt   # C 级 OCR，体积大，首次运行下载权重
+```
+
+图例视觉识别需要 `ANTHROPIC_API_KEY`（或 `ant auth login` 的配置），模型按 §14 用
+Claude Sonnet。
+
 ## 测试
 
 ```bash
