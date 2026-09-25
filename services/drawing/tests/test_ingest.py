@@ -301,3 +301,76 @@ def test_legend_recognition_rejects_unsupported_images(tmp_path: Path) -> None:
     bad.write_bytes(b"\x00")
     with pytest.raises(ValueError, match="unsupported image type"):
         vision.recognise_legend(bad, client=FakeClient(FakeResponse("{}")))
+
+
+# ------------------------------------------------ CLI (the web app's entry)
+
+def _cli(args: list[str], stdin: str | None = None) -> tuple[int, dict]:
+    import subprocess, sys
+    proc = subprocess.run(
+        [sys.executable, "-m", "avdrawing.ingest.cli", *args],
+        input=stdin, capture_output=True, text=True, cwd=Path(__file__).parent.parent,
+    )
+    return proc.returncode, json.loads(proc.stdout)
+
+
+def test_cli_ingest_marks_what_needs_review(dxf_drawing: Path) -> None:
+    code, out = _cli(["ingest", str(dxf_drawing)])
+    assert code == 0
+    assert out["grade"] == "A" and out["may_enter_configuration"] is False
+    by = {e["element"]: e for e in out["extractions"]}
+    assert by["led_opening_w"]["value"] == pytest.approx(OPENING_W)
+    assert by["led_opening_w"]["needs_review"] is False   # 0.94 on the matched layer
+    assert by["led_view_min"]["needs_review"] is True     # not on any drawing
+
+
+def test_cli_reports_errors_as_json(pdf_drawing: Path) -> None:
+    code, out = _cli(["ingest", str(pdf_drawing)])
+    assert code == 2 and "比例尺标定" in out["error"]
+    code, out = _cli(["ingest", str(pdf_drawing), "--scale", "50"])
+    assert code == 0 and out["grade"] == "B"
+
+
+def test_cli_scan_without_paddle_says_how_to_install(scan_drawing: Path) -> None:
+    code, out = _cli(["ingest", str(scan_drawing)])
+    assert code == 2 and "requirements-ocr.txt" in out["error"]
+
+
+def test_cli_writeback_round_trips_the_reviewed_json(dxf_drawing: Path, tmp_path: Path) -> None:
+    _, out = _cli(["ingest", str(dxf_drawing)])
+    item = next(e for e in out["extractions"] if e["element"] == "led_opening_w")
+    item.update(confirmed=True, corrected=4500.0, corrected_by="PM-Jimmy", corrected_at="2026-09-25T10:00:00+00:00")
+    store = tmp_path / "led.jsonl"
+    code, res = _cli(["writeback", str(store)], stdin=json.dumps(out))
+    assert code == 0 and res == {"written": 1, "may_enter_configuration": False}
+    row = json.loads(store.read_text(encoding="utf-8"))
+    assert row["predicted"] == pytest.approx(OPENING_W) and row["label"] == 4500.0
+
+
+def test_gate_ignores_confirmed_items_and_empty_ingests(dxf_drawing: Path) -> None:
+    from avdrawing.ingest.models import DrawingIngest
+    assert not DrawingIngest("x.dxf", "A", 1.0).may_enter_configuration()
+    result = pipeline.ingest(dxf_drawing)
+    d = result.to_dict()
+    assert sum(e["needs_review"] for e in d["extractions"]) == len(result.unconfirmed_below(0.9))
+
+
+def test_cli_writeback_passes_the_gate_only_when_everything_is_reviewed(dxf_drawing: Path, tmp_path: Path) -> None:
+    _, out = _cli(["ingest", str(dxf_drawing)])
+    for e in out["extractions"]:
+        e["confirmed"] = True
+        if e["value"] is None:
+            e.update(corrected=3.0, corrected_by="PM", corrected_at="2026-09-25T10:00:00+00:00")
+    code, res = _cli(["writeback", str(tmp_path / "s.jsonl")], stdin=json.dumps(out))
+    assert code == 0 and res["may_enter_configuration"] is True
+
+
+def test_a_required_element_confirmed_empty_keeps_the_gate_closed(dxf_without_led: Path) -> None:
+    """未识别项补录 — confirming a blank opening is not filling it in."""
+    result = pipeline.ingest(dxf_without_led)
+    for e in result.extractions:
+        e.confirm(by="PM")
+    assert not result.may_enter_configuration()
+    result.get("led_opening_w").confirm(by="PM", corrected=4480.0)
+    result.get("led_opening_h").confirm(by="PM", corrected=2560.0)
+    assert result.may_enter_configuration()

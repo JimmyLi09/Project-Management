@@ -7,20 +7,19 @@
    Nothing is computed here. Every number on this screen comes from
    src/av/core, which is framework-free and separately tested. */
 
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 
 import { bomCsv } from '@/av/core/bom';
 import { compute } from '@/av/core/compute';
 import { assertExportable, buildDrawing } from '@/av/core/drawing';
 import { getRulePack, LATEST_LED_PACK, listRulePacks } from '@/av/core/rulepack';
 import { toSvg } from '@/av/core/svg';
+import type { DrawingElement, Handoff } from '@/av/core/handoff';
 import type { LedConfig, ScreenType, Severity, Size, TraceNode } from '@/av/core/types';
+import { canExportLed } from '@/lib/permissions';
 import { useLang } from '@/lib/i18n';
 import { useStore } from '../store';
 import { Icon } from '../ui';
-
-/* §11 — 销售 may see the configuration result but may not export drawings. */
-const canExport = (role: string) => role !== 'sales' && role !== 'viewer' && role !== 'member';
 
 const SEVERITY: Record<Severity, { bg: string; fg: string; zh: string; en: string }> = {
   block: { bg: 'var(--danger-bg, #FDF0EC)', fg: 'var(--danger)', zh: '阻断', en: 'Blocking' },
@@ -47,13 +46,25 @@ const parseLib = (s: string): Size[] =>
 const fmtLib = (lib: Size[]) => lib.map((s) => `${s[0]}x${s[1]}`).join(', ');
 
 export default function LedStudioView() {
-  const { me } = useStore();
+  const { me, ledHandoff, setLedHandoff, go } = useStore();
   const { t, lang } = useLang();
 
   const [packVersion, setPackVersion] = useState(LATEST_LED_PACK);
   const [cfg, setCfg] = useState<LedConfig>(() => defaultConfig(LATEST_LED_PACK, 'in_fixed'));
   const [libText, setLibText] = useState(() => fmtLib(getRulePack(LATEST_LED_PACK).profiles.in_fixed.cabLib));
   const [openTrace, setOpenTrace] = useState<string | null>(null);
+  /* Values handed over by 04 人工校核, with their provenance (§9). Those fields
+     are read-only here: the drawing, not this form, is their source. */
+  const [fromDrawing, setFromDrawing] = useState<Handoff | null>(null);
+
+  useEffect(() => {
+    if (!ledHandoff) return;
+    setCfg((prev) => ({ ...prev, ...ledHandoff.fields }));
+    setFromDrawing(ledHandoff);
+    setLedHandoff(null);
+  }, [ledHandoff, setLedHandoff]);
+
+  const locked = (k: DrawingElement) => !!fromDrawing && k in fromDrawing.fields;
 
   const pack = getRulePack(packVersion);
   const profile = pack.profiles[cfg.led_screen_type];
@@ -61,12 +72,12 @@ export default function LedStudioView() {
   const [modW, modH] = cfg.led_mod ?? [profile.modW, profile.modH];
 
   const result = useMemo(
-    () => compute({ ...cfg, led_cab_lib: lib.length ? lib : undefined }, packVersion),
-    [cfg, lib, packVersion],
+    () => compute({ ...cfg, led_cab_lib: lib.length ? lib : undefined }, packVersion, fromDrawing?.prov),
+    [cfg, lib, packVersion, fromDrawing],
   );
   const drawing = useMemo(
-    () => buildDrawing(result, { project: t('方案配置', 'Configuration') }),
-    [result, t],
+    () => buildDrawing(result, { project: fromDrawing?.drawing ?? t('方案配置', 'Configuration') }),
+    [result, t, fromDrawing],
   );
   const svg = useMemo(() => (drawing ? toSvg(drawing) : ''), [drawing]);
 
@@ -129,6 +140,19 @@ export default function LedStudioView() {
         <div className="panel-head"><span className="panel-title">{t('LED 词条', 'LED fields')}</span></div>
         <div style={{ padding: '16px 18px', display: 'grid', gap: 12 }}>
 
+          {fromDrawing ? (
+            <div style={{ fontSize: 12, lineHeight: 1.7, padding: '9px 11px', borderRadius: 6, background: 'var(--hover-bg)' }}>
+              {t('已载入校核结果：', 'Loaded from review: ')}<strong>{fromDrawing.drawing}</strong>
+              {t('。图纸带入字段只读。', '. Drawing fields are read-only.')}{' '}
+              <button style={{ fontSize: 12, textDecoration: 'underline', color: 'var(--text2)' }}
+                onClick={() => setFromDrawing(null)}>{t('改为手动输入', 'Switch to manual')}</button>
+            </div>
+          ) : (
+            <button className="btn-line" style={{ justifySelf: 'start' }} onClick={() => go('ledingest')}>
+              {t('从图纸导入（03 / 04）', 'Import from drawing (03 / 04)')}
+            </button>
+          )}
+
           <Field label={t('规则包', 'Rule pack')}>
             <select value={packVersion} onChange={(e) => setPackVersion(e.target.value)}>
               {listRulePacks().map((p) => <option key={p.version} value={p.version}>{p.version}</option>)}
@@ -152,10 +176,10 @@ export default function LedStudioView() {
 
           <Two>
             <Field label={t('屏体开口宽 mm', 'Opening W mm')}>
-              <input type="number" value={cfg.led_opening_w} onChange={(e) => set('led_opening_w', +e.target.value)} />
+              <input type="number" value={cfg.led_opening_w} readOnly={locked('led_opening_w')} onChange={(e) => set('led_opening_w', +e.target.value)} />
             </Field>
             <Field label={t('屏体开口高 mm', 'Opening H mm')}>
-              <input type="number" value={cfg.led_opening_h} onChange={(e) => set('led_opening_h', +e.target.value)} />
+              <input type="number" value={cfg.led_opening_h} readOnly={locked('led_opening_h')} onChange={(e) => set('led_opening_h', +e.target.value)} />
             </Field>
             <Field label={t('模组宽 mm', 'Module W mm')}>
               <input type="number" value={modW} onChange={(e) => set('led_mod', [+e.target.value, modH])} />
@@ -222,19 +246,19 @@ export default function LedStudioView() {
           <div className="section-label" style={{ marginTop: 4 }}>{t('图纸带入（04 校核后只读）', 'From 04 review')}</div>
           <Two>
             <Field label={t('安装标高 mm', 'Mount height mm')}>
-              <input type="number" value={cfg.led_mount_h ?? ''} placeholder="—"
+              <input type="number" value={cfg.led_mount_h ?? ''} placeholder="—" readOnly={locked('led_mount_h')}
                 onChange={(e) => set('led_mount_h', e.target.value === '' ? undefined : +e.target.value)} />
             </Field>
             <Field label={t('最近观看距离 m', 'Min viewing dist m')}>
-              <input type="number" step="0.1" value={cfg.led_view_min ?? ''} placeholder="—"
+              <input type="number" step="0.1" value={cfg.led_view_min ?? ''} placeholder="—" readOnly={locked('led_view_min')}
                 onChange={(e) => set('led_view_min', e.target.value === '' ? undefined : +e.target.value)} />
             </Field>
             <Field label={t('控制室距离 m', 'Control room m')}>
-              <input type="number" step="0.1" value={cfg.led_ctrl_dist ?? ''} placeholder="—"
+              <input type="number" step="0.1" value={cfg.led_ctrl_dist ?? ''} placeholder="—" readOnly={locked('led_ctrl_dist')}
                 onChange={(e) => set('led_ctrl_dist', e.target.value === '' ? undefined : +e.target.value)} />
             </Field>
             <Field label={t('强电井距离 m', 'Power riser m')}>
-              <input type="number" step="0.1" value={cfg.led_pwr_dist ?? ''} placeholder="—"
+              <input type="number" step="0.1" value={cfg.led_pwr_dist ?? ''} placeholder="—" readOnly={locked('led_pwr_dist')}
                 onChange={(e) => set('led_pwr_dist', e.target.value === '' ? undefined : +e.target.value)} />
             </Field>
           </Two>
@@ -290,7 +314,7 @@ export default function LedStudioView() {
         <div className="panel" style={{ padding: 0 }}>
           <div className="panel-head">
             <span className="panel-title">{t('拼接与线路图', 'Layout & wiring')}</span>
-            {canExport(me.role) && result.layout && (
+            {canExportLed(me) && result.layout && (
               <span style={{ display: 'flex', gap: 8 }}>
                 <button className="btn-line" onClick={() => exportFile('svg')}><Icon name="download" size={14} /> SVG</button>
                 <button className="btn-line" onClick={() => exportFile('bom')}><Icon name="download" size={14} /> {t('箱体清单', 'Cabinets')}</button>
@@ -303,7 +327,7 @@ export default function LedStudioView() {
               <>
                 <div style={{ overflowX: 'auto', background: '#0E1013', borderRadius: 6, padding: 8 }}
                   dangerouslySetInnerHTML={{ __html: svg }} />
-                {canExport(me.role) && (
+                {canExportLed(me) && (
                   <p style={{ fontSize: 11.5, color: 'var(--text2)', lineHeight: 1.8, marginTop: 10 }}>
                     {t('DXF 由制图服务渲染：下载数据包后执行 ', 'Render DXF from the payload: ')}
                     <code>python -m avdrawing.dxf led-layout.drawing.json out.dxf</code>

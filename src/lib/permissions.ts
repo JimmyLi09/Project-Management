@@ -42,6 +42,13 @@ export const canCreate = (u: Identity) => isFull(u) || u.role === 'sales';
 
 export const canAdmin = (u: Identity) => isFull(u);
 
+/* AV platform · LED spec v1.0 §11. PD/BD stand in for 管理员.
+   销售 may start a project and upload drawings but not review them or export
+   drawings; 人工校核 and 出图 belong to the PM. */
+export const canUploadDrawing = (u: Identity) => isFull(u) || u.role === 'pm' || u.role === 'sales';
+export const canReviewDrawing = (u: Identity) => isFull(u) || u.role === 'pm';
+export const canExportLed = (u: Identity) => isFull(u) || u.role === 'pm';
+
 export const ROLE_LABEL: Record<Role, string> = {
   director: 'PD',
   bd: 'BD',

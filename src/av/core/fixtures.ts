@@ -92,7 +92,7 @@ export function fixtureConfig(f: Fixture): LedConfig {
 }
 
 /* The whole-screen data-cable reading (total pixels ÷ data_px, ceil). It is NOT
-   the normative F8 — §5/§7.2/§6.3 all specify a per-row calculation — but it is
-   the reading §7.3's "算出" column was produced with, so it is computed
-   alongside to keep that divergence visible instead of silently resolved. */
+   the normative F8: the per-row reading of §5/§7.2/§6.3 was confirmed as the
+   standard on 2026-09-25. It is kept only because §7.3's printed "算出" column
+   was produced with it, so the regression report can still compare old records. */
 export const wholeScreenRuns = (px: number, dataPx: number) => Math.ceil(px / dataPx);

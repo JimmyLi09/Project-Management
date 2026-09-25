@@ -11,5 +11,6 @@ export * from './compute.ts';
 export * from './drawing.ts';
 export * from './svg.ts';
 export * from './bom.ts';
+export * from './handoff.ts';
 export { FIXTURES, fixtureConfig, wholeScreenRuns, type Fixture } from './fixtures.ts';
 export { evalExpr, varsOf } from './expr.ts';

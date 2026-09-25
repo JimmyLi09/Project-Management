@@ -6,7 +6,7 @@ from pathlib import Path
 
 from . import dxf_reader, ocr, pdf_reader
 from .grade import grade
-from .models import DrawingIngest
+from .models import REVIEW_THRESHOLD, DrawingIngest
 from .pdf_reader import Calibration
 
 
@@ -34,7 +34,7 @@ def ingest(
     return ocr.read(path, ocr_backend)
 
 
-def summarise(result: DrawingIngest, threshold: float = 0.9) -> str:
+def summarise(result: DrawingIngest, threshold: float = REVIEW_THRESHOLD) -> str:
     """One-line status for 04's list view."""
     pending = result.unconfirmed_below(threshold)
     gate = "可进入 05" if result.may_enter_configuration(threshold) else f"待确认 {len(pending)} 项"
