@@ -11,7 +11,7 @@
 
 - 表 `av_price_item`，初始为空；PD / BD 点「导入 2026 LED 价格表（PDF）」载入
   《Audax LED Cost Book (2026 April)》（文件 `Audax_LED_Price_List-2026_June.pdf`）的 **8 类 47 条**。
-  数据在 `src/av/data/led-price-2026-04.json`，94 个价格已与 PDF 原文逐一比对一致。重复导入不会重复。
+  数据在 `src/av/seed/led-price-2026-04.json`，94 个价格已与 PDF 原文逐一比对一致。重复导入不会重复。
 - 列：类别、型号、点间距、模组尺寸、箱体 / 产品尺寸、单位、**成本价（取 Partner Price）**、**售价（取 MSRP）**、
   有效期至、启用状态、来源、更新人 / 时间。价格可留空表示「待定价」。
 - **价格会变**：每次改价或改有效期都写入 `av_price_history`，可在每行「历史」查看。

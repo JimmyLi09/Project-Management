@@ -5,7 +5,7 @@ import { test } from 'node:test';
 
 import { buildLedLines, checkSheet, displayCandidates, pitchOf, totals, type PriceItem, type SavedConfig } from '../pricing.ts';
 
-const seed = JSON.parse(readFileSync(new URL('../../data/led-price-2026-04.json', import.meta.url), 'utf8')).items as Record<string, unknown>[];
+const seed = JSON.parse(readFileSync(new URL('../../seed/led-price-2026-04.json', import.meta.url), 'utf8')).items as Record<string, unknown>[];
 const ITEMS: PriceItem[] = seed.map((r, i) => ({
   id: i + 1, line: 'led', category: r.category as string, categoryLabel: r.category_label as string,
   model: r.model as string, pitch: r.pitch as string, moduleSize: r.module_size as string, cabinetSize: r.cabinet_size as string,

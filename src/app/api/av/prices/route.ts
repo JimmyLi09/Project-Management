@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import seed from '@/av/data/led-price-2026-04.json';
+import seed from '@/av/seed/led-price-2026-04.json';
 import type { BusinessLine } from '@/av/core/types';
 import { canEditPrices, canViewPrices, identityOf } from '@/lib/permissions';
 import { createPriceItem, importPriceItems, listPriceItems, type PriceInput } from '@/server/avdb';
