@@ -32,24 +32,47 @@ export function pitchOf(label: string): number | null {
   return m ? Number(m[1]) : null;
 }
 
-/* The 05 result a cost sheet is built from (spec §10 config_result). */
-export interface SavedConfig {
+/* The 05 result a cost sheet is built from (spec §10 config_result). Every
+   line's summary says whether the configuration may be quoted at all. */
+export interface SummaryBase {
+  exportable: boolean;       // false when a blocking finding stands (LED-TYPE-01, PRJ-TYPE-01 …)
+  blocking: string[];
+}
+
+export interface LedSummary extends SummaryBase {
+  sqm: number;
+  pitch: number;
+  screenType: string;
+  mods: number;
+  cabinets: number;
+  nPowerCable: number;       // F7, spare included
+  nDataCable: number;        // F9, spare included
+  powerCableSpec: string;
+}
+
+export interface PrjSummary extends SummaryBase {
+  width: number;
+  height: number;
+  area: number;
+  nProj: number;
+  lmProj: number;
+  throwRatio: number;
+  pxW: number;
+  pxH: number;
+  kw: number;
+  nCircuit: number;
+  nSignalCable: number;      // P10, spare included
+  profile: string;
+  content: string;
+}
+
+export interface SavedConfig<S extends SummaryBase = LedSummary> {
   id: number;
   projectId: string;
+  line: BusinessLine;
   packVersion: string;
   drawingId: number | null;
-  summary: {
-    sqm: number;
-    pitch: number;
-    screenType: string;
-    mods: number;
-    cabinets: number;
-    nPowerCable: number;     // F7, spare included
-    nDataCable: number;      // F9, spare included
-    powerCableSpec: string;
-    exportable: boolean;     // false when LED-TYPE-01 or another block stands
-    blocking: string[];      // codes of blocking findings
-  };
+  summary: S;
   createdBy: string;
   createdAt: number;
 }
@@ -110,9 +133,10 @@ export interface CostCheck { code: string; severity: 'block' | 'warn' | 'ok'; me
 /* 提交前检查 (prototype Summary.dc.html): what stops a sheet from being
    confirmed, and what only needs a look. */
 export function checkSheet(
-  lines: CostLine[], cfg: SavedConfig, items: PriceItem[], marginFloor: number, today: string,
+  lines: CostLine[], cfg: SavedConfig<SummaryBase>, items: PriceItem[], marginFloor: number, today: string,
+  extra: CostCheck[] = [],
 ): CostCheck[] {
-  const out: CostCheck[] = [];
+  const out: CostCheck[] = [...extra];
   const byId = new Map(items.map((i) => [i.id, i]));
   if (!cfg.summary.exportable) {
     out.push({ code: 'COST-CFG', severity: 'block',
@@ -137,6 +161,46 @@ export function checkSheet(
       : { code: 'COST-MARGIN', severity: 'ok', message: `毛利率 ${pct(t.margin)} 不低于公司下限 ${pct(marginFloor)}。` });
   }
   return out;
+}
+
+/* ===== projection line ===== */
+
+/* Brightness as printed in the library's spec column, e.g. "12,000 lm" → 12000. */
+export const lumensOf = (spec: string): number | null => {
+  const m = /(\d+(?:\.\d+)?)/.exec(spec.replace(/,/g, ''));
+  return m ? Number(m[1]) : null;
+};
+
+export interface PrjPicks { projector: number | null; screen: number | null; signal_cable: number | null; mount: number | null; blend: number | null }
+
+export function buildPrjLines(cfg: SavedConfig<PrjSummary>, picks: PrjPicks, manual: ManualLine[], items: PriceItem[]): CostLine[] {
+  const byId = new Map(items.map((i) => [i.id, i]));
+  const priced = (key: string, name: string, qty: number, unit: string, qtySource: string, itemId: number | null): CostLine => {
+    const it = itemId === null ? undefined : byId.get(itemId);
+    return { key, name, qty, unit, qtySource, itemId: it ? it.id : null, itemLabel: it ? itemLabel(it) : '',
+      unitCost: it?.costPrice ?? null, unitList: it?.listPrice ?? null };
+  };
+  const s = cfg.summary;
+  return [
+    priced('projector', `投影机（单机 ≥ ${Math.ceil(s.lmProj).toLocaleString('en-US')} lm）`, s.nProj, '台', 'P2', picks.projector),
+    priced('screen', '投影幕 / 投影面', round2(s.area), '㎡', 'P1', picks.screen),
+    priced('signal_cable', '信号线（含 1 备用）', s.nSignalCable, '根', 'P10', picks.signal_cable),
+    priced('mount', '投影机吊架', s.nProj, '套', 'P2', picks.mount),
+    ...(s.nProj > 1 ? [priced('blend', '融合处理器', 1, '套', 'P2', picks.blend)] : []),
+    ...manual.map((m) => priced(m.key, m.name, m.qty, m.unit, '人工', m.itemId)),
+  ];
+}
+
+/* The chosen projector must reach the brightness P6 asks for. */
+export function prjChecks(lines: CostLine[], cfg: SavedConfig<PrjSummary>, items: PriceItem[]): CostCheck[] {
+  const line = lines.find((l) => l.key === 'projector');
+  const it = line?.itemId == null ? undefined : items.find((i) => i.id === line.itemId);
+  if (!it) return [];
+  const lm = lumensOf(it.pitch);
+  if (lm === null) return [{ code: 'PRJ-COST-LM', severity: 'warn', message: `「${itemLabel(it)}」未注明亮度（规格栏如 12000 lm），无法核对是否满足单机 ${Math.ceil(cfg.summary.lmProj)} lm。` }];
+  return lm < cfg.summary.lmProj
+    ? [{ code: 'PRJ-COST-LM', severity: 'block', message: `所选投影机 ${lm.toLocaleString('en-US')} lm 低于单机所需 ${Math.ceil(cfg.summary.lmProj).toLocaleString('en-US')} lm。` }]
+    : [];
 }
 
 export const round2 = (x: number) => Math.round(x * 100) / 100;

@@ -425,7 +425,7 @@ export default function LedStudioView() {
 const cellStyle: React.CSSProperties = { padding: '10px 18px', borderTop: '1px solid var(--row-line)' };
 
 /* The app's own .field styling: label above, full-width input / select. */
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
+export function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="field" style={{ marginBottom: 0, minWidth: 0 }}>
       <label>{label}</label>
@@ -434,12 +434,12 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
-const Two = ({ children }: { children: React.ReactNode }) => (
+export const Two = ({ children }: { children: React.ReactNode }) => (
   <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr)', gap: 11 }}>{children}</div>
 );
 
 /* A9 追溯视图 — expand a value to its inputs, and theirs, down to the sources. */
-function TraceChain({ trace, start }: { trace: Record<string, TraceNode>; start: string }) {
+export function TraceChain({ trace, start }: { trace: Record<string, TraceNode>; start: string }) {
   const { t } = useLang();
   const rows: { node: TraceNode; depth: number }[] = [];
   const seen = new Set<string>();

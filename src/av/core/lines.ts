@@ -1,8 +1,10 @@
 /* ===== AV platform · business lines (spec §2.2, §4) =====
-   One platform, several lines. Only LED is implemented in phase 1; the others
-   are architecturally reserved (§2.2: 投影、弱电、太阳能三条业务线 —— 架构预留，
-   本期不实现), so 01 shows them but cannot open a project on them yet. */
+   One platform, several lines. LED runs on a calibrated rule pack; projection
+   on a draft pack (prj@0.1-draft, 2026-09-25 decision) that can be configured
+   and costed but not quoted formally; ELV and solar are still reserved, so 01
+   shows them but cannot open a project on them yet. */
 
+import { LATEST_PRJ_PACK } from './prj/rulepack.ts';
 import { LATEST_LED_PACK } from './rulepack.ts';
 import type { BusinessLine } from './types.ts';
 
@@ -13,13 +15,14 @@ export interface LineInfo {
   prefix: string;          // field prefix, never shared across lines (§4)
   svc: string | null;      // service package it creates in the project, if any
   pack: string | null;     // latest published rule pack; null = not available yet
+  draft: boolean;          // pack is uncalibrated: configure and cost, never quote formally
 }
 
 export const LINES: LineInfo[] = [
-  { line: 'led', label: 'LED 显示屏', en: 'LED display', prefix: 'led_', svc: 'led', pack: LATEST_LED_PACK },
-  { line: 'projector', label: '投影系统', en: 'Projection', prefix: 'prj_', svc: 'projector', pack: null },
-  { line: 'elv', label: '弱电系统', en: 'ELV systems', prefix: 'elv_', svc: null, pack: null },
-  { line: 'pv', label: '太阳能光伏', en: 'Solar PV', prefix: 'pv_', svc: null, pack: null },
+  { line: 'led', label: 'LED 显示屏', en: 'LED display', prefix: 'led_', svc: 'led', pack: LATEST_LED_PACK, draft: false },
+  { line: 'projector', label: '投影系统', en: 'Projection', prefix: 'prj_', svc: 'projector', pack: LATEST_PRJ_PACK, draft: true },
+  { line: 'elv', label: '弱电系统', en: 'ELV systems', prefix: 'elv_', svc: null, pack: null, draft: false },
+  { line: 'pv', label: '太阳能光伏', en: 'Solar PV', prefix: 'pv_', svc: null, pack: null, draft: false },
 ];
 
 export const lineInfo = (line: BusinessLine) => LINES.find((l) => l.line === line)!;

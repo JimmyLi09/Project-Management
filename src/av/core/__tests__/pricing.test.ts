@@ -18,7 +18,7 @@ const cable = (id: number, name: string, cost: number | null, list: number | nul
 
 /* 144-Chuan Grove as saved from 05: 11.4688 ㎡, P2, 4 power / 7 data cables. */
 const CFG: SavedConfig = {
-  id: 1, projectId: 'p', packVersion: 'led@1.0', drawingId: 1, createdBy: 'PM', createdAt: 0,
+  id: 1, projectId: 'p', line: 'led', packVersion: 'led@1.0', drawingId: 1, createdBy: 'PM', createdAt: 0,
   summary: { sqm: 11.4688, pitch: 2, screenType: 'in_fixed', mods: 224, cabinets: 35, nPowerCable: 4, nDataCable: 7,
     powerCableSpec: '3*2.5', exportable: true, blocking: [] },
 };

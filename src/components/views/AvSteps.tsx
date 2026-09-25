@@ -26,7 +26,8 @@ export default function AvSteps() {
       style={{ display: 'flex', gap: 4, flexWrap: 'wrap', background: 'var(--card)', border: '1px solid var(--border)',
         borderRadius: 10, padding: 4, marginBottom: 20 }}>
       {STEPS.map((s) => {
-        const on = s.view === view.name;
+        /* 05 is one step with one screen per business line */
+        const on = s.view === view.name || (s.view === 'ledstudio' && view.name === 'prjstudio');
         const off = s.view === null;
         return (
           <button key={s.no} disabled={off} onClick={() => s.view && go(s.view)}
@@ -42,6 +43,17 @@ export default function AvSteps() {
           </button>
         );
       })}
+      {(view.name === 'ledstudio' || view.name === 'prjstudio') && (
+        <span style={{ flexBasis: '100%', display: 'flex', gap: 6, padding: '4px 8px 2px', fontSize: 12, alignItems: 'center' }}>
+          <span style={{ color: 'var(--text2)' }}>{t('业务线', 'Line')}</span>
+          {([['ledstudio', 'LED 显示屏', 'LED'], ['prjstudio', '投影系统（草案）', 'Projection (draft)']] as const).map(([v, zh, en]) => (
+            <button key={v} onClick={() => go(v)} style={{ font: 'inherit', fontSize: 12, padding: '3px 10px', borderRadius: 5, border: '1px solid var(--border)',
+              background: view.name === v ? 'var(--hover-bg)' : 'transparent', fontWeight: view.name === v ? 700 : 400, cursor: 'pointer', color: 'var(--text)' }}>
+              {t(zh, en)}
+            </button>
+          ))}
+        </span>
+      )}
     </nav>
   );
 }

@@ -104,7 +104,7 @@ export default function AvInquiryView() {
                   <input type="checkbox" checked={on} disabled={!ok} onChange={() => toggle(l.line)} style={{ width: 17, height: 17 }} />
                   <span style={{ fontWeight: 500 }}>{t(l.label, l.en)}</span>
                   <span style={{ marginLeft: 'auto', fontSize: 12, color: ok ? 'var(--navy700)' : 'var(--text2)' }}>
-                    {ok ? t(`规则包 ${l.pack}`, `pack ${l.pack}`) : t('规则包未发布 · 架构预留', 'no rule pack yet')}
+                    {ok ? t(`规则包 ${l.pack}${l.draft ? ' · 草案，不可正式报价' : ''}`, `pack ${l.pack}${l.draft ? ' · draft' : ''}`) : t('规则包未发布 · 架构预留', 'no rule pack yet')}
                   </span>
                 </label>
               );

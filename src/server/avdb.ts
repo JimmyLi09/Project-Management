@@ -10,8 +10,8 @@
 
 import { getDb } from './db';
 import type { DrawingElement, DrawingSummary, IngestRecord, IngestResult, StoredDrawing } from '@/av/core/handoff';
-import type { CostLine, PriceItem, SavedConfig } from '@/av/core/pricing';
-import type { BusinessLine, LedConfig } from '@/av/core/types';
+import type { CostLine, PriceItem, SavedConfig, SummaryBase } from '@/av/core/pricing';
+import type { BusinessLine } from '@/av/core/types';
 
 export type { DrawingSummary, StoredDrawing };
 
@@ -403,28 +403,22 @@ export function setMarginFloor(v: number, by: string): void {
 
 /* ===== 05 configuration saves (§10 config_result) ===== */
 
-export function saveConfig(c: Omit<SavedConfig, 'id' | 'createdAt'>, cfg: LedConfig, line: BusinessLine): SavedConfig {
+export function saveConfig<S extends SummaryBase>(c: Omit<SavedConfig<S>, 'id' | 'createdAt'>, cfg: unknown): SavedConfig<S> {
   const createdAt = Date.now();
   const { lastInsertRowid } = db().prepare(`INSERT INTO av_config (project_id, line, pack_version, drawing_id, cfg, summary, created_by, created_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
-    .run(c.projectId, line, c.packVersion, c.drawingId, JSON.stringify(cfg), JSON.stringify(c.summary), c.createdBy, createdAt);
+    .run(c.projectId, c.line, c.packVersion, c.drawingId, JSON.stringify(cfg), JSON.stringify(c.summary), c.createdBy, createdAt);
   return { ...c, id: Number(lastInsertRowid), createdAt };
 }
 
-type ConfigRow = { id: number; project_id: string; pack_version: string; drawing_id: number | null; cfg: string; summary: string; created_by: string; created_at: number };
-const toConfig = (r: ConfigRow): SavedConfig => ({
-  id: r.id, projectId: r.project_id, packVersion: r.pack_version, drawingId: r.drawing_id,
-  summary: JSON.parse(r.summary), createdBy: r.created_by, createdAt: r.created_at,
-});
+type ConfigRow = { id: number; project_id: string; line: string; pack_version: string; drawing_id: number | null; cfg: string; summary: string; created_by: string; created_at: number };
 
-export function latestConfig(projectId: string, line: BusinessLine): (SavedConfig & { cfg: LedConfig }) | null {
+export function latestConfig<S extends SummaryBase = SummaryBase>(projectId: string, line: BusinessLine): (SavedConfig<S> & { cfg: unknown }) | null {
   const r = db().prepare('SELECT * FROM av_config WHERE project_id = ? AND line = ? ORDER BY id DESC LIMIT 1').get(projectId, line) as ConfigRow | undefined;
-  return r ? { ...toConfig(r), cfg: JSON.parse(r.cfg) } : null;
-}
-
-export function getConfig(id: number): SavedConfig | null {
-  const r = db().prepare('SELECT * FROM av_config WHERE id = ?').get(id) as ConfigRow | undefined;
-  return r ? toConfig(r) : null;
+  return r ? {
+    id: r.id, projectId: r.project_id, line: r.line as BusinessLine, packVersion: r.pack_version, drawingId: r.drawing_id,
+    summary: JSON.parse(r.summary) as S, createdBy: r.created_by, createdAt: r.created_at, cfg: JSON.parse(r.cfg),
+  } : null;
 }
 
 /* ===== cost sheets ===== */

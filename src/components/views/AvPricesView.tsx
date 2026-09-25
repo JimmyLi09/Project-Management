@@ -31,6 +31,7 @@ export default function AvPricesView() {
   const { me } = useStore();
   const { t } = useLang();
   const mayEdit = canEditPrices(me);
+  const [line, setLine] = useState<'led' | 'projector'>('led');
   const [items, setItems] = useState<PriceItem[]>([]);
   const [floor, setFloor] = useState<number | null>(null);
   const [floorDraft, setFloorDraft] = useState('');
@@ -44,13 +45,14 @@ export default function AvPricesView() {
 
   const load = useCallback(async () => {
     try {
-      setItems((await call<{ items: PriceItem[] }>('/api/av/prices?line=led')).items);
+      setItems((await call<{ items: PriceItem[] }>(`/api/av/prices?line=${line}`)).items);
       const f = (await call<{ marginFloor: number }>('/api/av/settings')).marginFloor;
       setFloor(f);
       setFloorDraft(String(Math.round(f * 1000) / 10));
     } catch (e) { setError((e as Error).message); }
-  }, []);
+  }, [line]);
   useEffect(() => { if (canViewPrices(me)) load(); }, [load, me]);
+  useEffect(() => { setCat(''); setEditing(null); setAdding(false); setHistory(null); setMsg(''); }, [line]);
 
   const categories = useMemo(() => [...new Map(items.map((i) => [i.categoryLabel, i.categoryLabel])).keys()], [items]);
   const shown = cat ? items.filter((i) => i.categoryLabel === cat) : items;
@@ -77,7 +79,7 @@ export default function AvPricesView() {
   }), t('毛利下限已更新。', 'Margin floor updated.'));
 
   const save = () => run(async () => {
-    const item = { ...draft, line: 'led' };
+    const item = { ...draft, line };
     if (editing !== null) await call(`/api/av/prices/${editing}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ item }) });
     else await call('/api/av/prices', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ item }) });
     setEditing(null); setAdding(false); setDraft(EMPTY);
@@ -102,7 +104,7 @@ export default function AvPricesView() {
     <tr key={key} style={{ background: 'var(--hover-bg)' }}>
       <td style={td}>{field('categoryLabel', 130, 'text', t('类别 *', 'Category *'))}</td>
       <td style={td}>{field('model', 110, 'text', t('型号', 'Model'))}</td>
-      <td style={td}>{field('pitch', 80, 'text', 'P2')}</td>
+      <td style={td}>{field('pitch', 90, 'text', line === 'projector' ? '12000 lm' : 'P2')}</td>
       <td style={td}>{field('moduleSize', 100)}</td>
       <td style={td}>{field('cabinetSize', 130)}</td>
       <td style={td}>{field('unit', 50, 'text', '㎡')}</td>
@@ -136,10 +138,15 @@ export default function AvPricesView() {
 
       <div className="panel clip" style={{ padding: 0 }}>
         <div className="panel-head">
-          <span className="panel-title">{t('LED 价格库', 'LED price library')} <span style={{ fontWeight: 400, color: 'var(--text2)', fontSize: 12 }}>· {items.length} {t('条', 'items')}</span></span>
+          <span className="panel-title" style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+            <select className="in sm" value={line} onChange={(e) => setLine(e.target.value as 'led' | 'projector')} aria-label={t('业务线', 'Line')}>
+              <option value="led">{t('LED 价格库', 'LED price library')}</option>
+              <option value="projector">{t('投影价格库', 'Projection price library')}</option>
+            </select>
+            <span style={{ fontWeight: 400, color: 'var(--text2)', fontSize: 12 }}>· {items.length} {t('条', 'items')}</span></span>
           {mayEdit && (
             <span style={{ display: 'flex', gap: 8 }}>
-              <button className="btn-line" onClick={importPdf}>{t('导入 2026 LED 价格表（PDF）', 'Import 2026 LED cost book')}</button>
+              {line === 'led' && <button className="btn-line" onClick={importPdf}>{t('导入 2026 LED 价格表（PDF）', 'Import 2026 LED cost book')}</button>}
               <button className="btn-navy" onClick={() => { setAdding(true); setEditing(null); setDraft(EMPTY); }}>{t('新增条目', 'Add item')}</button>
             </span>
           )}
@@ -147,8 +154,11 @@ export default function AvPricesView() {
 
         <div style={{ padding: '12px 18px', display: 'grid', gap: 10 }}>
           <p style={{ fontSize: 12, color: 'var(--text2)', lineHeight: 1.7 }}>
-            {t('成本价取 PDF 的 Partner Price，售价取 MSRP；价格会变，可随时修改，每次改价都留有历史。价格留空表示待定价，成本表会拦住未定价的条目。线材、控制系统、钢结构、安装人工等不在 PDF 中，需要逐条添加。',
-              'Cost = Partner Price, sell = MSRP. Every price change is kept in history. Blank prices block costing.')}
+            {line === 'led'
+              ? t('成本价取 PDF 的 Partner Price，售价取 MSRP；价格会变，可随时修改，每次改价都留有历史。价格留空表示待定价，成本表会拦住未定价的条目。线材、控制系统、钢结构、安装人工等不在 PDF 中，需要逐条添加。',
+                'Cost = Partner Price, sell = MSRP. Every price change is kept in history. Blank prices block costing.')
+              : t('投影暂无价格表，逐条录入。投影机的「规格」栏填亮度（如 12000 lm），成本核算据此核对是否满足单机所需亮度；幕布按 ㎡、信号线按根、吊架与融合处理器按套计价。',
+                'No price list yet. Put brightness in the spec column (e.g. 12000 lm) for projectors.')}
           </p>
           {categories.length > 0 && (
             <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
@@ -166,14 +176,14 @@ export default function AvPricesView() {
 
         {items.length === 0 && !adding ? (
           <p style={{ padding: '0 18px 18px', fontSize: 13, color: 'var(--text2)' }}>
-            {t('价格库为空。可导入 2026 年 LED 价格表，或逐条添加。', 'The library is empty. Import the 2026 LED cost book or add items.')}
+            {line === 'led' ? t('价格库为空。可导入 2026 年 LED 价格表，或逐条添加。', 'The library is empty. Import the 2026 LED cost book or add items.') : t('投影价格库为空，请逐条添加。', 'The projection library is empty.')}
           </p>
         ) : (
           <div style={{ overflowX: 'auto' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5, minWidth: 1180 }}>
               <tbody>
                 <tr>
-                  {[t('类别', 'Category'), t('型号', 'Model'), t('点间距', 'Pitch'), t('模组尺寸', 'Module'), t('箱体 / 产品尺寸', 'Cabinet / product'),
+                  {[t('类别', 'Category'), t('型号', 'Model'), line === 'projector' ? t('规格 / 亮度', 'Spec / lumens') : t('点间距', 'Pitch'), t('模组尺寸', 'Module'), t('箱体 / 产品尺寸', 'Cabinet / product'),
                     t('单位', 'Unit'), t('成本价 Partner', 'Cost (Partner)'), t('售价 MSRP', 'Sell (MSRP)'), t('有效期至', 'Valid until'), t('更新', 'Updated'), ''].map((h, i) => <th key={i} style={th}>{h}</th>)}
                 </tr>
                 {adding && editRow('new')}
