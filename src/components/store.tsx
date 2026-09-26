@@ -9,7 +9,7 @@ import type { Identity } from '@/lib/permissions';
 import type { Handoff, StoredDrawing } from '@/av/core/handoff';
 
 export interface View {
-  name: 'overview' | 'projects' | 'team' | 'mytasks' | 'dupdate' | 'stats' | 'contacts' | 'finance' | 'registers' | 'avinquiry' | 'ledingest' | 'ledstudio' | 'prjstudio' | 'elvstudio' | 'pvstudio' | 'avcost' | 'avprices' | 'users' | 'templates' | 'project';
+  name: 'overview' | 'projects' | 'team' | 'mytasks' | 'dupdate' | 'stats' | 'contacts' | 'finance' | 'registers' | 'avinquiry' | 'ledingest' | 'ledstudio' | 'prjstudio' | 'elvstudio' | 'pvstudio' | 'avcost' | 'avquote' | 'avprices' | 'users' | 'templates' | 'project';
   pid?: string;
   tab?: 'overview' | 'schedule' | 'checklist' | 'jobrecord';
   pkg?: number;

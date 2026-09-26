@@ -29,3 +29,7 @@ export const LINES: LineInfo[] = [
 
 export const lineInfo = (line: BusinessLine) => LINES.find((l) => l.line === line)!;
 export const isAvailable = (l: LineInfo) => l.pack !== null && l.svc !== null;
+
+/* The lines a project carries: its service packages, plus whatever 01 recorded. */
+export const projectLines = (svcs: string[], inquiryLines: BusinessLine[] = []) =>
+  LINES.filter((l) => (l.svc && svcs.includes(l.svc)) || inquiryLines.includes(l.line));

@@ -61,6 +61,12 @@ export const canViewPrices = (u: Identity) => u.role !== 'member' && u.role !== 
 export const canEditPrices = (u: Identity) => isFull(u);
 export const canCostProject = (u: Identity, p?: Project) => canReviewDrawing(u, p);
 
+/* 07 报价审批 (2026-09-26): sales or the project's PM put a quotation together
+   and submit it; every quotation needs PD / BD approval before it goes out. */
+export const canSubmitQuote = (u: Identity, p?: Project) =>
+  isFull(u) || u.role === 'sales' || (u.role === 'pm' && (!p || canEdit(u, p)));
+export const canApproveQuote = (u: Identity) => isFull(u);
+
 export const ROLE_LABEL: Record<Role, string> = {
   director: 'PD',
   bd: 'BD',

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { lineInfo, LINES } from '@/av/core/lines';
+import { lineInfo, projectLines } from '@/av/core/lines';
 import {
   buildElvLines, buildLedLines, buildPrjLines, buildPvLines, checkSheet, elvChecks, prjChecks, pvChecks, totals,
   type ElvPicks, type ElvSummary, type LedSummary, type ManualLine, type Picks, type PrjPicks, type PrjSummary, type PvPicks, type PvSummary, type SavedConfig,
@@ -70,8 +70,7 @@ export async function GET(req: NextRequest) {
     : line === 'pv' ? pvChecks(sheet.lines, config as SavedConfig<PvSummary>, items) : [];
 
   /* one row per business line the project carries */
-  const svcs = new Set(project.packages.map((k) => k.svc));
-  const summary = LINES.filter((l) => l.svc && svcs.has(l.svc) || inquiry?.lines.includes(l.line)).map((l) => {
+  const summary = projectLines(project.packages.map((k) => k.svc), inquiry?.lines).map((l) => {
     const s = COSTED.includes(l.line) ? latestCostSheet(projectId, l.line) : null;
     const c = COSTED.includes(l.line) ? latestConfig(projectId, l.line) : null;
     return {

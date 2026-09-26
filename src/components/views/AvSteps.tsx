@@ -1,21 +1,19 @@
 'use client';
 
-/* The AV platform's step bar (01 → 07), shown on each AV screen. 07 报价审批
-   is deliberately not built yet (every business line comes first), so it shows
-   but does not navigate. */
+/* The AV platform's step bar (01 → 07), shown on each AV screen. */
 
 import React from 'react';
 import { useLang } from '@/lib/i18n';
 import { useStore, type View } from '../store';
 
-type Step = { no: string; zh: string; en: string; view: View['name'] | null };
+type Step = { no: string; zh: string; en: string; view: View['name'] };
 
 const STEPS: Step[] = [
   { no: '01', zh: '立项询价', en: 'Inquiry', view: 'avinquiry' },
   { no: '02–04', zh: '图纸 · 解析 · 校核', en: 'Drawings & review', view: 'ledingest' },
   { no: '05', zh: '方案配置', en: 'Configuration', view: 'ledstudio' },
   { no: '06', zh: '成本核算', en: 'Costing', view: 'avcost' },
-  { no: '07', zh: '报价审批', en: 'Quotation', view: null },
+  { no: '07', zh: '报价审批', en: 'Quotation', view: 'avquote' },
 ];
 
 /* 05 is one step with one screen per business line */
@@ -30,18 +28,14 @@ export default function AvSteps() {
         borderRadius: 10, padding: 4, marginBottom: 20 }}>
       {STEPS.map((s) => {
         const on = s.view === view.name || (s.view === 'ledstudio' && STUDIOS.includes(view.name));
-        const off = s.view === null;
         return (
-          <button key={s.no} disabled={off} onClick={() => s.view && go(s.view)}
-            title={off ? t('报价审批暂不开放：先完成全部业务线', 'Not open yet') : undefined}
+          <button key={s.no} onClick={() => go(s.view)}
             style={{
               flex: '1 1 150px', textAlign: 'left', padding: '8px 12px', borderRadius: 7, border: 0,
-              background: on ? 'var(--navy900)' : 'transparent', color: on ? '#fff' : off ? 'var(--text2)' : 'var(--text)',
-              cursor: off ? 'not-allowed' : 'pointer', opacity: off ? 0.55 : 1, font: 'inherit',
+              background: on ? 'var(--navy900)' : 'transparent', color: on ? '#fff' : 'var(--text)', cursor: 'pointer', font: 'inherit',
             }}>
             <span className="tnum" style={{ fontSize: 11, fontWeight: 700, opacity: 0.8 }}>{s.no}</span>{' '}
             <span style={{ fontSize: 13, fontWeight: 600 }}>{t(s.zh, s.en)}</span>
-            {off && <span style={{ fontSize: 10.5, marginLeft: 6 }}>{t('暂不开放', 'not yet')}</span>}
           </button>
         );
       })}

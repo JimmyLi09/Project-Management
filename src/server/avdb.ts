@@ -11,6 +11,7 @@
 import { getDb } from './db';
 import type { DrawingElement, DrawingSummary, IngestRecord, IngestResult, StoredDrawing } from '@/av/core/handoff';
 import type { CostLine, PriceItem, SavedConfig, SummaryBase } from '@/av/core/pricing';
+import type { QuoteSection } from '@/av/core/quote';
 import type { BusinessLine } from '@/av/core/types';
 
 export type { DrawingSummary, StoredDrawing };
@@ -108,6 +109,21 @@ function db() {
         created_at INTEGER NOT NULL,
         confirmed_by TEXT NOT NULL DEFAULT '',
         confirmed_at INTEGER NOT NULL DEFAULT 0
+      );
+      CREATE TABLE IF NOT EXISTS av_quote (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        project_id TEXT NOT NULL,
+        sections TEXT NOT NULL,
+        discount_pct REAL NOT NULL,
+        gst_rate REAL NOT NULL,
+        margin_floor REAL NOT NULL,
+        reason TEXT NOT NULL DEFAULT '',
+        status TEXT NOT NULL DEFAULT 'submitted',
+        submitted_by TEXT NOT NULL,
+        submitted_at INTEGER NOT NULL,
+        decided_by TEXT NOT NULL DEFAULT '',
+        decided_at INTEGER NOT NULL DEFAULT 0,
+        decision_note TEXT NOT NULL DEFAULT ''
       );
       CREATE TABLE IF NOT EXISTS av_extraction (
         drawing_id INTEGER NOT NULL REFERENCES av_drawing(id) ON DELETE CASCADE,
@@ -300,6 +316,7 @@ export function deleteProjectDrawings(projectId: string): void {
     d.prepare('DELETE FROM av_inquiry WHERE project_id = ?').run(projectId);
     d.prepare('DELETE FROM av_config WHERE project_id = ?').run(projectId);
     d.prepare('DELETE FROM av_cost_sheet WHERE project_id = ?').run(projectId);
+    d.prepare('DELETE FROM av_quote WHERE project_id = ?').run(projectId);
     d.prepare('DELETE FROM av_extraction WHERE drawing_id IN (SELECT id FROM av_drawing WHERE project_id = ?)').run(projectId);
     d.prepare('DELETE FROM av_drawing WHERE project_id = ?').run(projectId);
   })();
@@ -458,4 +475,61 @@ export function saveCostSheet(s: Pick<CostSheet, 'projectId' | 'line' | 'configI
 export function latestCostSheet(projectId: string, line: BusinessLine): CostSheet | null {
   const r = db().prepare('SELECT * FROM av_cost_sheet WHERE project_id = ? AND line = ? ORDER BY id DESC LIMIT 1').get(projectId, line) as SheetRow | undefined;
   return r ? toSheet(r) : null;
+}
+
+/* ===== 07 quotations =====
+   A quotation freezes the sections it was built from, the discount, the GST
+   rate and the margin floor of the day, so the document reads the same later.
+   Submitting a new one supersedes a quotation still waiting for approval. */
+
+export type QuoteStatus = 'submitted' | 'approved' | 'rejected' | 'superseded';
+
+export interface Quote {
+  id: number;
+  projectId: string;
+  sections: QuoteSection[];
+  discountPct: number;
+  gstRate: number;
+  marginFloor: number;
+  reason: string;
+  status: QuoteStatus;
+  submittedBy: string;
+  submittedAt: number;
+  decidedBy: string;
+  decidedAt: number;
+  decisionNote: string;
+}
+
+type QuoteRow = { id: number; project_id: string; sections: string; discount_pct: number; gst_rate: number; margin_floor: number;
+  reason: string; status: string; submitted_by: string; submitted_at: number; decided_by: string; decided_at: number; decision_note: string };
+const toQuote = (r: QuoteRow): Quote => ({
+  id: r.id, projectId: r.project_id, sections: JSON.parse(r.sections), discountPct: r.discount_pct, gstRate: r.gst_rate,
+  marginFloor: r.margin_floor, reason: r.reason, status: r.status as QuoteStatus, submittedBy: r.submitted_by,
+  submittedAt: r.submitted_at, decidedBy: r.decided_by, decidedAt: r.decided_at, decisionNote: r.decision_note,
+});
+
+export function createQuote(q: Pick<Quote, 'projectId' | 'sections' | 'discountPct' | 'gstRate' | 'marginFloor' | 'reason'>, by: string): Quote {
+  const d = db();
+  const id = d.transaction(() => {
+    d.prepare("UPDATE av_quote SET status = 'superseded' WHERE project_id = ? AND status = 'submitted'").run(q.projectId);
+    return Number(d.prepare(`INSERT INTO av_quote (project_id, sections, discount_pct, gst_rate, margin_floor, reason, submitted_by, submitted_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(q.projectId, JSON.stringify(q.sections), q.discountPct, q.gstRate, q.marginFloor, q.reason, by, Date.now()).lastInsertRowid);
+  })();
+  return getQuote(id)!;
+}
+
+export function getQuote(id: number): Quote | null {
+  const r = db().prepare('SELECT * FROM av_quote WHERE id = ?').get(id) as QuoteRow | undefined;
+  return r ? toQuote(r) : null;
+}
+
+export function listQuotes(projectId: string): Quote[] {
+  return (db().prepare('SELECT * FROM av_quote WHERE project_id = ? ORDER BY id DESC').all(projectId) as QuoteRow[]).map(toQuote);
+}
+
+/* Only a quotation still waiting can be decided; false when it no longer is. */
+export function decideQuote(id: number, status: 'approved' | 'rejected', by: string, note: string): boolean {
+  return db().prepare(`UPDATE av_quote SET status = ?, decided_by = ?, decided_at = ?, decision_note = ? WHERE id = ? AND status = 'submitted'`)
+    .run(status, by, Date.now(), note, id).changes === 1;
 }
