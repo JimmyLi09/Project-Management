@@ -66,9 +66,11 @@ export function quoteChecks(sections: QuoteSection[], discountPct: number, t: Qu
   if (!sections.length) out.push({ code: 'QUOTE-EMPTY', severity: 'block', message: '至少选择一条已确认成本的业务线。' });
   if (!(discountPct >= 0 && discountPct < 100)) out.push({ code: 'QUOTE-DISC', severity: 'block', message: '折扣须在 0–100% 之间。' });
   if (sections.length && t.margin !== null && t.margin < marginFloor) {
+    /* rounded down, so 17.96% never reads as "18.0% below 18%" */
+    const m = (Math.floor(t.margin * 1000) / 10).toFixed(1);
     out.push(reason.trim()
-      ? { code: 'QUOTE-MARGIN', severity: 'warn', message: `折后毛利 ${(t.margin * 100).toFixed(1)}% 低于公司下限 ${(marginFloor * 100).toFixed(0)}%，已填写理由，由审批人决定。` }
-      : { code: 'QUOTE-MARGIN', severity: 'block', message: `折后毛利 ${(t.margin * 100).toFixed(1)}% 低于公司下限 ${(marginFloor * 100).toFixed(0)}%，须填写理由。` });
+      ? { code: 'QUOTE-MARGIN', severity: 'warn', message: `折后毛利 ${m}% 低于公司下限 ${(marginFloor * 100).toFixed(0)}%，已填写理由，由审批人决定。` }
+      : { code: 'QUOTE-MARGIN', severity: 'block', message: `折后毛利 ${m}% 低于公司下限 ${(marginFloor * 100).toFixed(0)}%，须填写理由。` });
   }
   return out;
 }

@@ -48,3 +48,10 @@ test('项目业务线与报价编号', () => {
   assert.deepEqual(projectLines(['led'], ['pv']).map((l) => l.line), ['led', 'pv']);
   assert.equal(quoteNo(7), 'AVQ-0007');
 });
+
+test('低于下限的毛利向下取整显示，不会出现「18.0% 低于 18%」', () => {
+  const s = toSection('led', { id: 1, cost: 8204, list: 10000, lines: [] });
+  /* 5% 折后 9,500，毛利 1,296 ÷ 9,500 = 13.64%；这里用 17.96% 的场景 */
+  const t = { ...quoteTotals([s], 0, GST_RATE), margin: 0.1796 };
+  assert.match(quoteChecks([s], 0, t, 0.18, '')[0].message, /17\.9%/);
+});
