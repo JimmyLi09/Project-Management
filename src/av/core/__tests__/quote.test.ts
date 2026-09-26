@@ -27,7 +27,7 @@ test('报价单只带售价', () => {
 test('合计：折扣作用于售价合计，GST 9% 加在折后小计上', () => {
   const t = quoteTotals([led, prj], 5, GST_RATE);
   /* 27,395 × 5% = 1,369.75 → 26,025.25；GST 2,342.27（四舍五入到分）；成本 22,451.50 */
-  assert.deepEqual({ ...t, margin: undefined }, { list: 27395, discount: 1369.75, subtotal: 26025.25, gst: 2342.27, total: 28367.52, cost: 22451.5, margin: undefined });
+  assert.deepEqual({ ...t, margin: undefined }, { list: 27395, shared: 0, discount: 1369.75, subtotal: 26025.25, gst: 2342.27, total: 28367.52, cost: 22451.5, margin: undefined });
   assert.ok(Math.abs(t.margin! - (26025.25 - 22451.5) / 26025.25) < 1e-12);
   assert.equal(quoteTotals([], 0, GST_RATE).margin, null);
 });

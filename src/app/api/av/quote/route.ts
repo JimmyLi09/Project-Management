@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { lineInfo, projectLines } from '@/av/core/lines';
 import { GST_RATE, lineState, quoteChecks, quoteNo, quoteTotals, toSection } from '@/av/core/quote';
 import type { BusinessLine } from '@/av/core/types';
+import { dedupe, sharedRows } from '@/av/core/xline';
 import { canApproveQuote, canSubmitQuote, canViewPrices, identityOf } from '@/lib/permissions';
 import { createQuote, getInquiry, getMarginFloor, latestConfig, latestCostSheet, listQuotes } from '@/server/avdb';
 import { appendAudit, getProject } from '@/server/db';
@@ -9,10 +10,11 @@ import { currentUser } from '@/server/session';
 
 /* 07 报价审批.
    GET ?project=ID   every line the project carries with whether it can be
-        quoted (only a confirmed sheet on the latest configuration can), and
-        the project's quotations.
+        quoted (only a confirmed sheet on the latest configuration can) and its
+        rows tagged as shared resources, and the project's quotations.
    POST { projectId, lines, discountPct, reason }   build a quotation from the
-        latest confirmed sheets of the chosen lines and submit it for approval. */
+        latest confirmed sheets of the chosen lines, take off the cross-line
+        savings among them, and submit it for approval. */
 
 function lineRows(projectId: string, svcs: string[]) {
   return projectLines(svcs, getInquiry(projectId)?.lines).map((l) => {
@@ -32,6 +34,7 @@ export async function GET(req: NextRequest) {
   return NextResponse.json({
     lines: lineRows(project.id, project.packages.map((k) => k.svc)).map((r) => ({
       line: r.line, state: r.state, cost: r.sheet?.cost ?? null, list: r.sheet?.list ?? null,
+      shared: r.sheet ? sharedRows(r.line, r.sheet.lines) : [],
     })),
     quotes: listQuotes(project.id),
     marginFloor: getMarginFloor(), gstRate: GST_RATE,
@@ -54,17 +57,19 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: `${notReady.map((r) => lineInfo(r.line).label).join('、')}没有已确认的最新成本，不能进入报价。` }, { status: 400 });
   }
   const sections = rows.map((r) => toSection(r.line as BusinessLine, r.sheet!));
+  const dedup = dedupe(rows.flatMap((r) => sharedRows(r.line, r.sheet!.lines)));
   const discountPct = Number(body.discountPct ?? 0);
   const reason = String(body.reason ?? '').trim();
   const marginFloor = getMarginFloor();
-  const totals = quoteTotals(sections, discountPct, GST_RATE);
-  const blocks = quoteChecks(sections, discountPct, totals, marginFloor, reason).filter((c) => c.severity === 'block');
+  const totals = quoteTotals(sections, discountPct, GST_RATE, dedup);
+  const blocks = quoteChecks(sections, discountPct, totals, marginFloor, reason, dedup).filter((c) => c.severity === 'block');
   if (blocks.length) return NextResponse.json({ error: blocks.map((c) => c.message).join(' ') }, { status: 400 });
 
-  const quote = createQuote({ projectId: project.id, sections, discountPct, gstRate: GST_RATE, marginFloor, reason }, user.name);
+  const quote = createQuote({ projectId: project.id, sections, dedup, discountPct, gstRate: GST_RATE, marginFloor, reason }, user.name);
   appendAudit(project.id, [{
     at: Date.now(), by: user.name,
     text: `提交报价 ${quoteNo(quote.id)} 待审批：${sections.map((s) => lineInfo(s.line).label).join(' + ')} · 含税 S$${totals.total.toLocaleString('en-US')}`
+      + (totals.shared ? ` · 共用资源去重 −S$${totals.shared.toLocaleString('en-US')}` : '')
       + ` · 折后毛利 ${totals.margin === null ? '—' : (totals.margin * 100).toFixed(1) + '%'}`,
   }]);
   return NextResponse.json({ quote });

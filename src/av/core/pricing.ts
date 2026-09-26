@@ -5,6 +5,7 @@
    moves on its own, and the checks say when the library has moved under it. */
 
 import type { BusinessLine } from './types.ts';
+import type { SharedTag } from './xline.ts';
 
 export interface PriceItem {
   id: number;
@@ -126,6 +127,7 @@ export interface CostLine {
   itemLabel: string;
   unitCost: number | null;   // snapshot at computation time
   unitList: number | null;
+  shared?: SharedTag;        // cross-line shared resource (xline.ts)
 }
 
 export const itemLabel = (i: PriceItem) =>
@@ -138,7 +140,8 @@ export function displayCandidates(items: PriceItem[], pitch: number): PriceItem[
   return [...sqm.filter(fits), ...sqm.filter((i) => !fits(i))];
 }
 
-export interface ManualLine { key: string; name: string; qty: number; unit: string; itemId: number | null }
+export interface ManualLine { key: string; name: string; qty: number; unit: string; itemId: number | null; shared?: SharedTag }
+const tagged = (l: CostLine, shared?: SharedTag): CostLine => (shared ? { ...l, shared } : l);
 export interface Picks { display: number | null; power_cable: number | null; data_cable: number | null }
 
 export function buildLedLines(cfg: SavedConfig, picks: Picks, manual: ManualLine[], items: PriceItem[]): CostLine[] {
@@ -155,7 +158,7 @@ export function buildLedLines(cfg: SavedConfig, picks: Picks, manual: ManualLine
     priced('display', `LED 显示屏 P${s.pitch}`, round2(s.sqm), '㎡', 'F1', picks.display),
     priced('power_cable', `电源线 ${s.powerCableSpec}（含 1 备用）`, s.nPowerCable, '根', 'F7', picks.power_cable),
     priced('data_cable', '数据线（含 1 备用）', s.nDataCable, '根', 'F9', picks.data_cable),
-    ...manual.map((m) => priced(m.key, m.name, m.qty, m.unit, '人工', m.itemId)),
+    ...manual.map((m) => tagged(priced(m.key, m.name, m.qty, m.unit, '人工', m.itemId), m.shared)),
   ];
 }
 
@@ -228,7 +231,7 @@ export function buildPrjLines(cfg: SavedConfig<PrjSummary>, picks: PrjPicks, man
     priced('signal_cable', '信号线（含 1 备用）', s.nSignalCable, '根', 'P10', picks.signal_cable),
     priced('mount', '投影机吊架', s.nProj, '套', 'P2', picks.mount),
     ...(s.nProj > 1 ? [priced('blend', '融合处理器', 1, '套', 'P2', picks.blend)] : []),
-    ...manual.map((m) => priced(m.key, m.name, m.qty, m.unit, '人工', m.itemId)),
+    ...manual.map((m) => tagged(priced(m.key, m.name, m.qty, m.unit, '人工', m.itemId), m.shared)),
   ];
 }
 
@@ -271,8 +274,9 @@ export function buildElvLines(cfg: SavedConfig<ElvSummary>, picks: ElvPicks, man
       unitCost: it?.costPrice ?? null, unitList: it?.listPrice ?? null };
   };
   return [
-    ...rows.filter((r) => r[2] > 0).map(([k, n, q, u, src]) => line(k, n, q, u, src, picks[k] ?? null)),
-    ...manual.map((m) => line(m.key, m.name, m.qty, m.unit, '人工', m.itemId)),
+    /* the ELV rack is the machine room's rack: the one other lines' control gear joins */
+    ...rows.filter((r) => r[2] > 0).map(([k, n, q, u, src]) => tagged(line(k, n, q, u, src, picks[k] ?? null), k === 'rack' ? 'rack' : undefined)),
+    ...manual.map((m) => tagged(line(m.key, m.name, m.qty, m.unit, '人工', m.itemId), m.shared)),
   ];
 }
 
@@ -311,7 +315,7 @@ export function buildPvLines(cfg: SavedConfig<PvSummary>, picks: PvPicks, manual
   };
   return [
     ...rows.map(([k, n, q, u, src]) => line(k, n, q, u, src, picks[k] ?? null)),
-    ...manual.map((m) => line(m.key, m.name, m.qty, m.unit, '人工', m.itemId)),
+    ...manual.map((m) => tagged(line(m.key, m.name, m.qty, m.unit, '人工', m.itemId), m.shared)),
   ];
 }
 

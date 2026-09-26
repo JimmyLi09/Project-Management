@@ -4,22 +4,24 @@
    Put a quotation together from the lines whose cost is confirmed on their
    latest configuration, apply a discount, see GST and the discounted margin
    against the company floor, and submit it. PD / BD approve or send back; the
-   approved quotation prints from its own page. Decisions of 2026-09-26. */
+   approved quotation prints from its own page. Shared resources among the
+   chosen lines come off before the discount (xline.ts). Decisions of 2026-09-26. */
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { lineInfo, LINES } from '@/av/core/lines';
 import { quoteChecks, quoteNo, quoteTotals, type LineState, type QuoteSection } from '@/av/core/quote';
 import type { BusinessLine } from '@/av/core/types';
+import { dedupe, XLINE_PACK, type Deduction, type SharedRow } from '@/av/core/xline';
 import { canViewPrices } from '@/lib/permissions';
 import { fmtDate } from '@/lib/project';
 import { useLang } from '@/lib/i18n';
 import { useStore } from '../store';
 import AvSteps from './AvSteps';
 
-interface LineRow { line: BusinessLine; state: LineState; cost: number | null; list: number | null }
+interface LineRow { line: BusinessLine; state: LineState; cost: number | null; list: number | null; shared: SharedRow[] }
 interface Quote {
-  id: number; sections: QuoteSection[]; discountPct: number; gstRate: number; marginFloor: number; reason: string;
+  id: number; sections: QuoteSection[]; dedup: Deduction[]; discountPct: number; gstRate: number; marginFloor: number; reason: string;
   status: 'submitted' | 'approved' | 'rejected' | 'superseded';
   submittedBy: string; submittedAt: number; decidedBy: string; decidedAt: number; decisionNote: string;
 }
@@ -58,11 +60,12 @@ export default function AvQuoteView() {
   /* the preview uses totals only; the server rebuilds the sections from the sheets */
   const preview = useMemo(() => {
     if (!state) return null;
-    const sections = state.lines.filter((l) => picked.includes(l.line) && l.state === 'confirmed')
-      .map((l) => ({ line: l.line, sheetId: 0, cost: l.cost!, list: l.list!, rows: [] }));
+    const chosen = state.lines.filter((l) => picked.includes(l.line) && l.state === 'confirmed');
+    const sections = chosen.map((l) => ({ line: l.line, sheetId: 0, cost: l.cost!, list: l.list!, rows: [] }));
+    const dedup = dedupe(chosen.flatMap((l) => l.shared));
     const d = Number(discount);
-    const totals = quoteTotals(sections, d, state.gstRate);
-    return { totals, checks: quoteChecks(sections, d, totals, state.marginFloor, reason) };
+    const totals = quoteTotals(sections, d, state.gstRate, dedup);
+    return { totals, dedup, checks: quoteChecks(sections, d, totals, state.marginFloor, reason, dedup) };
   }, [state, picked, discount, reason]);
 
   if (!canViewPrices(me)) {
@@ -151,7 +154,7 @@ export default function AvQuoteView() {
             <div style={{ padding: '14px 18px', display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,340px)', gap: 20, alignItems: 'start' }}>
               <div style={{ display: 'grid', gap: 12 }}>
                 <div className="field" style={{ marginBottom: 0, maxWidth: 200 }}>
-                  <label htmlFor="quote-discount">{t('折扣 %（作用于售价合计）', 'Discount %')}</label>
+                  <label htmlFor="quote-discount">{t('折扣 %（作用于去重后的售价）', 'Discount %')}</label>
                   <input id="quote-discount" type="number" min={0} max={99} step="0.5" value={discount} disabled={!state.canSubmit} onChange={(e) => setDiscount(e.target.value)} />
                 </div>
                 {below && (
@@ -160,6 +163,13 @@ export default function AvQuoteView() {
                     <textarea id="quote-reason" rows={3} value={reason} onChange={(e) => setReason(e.target.value)} />
                   </div>
                 )}
+                {preview.dedup.map((d) => (
+                  <div key={d.tag} style={{ fontSize: 12.5, color: 'var(--text2)' }}>
+                    {t('共用', 'Shared')} · {d.label}：{t('保留', 'kept')}{lineInfo(d.kept).label}，{d.items.map((i) => `${lineInfo(i.line).label}「${i.name}」`).join('、')}
+                    {t(` 按 ${Math.round(d.rate * 100)}% 扣减 `, ` reduced ${Math.round(d.rate * 100)}% `)}<span className="tnum">− {money(d.list)}</span>
+                    <span title={XLINE_PACK.rules[d.tag].basis} style={{ marginLeft: 4, cursor: 'help' }}>ⓘ</span>
+                  </div>
+                ))}
                 {preview.checks.map((c) => (
                   <div key={c.code} style={{ fontSize: 12.5, color: c.severity === 'block' ? 'var(--danger)' : 'var(--warning)' }}>● {c.message}</div>
                 ))}
@@ -180,6 +190,7 @@ export default function AvQuoteView() {
                 <tbody>
                   {([
                     [t('售价合计', 'Sell total'), money(preview.totals.list)],
+                    [t('共用资源去重', 'Shared resources'), `− ${money(preview.totals.shared)}`],
                     [t('折扣', 'Discount'), `− ${money(preview.totals.discount)}`],
                     [t('不含税小计', 'Subtotal excl. GST'), money(preview.totals.subtotal)],
                     [`GST ${Math.round(state.gstRate * 100)}%`, money(preview.totals.gst)],
@@ -187,9 +198,9 @@ export default function AvQuoteView() {
                     [t('成本', 'Cost'), money(preview.totals.cost)],
                     [t('折后毛利率', 'Margin after discount'), pct(preview.totals.margin)],
                   ] as const).map(([k, v], i) => (
-                    <tr key={k} style={i === 4 ? { fontWeight: 700 } : undefined}>
-                      <td style={{ ...td, color: i >= 5 ? 'var(--text2)' : undefined }}>{k}</td>
-                      <td style={{ ...td, textAlign: 'right', color: i === 6 && below ? 'var(--danger)' : undefined }} className="tnum">{v}</td>
+                    <tr key={k} style={i === 5 ? { fontWeight: 700 } : undefined}>
+                      <td style={{ ...td, color: i >= 6 ? 'var(--text2)' : undefined }}>{k}</td>
+                      <td style={{ ...td, textAlign: 'right', color: i === 7 && below ? 'var(--danger)' : undefined }} className="tnum">{v}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -209,12 +220,13 @@ export default function AvQuoteView() {
                   <tbody>
                     <tr>{[t('编号', 'No.'), t('业务线', 'Lines'), t('含税总计', 'Total'), t('折后毛利', 'Margin'), t('提交', 'Submitted'), t('状态', 'Status'), ''].map((h, i) => <th key={i} style={i === 2 || i === 3 ? { ...th, textAlign: 'right' } : th}>{h}</th>)}</tr>
                     {state.quotes.map((q) => {
-                      const tt = quoteTotals(q.sections, q.discountPct, q.gstRate);
+                      const tt = quoteTotals(q.sections, q.discountPct, q.gstRate, q.dedup);
                       const [zh, en, color] = STATUS[q.status];
                       return (
                         <tr key={q.id}>
                           <td style={{ ...td, fontWeight: 600 }}>{quoteNo(q.id)}</td>
                           <td style={td}>{q.sections.map((s) => t(lineInfo(s.line).label, lineInfo(s.line).en)).join(' + ')}
+                            {tt.shared > 0 && <div style={{ fontSize: 11.5, color: 'var(--text2)' }}>{t('共用资源去重', 'shared')} − {money(tt.shared)}</div>}
                             {q.discountPct > 0 && <div style={{ fontSize: 11.5, color: 'var(--text2)' }}>{t('折扣', 'discount')} {q.discountPct}%</div>}
                           </td>
                           <td style={{ ...td, textAlign: 'right' }} className="tnum">{money(tt.total)}</td>

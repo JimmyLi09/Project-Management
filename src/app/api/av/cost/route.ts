@@ -5,6 +5,7 @@ import {
   type ElvPicks, type ElvSummary, type LedSummary, type ManualLine, type Picks, type PrjPicks, type PrjSummary, type PvPicks, type PvSummary, type SavedConfig,
 } from '@/av/core/pricing';
 import type { BusinessLine } from '@/av/core/types';
+import { dedupe, isSharedTag, sharedRows } from '@/av/core/xline';
 import { canCostProject, canViewPrices, identityOf } from '@/lib/permissions';
 import { getInquiry, getMarginFloor, latestConfig, latestCostSheet, listPriceItems, saveCostSheet } from '@/server/avdb';
 import { lineProjectError } from '@/server/avdrawing';
@@ -14,7 +15,8 @@ import { currentUser } from '@/server/session';
 /* 06 成本核算, per business line.
    GET ?project=ID&line=led|projector|elv|pv  the line's latest saved configuration,
         latest cost sheet with its checks against today's price library, the
-        line's library, and a summary row for every line of the project.
+        line's library, a summary row for every line of the project and the
+        cross-line shared-resource savings across the lines' latest sheets.
    POST { projectId, line, picks, manual, confirm }
         price the latest configuration and save a sheet; unit prices are
         snapshotted, confirming requires no blocking check. */
@@ -70,8 +72,9 @@ export async function GET(req: NextRequest) {
     : line === 'pv' ? pvChecks(sheet.lines, config as SavedConfig<PvSummary>, items) : [];
 
   /* one row per business line the project carries */
+  const sheets = new Map(COSTED.map((l) => [l, latestCostSheet(projectId, l)]));
   const summary = projectLines(project.packages.map((k) => k.svc), inquiry?.lines).map((l) => {
-    const s = COSTED.includes(l.line) ? latestCostSheet(projectId, l.line) : null;
+    const s = sheets.get(l.line) ?? null;
     const c = COSTED.includes(l.line) ? latestConfig(projectId, l.line) : null;
     return {
       line: l.line, pack: inquiry?.packs[l.line] ?? lineInfo(l.line).pack,
@@ -80,8 +83,10 @@ export async function GET(req: NextRequest) {
     };
   });
 
+  const dedup = dedupe(summary.flatMap((r) => { const s = sheets.get(r.line); return s ? sharedRows(r.line, s.lines) : []; }));
+
   return NextResponse.json({
-    line, inquiry, config, sheet, items, marginFloor, summary,
+    line, inquiry, config, sheet, items, marginFloor, summary, dedup,
     sheetOutdated: !!(sheet && config && sheet.configId !== config.id),
     checks: current ? checkSheet(sheet.lines, config, items, marginFloor, today(), extra) : [],
     canEdit: canCostProject(identityOf(user), project),
@@ -108,7 +113,8 @@ export async function POST(req: NextRequest) {
     const qty = Number(m?.qty);
     const unit = String(m?.unit || '').trim();
     if (!name || !(qty > 0) || !unit) return NextResponse.json({ error: `第 ${i + 1} 条附加项需填写名称、数量（> 0）与单位` }, { status: 400 });
-    manual.push({ key: `m${i + 1}`, name, qty, unit, itemId: m.itemId === null || m.itemId === undefined ? null : Number(m.itemId) });
+    manual.push({ key: `m${i + 1}`, name, qty, unit, itemId: m.itemId === null || m.itemId === undefined ? null : Number(m.itemId),
+      ...(isSharedTag(m.shared) ? { shared: m.shared } : {}) });
   }
 
   const { items, lines, extra } = price(line, config, body.picks || {}, manual);

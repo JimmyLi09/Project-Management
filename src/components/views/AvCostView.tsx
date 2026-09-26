@@ -7,7 +7,8 @@
    E1–E13 quantities per enabled subsystem; solar: S2–S7), plus
    added lines. Below it, the project's combined view across all its lines
    (prototype Summary.dc.html). A configuration on a draft rule pack can be
-   costed as a draft but never confirmed. */
+   costed as a draft but never confirmed. Added lines can be tagged as a
+   shared resource; the summary then shows the cross-line savings (xline.ts). */
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 
@@ -18,6 +19,7 @@ import {
   type PvPicks, type PvSummary, type SavedConfig,
 } from '@/av/core/pricing';
 import type { BusinessLine } from '@/av/core/types';
+import { dedupTotals, SHARED_TAGS, XLINE_PACK, type Deduction, type SharedTag } from '@/av/core/xline';
 import { canViewPrices } from '@/lib/permissions';
 import { fmtDate } from '@/lib/project';
 import { useLang } from '@/lib/i18n';
@@ -38,6 +40,7 @@ interface CostState {
   sheetOutdated: boolean;
   canEdit: boolean;
   summary: SummaryRow[];
+  dedup: Deduction[];
 }
 
 const AUTO_KEYS: Record<Line, string[]> = {
@@ -83,7 +86,7 @@ export default function AvCostView() {
       if (fit.length === 1) next.display = fit[0].id;
     }
     setPicks(next);
-    setManual((s.sheet?.lines ?? []).filter((l) => l.qtySource === '人工').map((l) => ({ key: l.key, name: l.name, qty: l.qty, unit: l.unit, itemId: l.itemId })));
+    setManual((s.sheet?.lines ?? []).filter((l) => l.qtySource === '人工').map((l) => ({ key: l.key, name: l.name, qty: l.qty, unit: l.unit, itemId: l.itemId, shared: l.shared })));
   }, [project, line]);
   useEffect(() => { load(); }, [load]);
 
@@ -245,9 +248,19 @@ export default function AvCostView() {
                     <tr key={l.key}>
                       <td style={td}>
                         {l.qtySource === '人工' && editable ? (
-                          <input className="in sm" style={{ width: 180 }} value={l.name} aria-label={t('名称', 'Name')}
-                            onChange={(e) => setManual(manual.map((m) => (m.key === l.key ? { ...m, name: e.target.value } : m)))} />
-                        ) : l.name}
+                          <div style={{ display: 'grid', gap: 5 }}>
+                            <input className="in sm" style={{ width: 180 }} value={l.name} aria-label={t('名称', 'Name')}
+                              onChange={(e) => setManual(manual.map((m) => (m.key === l.key ? { ...m, name: e.target.value } : m)))} />
+                            <select className="in sm" style={{ width: 180 }} value={l.shared ?? ''} aria-label={t('共用类别', 'Shared resource')}
+                              title={l.shared ? XLINE_PACK.rules[l.shared].basis : t('多条业务线共用的资源在项目汇总中去重', 'Shared resources are de-duplicated across lines')}
+                              onChange={(e) => setManual(manual.map((m) => (m.key === l.key ? { ...m, shared: (e.target.value || undefined) as SharedTag | undefined } : m)))}>
+                              <option value="">{t('非共用', 'Not shared')}</option>
+                              {SHARED_TAGS.map((k) => <option key={k} value={k}>{t('共用 · ', 'Shared · ')}{XLINE_PACK.rules[k].label}</option>)}
+                            </select>
+                          </div>
+                        ) : (
+                          <>{l.name}{l.shared && <div style={{ fontSize: 11.5, color: 'var(--text2)' }}>{t('共用 · ', 'Shared · ')}{XLINE_PACK.rules[l.shared].label}</div>}</>
+                        )}
                       </td>
                       <td style={{ ...td, whiteSpace: 'nowrap' }} className="tnum">
                         {l.qtySource === '人工' && editable ? (
@@ -340,10 +353,20 @@ export default function AvCostView() {
                       </tr>
                     );
                   })}
+                  {state.dedup.length > 0 && (
+                    <tr style={{ color: 'var(--success)' }}>
+                      <td style={td} colSpan={2}>{t('共用资源去重', 'Shared resources')}
+                        <span style={{ color: 'var(--text2)', fontSize: 12 }}> · {XLINE_PACK.version}{XLINE_PACK.calibrated ? '' : t(' · 草案', ' · draft')}</span></td>
+                      <td style={{ ...td, textAlign: 'right' }} className="tnum">− {money(dedupTotals(state.dedup).cost)}</td>
+                      <td style={{ ...td, textAlign: 'right' }} className="tnum">− {money(dedupTotals(state.dedup).list)}</td>
+                      <td style={td} colSpan={2}>{state.dedup.map((d) => d.label).join(' / ')}</td>
+                    </tr>
+                  )}
                   {(() => {
                     const rows = state.summary.filter((r) => r.sheet);
-                    const cost = rows.reduce((a, r) => a + r.sheet!.cost, 0);
-                    const list = rows.reduce((a, r) => a + r.sheet!.list, 0);
+                    const saved = dedupTotals(state.dedup);
+                    const cost = rows.reduce((a, r) => a + r.sheet!.cost, 0) - saved.cost;
+                    const list = rows.reduce((a, r) => a + r.sheet!.list, 0) - saved.list;
                     const allFinal = rows.length > 0 && rows.length === state.summary.length && rows.every((r) => r.sheet!.status === 'confirmed' && !r.outdated);
                     return (
                       <tr style={{ fontWeight: 700, borderTop: '2px solid var(--text)', background: 'var(--hover-bg)' }}>
@@ -358,9 +381,24 @@ export default function AvCostView() {
                 </tbody>
               </table>
             </div>
+            {state.dedup.length > 0 && (
+              <div style={{ padding: '12px 18px 0', display: 'grid', gap: 6, fontSize: 12.5 }}>
+                <div className="section-label">{t('共用资源去重明细', 'Shared resources in detail')}</div>
+                {state.dedup.map((d) => (
+                  <div key={d.tag} style={{ display: 'flex', justifyContent: 'space-between', gap: 16, borderBottom: '1px solid var(--row-line)', paddingBottom: 6 }}>
+                    <span>
+                      {d.label}：{t('保留', 'kept')}{t(lineInfo(d.kept).label, lineInfo(d.kept).en)}，
+                      {d.items.map((i) => `${lineInfo(i.line).label}「${i.name}」`).join('、')} {t(`按 ${Math.round(d.rate * 100)}% 扣减`, `reduced ${Math.round(d.rate * 100)}%`)}
+                      <div style={{ fontSize: 11.5, color: 'var(--text2)' }}>{XLINE_PACK.rules[d.tag].basis}</div>
+                    </span>
+                    <span className="tnum" style={{ whiteSpace: 'nowrap' }}>− {money(d.list)}</span>
+                  </div>
+                ))}
+              </div>
+            )}
             <p style={{ padding: '12px 18px 16px', fontSize: 12, color: 'var(--text2)', lineHeight: 1.7 }}>
-              {t('跨业务线的共用资源去重（机房、桥架、进场、调试工日）需要一套跨包规则，待你们给出口径后接入；目前各线成本直接相加。',
-                'Cross-line de-duplication needs a rule set; lines are summed as-is for now.')}
+              {t('在 06 各业务线的附加项上标注「共用类别」（进场与吊装、机柜、系统调试、弱电桥架 / 线槽；弱电机柜自动标注）。同一类别出现在两条以上业务线时，保留金额最大的一条，其余按草案比例扣减。',
+                'Tag added lines as shared resources; when a tag appears in two or more lines, the largest is kept and the others reduced.')}
             </p>
           </div>
         )}

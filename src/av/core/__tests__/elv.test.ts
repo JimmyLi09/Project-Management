@@ -113,3 +113,18 @@ test('弱电成本：数量来自 E1–E13，零数量行不出现；功放功�
   assert.equal(totals(lines).cost, 200 * 25 + 7 * 400 + 9 * 250 + 6 * 1800 + 11 * 120 + 32 * 180 + 78 * 45 + 1400 + 1500 + 12 * 40 + 2 * 800);
   assert.ok(checkSheet(lines, cfg, items, 0.18, '2026-09-25').some((c) => c.code === 'COST-CFG' && /ELV-TYPE-01/.test(c.message)));
 });
+
+test('弱电机柜行自动标记为共用机柜，附加项按 PM 标注', () => {
+  const r = computeElv(base, LATEST_ELV_PACK);
+  const t = r.trace;
+  const cfg = { id: 1, projectId: 'p', line: 'elv' as const, packVersion: LATEST_ELV_PACK, drawingId: null, createdBy: 'PM', createdAt: 0,
+    summary: { area: 1000, floors: 1, space: 'office', subsystems: [], nOutlet: t.n_outlet.value, nAp: t.n_ap.value, nCam: t.n_cam.value,
+      nDoor: t.n_door.value, nPort: t.n_port.value, nSwitch: t.n_switch.value, poeW: t.poe_w.value, nBox: t.n_box.value, nPatch: t.n_patch.value,
+      nSpk: t.n_spk.value, ampW: t.amp_w.value, nPaZone: t.n_pa_zone.value, nvrTb: t.nvr_tb.value, nNvr: t.n_nvr.value, nRack: t.n_rack.value,
+      exportable: false, blocking: [] } };
+  const lines = buildElvLines(cfg, {}, [{ key: 'm1', name: '进场', qty: 1, unit: '项', itemId: null, shared: 'mobilisation' }, { key: 'm2', name: '辅材', qty: 1, unit: '项', itemId: null }], []);
+  assert.equal(lines.find((l) => l.key === 'rack')!.shared, 'rack');
+  assert.equal(lines.find((l) => l.key === 'switch')!.shared, undefined);
+  assert.equal(lines.find((l) => l.key === 'm1')!.shared, 'mobilisation');
+  assert.ok(!('shared' in lines.find((l) => l.key === 'm2')!));
+});

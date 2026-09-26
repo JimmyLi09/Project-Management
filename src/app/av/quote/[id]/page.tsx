@@ -10,7 +10,8 @@ import PrintButton from './PrintButton';
 export const dynamic = 'force-dynamic';
 
 /* 07 · the customer quotation, printed from the browser (2026-09-26 decision).
-   Sell prices only; library sell prices exclude GST, which is added at the end.
+   Sell prices only; cross-line savings and the discount come off the total,
+   library sell prices exclude GST, which is added at the end.
    Anything not yet approved carries a banner so it cannot go out by mistake. */
 
 const money = (v: number) => v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -24,7 +25,7 @@ export default async function QuotePage({ params }: { params: Promise<{ id: stri
   if (!quote || !project || !canViewPrices(identityOf(user))) {
     return <main style={{ padding: 40, fontSize: 14 }}>{quote && project ? '当前角色无权查看报价。' : '报价不存在。'}</main>;
   }
-  const t = quoteTotals(quote.sections, quote.discountPct, quote.gstRate);
+  const t = quoteTotals(quote.sections, quote.discountPct, quote.gstRate, quote.dedup);
   const approved = quote.status === 'approved';
   const status = { submitted: '待审批', rejected: '已退回', superseded: '已被新版本取代', approved: '' }[quote.status];
 
@@ -97,6 +98,9 @@ export default async function QuotePage({ params }: { params: Promise<{ id: stri
       <table style={{ marginTop: 26, width: 360, marginLeft: 'auto' }}>
         <tbody>
           <tr><td>合计 Total</td><td className="r">{money(t.list)}</td></tr>
+          {quote.dedup.map((d) => (
+            <tr key={d.tag}><td>跨系统共用：{d.label} Shared across systems</td><td className="r">− {money(d.list)}</td></tr>
+          ))}
           {t.discount > 0 && <tr><td>折扣 Discount ({quote.discountPct}%)</td><td className="r">− {money(t.discount)}</td></tr>}
           <tr><td>不含税小计 Subtotal (excl. GST)</td><td className="r">{money(t.subtotal)}</td></tr>
           <tr><td>GST {Math.round(quote.gstRate * 100)}%</td><td className="r">{money(t.gst)}</td></tr>

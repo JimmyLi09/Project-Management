@@ -12,6 +12,7 @@ import { getDb } from './db';
 import type { DrawingElement, DrawingSummary, IngestRecord, IngestResult, StoredDrawing } from '@/av/core/handoff';
 import type { CostLine, PriceItem, SavedConfig, SummaryBase } from '@/av/core/pricing';
 import type { QuoteSection } from '@/av/core/quote';
+import type { Deduction } from '@/av/core/xline';
 import type { BusinessLine } from '@/av/core/types';
 
 export type { DrawingSummary, StoredDrawing };
@@ -117,6 +118,7 @@ function db() {
         discount_pct REAL NOT NULL,
         gst_rate REAL NOT NULL,
         margin_floor REAL NOT NULL,
+        dedup TEXT NOT NULL DEFAULT '[]',
         reason TEXT NOT NULL DEFAULT '',
         status TEXT NOT NULL DEFAULT 'submitted',
         submitted_by TEXT NOT NULL,
@@ -144,6 +146,9 @@ function db() {
         PRIMARY KEY (drawing_id, element)
       );
     `);
+    /* quotations saved before cross-line savings existed */
+    const qcols = (d.prepare('PRAGMA table_info(av_quote)').all() as { name: string }[]).map((c) => c.name);
+    if (!qcols.includes('dedup')) d.exec("ALTER TABLE av_quote ADD COLUMN dedup TEXT NOT NULL DEFAULT '[]'");
     ready = true;
   }
   return d;
@@ -480,6 +485,7 @@ export function latestCostSheet(projectId: string, line: BusinessLine): CostShee
 /* ===== 07 quotations =====
    A quotation freezes the sections it was built from, the discount, the GST
    rate and the margin floor of the day, so the document reads the same later.
+   So are the cross-line savings it took off (xline.ts).
    Submitting a new one supersedes a quotation still waiting for approval. */
 
 export type QuoteStatus = 'submitted' | 'approved' | 'rejected' | 'superseded';
@@ -488,6 +494,7 @@ export interface Quote {
   id: number;
   projectId: string;
   sections: QuoteSection[];
+  dedup: Deduction[];
   discountPct: number;
   gstRate: number;
   marginFloor: number;
@@ -500,21 +507,21 @@ export interface Quote {
   decisionNote: string;
 }
 
-type QuoteRow = { id: number; project_id: string; sections: string; discount_pct: number; gst_rate: number; margin_floor: number;
+type QuoteRow = { id: number; project_id: string; sections: string; dedup: string; discount_pct: number; gst_rate: number; margin_floor: number;
   reason: string; status: string; submitted_by: string; submitted_at: number; decided_by: string; decided_at: number; decision_note: string };
 const toQuote = (r: QuoteRow): Quote => ({
-  id: r.id, projectId: r.project_id, sections: JSON.parse(r.sections), discountPct: r.discount_pct, gstRate: r.gst_rate,
+  id: r.id, projectId: r.project_id, sections: JSON.parse(r.sections), dedup: JSON.parse(r.dedup), discountPct: r.discount_pct, gstRate: r.gst_rate,
   marginFloor: r.margin_floor, reason: r.reason, status: r.status as QuoteStatus, submittedBy: r.submitted_by,
   submittedAt: r.submitted_at, decidedBy: r.decided_by, decidedAt: r.decided_at, decisionNote: r.decision_note,
 });
 
-export function createQuote(q: Pick<Quote, 'projectId' | 'sections' | 'discountPct' | 'gstRate' | 'marginFloor' | 'reason'>, by: string): Quote {
+export function createQuote(q: Pick<Quote, 'projectId' | 'sections' | 'dedup' | 'discountPct' | 'gstRate' | 'marginFloor' | 'reason'>, by: string): Quote {
   const d = db();
   const id = d.transaction(() => {
     d.prepare("UPDATE av_quote SET status = 'superseded' WHERE project_id = ? AND status = 'submitted'").run(q.projectId);
-    return Number(d.prepare(`INSERT INTO av_quote (project_id, sections, discount_pct, gst_rate, margin_floor, reason, submitted_by, submitted_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
-      .run(q.projectId, JSON.stringify(q.sections), q.discountPct, q.gstRate, q.marginFloor, q.reason, by, Date.now()).lastInsertRowid);
+    return Number(d.prepare(`INSERT INTO av_quote (project_id, sections, dedup, discount_pct, gst_rate, margin_floor, reason, submitted_by, submitted_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(q.projectId, JSON.stringify(q.sections), JSON.stringify(q.dedup), q.discountPct, q.gstRate, q.marginFloor, q.reason, by, Date.now()).lastInsertRowid);
   })();
   return getQuote(id)!;
 }

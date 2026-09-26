@@ -21,7 +21,7 @@ export async function POST(req: NextRequest, { params }: Params) {
   if (body.action === 'reject' && !note) return NextResponse.json({ error: '退回须填写意见' }, { status: 400 });
   const status = body.action === 'approve' ? 'approved' : 'rejected';
   if (!decideQuote(quote.id, status, user.name, note)) return NextResponse.json({ error: '该报价已不在待审批状态' }, { status: 409 });
-  const t = quoteTotals(quote.sections, quote.discountPct, quote.gstRate);
+  const t = quoteTotals(quote.sections, quote.discountPct, quote.gstRate, quote.dedup);
   appendAudit(quote.projectId, [{
     at: Date.now(), by: user.name,
     text: `${status === 'approved' ? '批准' : '退回'}报价 ${quoteNo(quote.id)}（含税 S$${t.total.toLocaleString('en-US')}）${note ? `：${note}` : ''}`,
