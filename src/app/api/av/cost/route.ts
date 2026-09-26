@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { lineInfo, LINES } from '@/av/core/lines';
 import {
-  buildElvLines, buildLedLines, buildPrjLines, checkSheet, elvChecks, prjChecks, totals,
-  type ElvPicks, type ElvSummary, type LedSummary, type ManualLine, type Picks, type PrjPicks, type PrjSummary, type SavedConfig,
+  buildElvLines, buildLedLines, buildPrjLines, buildPvLines, checkSheet, elvChecks, prjChecks, pvChecks, totals,
+  type ElvPicks, type ElvSummary, type LedSummary, type ManualLine, type Picks, type PrjPicks, type PrjSummary, type PvPicks, type PvSummary, type SavedConfig,
 } from '@/av/core/pricing';
 import type { BusinessLine } from '@/av/core/types';
 import { canCostProject, canViewPrices, identityOf } from '@/lib/permissions';
@@ -12,7 +12,7 @@ import { appendAudit, getProject } from '@/server/db';
 import { currentUser } from '@/server/session';
 
 /* 06 成本核算, per business line.
-   GET ?project=ID&line=led|projector|elv  the line's latest saved configuration,
+   GET ?project=ID&line=led|projector|elv|pv  the line's latest saved configuration,
         latest cost sheet with its checks against today's price library, the
         line's library, and a summary row for every line of the project.
    POST { projectId, line, picks, manual, confirm }
@@ -20,13 +20,19 @@ import { currentUser } from '@/server/session';
         snapshotted, confirming requires no blocking check. */
 
 const today = () => new Date().toISOString().slice(0, 10);
-const COSTED: BusinessLine[] = ['led', 'projector', 'elv'];
-const lineOf = (v: unknown): BusinessLine => (v === 'projector' || v === 'elv' ? v : 'led');
-type AnySummary = LedSummary | PrjSummary | ElvSummary;
+const COSTED: BusinessLine[] = ['led', 'projector', 'elv', 'pv'];
+const lineOf = (v: unknown): BusinessLine => (v === 'projector' || v === 'elv' || v === 'pv' ? v : 'led');
+type AnySummary = LedSummary | PrjSummary | ElvSummary | PvSummary;
 
 function price(line: BusinessLine, config: SavedConfig<AnySummary>, picks: Record<string, unknown>, manual: ManualLine[]) {
   const items = listPriceItems(line);
   const num = (v: unknown) => (v === null || v === undefined || v === '' ? null : Number(v));
+  if (line === 'pv') {
+    const cfg = config as SavedConfig<PvSummary>;
+    const p = Object.fromEntries(Object.entries(picks).map(([k, v]) => [k, num(v)])) as PvPicks;
+    const lines = buildPvLines(cfg, p, manual, items);
+    return { items, lines, extra: pvChecks(lines, cfg, items) };
+  }
   if (line === 'elv') {
     const cfg = config as SavedConfig<ElvSummary>;
     const p = Object.fromEntries(Object.entries(picks).map(([k, v]) => [k, num(v)])) as ElvPicks;
@@ -60,7 +66,8 @@ export async function GET(req: NextRequest) {
   const current = sheet && config && sheet.configId === config.id;
   const extra = !current ? []
     : line === 'projector' ? prjChecks(sheet.lines, config as SavedConfig<PrjSummary>, items)
-    : line === 'elv' ? elvChecks(sheet.lines, config as SavedConfig<ElvSummary>, items) : [];
+    : line === 'elv' ? elvChecks(sheet.lines, config as SavedConfig<ElvSummary>, items)
+    : line === 'pv' ? pvChecks(sheet.lines, config as SavedConfig<PvSummary>, items) : [];
 
   /* one row per business line the project carries */
   const svcs = new Set(project.packages.map((k) => k.svc));

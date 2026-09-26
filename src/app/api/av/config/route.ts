@@ -3,9 +3,11 @@ import { compute } from '@/av/core/compute';
 import { toHandoff } from '@/av/core/handoff';
 import { computeElv, type ElvConfig } from '@/av/core/elv/compute';
 import { LATEST_ELV_PACK } from '@/av/core/elv/rulepack';
-import type { ElvSummary, LedSummary, PrjSummary } from '@/av/core/pricing';
+import type { ElvSummary, LedSummary, PrjSummary, PvSummary } from '@/av/core/pricing';
 import { computePrj, type PrjConfig } from '@/av/core/prj/compute';
 import { LATEST_PRJ_PACK } from '@/av/core/prj/rulepack';
+import { computePv, type PvConfig } from '@/av/core/pv/compute';
+import { LATEST_PV_PACK } from '@/av/core/pv/rulepack';
 import { LATEST_LED_PACK } from '@/av/core/rulepack';
 import type { LedConfig } from '@/av/core/types';
 import { canCostProject, identityOf } from '@/lib/permissions';
@@ -22,13 +24,37 @@ export async function POST(req: NextRequest) {
   const user = await currentUser();
   if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
   const body = (await req.json().catch(() => ({}))) as { projectId?: string; line?: string; drawingId?: number | null; cfg?: unknown };
-  const line = body.line === 'projector' || body.line === 'elv' ? body.line : 'led';
+  const line = body.line === 'projector' || body.line === 'elv' || body.line === 'pv' ? body.line : 'led';
   const project = getProject(String(body.projectId || ''));
-  const bad = lineProjectError(project, line, line === 'led' ? ' LED ' : line === 'projector' ? '投影' : '弱电');
+  const bad = lineProjectError(project, line, { led: ' LED ', projector: '投影', elv: '弱电', pv: '光伏' }[line]);
   if (bad) return NextResponse.json({ error: bad }, { status: 400 });
   if (!canCostProject(identityOf(user), project)) return NextResponse.json({ error: '仅该项目的 PM 可保存方案' }, { status: 403 });
   if (!body.cfg) return NextResponse.json({ error: '缺少方案参数' }, { status: 400 });
   const inquiry = getInquiry(project!.id);
+
+  if (line === 'pv') {
+    const cfg = body.cfg as PvConfig;
+    const packVersion = inquiry?.packs.pv ?? LATEST_PV_PACK;
+    let r;
+    try { r = computePv(cfg, packVersion); }
+    catch (e) { return NextResponse.json({ error: e instanceof Error ? e.message : '方案参数无效' }, { status: 400 }); }
+    if (!r.ok) return NextResponse.json({ error: r.findings.filter((f) => f.gate === 'compute' && f.severity === 'block').map((f) => f.message).join(' ') }, { status: 400 });
+    const v = (k: string) => r.trace[k].value;
+    const saved = saveConfig<PvSummary>({
+      projectId: project!.id, line, packVersion, drawingId: null, createdBy: user.name,
+      summary: {
+        area: cfg.pv_area, mount: cfg.pv_mount, module: cfg.pv_module, modW: r.module.w, nMod: v('n_mod'), kwp: v('kwp'),
+        invKw: r.inverter.kw, nInv: v('n_inv'), acKw: v('ac_kw'), nStr: v('n_str'), dcM: v('dc_m'), acM: v('ac_m'),
+        nMc4: v('n_mc4'), yieldKwh: v('yield_kwh'),
+        exportable: r.exportable, blocking: r.findings.filter((f) => f.severity === 'block').map((f) => f.code),
+      },
+    }, cfg);
+    appendAudit(project!.id, [{
+      at: Date.now(), by: user.name,
+      text: `保存光伏方案：${v('kwp').toFixed(2)} kWp · 组件 ${v('n_mod')} 块 · 逆变器 ${v('n_inv')} × ${r.inverter.kw} kW（规则包 ${packVersion}）`,
+    }]);
+    return NextResponse.json({ config: saved });
+  }
 
   if (line === 'elv') {
     const cfg = body.cfg as ElvConfig;

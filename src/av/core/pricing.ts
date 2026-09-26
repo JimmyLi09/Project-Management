@@ -88,6 +88,23 @@ export interface ElvSummary extends SummaryBase {
   nRack: number;
 }
 
+export interface PvSummary extends SummaryBase {
+  area: number;
+  mount: string;
+  module: string;
+  modW: number;              // Wp per module, the basis of the module count
+  nMod: number;
+  kwp: number;
+  invKw: number;             // rated kW per inverter
+  nInv: number;
+  acKw: number;
+  nStr: number;
+  dcM: number;
+  acM: number;
+  nMc4: number;
+  yieldKwh: number;
+}
+
 export interface SavedConfig<S extends SummaryBase = LedSummary> {
   id: number;
   projectId: string;
@@ -104,7 +121,7 @@ export interface CostLine {
   name: string;
   qty: number;
   unit: string;
-  qtySource: string;         // F1 / F7 / F9 for computed quantities, 人工 for added lines
+  qtySource: string;         // rule id (F1, P2, S7 …) for computed quantities, a note for fixed ones, 人工 for added lines
   itemId: number | null;
   itemLabel: string;
   unitCost: number | null;   // snapshot at computation time
@@ -268,6 +285,57 @@ export function elvChecks(lines: CostLine[], cfg: SavedConfig<ElvSummary>, items
   const w = specNumber(it.pitch);
   if (w === null) return [{ code: 'ELV-COST-AMP', severity: 'warn', message: `「${itemLabel(it)}」未注明功率（规格栏如 650 W），无法核对是否满足每区 ${Math.ceil(need)} W。` }];
   return w < need ? [{ code: 'ELV-COST-AMP', severity: 'block', message: `所选功放 ${w} W 低于每区所需 ${Math.ceil(need)} W。` }] : [];
+}
+
+/* ===== Solar PV line ===== */
+
+export type PvPicks = Partial<Record<'module' | 'inverter' | 'mount' | 'dc_cable' | 'ac_cable' | 'connector' | 'acdb' | 'monitor', number | null>>;
+
+export function buildPvLines(cfg: SavedConfig<PvSummary>, picks: PvPicks, manual: ManualLine[], items: PriceItem[]): CostLine[] {
+  const byId = new Map(items.map((i) => [i.id, i]));
+  const s = cfg.summary;
+  const rows: [keyof PvPicks, string, number, string, string][] = [
+    ['module', `光伏组件（${s.modW} Wp）`, s.nMod, '块', 'S2'],
+    ['inverter', `并网逆变器（${s.invKw} kW）`, s.nInv, '台', 'S4'],
+    ['mount', '支架与压块（每块组件）', s.nMod, '套', 'S2'],
+    ['dc_cable', '直流光伏线', s.dcM, 'm', 'S7'],
+    ['ac_cable', '交流电缆', s.acM, 'm', 'S7'],
+    ['connector', 'MC4 连接器', s.nMc4, '对', 'S7'],
+    ['acdb', '交流配电箱（隔离开关、防雷、保护）', 1, '套', '每项目 1 套'],
+    ['monitor', '监控与数据采集', 1, '套', '每项目 1 套'],
+  ];
+  const line = (key: string, name: string, qty: number, unit: string, qtySource: string, itemId: number | null): CostLine => {
+    const it = itemId == null ? undefined : byId.get(itemId);
+    return { key, name, qty, unit, qtySource, itemId: it ? it.id : null, itemLabel: it ? itemLabel(it) : '',
+      unitCost: it?.costPrice ?? null, unitList: it?.listPrice ?? null };
+  };
+  return [
+    ...rows.map(([k, n, q, u, src]) => line(k, n, q, u, src, picks[k] ?? null)),
+    ...manual.map((m) => line(m.key, m.name, m.qty, m.unit, '人工', m.itemId)),
+  ];
+}
+
+/* The module count assumes the configured wattage, and each inverter must
+   carry its rated share (S2, S4); both ratings sit in the spec column. */
+export function pvChecks(lines: CostLine[], cfg: SavedConfig<PvSummary>, items: PriceItem[]): CostCheck[] {
+  const picked = (key: string) => {
+    const l = lines.find((x) => x.key === key);
+    return l?.itemId == null ? undefined : items.find((i) => i.id === l.itemId);
+  };
+  const out: CostCheck[] = [];
+  const mod = picked('module');
+  if (mod) {
+    const w = specNumber(mod.pitch);
+    if (w === null) out.push({ code: 'PV-COST-MOD', severity: 'warn', message: `「${itemLabel(mod)}」未注明功率（规格栏如 550 Wp），无法核对组件数量的依据。` });
+    else if (w !== cfg.summary.modW) out.push({ code: 'PV-COST-MOD', severity: 'block', message: `所选组件 ${w} Wp 与方案的 ${cfg.summary.modW} Wp 不一致，组件数量须按所选型号重算 05 方案。` });
+  }
+  const inv = picked('inverter');
+  if (inv) {
+    const kw = specNumber(inv.pitch);
+    if (kw === null) out.push({ code: 'PV-COST-INV', severity: 'warn', message: `「${itemLabel(inv)}」未注明额定功率（规格栏如 50 kW），无法核对。` });
+    else if (kw < cfg.summary.invKw) out.push({ code: 'PV-COST-INV', severity: 'block', message: `所选逆变器 ${kw} kW 低于方案的 ${cfg.summary.invKw} kW。` });
+  }
+  return out;
 }
 
 export const round2 = (x: number) => Math.round(x * 100) / 100;

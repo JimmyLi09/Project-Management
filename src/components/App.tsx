@@ -20,6 +20,7 @@ import AvInquiryView from './views/AvInquiryView';
 import AvPricesView from './views/AvPricesView';
 import PrjStudioView from './views/PrjStudioView';
 import ElvStudioView from './views/ElvStudioView';
+import PvStudioView from './views/PvStudioView';
 import LedIngestView from './views/LedIngestView';
 import LedStudioView from './views/LedStudioView';
 import FinanceView from './views/FinanceView';
@@ -47,6 +48,7 @@ const PAGE_META: Record<string, { title: [string, string]; sub: [string, string]
   avinquiry: { title: ['AV 立项询价', 'AV Inquiry'], sub: ['01 · 项目信息 · 业务线勾选 · 绑定规则包', '01 · Project, business lines and rule packs'] },
   prjstudio: { title: ['投影方案配置', 'Projection Configuration'], sub: ['05 · 投影 · 草案规则包 prj@0.1-draft', '05 · Projection · draft rule pack'] },
   elvstudio: { title: ['弱电方案配置', 'ELV Configuration'], sub: ['05 · 弱电 · 草案规则包 elv@0.1-draft', '05 · ELV · draft rule pack'] },
+  pvstudio: { title: ['光伏方案配置', 'Solar PV Configuration'], sub: ['05 · 光伏 · 草案规则包 pv@0.1-draft', '05 · Solar PV · draft rule pack'] },
   avcost: { title: ['AV 成本核算', 'AV Costing'], sub: ['06 · 单线成本 · 项目合并汇总', '06 · Line cost · project summary'] },
   avprices: { title: ['AV 价格库', 'AV Price Library'], sub: ['可编辑价格表 · 改价留痕 · 公司毛利下限', 'Editable prices · change history · margin floor'] },
   ledingest: { title: ['LED 图纸解析与校核', 'LED Drawing Review'], sub: ['02 图纸接入与分级 · 03 解析提取 · 04 人工校核', 'Intake & grading · extraction · human review'] },
@@ -152,6 +154,7 @@ function Shell() {
           {navItem('ledstudio', 'target', t('LED 方案配置', 'LED Configuration'))}
           {navItem('prjstudio', 'presentation', t('投影方案配置', 'Projection Config'))}
           {navItem('elvstudio', 'layers', t('弱电方案配置', 'ELV Config'))}
+          {navItem('pvstudio', 'grid', t('光伏方案配置', 'Solar PV Config'))}
           {canViewPrices(me) && navItem('avcost', 'trending', t('AV 成本核算', 'AV Costing'))}
           {canViewPrices(me) && navItem('avprices', 'settings', t('AV 价格库', 'AV Price Library'))}
           {(isFull(me) || me.role === 'finance') && navItem('finance', 'trending', t('收款看板', 'Collections'), financeAlertCount)}
@@ -257,6 +260,7 @@ function Shell() {
             {view.name === 'ledstudio' && <LedStudioView />}
             {view.name === 'prjstudio' && <PrjStudioView />}
             {view.name === 'elvstudio' && <ElvStudioView />}
+            {view.name === 'pvstudio' && <PvStudioView />}
             {view.name === 'avcost' && <AvCostView />}
             {view.name === 'avprices' && <AvPricesView />}
             {view.name === 'finance' && <FinanceView />}

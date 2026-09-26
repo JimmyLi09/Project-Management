@@ -4,7 +4,7 @@
    One business line at a time: the bill of quantities from the project's saved
    05 configuration, priced from that line's price library (LED: F1 area, F7 / F9
    cables; projection: P2 projectors, P1 screen area, P10 signal cables; ELV:
-   E1–E13 quantities per enabled subsystem), plus
+   E1–E13 quantities per enabled subsystem; solar: S2–S7), plus
    added lines. Below it, the project's combined view across all its lines
    (prototype Summary.dc.html). A configuration on a draft rule pack can be
    costed as a draft but never confirmed. */
@@ -13,8 +13,9 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { lineInfo, LINES } from '@/av/core/lines';
 import {
-  buildElvLines, buildLedLines, buildPrjLines, checkSheet, displayCandidates, elvChecks, itemLabel, lumensOf, pitchOf, prjChecks, totals,
-  type CostCheck, type CostLine, type ElvPicks, type ElvSummary, type LedSummary, type ManualLine, type Picks, type PriceItem, type PrjPicks, type PrjSummary, type SavedConfig,
+  buildElvLines, buildLedLines, buildPrjLines, buildPvLines, checkSheet, displayCandidates, elvChecks, itemLabel, lumensOf, pitchOf, prjChecks, pvChecks, totals,
+  type CostCheck, type CostLine, type ElvPicks, type ElvSummary, type LedSummary, type ManualLine, type Picks, type PriceItem, type PrjPicks, type PrjSummary,
+  type PvPicks, type PvSummary, type SavedConfig,
 } from '@/av/core/pricing';
 import type { BusinessLine } from '@/av/core/types';
 import { canViewPrices } from '@/lib/permissions';
@@ -23,14 +24,14 @@ import { useLang } from '@/lib/i18n';
 import { useStore } from '../store';
 import AvSteps from './AvSteps';
 
-type Line = 'led' | 'projector' | 'elv';
+type Line = 'led' | 'projector' | 'elv' | 'pv';
 interface Sheet {
   id: number; configId: number; lines: CostLine[]; cost: number; list: number;
   status: 'draft' | 'confirmed'; createdBy: string; createdAt: number; confirmedBy: string; confirmedAt: number;
 }
 interface SummaryRow { line: BusinessLine; pack: string | null; sheet: { cost: number; list: number; status: string } | null; outdated: boolean; draftPack: boolean }
 interface CostState {
-  config: SavedConfig<LedSummary | PrjSummary | ElvSummary> | null;
+  config: SavedConfig<LedSummary | PrjSummary | ElvSummary | PvSummary> | null;
   sheet: Sheet | null;
   items: PriceItem[];
   marginFloor: number;
@@ -43,6 +44,7 @@ const AUTO_KEYS: Record<Line, string[]> = {
   led: ['display', 'power_cable', 'data_cable'],
   projector: ['projector', 'screen', 'signal_cable', 'mount', 'blend'],
   elv: ['outlet', 'ap', 'cam', 'door', 'switch', 'patch', 'cable', 'spk', 'amp', 'nvr', 'hdd', 'rack'],
+  pv: ['module', 'inverter', 'mount', 'dc_cable', 'ac_cable', 'connector', 'acdb', 'monitor'],
 };
 const money = (v: number) => `S$ ${v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const pct = (v: number | null) => (v === null ? '—' : `${(v * 100).toFixed(1)}%`);
@@ -97,6 +99,10 @@ export default function AvCostView() {
       const cfg = state.config as SavedConfig<ElvSummary>;
       lines = buildElvLines(cfg, picks as unknown as ElvPicks, manual, state.items);
       extra = elvChecks(lines, cfg, state.items);
+    } else if (line === 'pv') {
+      const cfg = state.config as SavedConfig<PvSummary>;
+      lines = buildPvLines(cfg, picks as unknown as PvPicks, manual, state.items);
+      extra = pvChecks(lines, cfg, state.items);
     } else {
       lines = buildLedLines(state.config as SavedConfig<LedSummary>, picks as unknown as Picks, manual, state.items);
     }
@@ -149,6 +155,10 @@ export default function AvCostView() {
       const s = c.summary as ElvSummary;
       return `${head} · ${s.area} ㎡ · ${s.floors} ${t('层', 'floors')} · ${t('端口', 'ports')} ${s.nPort} · ${t('摄像机', 'cameras')} ${s.nCam} · ${t('扬声器', 'speakers')} ${s.nSpk}`;
     }
+    if (line === 'pv') {
+      const s = c.summary as PvSummary;
+      return `${head} · ${s.kwp.toFixed(2)} kWp · ${s.nMod} × ${s.modW} Wp · ${t('逆变器', 'inverters')} ${s.nInv} × ${s.invKw} kW · ${t('年发电', 'yield')} ${Math.round(s.yieldKwh).toLocaleString('en-US')} kWh`;
+    }
     const s = c.summary as LedSummary;
     return `${head} · P${s.pitch} · ${s.sqm.toFixed(2)} ㎡ · ${t('箱体', 'cabinets')} ${s.cabinets} · ${t('电源线', 'power')} ${s.nPowerCable} · ${t('数据线', 'data')} ${s.nDataCable}`;
   };
@@ -167,6 +177,7 @@ export default function AvCostView() {
                   <option value="led">{t('LED 显示屏', 'LED display')}</option>
                   <option value="projector">{t('投影系统（草案）', 'Projection (draft)')}</option>
                   <option value="elv">{t('弱电系统（草案）', 'ELV (draft)')}</option>
+                  <option value="pv">{t('太阳能光伏（草案）', 'Solar PV (draft)')}</option>
                 </select>
               </div>
               <div className="field" style={{ marginBottom: 0, flex: '1 1 320px', maxWidth: 520 }}>
@@ -189,8 +200,9 @@ export default function AvCostView() {
         {project && state && !state.config && (
           <div className="panel" style={{ padding: '16px 18px', fontSize: 13, color: 'var(--text2)', display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
             {t('该项目这条业务线还没有保存的 05 方案。', 'No saved 05 configuration for this line yet.')}
-            <button className="btn-line" onClick={() => go(line === 'led' ? 'ledingest' : line === 'elv' ? 'elvstudio' : 'prjstudio')}>
-              {line === 'led' ? t('去 02–04 图纸校核', 'Open 02–04') : line === 'elv' ? t('去 05 弱电方案配置', 'Open ELV 05') : t('去 05 投影方案配置', 'Open projection 05')}
+            <button className="btn-line" onClick={() => go(({ led: 'ledingest', projector: 'prjstudio', elv: 'elvstudio', pv: 'pvstudio' } as const)[line])}>
+              {({ led: t('去 02–04 图纸校核', 'Open 02–04'), projector: t('去 05 投影方案配置', 'Open projection 05'),
+                elv: t('去 05 弱电方案配置', 'Open ELV 05'), pv: t('去 05 光伏方案配置', 'Open solar 05') })[line]}
             </button>
           </div>
         )}
@@ -247,7 +259,7 @@ export default function AvCostView() {
                           </>
                         ) : `${l.qty} ${l.unit}`}
                       </td>
-                      <td style={{ ...td, color: 'var(--text2)' }}>{l.qtySource === '人工' ? t('人工', 'manual') : `rule · ${l.qtySource}`}</td>
+                      <td style={{ ...td, color: 'var(--text2)' }}>{l.qtySource === '人工' ? t('人工', 'manual') : /^[A-Z]+\d+$/.test(l.qtySource) ? `rule · ${l.qtySource}` : l.qtySource}</td>
                       <td style={{ ...td, maxWidth: 340 }}>
                         {editable ? (
                           <select className="in sm" style={{ width: 320 }} value={l.itemId ?? ''} aria-label={t('价格库条目', 'Price item')}
@@ -282,8 +294,9 @@ export default function AvCostView() {
               {editable && (
                 <button className="btn-line" style={{ justifySelf: 'start' }}
                   onClick={() => setManual([...manual, { key: `m${manual.length + 1}-${Date.now()}`, name: '', qty: 1, unit: '项', itemId: null }])}>
-                  {line === 'led' ? t('+ 附加项（控制系统、钢结构、安装人工…）', '+ Add line')
-                    : line === 'elv' ? t('+ 附加项（线管桥架、UPS、系统调试、安装人工…）', '+ Add line') : t('+ 附加项（镜头、调试、安装人工…）', '+ Add line')}
+                  {({ led: t('+ 附加项（控制系统、钢结构、安装人工…）', '+ Add line'), projector: t('+ 附加项（镜头、调试、安装人工…）', '+ Add line'),
+                    elv: t('+ 附加项（线管桥架、UPS、系统调试、安装人工…）', '+ Add line'),
+                    pv: t('+ 附加项（线槽、接地防雷、PE 结构核算、并网申请、安装人工…）', '+ Add line') })[line]}
                 </button>
               )}
               <Checks checks={preview.checks} />

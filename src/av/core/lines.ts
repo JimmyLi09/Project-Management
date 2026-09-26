@@ -1,11 +1,12 @@
 /* ===== AV platform · business lines (spec §2.2, §4) =====
-   One platform, several lines. LED runs on a calibrated rule pack; projection
-   and ELV on draft packs (prj@0.1-draft, elv@0.1-draft, 2026-09-25 decisions)
-   that can be configured and costed but not quoted formally; solar is still
-   reserved, so 01 shows it but cannot open a project on it yet. */
+   One platform, several lines. LED runs on a calibrated rule pack; projection,
+   ELV and solar on draft packs (prj@0.1-draft, elv@0.1-draft, pv@0.1-draft,
+   2026-09-25/26 decisions) that can be configured and costed but not quoted
+   formally. */
 
 import { LATEST_ELV_PACK } from './elv/rulepack.ts';
 import { LATEST_PRJ_PACK } from './prj/rulepack.ts';
+import { LATEST_PV_PACK } from './pv/rulepack.ts';
 import { LATEST_LED_PACK } from './rulepack.ts';
 import type { BusinessLine } from './types.ts';
 
@@ -23,7 +24,7 @@ export const LINES: LineInfo[] = [
   { line: 'led', label: 'LED 显示屏', en: 'LED display', prefix: 'led_', svc: 'led', pack: LATEST_LED_PACK, draft: false },
   { line: 'projector', label: '投影系统', en: 'Projection', prefix: 'prj_', svc: 'projector', pack: LATEST_PRJ_PACK, draft: true },
   { line: 'elv', label: '弱电系统', en: 'ELV systems', prefix: 'elv_', svc: 'elv', pack: LATEST_ELV_PACK, draft: true },
-  { line: 'pv', label: '太阳能光伏', en: 'Solar PV', prefix: 'pv_', svc: null, pack: null, draft: false },
+  { line: 'pv', label: '太阳能光伏', en: 'Solar PV', prefix: 'pv_', svc: 'pv', pack: LATEST_PV_PACK, draft: true },
 ];
 
 export const lineInfo = (line: BusinessLine) => LINES.find((l) => l.line === line)!;

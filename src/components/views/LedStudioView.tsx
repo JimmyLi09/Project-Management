@@ -458,7 +458,7 @@ export function TraceChain({ trace, start }: { trace: Record<string, TraceNode>;
         <div key={node.key} style={{ fontSize: 12, lineHeight: 1.7, paddingLeft: depth * 18,
           color: depth === 0 ? 'var(--text1)' : 'var(--text2)' }}>
           <span className="tnum" style={{ fontWeight: depth === 0 ? 700 : 400 }}>
-            {node.key} = {node.value} {node.unit}
+            {node.key} = {Number(node.value.toPrecision(10))} {node.unit}
           </span>
           {' · '}
           <span>{node.prov.rule ? `rule · ${node.prov.rule}` : node.prov.method}</span>
