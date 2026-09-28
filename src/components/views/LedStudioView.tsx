@@ -109,7 +109,7 @@ export default function LedStudioView() {
     setLibText(fmtLib(p.cabLib));
   }
 
-  function download(name: string, body: string, mime: string) {
+  function download(name: string, body: BlobPart, mime: string) {
     const url = URL.createObjectURL(new Blob([body], { type: mime }));
     const a = document.createElement('a');
     a.href = url;
@@ -118,7 +118,7 @@ export default function LedStudioView() {
     URL.revokeObjectURL(url);
   }
 
-  function exportFile(kind: 'svg' | 'bom' | 'dxf') {
+  async function exportFile(kind: 'svg' | 'bom' | 'dxf') {
     try {
       assertExportable(result);
     } catch (e) {
@@ -128,7 +128,20 @@ export default function LedStudioView() {
     if (!drawing || !result.layout) return;
     if (kind === 'svg') download('led-layout.svg', svg, 'image/svg+xml');
     else if (kind === 'bom') download('led-cabinets.csv', bomCsv(result.layout), 'text/csv;charset=utf-8');
-    else download('led-layout.drawing.json', JSON.stringify(drawing, null, 2), 'application/json');
+    else {
+      /* DXF is rendered by the drawing service; the server recomputes and re-applies the export gate */
+      const title = fromDrawing?.project ?? fromDrawing?.drawing ?? t('方案配置', 'Configuration');
+      const res = await fetch('/api/av/dxf', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ cfg: { ...cfg, led_cab_lib: lib.length ? lib : undefined }, packVersion, title }),
+      }).catch(() => null);
+      if (!res?.ok) {
+        const body = res ? await res.json().catch(() => ({})) : {};
+        alert(body.error || t('DXF 导出失败', 'DXF export failed'));
+        return;
+      }
+      download('led-layout.dxf', await res.blob(), 'application/dxf');
+    }
   }
 
   const trace = result.trace;
@@ -360,7 +373,7 @@ export default function LedStudioView() {
               <span style={{ display: 'flex', gap: 8 }}>
                 <button className="btn-line" onClick={() => exportFile('svg')}><Icon name="download" size={14} /> SVG</button>
                 <button className="btn-line" onClick={() => exportFile('bom')}><Icon name="download" size={14} /> {t('箱体清单', 'Cabinets')}</button>
-                <button className="btn-line" onClick={() => exportFile('dxf')}><Icon name="download" size={14} /> {t('DXF 数据包', 'DXF payload')}</button>
+                <button className="btn-line" onClick={() => exportFile('dxf')}><Icon name="download" size={14} /> DXF</button>
               </span>
             )}
           </div>
@@ -371,9 +384,8 @@ export default function LedStudioView() {
                   dangerouslySetInnerHTML={{ __html: svg }} />
                 {canExportLed(me) && (
                   <p style={{ fontSize: 11.5, color: 'var(--text2)', lineHeight: 1.8, marginTop: 10 }}>
-                    {t('DXF 由制图服务渲染：下载数据包后执行 ', 'Render DXF from the payload: ')}
-                    <code>python -m avdrawing.dxf led-layout.drawing.json out.dxf</code>
-                    {t('，输出 R2010 / 单位 mm / 八图层。', ' — R2010, mm, eight layers.')}
+                    {t('DXF 由服务端制图服务渲染：R2010 / 单位 mm / 八图层，可直接在 AutoCAD 中打开。',
+                      'DXF is rendered on the server: R2010, mm, eight layers.')}
                   </p>
                 )}
               </>

@@ -1,0 +1,17 @@
+# 局域网部署：docker compose up -d --build，浏览器打开 http://<服务器IP>:8080
+services:
+  app:
+    build: .
+    ports:
+      - "8080:3000"
+    environment:
+      # 会话签名密钥；留空时自动生成并保存在数据库里
+      SESSION_SECRET: ${SESSION_SECRET:-}
+      # 可选：C 级图纸的视觉识别
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+    volumes:
+      - audax-data:/app/data
+    restart: unless-stopped
+
+volumes:
+  audax-data:

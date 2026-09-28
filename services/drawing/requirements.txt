@@ -1,1 +1,5 @@
 ezdxf==1.4.4
+# B 级矢量 PDF 解析
+pymupdf==1.28.2
+# C 级图纸视觉识别（仅在设置 ANTHROPIC_API_KEY 时使用）
+anthropic==1.8.0
