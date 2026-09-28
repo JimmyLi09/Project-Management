@@ -75,7 +75,7 @@ Claude Sonnet。
 .venv/bin/python -m avdrawing.cases "All the Project Links.xlsx" > cases.json
 ```
 
-读取公司项目统计表的两张 LED 工作表（每行一块屏），输出 `{cases, sheets}`；平台的「AV 历史案例」页上传统计表时调用它。读法与相对系统二的修正见 `docs/requirements/021-AV方案成本平台-历史案例检索.md`。
+读取公司项目统计表的两张 LED 工作表（每行一块屏），输出 `{cases, sheets}`；平台的「AV 历史案例」页上传统计表时调用它。读法与相对系统二的修正见 `docs/requirements/054-AV方案成本平台-历史案例检索.md`。
 
 ## 测试
 

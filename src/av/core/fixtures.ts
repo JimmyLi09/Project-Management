@@ -33,7 +33,7 @@ export interface Fixture {
   modsHandEntered?: boolean;
   /* §7.3's data-cable "算出" figure reproduces on the whole-screen reading for
      every project but these two, where the printed figure matches neither
-     reading. See docs/requirements/010-LED方案成本平台-确定性计算内核.md §6. */
+     reading. See docs/requirements/043-LED方案成本平台-确定性计算内核.md §6. */
   docDataInconsistent?: boolean;
   note?: string;
 }
