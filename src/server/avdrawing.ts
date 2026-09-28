@@ -1,6 +1,6 @@
 /* ===== Bridge to the Python drawing service (services/drawing) =====
-   Spawns `python -m avdrawing.ingest.cli` per request: JSON on stdout, errors as
-   {"error": ...} with exit code 2; and the DXF / Word renderers. One app, one intranet server (§14), no
+   Spawns `python -m avdrawing.ingest.cli` (or avdrawing.cases) per request: JSON
+   on stdout, errors as {"error": ...} with exit code 2; and the DXF / Word renderers. One app, one intranet server (§14), no
    second long-running process to supervise. */
 
 import { spawn } from 'child_process';
@@ -37,8 +37,17 @@ function runPython(args: string[], stdin?: string): Promise<{ code: number | nul
   });
 }
 
-export async function runDrawingCli(args: string[], stdin?: string): Promise<Record<string, unknown>> {
-  const { code, out, err } = await runPython(['-m', 'avdrawing.ingest.cli', ...args], stdin);
+export function runDrawingCli(args: string[], stdin?: string): Promise<Record<string, unknown>> {
+  return runJsonCli('avdrawing.ingest.cli', args, stdin);
+}
+
+/* 历史案例：读取公司统计表（xlsx）的两张 LED 工作表 -> { cases, sheets } */
+export function readCaseWorkbook(file: string): Promise<Record<string, unknown>> {
+  return runJsonCli('avdrawing.cases', [file]);
+}
+
+async function runJsonCli(module: string, args: string[], stdin?: string): Promise<Record<string, unknown>> {
+  const { code, out, err } = await runPython(['-m', module, ...args], stdin);
   let payload: Record<string, unknown> | null = null;
   try { payload = JSON.parse(out); } catch { /* fall through */ }
   if (code === 0 && payload) return payload;

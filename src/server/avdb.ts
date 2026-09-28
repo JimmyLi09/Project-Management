@@ -127,6 +127,28 @@ function db() {
         decided_at INTEGER NOT NULL DEFAULT 0,
         decision_note TEXT NOT NULL DEFAULT ''
       );
+      CREATE TABLE IF NOT EXISTS av_case (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        source_sheet TEXT NOT NULL,
+        status TEXT NOT NULL,
+        ref_no TEXT,
+        year INTEGER,
+        name TEXT NOT NULL,
+        client TEXT,
+        address TEXT,
+        width_mm REAL,
+        height_mm REAL,
+        sqm REAL,
+        pitch REAL,
+        modules INTEGER,
+        kw REAL,
+        power_cable TEXT,
+        data_cable TEXT,
+        product TEXT,
+        remarks TEXT,
+        imported_by TEXT NOT NULL,
+        imported_at INTEGER NOT NULL
+      );
       CREATE TABLE IF NOT EXISTS av_extraction (
         drawing_id INTEGER NOT NULL REFERENCES av_drawing(id) ON DELETE CASCADE,
         element TEXT NOT NULL,
@@ -539,4 +561,86 @@ export function listQuotes(projectId: string): Quote[] {
 export function decideQuote(id: number, status: 'approved' | 'rejected', by: string, note: string): boolean {
   return db().prepare(`UPDATE av_quote SET status = ?, decided_by = ?, decided_at = ?, decision_note = ? WHERE id = ? AND status = 'submitted'`)
     .run(status, by, Date.now(), note, id).changes === 1;
+}
+
+/* ===== 历史案例 (ported from avcost-phase1, 2026-09-28) =====
+   The company's "All the Project Links" workbook is the record; the library is
+   a searchable copy of its two LED sheets. Each import replaces the whole copy,
+   so re-importing the updated workbook never leaves stale or duplicate rows. */
+
+export interface HistCase {
+  id: number;
+  sourceSheet: string;
+  status: 'ongoing' | 'completed';
+  refNo: string | null;
+  year: number | null;
+  name: string;
+  client: string | null;
+  address: string | null;
+  widthMm: number | null;
+  heightMm: number | null;
+  sqm: number | null;
+  pitch: number | null;
+  modules: number | null;
+  kw: number | null;
+  powerCable: string | null;
+  dataCable: string | null;
+  product: string | null;
+  remarks: string | null;
+}
+
+export interface CaseFilter {
+  q?: string;
+  status?: string;
+  pitchMin?: number;
+  pitchMax?: number;
+  sqmMin?: number;
+  sqmMax?: number;
+}
+
+const CASE_COLS = `id, source_sheet AS sourceSheet, status, ref_no AS refNo, year, name, client, address,
+  width_mm AS widthMm, height_mm AS heightMm, sqm, pitch, modules, kw, power_cable AS powerCable,
+  data_cable AS dataCable, product, remarks`;
+
+export function replaceCases(cases: Omit<HistCase, 'id'>[], by: string): number {
+  const d = db();
+  const ins = d.prepare(`INSERT INTO av_case (source_sheet, status, ref_no, year, name, client, address, width_mm, height_mm,
+    sqm, pitch, modules, kw, power_cable, data_cable, product, remarks, imported_by, imported_at)
+    VALUES (@sourceSheet, @status, @refNo, @year, @name, @client, @address, @widthMm, @heightMm,
+    @sqm, @pitch, @modules, @kw, @powerCable, @dataCable, @product, @remarks, @by, @at)`);
+  const at = Date.now();
+  d.transaction(() => {
+    d.prepare('DELETE FROM av_case').run();
+    for (const c of cases) ins.run({ ...c, by, at });
+  })();
+  return cases.length;
+}
+
+/* Keyword over name / client / address / product / ref no. / remarks, plus
+   pitch and area ranges; largest screens first, as in the original. */
+export function searchCases(f: CaseFilter, limit = 500): { cases: HistCase[]; total: number } {
+  const where: string[] = [];
+  const args: (string | number)[] = [];
+  const q = f.q?.trim();
+  if (q) {
+    where.push(`(name || ' ' || IFNULL(client,'') || ' ' || IFNULL(address,'') || ' ' || IFNULL(product,'') || ' ' ||
+      IFNULL(ref_no,'') || ' ' || IFNULL(remarks,'')) LIKE ? ESCAPE '\\'`);
+    args.push(`%${q.replace(/[\\%_]/g, (c) => '\\' + c)}%`);
+  }
+  if (f.status) { where.push('status = ?'); args.push(f.status); }
+  for (const [col, lo, hi] of [['pitch', f.pitchMin, f.pitchMax], ['sqm', f.sqmMin, f.sqmMax]] as const) {
+    if (lo !== undefined) { where.push(`${col} >= ?`); args.push(lo); }
+    if (hi !== undefined) { where.push(`${col} <= ?`); args.push(hi); }
+  }
+  const sql = `FROM av_case ${where.length ? 'WHERE ' + where.join(' AND ') : ''}`;
+  const d = db();
+  const total = (d.prepare(`SELECT count(*) AS n ${sql}`).get(...args) as { n: number }).n;
+  const cases = d.prepare(`SELECT ${CASE_COLS} ${sql} ORDER BY sqm IS NULL, sqm DESC, id LIMIT ?`).all(...args, limit) as HistCase[];
+  return { cases, total };
+}
+
+export function caseLibraryInfo(): { count: number; importedBy: string; importedAt: number } {
+  const r = db().prepare('SELECT count(*) AS count, MAX(imported_by) AS importedBy, MAX(imported_at) AS importedAt FROM av_case').get() as
+    { count: number; importedBy: string | null; importedAt: number | null };
+  return { count: r.count, importedBy: r.importedBy ?? '', importedAt: r.importedAt ?? 0 };
 }
