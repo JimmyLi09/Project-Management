@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { appendAudit, getProject, insertProject, nextProjectSerial } from '@/server/db';
 import { currentUser } from '@/server/session';
-import { canCreate, identityOf } from '@/lib/permissions';
+import { canCreate, canSeeProject, identityOf } from '@/lib/permissions';
 import { emptyUpdate, migrate, uid } from '@/lib/project';
 import { trimPackage } from '@/server/fragments';
 import type { Project } from '@/lib/types';
@@ -20,6 +20,10 @@ export async function POST(req: NextRequest) {
   if (!['entire', 'schedule', 'checklist'].includes(mode)) return NextResponse.json({ error: '无效的复制方式' }, { status: 400 });
   const src = body?.sourceId ? getProject(String(body.sourceId)) : undefined;
   if (!src) return NextResponse.json({ error: '源项目不存在' }, { status: 404 });
+  /* REQ-043: 复制整个项目同样是读一遍源项目。今天只有 sales/PD/BD 走得到这
+     里(都是看全部的角色),所以这句现在不拦任何人 —— 留着是因为可创建项目的
+     角色一旦放宽,这里就是漏的那一处。 */
+  if (!canSeeProject(identityOf(user), src)) return NextResponse.json({ error: '非你管理 / 参与的项目' }, { status: 403 });
 
   const now = Date.now();
   const copy = JSON.parse(JSON.stringify(src)) as Project;

@@ -3,7 +3,7 @@
 import React, { useMemo, useState } from 'react';
 import { useStore } from '../store';
 import { fmtDate, isoDate, parseISO, projectHealth, projStage, schedProgress } from '@/lib/project';
-import { canCreate } from '@/lib/permissions';
+import { canCreate, isScopedRole } from '@/lib/permissions';
 import { DIFF, SVC, stageIdx, svcColor, svcName } from '@/lib/templates';
 import { diffTerm } from '@/lib/terms';
 import { useLang } from '@/lib/i18n';
@@ -17,6 +17,7 @@ export default function ProjectsView({ search = '' }: { search?: string }) {
   const { lang, t } = useLang();
   const [typeFilter, setTypeFilter] = useState('all');
   const [pmFilter, setPmFilter] = useState('all');
+  const scoped = isScopedRole(me);   // REQ-043: 只看得到自己项目的角色
   const [showArchived, setShowArchived] = useState(false);
   const [q, setQ] = useState(search);
   /* R5-1: view/density switcher (大卡片 / 紧凑 / 列表) — persisted per browser */
@@ -64,12 +65,19 @@ export default function ProjectsView({ search = '' }: { search?: string }) {
         </div>
         <div style={{ flex: 1 }} />
         <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap' }}>
-          <button className={`chip ${pmFilter === 'all' ? 'active' : ''}`} onClick={() => setPmFilter('all')}>{t('全部负责人', 'All PMs')}</button>
-          {pms.map((n) => (
-            <button key={n} className={`chip ${pmFilter === n ? 'active' : ''}`} onClick={() => setPmFilter(n)}>
-              <Avatar name={n} size={20} />{n}
-            </button>
-          ))}
+          {/* REQ-043: 「全部负责人」这排本来是用来切着看别人手上的活。PM /
+              Engineer 现在拿到的就只有自己的项目,这排切了也只剩自己一个人,
+              留着反而像还有别人可以看 —— 整排收掉。 */}
+          {!scoped && (
+            <>
+              <button className={`chip ${pmFilter === 'all' ? 'active' : ''}`} onClick={() => setPmFilter('all')}>{t('全部负责人', 'All PMs')}</button>
+              {pms.map((n) => (
+                <button key={n} className={`chip ${pmFilter === n ? 'active' : ''}`} onClick={() => setPmFilter(n)}>
+                  <Avatar name={n} size={20} />{n}
+                </button>
+              ))}
+            </>
+          )}
           <button className={`chip ${showArchived ? 'active' : ''}`} onClick={() => setShowArchived(!showArchived)} title={t('查看已归档项目', 'View archived projects')}>
             📦 {t('已归档', 'Archived')}{archivedCount ? ` ${archivedCount}` : ''}
           </button>

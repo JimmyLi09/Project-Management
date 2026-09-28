@@ -279,6 +279,10 @@ export default function ProjectDetail() {
             ? t('销售视角:可编辑售前/开票与商业信息;生产内容只读。', 'Sales view: presales/invoice and commercial info editable; production read-only.')
             : me.role === 'member'
             ? t('团队成员:仅可勾选指派给你(👤)的任务。', 'Member: you can only tick tasks assigned 👤 to you.')
+            /* REQ-043: PM 只会在「被指派了一行任务、但不是这个项目的负责人」时
+               走到这里 —— 说清楚是哪一种只读,别让他以为是权限坏了。 */
+            : isPM(me)
+            ? t('非你管理的项目 · 只读(服务端按角色强制)。', 'Not a project you manage · read-only (enforced server-side).')
             : t('你对此项目为只读(服务端按角色强制)。', 'Read-only for you (enforced server-side).')}
         </div>
       )}

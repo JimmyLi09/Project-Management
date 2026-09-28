@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { appendAudit, commitWorkflowAction, deleteProject, getEffectiveTemplate, getProject, saveProject, saveProjectCAS } from '@/server/db';
 import { currentUser } from '@/server/session';
-import { canDelete, identityOf, isFull } from '@/lib/permissions';
+import { canDelete, canSeeProject, identityOf, isFull } from '@/lib/permissions';
 import { applyAction, PermissionError, ValidationError, type ProjectAction } from '@/server/actions';
 
 type Params = { params: Promise<{ id: string }> };
@@ -16,12 +16,19 @@ const WORKFLOW_ACTIONS: Record<string, string> = {
   salesVerify: 'sales_verify',
 };
 
+/* REQ-043: 越权直达的那道后端门。前端已经拿不到别人的项目了,但只要 id 能猜
+   到、curl 就能敲 —— 读、写、删都先过这一句,不看这个项目的人一个动作都发不
+   出去。放在 applyAction 之前:那里面是每个动作各自的权限,这里管的是「这个
+   项目轮不轮得到你」。 */
+const DENY = { error: '非你管理 / 参与的项目', status: 403 } as const;
+
 export async function GET(_req: NextRequest, { params }: Params) {
   const user = await currentUser();
   if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
   const { id } = await params;
   const p = getProject(id);
   if (!p) return NextResponse.json({ error: '项目不存在' }, { status: 404 });
+  if (!canSeeProject(identityOf(user), p)) return NextResponse.json({ error: DENY.error }, { status: DENY.status });
   return NextResponse.json({ project: p });
 }
 
@@ -34,6 +41,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   const { id } = await params;
   const p = getProject(id);
   if (!p) return NextResponse.json({ error: '项目不存在' }, { status: 404 });
+  if (!canSeeProject(identityOf(user), p)) return NextResponse.json({ error: DENY.error }, { status: DENY.status });
 
   const body = (await req.json().catch(() => null)) as (ProjectAction & { baseUpdatedAt?: number; baseVersion?: number }) | null;
   if (!body || typeof body.type !== 'string') {
@@ -89,6 +97,8 @@ export async function DELETE(_req: NextRequest, { params }: Params) {
     return NextResponse.json({ error: '仅 Sales / PD / BD 可删除项目' }, { status: 403 });
   }
   const { id } = await params;
+  const p = getProject(id);
+  if (p && !canSeeProject(identityOf(user), p)) return NextResponse.json({ error: DENY.error }, { status: DENY.status });
   deleteProject(id);
   return NextResponse.json({ ok: true });
 }

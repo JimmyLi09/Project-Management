@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { appendAudit, getProject, getUserTemplate, saveProjectCAS } from '@/server/db';
 import { currentUser } from '@/server/session';
-import { canEdit, identityOf } from '@/lib/permissions';
+import { canEdit, canSeeProject, identityOf } from '@/lib/permissions';
 import { applyFragment, matchPackage, extractFragment, statFragment, type Fragment, type FragmentKind } from '@/server/fragments';
 
 type Params = { params: Promise<{ id: string }> };
@@ -55,6 +55,9 @@ export async function POST(req: NextRequest, { params }: Params) {
   } else if (body?.sourceId) {
     const src = getProject(String(body.sourceId));
     if (!src) return NextResponse.json({ error: '源项目不存在' }, { status: 404 });
+    /* REQ-043: 「从别的项目抄一段」也是一种读。看不到那个项目的人,不能靠
+       给个 id 就把它的排期 / 信息清单(带内容时还有日期和路径)抄进自己这边。 */
+    if (!canSeeProject(identityOf(user), src)) return NextResponse.json({ error: '非你管理 / 参与的项目' }, { status: 403 });
     /* 目标包在本项目同类业务里排第几 —— 用它去源项目找对应的那一份 */
     const ordinal = p.packages.filter((x, i) => x.svc === dest.svc && i < pkgIdx).length;
     const srcPkg = matchPackage(src, dest.svc, ordinal);

@@ -22,6 +22,29 @@ export const canEdit = (u: Identity, p: Project) =>
 
 export const canCommercial = (u: Identity, _p?: Project) => isFull(u) || u.role === 'sales';
 
+/* ===== REQ-043: 项目可见性 —— PM / Engineer 只看自己的项目 =====
+   收窄的只有 pm 与 member 这两个「干活的」角色。director / bd 本来就看全部;
+   sales 要跟自己没建过的单子、finance 要给所有项目开票、viewer 就是拿来旁观
+   的 —— 项目上并没有「Sales 对接人」这类归属字段,硬把他们也收窄等于让他们
+   看不见该管的项目。这三个角色本期保持看全部(PR 里已列出待确认)。
+
+   归属的判据和 canEdit 用的是同一批数据(owners = PM,perm = 参与人),再加上
+   「有一行任务点名指派给我」—— Engineer(member)是靠 👤 指派干活的,不进
+   owners/perm,不算这一条他就一个项目都看不见。 */
+export const isScopedRole = (u: Identity) => u.role === 'pm' || u.role === 'member';
+
+export const isOnProject = (u: Identity, p: Project) =>
+  (p.owners || []).includes(u.name)
+  || (p.perm || []).includes(u.name)
+  || (p.packages || []).some((pk) => (pk.schedule || []).some((r) => r.assignee === u.name));
+
+export const canSeeProject = (u: Identity, p: Project) => !isScopedRole(u) || isOnProject(u, p);
+
+/* 服务端取项目、客户端过列表都走这一个口子 —— 列表 / 待办 / 统计 / 汇报 /
+   档案 / 搜索全是从同一份 projects 派生出来的,所以在这里过一次就够了。 */
+export const visibleProjects = <T extends Project>(u: Identity, ps: T[]): T[] =>
+  (isScopedRole(u) ? ps.filter((p) => isOnProject(u, p)) : ps);
+
 /* v2.2 §6/§7: Finance may edit invoice/payment status only (not production).
    PD/BD can view finance info but only Finance may change it (§7.2). */
 export const isFinance = (u: Identity) => u.role === 'finance';

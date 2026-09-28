@@ -1,14 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { appendAudit, getEffectiveTemplate, insertProject, listProjects, nextProjectSerial } from '@/server/db';
 import { currentUser } from '@/server/session';
-import { canCreate, identityOf } from '@/lib/permissions';
+import { canCreate, identityOf, visibleProjects } from '@/lib/permissions';
 import { newProject } from '@/lib/project';
 import { SVC } from '@/lib/templates';
 
 export async function GET() {
   const user = await currentUser();
   if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
-  return NextResponse.json({ projects: listProjects() });
+  /* REQ-043: PM / Engineer 只拿得到自己的项目。全站的列表、待办、统计、向上
+     汇报、项目档案和搜索都是从这一份数组派生的,所以过滤放在这里 —— 别人的
+     项目根本不会进到浏览器里,而不是发下去再靠前端藏。 */
+  return NextResponse.json({ projects: visibleProjects(identityOf(user), listProjects()) });
 }
 
 export async function POST(req: NextRequest) {
