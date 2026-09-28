@@ -6,6 +6,7 @@
    Viewer   — read-only */
 
 import type { Project, Role, ScheduleRow, User } from './types';
+import { ROLE_TERMS } from './terms';
 
 export interface Identity {
   name: string;
@@ -40,6 +41,10 @@ export const canDecide = (u: Identity) => isFull(u);
 
 export const canCreate = (u: Identity) => isFull(u) || u.role === 'sales';
 
+/* REQ-008: only Sales / PD / BD may delete a project. PM & members can edit/add
+   but never delete; viewer/finance cannot either. Server is the final authority. */
+export const canDelete = (u: Identity) => isFull(u) || u.role === 'sales';
+
 export const canAdmin = (u: Identity) => isFull(u);
 
 /* AV platform · LED spec v1.0 §11. PD/BD stand in for 管理员.
@@ -67,12 +72,67 @@ export const canSubmitQuote = (u: Identity, p?: Project) =>
   isFull(u) || u.role === 'sales' || (u.role === 'pm' && (!p || canEdit(u, p)));
 export const canApproveQuote = (u: Identity) => isFull(u);
 
+/* ===== REQ-022: who sees which part of the post-sales workflow =====
+   Sales 管两头(交接、核对/开票/收款),PM 只管制作 —— 整张售后卡片对 PM
+   完全不出现。这些只影响前端呈现:服务端 applyAction 里每个 action 自己的
+   权限校验一条都没动,藏 UI 不等于放宽权限。
+
+   注意 canEdit 对 PD/BD 也返回 true,不能拿它判断「是不是 PM」,否则 PD 会
+   跟着被藏掉、无法审批 —— 判断 PM 一律用 isPM。 */
+export const isPM = (u: Identity) => u.role === 'pm';
+/* member / viewer / finance 只旁观,不参与生产也不发起售后 */
+const isBystander = (u: Identity) => u.role === 'member' || u.role === 'viewer';
+
+/* PM 整块不见;其余角色都看得到卡片(至少是顶部六步时间线) */
+export const canSeeWorkflow = (u: Identity) => !isPM(u);
+/* 顶部六步时间线:除 PM 外一律保留(只读),含 Finance 与 member/viewer */
+export const canSeeWorkflowTimeline = (u: Identity) => !isPM(u);
+
+export const canSeeHandoverBlock = (u: Identity) =>
+  !isPM(u) && !isBystander(u) && u.role !== 'finance' && canCommercial(u);
+export const canSeeCompletionBlock = (u: Identity) => isFull(u);
+export const canSeeVerifyBlock = (u: Identity) =>
+  !isPM(u) && !isBystander(u) && u.role !== 'finance' && canCommercial(u);
+export const canSeeFinanceBlock = (u: Identity) =>
+  !isPM(u) && !isBystander(u) && (isFull(u) || u.role === 'sales' || u.role === 'finance');
+
+/* 「提交完工」的新家:排期页底部,只给本项目的 PM 与全权角色 */
+export const canSubmitCompletionHere = (u: Identity, p: Project) => canEdit(u, p);
+
+/* REQ-012: anyone who actually builds schedules/checklists may save one as a
+   reusable template — that includes PM, who owns the production content.
+   Viewer / member / finance can still read and apply, not save. */
+export const canSaveTemplate = (u: Identity) => isFull(u) || u.role === 'sales' || u.role === 'pm';
+
+/* Only the author or PD/BD may delete a shared template, so one person can't
+   wipe another team's saved layout. */
+export const canDeleteTemplate = (u: Identity, createdBy: string) => isFull(u) || u.name === createdBy;
+
+/* REQ-041: 角色名的两语词条集中在 lib/terms.ts,这里只保留中文一份
+   给旧调用点用;界面上取名请用 roleTerm(role, lang),不要直接读这张表
+   —— 直接读等于把 EN 模式下的角色名又写死成中文。 */
 export const ROLE_LABEL: Record<Role, string> = {
-  director: 'PD',
-  bd: 'BD',
-  sales: '销售',
-  pm: 'PM',
-  member: '成员',
-  viewer: '只读',
-  finance: 'Finance',
+  director: ROLE_TERMS.director[0],
+  bd: ROLE_TERMS.bd[0],
+  sales: ROLE_TERMS.sales[0],
+  pm: ROLE_TERMS.pm[0],
+  member: ROLE_TERMS.member[0],
+  viewer: ROLE_TERMS.viewer[0],
+  finance: ROLE_TERMS.finance[0],
 };
+
+/* ===== REQ-035: 知识库 =====
+   需求默认口径:总监 / PM 可编辑,其余角色只读 + 可导出。
+   BD 与总监同权(平台里两者一直是一档),删除文档收得更紧一些 ——
+   知识库是公司资产,误删一篇 SOP 比误改一篇代价大。 */
+export const canEditKb = (u: Identity) => isFull(u) || u.role === 'pm';
+export const canDeleteKb = (u: Identity) => isFull(u);
+
+/* REQ-036: 新人培训 —— 路径与题库由 总监 / BD / PM 维护(和知识库同一档);
+   学员进度所有人都能看自己的,管理视图另判。 */
+export const canEditTraining = (u: Identity) => canEditKb(u);
+export const canSeeAllTraining = (u: Identity) => canEditKb(u);
+/* 具体到某一条路径:勾了「仅总监维护」的,PM 就碰不了了。
+   题库和学员在同一批人里(全体 PM)的时候,这是唯一能真正把答案挡住的办法。 */
+export const canEditPath = (u: Identity, adminOnly: boolean) =>
+  (adminOnly ? isFull(u) : canEditTraining(u));

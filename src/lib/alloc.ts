@@ -1,6 +1,7 @@
 /* ===== Team allocation / workload derived from live project data ===== */
 
 import { projPoints, projStage } from './project';
+import { round1, type PointRules } from './points';
 import type { Project, User } from './types';
 
 export interface PersonLoad {
@@ -22,7 +23,7 @@ const isActive = (p: Project) => {
 };
 
 /* Load heuristic: each active project 20%, each open task 7%, capped at 100. */
-export function teamLoads(projects: Project[], users: User[]): PersonLoad[] {
+export function teamLoads(projects: Project[], users: User[], rulesFor?: (createdAt: number) => PointRules): PersonLoad[] {
   const map = new Map<string, PersonLoad>();
   const capByName = new Map<string, number>();
   users.forEach((u) => { if (u.pointCap) capByName.set(u.name, u.pointCap); });
@@ -60,7 +61,8 @@ export function teamLoads(projects: Project[], users: User[]): PersonLoad[] {
   const out = [...map.values()];
   out.forEach((pl) => {
     pl.load = Math.min(100, pl.activeProjects.length * 20 + pl.openTasks * 7);
-    pl.points = pl.activeProjects.reduce((a, p) => a + projPoints(p), 0);
+    /* REQ-038: 传了积分规则就按规则算,没传保持老口径 */
+    pl.points = round1(pl.activeProjects.reduce((a, p) => a + projPoints(p, rulesFor ? rulesFor(p.created) : undefined), 0));
   });
   return out.sort((a, b) => (a.isPM === b.isPM ? b.load - a.load : a.isPM ? -1 : 1));
 }

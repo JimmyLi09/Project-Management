@@ -5,7 +5,7 @@ import { useStore } from '../store';
 import { fmtDate, todayMid } from '@/lib/project';
 import { canEditFinance } from '@/lib/permissions';
 import { useLang } from '@/lib/i18n';
-import { Icon } from '../ui';
+import { Ell, Icon } from '../ui';
 import type { Project } from '@/lib/types';
 
 /* Commercial-status vocabulary — same labels/colors as the workflow panel. */
@@ -148,10 +148,10 @@ export default function FinanceView() {
               borderLeft: `3px solid ${isOverdue ? 'var(--danger)' : dueSoon ? 'var(--warning)' : 'transparent'}`,
             }}>
               <div style={{ minWidth: 0, cursor: 'pointer' }} onClick={() => openProject(p.id)}>
-                <div style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--navy900)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.name}</div>
+                <Ell style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--navy900)' }}>{p.name}</Ell>
               </div>
-              <div style={{ fontSize: 12.5, color: 'var(--text2)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.client || '—'}</div>
-              <div className="tnum" style={{ fontSize: 12.5, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{inv?.invoiceRef || <span style={{ color: '#b6bfc9' }}>—</span>}</div>
+              <Ell style={{ fontSize: 12.5, color: 'var(--text2)' }}>{p.client || '—'}</Ell>
+              <Ell className="tnum" style={{ fontSize: 12.5 }}>{inv?.invoiceRef || <span style={{ color: '#b6bfc9' }}>—</span>}</Ell>
               <div className="tnum" style={{ fontSize: 12, color: 'var(--text2)' }}>{inv?.issuedDate || '—'}</div>
               <div className="tnum" style={{ fontSize: 12, color: isOverdue ? 'var(--danger)' : dueSoon ? 'var(--warning)' : 'var(--text2)', fontWeight: isOverdue || dueSoon ? 600 : 400 }}>
                 {inv?.dueDate || '—'}

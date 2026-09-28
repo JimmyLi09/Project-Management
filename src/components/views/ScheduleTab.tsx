@@ -2,21 +2,44 @@
 
 import React, { useState } from 'react';
 import { useStore } from '../store';
-import { fmtDate, isoDate, MACRO, macroStage, parseISO, pkgStart, planDates, todayMid } from '@/lib/project';
-import { canEdit, canRowEdit } from '@/lib/permissions';
+import CalendarScheduleTab from './CalendarScheduleTab';
+import { fmtDate, isoDate, MACRO, macroStage, parseISO, pkgStart, planDates, todayMid , pkgSuffix } from '@/lib/project';
+import { canEdit, canRowEdit, canSubmitCompletionHere } from '@/lib/permissions';
 import { svcColor, svcName } from '@/lib/templates';
 import { useLang } from '@/lib/i18n';
-import { Avatar, Icon, Pill, TM } from '../ui';
+import { Avatar, Ell, Icon, Pill, TM } from '../ui';
+import FragmentBar from '../FragmentBar';
+import type { PlanDate } from '@/lib/project';
 import type { Project, ScheduleStatus } from '@/lib/types';
+import { durationTerm, gateTerm } from '@/lib/terms';
+
+/* REQ-041: 典型工期 / 冻结点提示的显示值。优先级:
+   模板里显式填的 EN > terms.ts 里的出厂词条 > 中文原值。 */
+const typicalOf = (r: { typical: string; typicalEn?: string }, lang: 'zh' | 'en') =>
+  (lang === 'zh' ? r.typical : r.typicalEn || durationTerm(r.typical, 'en')) || '';
+const gateOf = (r: { gate: string; gateEn?: string }, lang: 'zh' | 'en') =>
+  (lang === 'zh' ? r.gate : r.gateEn || gateTerm(r.gate, 'en')) || '';
+
 
 const NEXT: Record<ScheduleStatus, ScheduleStatus> = { todo: 'wip', wip: 'done', done: 'block', block: 'todo' };
 
 export default function ScheduleTab({ p, pkgIdx, onExport, onPkg }: {
   p: Project; pkgIdx: number; onExport: () => void; onPkg: (i: number) => void;
 }) {
-  const { me, dispatch, users } = useStore();
-  const { lang, t } = useLang();
+  const { me, dispatch, users, setToast } = useStore();
+  const { lang, t, dual } = useLang();
   const [editMode, setEditMode] = useState(false);
+  /* REQ-040(方案 A):日历排期与经典排期并存。
+     已经排过日历的服务包默认打开日历视图,其余仍是经典 —— 老项目一行不动。 */
+  const [schedView, setSchedView] = useState<'classic' | 'calendar'>(
+    () => (p.packages[pkgIdx]?.calendar?.boundaries?.length ? 'calendar' : 'classic'),
+  );
+  const [showCal, setShowCal] = useState(false);
+  const [dragIdx, setDragIdx] = useState<number | null>(null);
+  const [overIdx, setOverIdx] = useState<number | null>(null);
+  /* REQ-018: template style (stored on the project) + its edit toggle */
+  const style = p.schedStyle || 'classic';
+  const [tplEdit, setTplEdit] = useState(false);
   const ed = canEdit(me, p);
   const pkg = p.packages[pkgIdx];
   const assigneeNames = users.filter((u) => u.role === 'pm' || u.role === 'member' || u.role === 'director' || u.role === 'bd').map((u) => u.name);
@@ -48,13 +71,31 @@ export default function ScheduleTab({ p, pkgIdx, onExport, onPkg }: {
 
   return (
     <>
+      {/* REQ-040: 两种排期方式的切换。经典 = 阶段行表格(导出 / KPI / 进度统计
+          读的都是它);日历 = stage-calendar-planner,在月历上排、拖分界点。 */}
+      <div className="detail-tabs" style={{ borderTop: 'none', marginBottom: 12 }}>
+        <button className={`detail-tab${schedView === 'classic' ? ' active' : ''}`} onClick={() => setSchedView('classic')}
+          title={t('阶段行表格 —— 导出、KPI、进度统计读的是这一套', 'Phase table — exports, KPI and progress read this one')}>
+          {t('经典排期', 'Classic')}
+        </button>
+        <button className={`detail-tab${schedView === 'calendar' ? ' active' : ''}`} onClick={() => setSchedView('calendar')}
+          title={t('在月历上点排 + 拖分界点微调', 'Plan on a month calendar and drag the boundaries')}>
+          {t('日历排期', 'Calendar')}
+          {pkg.calendar?.boundaries?.length ? <span className="badge" style={{ background: 'var(--navy900)', color: '#fff', marginLeft: 6 }}>v{pkg.calendar.version}</span> : null}
+        </button>
+      </div>
+
+      {schedView === 'calendar' ? (
+        <CalendarScheduleTab p={p} pkgIdx={pkgIdx} />
+      ) : (
+      <>
       {p.packages.length > 1 && (
         <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap', marginBottom: 16 }}>
           {p.packages.map((pk, i) => (
             <button key={i} className={`chip ${i === pkgIdx ? 'active' : ''}`}
               style={i === pkgIdx ? { background: svcColor(pk.svc), borderColor: svcColor(pk.svc) } : undefined}
               onClick={() => onPkg(i)}>
-              {svcName(pk.svc, lang)}
+              {svcName(pk.svc, lang)}{pkgSuffix(p, i) ? ' ' + pkgSuffix(p, i) : ''}
             </button>
           ))}
         </div>
@@ -71,7 +112,12 @@ export default function ScheduleTab({ p, pkgIdx, onExport, onPkg }: {
         </Field>
         <Field label={t('交付', 'Delivery')}>
           {ed ? <input type="date" className="in sm" value={pkg.delivery || ''}
-            onChange={(e) => dispatch(p.id, { type: 'setPkgField', pkg: pkgIdx, field: 'delivery', value: e.target.value })} />
+            onChange={(e) => {
+              const v = e.target.value; const startIso = pkgStart(p, pkg);
+              // REQ-001: 交付日不能早于开始日
+              if (v && startIso && v < startIso) { setToast(t('交付日不能早于开始日', 'Delivery cannot be before the start date')); return; }
+              dispatch(p.id, { type: 'setPkgField', pkg: pkgIdx, field: 'delivery', value: v });
+            }} />
             : <b className="tnum">{pkg.delivery ? fmtDate(parseISO(pkg.delivery)) : '—'}</b>}
         </Field>
         <Field label="Buffer">
@@ -88,8 +134,40 @@ export default function ScheduleTab({ p, pkgIdx, onExport, onPkg }: {
         {slackNode}
         {ed && <button className="btn-line sm" onClick={() => dispatch(p.id, { type: 'reversePkg', pkg: pkgIdx })}>↩ {t('按交付日倒排', 'Back-plan from delivery')}</button>}
         {ed && <button className="btn-line sm" onClick={() => setEditMode(!editMode)}>{editMode ? t('完成编辑', 'Done editing') : t('编辑阶段', 'Edit phases')}</button>}
-        <button className="btn-line sm" onClick={onExport}><Icon name="download" size={13} />{t('导出', 'Export')}</button>
+        <button className={`btn-line sm ${showCal ? 'active' : ''}`} onClick={() => setShowCal((v) => !v)} style={showCal ? { borderColor: 'var(--navy700)', color: 'var(--navy900)' } : undefined}>📅 {t('交付日历', 'Calendar')}</button>
+        <button className="btn-line sm" onClick={onExport}><Icon name="download" size={13} />{t('导出排期', 'Export Schedule')}</button>
       </div>
+
+      {/* REQ-018: schedule template switcher */}
+      <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap', alignItems: 'center', marginBottom: 14 }}>
+        <span className="mini-label" style={{ fontWeight: 700, color: 'var(--navy900)' }}>{t('排期样式', 'Template')}:</span>
+        {([['classic', '经典编辑', 'Classic'], ['weeks', '按服务分组(周)', 'By service (weeks)'], ['dates', '按日期(Scale Model)', 'By date (Scale Model)']] as const).map(([k, zh, en]) => (
+          <button key={k} className={`chip ${style === k ? 'active' : ''}`}
+            onClick={() => ed ? dispatch(p.id, { type: 'setSchedStyle', value: k }) : setToast(t('无编辑权限', 'No edit permission'))}>
+            {t(zh, en)}
+          </button>
+        ))}
+        {style !== 'classic' && ed && (
+          <button className="btn-line sm" style={tplEdit ? { borderColor: 'var(--navy700)', color: 'var(--navy900)', fontWeight: 600 } : undefined}
+            onClick={() => setTplEdit(!tplEdit)}>{tplEdit ? t('完成', 'Done') : t('编辑', 'Edit')}</button>
+        )}
+      </div>
+
+      {/* REQ-012: import this package's schedule from another project / a saved template */}
+      {ed && <FragmentBar p={p} pkgIdx={pkgIdx} kind="schedule" />}
+
+      {/* REQ-002: delivery calendar (Gantt-style timeline) — time-linked to weeks */}
+      {showCal && <DeliveryCalendar p={p} pkg={pkg} pd={pd} t0={t0} lang={lang} t={t} />}
+
+      {/* REQ-018 style A/B templates — replace the classic table when selected */}
+      {style === 'weeks' && <WeeksTemplate p={p} ed={ed && tplEdit} dispatch={dispatch} lang={lang} t={t} />}
+      {style === 'dates' && <DatesTemplate p={p} pkg={pkg} pkgIdx={pkgIdx} pd={pd} ed={ed && tplEdit} dispatch={dispatch} lang={lang} t={t} />}
+      {style !== 'classic' && (
+        <p style={{ marginTop: 12, fontSize: 12.5, color: 'var(--text2)' }}>
+          {t('日期与「交付日历」「导出」同源:改周期或日期,日历与导出即时跟随。切回「经典编辑」可用完整的阶段编辑工具。',
+             'Dates feed the delivery calendar and the export from the same source — change weeks or dates and both follow. Switch to Classic for the full phase editor.')}
+        </p>
+      )}
 
       {/* datalist shared by the assignee inputs (B4) */}
       <datalist id="assignee-names">{assigneeNames.map((n) => <option key={n} value={n} />)}</datalist>
@@ -148,8 +226,10 @@ export default function ScheduleTab({ p, pkgIdx, onExport, onPkg }: {
         )}
       </div>
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14, fontSize: 12.5, color: 'var(--text2)' }}>
-        <Icon name="lock" size={14} style={{ color: 'var(--navy700)' }} /> {t('冻结点 — 确认后锁定,改动影响下游', 'Freeze point — locked once confirmed; changes ripple downstream')}
+      {style === 'classic' && (<>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 14, fontSize: 12.5, color: 'var(--text2)', flexWrap: 'wrap' }}>
+        <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}><Icon name="lock" size={14} style={{ color: 'var(--navy700)' }} /> {t('冻结点 — 确认后锁定,改动影响下游', 'Freeze point — locked once confirmed; changes ripple downstream')}</span>
+        {ed && !editMode && <span style={{ color: 'var(--navy700)' }}>⠿ {t('拖动左侧手柄即可调整阶段顺序(无需进入编辑)', 'Drag the ⠿ handle to reorder phases — no edit mode needed')}</span>}
       </div>
 
       <div className="panel clip">
@@ -169,22 +249,44 @@ export default function ScheduleTab({ p, pkgIdx, onExport, onPkg }: {
                   const over = r.status !== 'done' && d && d.end < t0;
                   const done = r.status === 'done';
                   const rowEd = canRowEdit(me, p, r);
-                  const gateTxt = r.gate && r.gate.trim() ? r.gate.replace(/★\s*/, '') : '';
+                  /* REQ-041: 冻结点提示 / 典型工期原来只有中文。模板里补了 EN 位
+                     (gateEn / typicalEn),没填就回落到中文 —— 老项目和老定制模板
+                     不会因此变空。 */
+                  const gateRaw = gateOf(r, lang);
+                  const gateTxt = gateRaw.trim() ? gateRaw.replace(/★\s*/, '') : '';
                   const taskMain = lang === 'zh' ? r.task : r.taskEn || r.task;
-                  const taskSub = lang === 'zh' ? r.taskEn : r.task;
+                  /* REQ-041: 另一种语言的任务名只在「双语并排」开着时压在下面;
+                     关掉之后这一行只剩负责人 —— EN 模式默认就是关的。 */
+                  const taskSub = dual ? (lang === 'zh' ? r.taskEn : r.task) : '';
                   return (
-                    <div key={r.id || i} className="row-hover" style={{
-                      display: 'grid', gridTemplateColumns: '26px 26px minmax(220px,2fr) 40px 1.15fr 120px', gap: 15, alignItems: 'center',
-                      padding: '18px 24px', borderBottom: '1px solid var(--row-line)',
-                      borderLeft: `3px solid ${over ? 'var(--danger)' : r.custom ? '#7c5bd6' : r.freeze ? 'var(--bronze)' : 'transparent'}`,
-                    }}>
+                    <div key={r.id || i} className="row-hover"
+                      onDragOver={ed && !editMode ? (e) => { e.preventDefault(); if (overIdx !== i) setOverIdx(i); } : undefined}
+                      onDrop={ed && !editMode ? (e) => { e.preventDefault(); if (dragIdx != null && dragIdx !== i) dispatch(p.id, { type: 'reorderRow', pkg: pkgIdx, from: dragIdx, to: i }); setDragIdx(null); setOverIdx(null); } : undefined}
+                      style={{
+                        display: 'grid', gridTemplateColumns: '26px 26px minmax(220px,2fr) 40px 1.15fr 120px', gap: 15, alignItems: 'center',
+                        padding: '18px 24px', borderBottom: '1px solid var(--row-line)',
+                        borderLeft: `3px solid ${over ? 'var(--danger)' : r.custom ? '#7c5bd6' : r.freeze ? 'var(--bronze)' : 'transparent'}`,
+                        boxShadow: overIdx === i && dragIdx != null && dragIdx !== i ? 'inset 0 2px 0 var(--navy700)' : undefined,
+                        opacity: dragIdx === i ? 0.45 : 1,
+                      }}>
                       <button className={`ckbox ${done ? 'on' : ''} ${rowEd ? '' : 'locked'}`}
                         onClick={rowEd ? () => dispatch(p.id, { type: 'toggleDone', pkg: pkgIdx, idx: i }) : undefined}>
                         {done && <Icon name="checkSm" size={13} style={{ color: '#fff' }} />}
                       </button>
-                      <span style={{ color: 'var(--navy700)', display: 'flex', justifyContent: 'center' }}>
-                        {r.freeze ? <Icon name="lock" size={14} /> : <span className="tnum" style={{ fontSize: 11, color: 'var(--text2)' }}>{r.no}</span>}
-                      </span>
+                      {ed && !editMode ? (
+                        <span
+                          draggable
+                          onDragStart={(e) => { setDragIdx(i); e.dataTransfer.effectAllowed = 'move'; }}
+                          onDragEnd={() => { setDragIdx(null); setOverIdx(null); }}
+                          title={t('拖动调整顺序', 'Drag to reorder')}
+                          style={{ cursor: 'grab', color: 'var(--text2)', display: 'flex', justifyContent: 'center', userSelect: 'none', fontSize: 14, lineHeight: 1 }}
+                        >⠿</span>
+                      ) : (
+                        <span style={{ color: 'var(--navy700)', display: 'flex', justifyContent: 'center' }}>
+                          {/* REQ-017: number by position so deletions renumber */}
+                          {r.freeze ? <Icon name="lock" size={14} /> : <span className="tnum" style={{ fontSize: 11, color: 'var(--text2)' }}>{i}</span>}
+                        </span>
+                      )}
                       <div style={{ minWidth: 0 }}>
                         {editMode && ed ? (
                           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -196,7 +298,13 @@ export default function ScheduleTab({ p, pkgIdx, onExport, onPkg }: {
                               <input className="in sm" style={{ flex: 1 }} defaultValue={r.owner} placeholder={t('角色', 'Owner role')}
                                 onBlur={(e) => e.target.value !== r.owner && dispatch(p.id, { type: 'editSched', pkg: pkgIdx, idx: i, field: 'owner', value: e.target.value })} />
                               <input className="in sm" type="number" step={0.5} min={0} style={{ width: 66 }} defaultValue={r.weeks} title={t('周数', 'weeks')}
-                                onBlur={(e) => (parseFloat(e.target.value) || 0) !== r.weeks && dispatch(p.id, { type: 'editSchedNum', pkg: pkgIdx, idx: i, field: 'weeks', value: parseFloat(e.target.value) || 0 })} />
+                                onBlur={(e) => {
+                                  const raw = e.target.value.trim(); const v = parseFloat(raw);
+                                  // REQ-001: 周期须为 ≥ 0 的数字;非法则拦截并还原
+                                  if (raw !== '' && (isNaN(v) || v < 0)) { setToast(t('周期需为 ≥ 0 的数字', 'Weeks must be a number ≥ 0')); e.target.value = String(r.weeks); return; }
+                                  const nv = isNaN(v) ? 0 : v;
+                                  if (nv !== r.weeks) dispatch(p.id, { type: 'editSchedNum', pkg: pkgIdx, idx: i, field: 'weeks', value: nv });
+                                }} />
                             </div>
                             {/* B4: pick assignee from accounts (still allows a free-typed name) */}
                             <input className="in sm" list="assignee-names" defaultValue={r.assignee} placeholder={t('👤 指派给(可选账号)', '👤 Assignee (pick account)')}
@@ -227,7 +335,7 @@ export default function ScheduleTab({ p, pkgIdx, onExport, onPkg }: {
                               {r.custom && <span style={{ fontSize: 10, fontWeight: 700, color: '#7c5bd6', background: '#efe9fb', borderRadius: 5, padding: '1px 6px', letterSpacing: '.02em' }}>＋{t('自定义', 'Custom')}</span>}
                               {taskMain}
                             </div>
-                            <div style={{ fontSize: 11.5, color: 'var(--text2)' }}>{taskSub}{r.owner ? ` · ${r.owner}` : ''}{r.assignee && r.custom ? ` · ${r.assignee}` : ''}</div>
+                            <div style={{ fontSize: 11.5, color: 'var(--text2)' }}>{[taskSub, r.owner, r.assignee && r.custom ? r.assignee : ''].filter(Boolean).join(' · ')}</div>
                             {gateTxt && (
                               <div style={{ display: 'inline-flex', gap: 5, marginTop: 5, fontSize: 11.5, color: r.freeze ? '#8f5b1d' : 'var(--text2)', background: r.freeze ? '#f6ecdd' : 'var(--row-line2)', borderRadius: 6, padding: '3px 8px' }}>
                                 {r.freeze ? '★' : '›'} {gateTxt}
@@ -257,12 +365,12 @@ export default function ScheduleTab({ p, pkgIdx, onExport, onPkg }: {
                           <input type="date" className="in sm" style={{ fontSize: 11, padding: '2px 5px', ...(over ? { borderColor: '#e7a19b', color: '#b23a32' } : {}) }}
                             title={t('结束(可改)', 'End (editable)')} value={r.e || (d ? isoDate(d.end) : '')}
                             onChange={(e) => dispatch(p.id, { type: 'editSched', pkg: pkgIdx, idx: i, field: 'e', value: e.target.value })} />
-                          <div style={{ fontSize: 10.5, color: 'var(--text2)' }}>{r.typical}</div>
+                          <div style={{ fontSize: 10.5, color: 'var(--text2)' }}>{typicalOf(r, lang)}</div>
                         </div>
                       ) : (
                         <div className="tnum" style={{ fontSize: 12, color: over ? 'var(--danger)' : 'var(--text2)', fontWeight: over ? 600 : 400 }}>
                           {d ? <>{fmtDate(d.start).slice(0, 6)} → {fmtDate(d.end).slice(0, 6)}</> : '—'}
-                          <div style={{ fontSize: 10.5, color: 'var(--text2)', fontWeight: 400 }}>{r.typical}</div>
+                          <div style={{ fontSize: 10.5, color: 'var(--text2)', fontWeight: 400 }}>{typicalOf(r, lang)}</div>
                         </div>
                       )}
                       <div style={{ justifySelf: 'end' }}>
@@ -286,12 +394,389 @@ export default function ScheduleTab({ p, pkgIdx, onExport, onPkg }: {
         <button className="btn-line" style={{ width: '100%', marginTop: 12, justifyContent: 'center', borderStyle: 'dashed' }}
           onClick={() => dispatch(p.id, { type: 'addRow', pkg: pkgIdx })}>+ {t('添加阶段', 'Add phase')}</button>
       )}
+      </>)}
       {ed && <AddNodeBar pid={p.id} pkgIdx={pkgIdx} />}
-      <p style={{ marginTop: 12, fontSize: 12.5, color: 'var(--text2)' }}>
-        {t('勾选=完成;未勾且过期=逾期(红边)。点状态徽章切换 未开始→进行中→已完成→受阻。团队成员只能操作指派给自己(👤)的任务。',
-          'Tick = done; unticked past due = overdue (red edge). Click the status pill to cycle To Do → In Progress → Done → Blocked. Members can only act on tasks assigned 👤 to them.')}
-      </p>
+      {/* REQ-018 style B: add red milestone / holiday band rows */}
+      {ed && style === 'dates' && <SpecialRowBar pid={p.id} pkgIdx={pkgIdx} />}
+      {style === 'classic' && (
+        <p style={{ marginTop: 12, fontSize: 12.5, color: 'var(--text2)' }}>
+          {t('勾选=完成;未勾且过期=逾期(红边)。点状态徽章切换 未开始→进行中→已完成→受阻。团队成员只能操作指派给自己(👤)的任务。',
+            'Tick = done; unticked past due = overdue (red edge). Click the status pill to cycle To Do → In Progress → Done → Blocked. Members can only act on tasks assigned 👤 to them.')}
+        </p>
+      )}
+
+      {/* REQ-022: 「提交完工」的新家 —— 售后工作流整块对 PM 不可见后,
+          这个动作挪到排期页底部,紧挨着 PM 真正在做的生产内容。 */}
+      <CompletionCard p={p} />
     </>
+      )}
+    </>
+  );
+}
+
+/* ===== REQ-022 — 提交完工(原「完成包」,从售后工作流卡片移来) =====
+   只给本项目的 PM 与全权角色。服务端 submitCompletion 的权限没变,
+   变的只是入口位置。 */
+function CompletionCard({ p }: { p: Project }) {
+  const { me, dispatch } = useStore();
+  const { t } = useLang();
+  const [summary, setSummary] = useState('');
+  const [links, setLinks] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [open, setOpen] = useState(false);
+
+  const h = p.handover;
+  const cr = p.completionReview;
+  /* 还没接单就没有「完工」可言 */
+  if (!canSubmitCompletionHere(me, p) || !h || h.status !== 'accepted' || !cr) return null;
+
+  const approved = cr.approval?.status === 'approved';
+  const pending = cr.status === 'submitted' && !approved;
+  const returned = cr.approval?.status === 'changes_requested' || cr.approval?.status === 'rejected';
+
+  /* 已提交 / 已批准 —— 收成一行状态,不占版面 */
+  if (pending || approved) {
+    return (
+      <div className="panel" style={{ padding: '12px 16px', marginTop: 16, display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+        <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--navy900)' }}>{t('完工提交', 'Completion')}</span>
+        {approved ? (
+          <span style={{ fontSize: 12.5, color: 'var(--success)', fontWeight: 600 }}>
+            ✓ {t('PD 已批准 · 制作完成', 'PD approved · production completed')}
+          </span>
+        ) : (
+          <span style={{ fontSize: 12.5, color: 'var(--warning)', fontWeight: 600 }}>{t('待 PD 审批', 'Awaiting PD approval')}</span>
+        )}
+        <span style={{ fontSize: 12, color: 'var(--text2)' }}>
+          · {cr.submittedBy} {cr.submittedAt ? fmtDate(new Date(cr.submittedAt)) : ''}
+        </span>
+      </div>
+    );
+  }
+
+  return (
+    <div className="panel" style={{ padding: '14px 16px', marginTop: 16 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 9, flexWrap: 'wrap' }}>
+        <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--navy900)' }}>
+          ✅ {t('制作做完了?提交完工', 'Production done? Submit completion')}
+        </span>
+        <span style={{ fontSize: 11.5, color: 'var(--text2)' }}>
+          {t('提交后交由 PD 审批,通过即进入开票流程。', 'Goes to PD for approval, then on to invoicing.')}
+        </span>
+        <div style={{ flex: 1 }} />
+        {!open && (
+          <button className="btn-navy sm" onClick={() => { setSummary(cr.summary || ''); setLinks(cr.links || ''); setOpen(true); }}>
+            {returned ? t('重新提交', 'Resubmit') : t('提交完工', 'Submit completion')}
+          </button>
+        )}
+      </div>
+
+      {returned && (
+        <div style={{ marginTop: 10, fontSize: 12.5, color: 'var(--danger)', background: '#fbe9e7', borderRadius: 8, padding: '8px 11px' }}>
+          {t('PD 退回', 'Returned by PD')}{cr.approval?.note ? ' — ' + cr.approval.note : ''} · {t('请修正后重新提交', 'fix and resubmit')}
+        </div>
+      )}
+
+      {open && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 9, marginTop: 12 }}>
+          <textarea className="in" style={{ minHeight: 60 }} value={summary} onChange={(e) => setSummary(e.target.value)}
+            placeholder={t('完成说明:交付了什么 / 版本 / 备注…', 'What was delivered / version / notes…')} />
+          <input className="in sm" value={links} onChange={(e) => setLinks(e.target.value)}
+            placeholder={t('成品链接 / 路径(可多行)', 'Deliverable links / paths')} />
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <button className="btn-navy sm" disabled={busy}
+              onClick={async () => {
+                setBusy(true);
+                const ok = await dispatch(p.id, { type: 'submitCompletion', summary, links });
+                setBusy(false);
+                if (ok) setOpen(false);
+              }}>{t('确认提交', 'Submit')}</button>
+            <button className="btn-line sm" onClick={() => setOpen(false)}>{t('取消', 'Cancel')}</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ===== REQ-018 style A: per-service grouped weeks table =====
+   One section per service package (service name as sub-heading), columns
+   # / Phase-Task / dates / Duration, a Subtotal per service and an overall
+   Sum at the very bottom. No week brackets on the right. */
+export function WeeksTemplate({ p, ed, dispatch, lang, t }: {
+  p: Project; ed: boolean; lang: 'zh' | 'en';
+  dispatch: (pid: string, a: import('@/server/actions').ProjectAction) => Promise<boolean>;
+  t: (zh: string, en: string) => string;
+}) {
+  let overall = 0;
+  return (
+    <div className="panel clip">
+      <div style={{ overflowX: 'auto' }}>
+        <div style={{ minWidth: 640 }}>
+          {p.packages.map((pkg, pi) => {
+            const pd = planDates(pkg, pkgStart(p, pkg));
+            const rows = pkg.schedule.filter((r) => !r.kind);
+            const sub = rows.reduce((n, r) => n + (Number(r.weeks) || 0), 0);
+            overall += sub;
+            return (
+              <div key={pi}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '14px 20px', background: 'var(--hover-bg)', borderBottom: '1px solid var(--border)', borderTop: pi ? '1px solid var(--border)' : 'none' }}>
+                  <span style={{ width: 9, height: 9, borderRadius: 2, background: svcColor(pkg.svc) }} />
+                  <span style={{ fontSize: 13.5, fontWeight: 700, color: 'var(--navy900)' }}>{svcName(pkg.svc, lang)}</span>
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '46px 1fr 190px 110px', gap: 12, padding: '9px 20px', fontSize: 11, fontWeight: 700, letterSpacing: '.03em', textTransform: 'uppercase', color: 'var(--text2)', borderBottom: '1px solid var(--row-line)' }}>
+                  <div>#</div><div>{t('阶段 / 任务', 'Phase / Task')}</div><div>{t('日期', 'Dates')}</div><div>{t('时长', 'Duration')}</div>
+                </div>
+                {pkg.schedule.map((r, i) => {
+                  if (r.kind) return null;
+                  const d = pd[i];
+                  return (
+                    <div key={r.id || i} style={{ display: 'grid', gridTemplateColumns: '46px 1fr 190px 110px', gap: 12, alignItems: 'center', padding: '11px 20px', borderBottom: '1px solid var(--row-line)' }}>
+                      <div className="tnum" style={{ fontSize: 12, color: 'var(--text2)' }}>{i}</div>
+                      <div style={{ minWidth: 0 }}>
+                        {ed ? (
+                          <input className="in sm" defaultValue={lang === 'zh' ? r.task : r.taskEn || r.task} key={`tk-${r.id || i}`}
+                            onBlur={(e) => { const f = lang === 'zh' ? 'task' : 'taskEn'; const cur = lang === 'zh' ? r.task : r.taskEn; if (e.target.value !== cur) dispatch(p.id, { type: 'editSched', pkg: pi, idx: i, field: f, value: e.target.value }); }} />
+                        ) : (
+                          <>
+                            <div style={{ fontSize: 13, fontWeight: 500, textDecoration: r.status === 'done' ? 'line-through' : 'none', color: r.status === 'done' ? 'var(--text2)' : 'var(--text)' }}>
+                              {r.freeze ? '★ ' : ''}{lang === 'zh' ? r.task : r.taskEn || r.task}
+                            </div>
+                            {r.owner && <div style={{ fontSize: 11, color: 'var(--text2)' }}>{r.owner}</div>}
+                          </>
+                        )}
+                      </div>
+                      {ed ? (
+                        <div style={{ display: 'flex', gap: 4 }}>
+                          <input type="date" className="in sm" style={{ fontSize: 11, padding: '2px 4px' }} value={r.s || (d ? isoDate(d.start) : '')}
+                            onChange={(e) => dispatch(p.id, { type: 'editSched', pkg: pi, idx: i, field: 's', value: e.target.value })} />
+                          <input type="date" className="in sm" style={{ fontSize: 11, padding: '2px 4px' }} value={r.e || (d ? isoDate(d.end) : '')}
+                            onChange={(e) => dispatch(p.id, { type: 'editSched', pkg: pi, idx: i, field: 'e', value: e.target.value })} />
+                        </div>
+                      ) : (
+                        <div className="tnum" style={{ fontSize: 12, color: 'var(--text2)' }}>{d ? `${fmtDate(d.start)} – ${fmtDate(d.end)}` : '—'}</div>
+                      )}
+                      {ed ? (
+                        <input type="number" step={0.5} min={0} className="in sm" style={{ width: 76 }} defaultValue={r.weeks} key={`wk-${r.id || i}-${r.weeks}`}
+                          onBlur={(e) => { const v = parseFloat(e.target.value); if (!isNaN(v) && v >= 0 && v !== r.weeks) dispatch(p.id, { type: 'editSchedNum', pkg: pi, idx: i, field: 'weeks', value: v }); }} />
+                      ) : (
+                        <div className="tnum" style={{ fontSize: 12.5 }}>{r.weeks ? t(`${r.weeks} 周`, `${r.weeks} week${r.weeks > 1 ? 's' : ''}`) : '—'}</div>
+                      )}
+                    </div>
+                  );
+                })}
+                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 12, padding: '10px 20px', borderBottom: '1px solid var(--row-line)', background: '#fbfcfd' }}>
+                  <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text2)' }}>{t('小计 Subtotal', 'Subtotal')}</span>
+                  <span className="tnum" style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--navy900)', minWidth: 96, textAlign: 'right' }}>{t(`${sub} 周`, `${sub} weeks`)}</span>
+                </div>
+              </div>
+            );
+          })}
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 12, padding: '13px 20px', background: 'var(--navy900)' }}>
+            <span style={{ fontSize: 12.5, fontWeight: 700, color: '#fff' }}>{t('Sum · 合计 Overall duration', 'Sum · Overall duration')}</span>
+            <span className="tnum" style={{ fontSize: 13.5, fontWeight: 700, color: '#fff', minWidth: 96, textAlign: 'right' }}>{t(`${overall} 周`, `${overall} weeks`)}</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ===== REQ-018 style B: date-based (Scale Model) template =====
+   Date Range / Task / Duration, with full-width red milestone rows, a centred
+   CNY-HOLIDAY band and right-side stage grouping 1.Production 2.Delivery
+   3.Handover. */
+const BANDS: [string, string][] = [['制作 Production', 'Production'], ['交付 Delivery', 'Delivery'], ['交接 Handover', 'Handover']];
+function bandOf(r: { phase: string; task: string; taskEn: string }): number {
+  const s = `${r.phase} ${r.task} ${r.taskEn}`.toLowerCase();
+  if (/交接|移交|签收|handover|sign-?off/.test(s)) return 2;
+  if (/交付|deliver|出图|提交|final|高清/.test(s)) return 1;
+  return 0;
+}
+
+export function DatesTemplate({ p, pkg, pkgIdx, pd, ed, dispatch, lang, t }: {
+  p: Project; pkg: Project['packages'][0]; pkgIdx: number; pd: (PlanDate | null)[]; ed: boolean; lang: 'zh' | 'en';
+  dispatch: (pid: string, a: import('@/server/actions').ProjectAction) => Promise<boolean>;
+  t: (zh: string, en: string) => string;
+}) {
+  let lastBand = -1;
+  const GRID = '210px 1fr 96px 150px';
+  return (
+    <div className="panel clip">
+      <div style={{ overflowX: 'auto' }}>
+        <div style={{ minWidth: 680 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: GRID, gap: 12, padding: '11px 20px', background: 'var(--hover-bg)', borderBottom: '1px solid var(--border)', fontSize: 11, fontWeight: 700, letterSpacing: '.03em', textTransform: 'uppercase', color: 'var(--text2)' }}>
+            <div>{t('日期区间 Date Range', 'Date Range')}</div><div>{t('任务 Task', 'Task')}</div><div>{t('时长', 'Duration')}</div><div>{t('阶段', 'Stage')}</div>
+          </div>
+          {pkg.schedule.map((r, i) => {
+            /* full-width annotation rows */
+            if (r.kind === 'holiday') {
+              return (
+                <div key={r.id || i} style={{ padding: '9px 20px', borderBottom: '1px solid var(--row-line)', background: '#fdecec', textAlign: 'center', color: '#b23a32', fontWeight: 800, letterSpacing: '.06em', fontSize: 12.5, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10 }}>
+                  <span>{(lang === 'zh' ? r.task : r.taskEn || r.task).toUpperCase()}</span>
+                  {ed && <button style={{ color: 'var(--danger)', fontWeight: 700, background: 'none' }} title={t('删除', 'Delete')} onClick={() => dispatch(p.id, { type: 'removeRow', pkg: pkgIdx, idx: i })}>✕</button>}
+                </div>
+              );
+            }
+            if (r.kind === 'milestone') {
+              return (
+                <div key={r.id || i} style={{ padding: '9px 20px', borderBottom: '1px solid var(--row-line)', background: '#fff5f5', color: '#b23a32', fontWeight: 700, fontSize: 12.5, display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <span>⚑ {lang === 'zh' ? r.task : r.taskEn || r.task}</span>
+                  {r.s && <span className="tnum" style={{ fontWeight: 600 }}>· {r.s}</span>}
+                  <div style={{ flex: 1 }} />
+                  {ed && <button style={{ color: 'var(--danger)', fontWeight: 700, background: 'none' }} title={t('删除', 'Delete')} onClick={() => dispatch(p.id, { type: 'removeRow', pkg: pkgIdx, idx: i })}>✕</button>}
+                </div>
+              );
+            }
+            const d = pd[i];
+            const b = bandOf(r);
+            const showBand = b !== lastBand;
+            lastBand = b;
+            return (
+              <div key={r.id || i} style={{ display: 'grid', gridTemplateColumns: GRID, gap: 12, alignItems: 'center', padding: '11px 20px', borderBottom: '1px solid var(--row-line)' }}>
+                {ed ? (
+                  <div style={{ display: 'flex', gap: 4 }}>
+                    <input type="date" className="in sm" style={{ fontSize: 11, padding: '2px 4px' }} value={r.s || (d ? isoDate(d.start) : '')}
+                      onChange={(e) => dispatch(p.id, { type: 'editSched', pkg: pkgIdx, idx: i, field: 's', value: e.target.value })} />
+                    <input type="date" className="in sm" style={{ fontSize: 11, padding: '2px 4px' }} value={r.e || (d ? isoDate(d.end) : '')}
+                      onChange={(e) => dispatch(p.id, { type: 'editSched', pkg: pkgIdx, idx: i, field: 'e', value: e.target.value })} />
+                  </div>
+                ) : (
+                  <div className="tnum" style={{ fontSize: 12, fontWeight: 500 }}>{d ? `${fmtDate(d.start)} – ${fmtDate(d.end)}` : '—'}</div>
+                )}
+                <div style={{ minWidth: 0 }}>
+                  {ed ? (
+                    <input className="in sm" defaultValue={lang === 'zh' ? r.task : r.taskEn || r.task} key={`dt-${r.id || i}`}
+                      onBlur={(e) => { const f = lang === 'zh' ? 'task' : 'taskEn'; const cur = lang === 'zh' ? r.task : r.taskEn; if (e.target.value !== cur) dispatch(p.id, { type: 'editSched', pkg: pkgIdx, idx: i, field: f, value: e.target.value }); }} />
+                  ) : (
+                    <div style={{ fontSize: 13, fontWeight: 500, textDecoration: r.status === 'done' ? 'line-through' : 'none', color: r.status === 'done' ? 'var(--text2)' : 'var(--text)' }}>
+                      {r.freeze ? '★ ' : ''}{lang === 'zh' ? r.task : r.taskEn || r.task}
+                    </div>
+                  )}
+                </div>
+                {ed ? (
+                  <input type="number" step={0.5} min={0} className="in sm" style={{ width: 72 }} defaultValue={r.weeks} key={`dw-${r.id || i}-${r.weeks}`}
+                    onBlur={(e) => { const v = parseFloat(e.target.value); if (!isNaN(v) && v >= 0 && v !== r.weeks) dispatch(p.id, { type: 'editSchedNum', pkg: pkgIdx, idx: i, field: 'weeks', value: v }); }} />
+                ) : (
+                  <div className="tnum" style={{ fontSize: 12.5 }}>{r.weeks ? t(`${r.weeks} 周`, `${r.weeks}w`) : '—'}</div>
+                )}
+                <div>
+                  {showBand && (
+                    <span className="badge" style={{ background: 'var(--hover-bg)', color: MACRO[Math.min(b + 1, 2)][2], fontWeight: 700 }}>
+                      {b + 1}. {lang === 'zh' ? BANDS[b][0] : BANDS[b][1]}
+                    </span>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* REQ-018 style B: add a red milestone row or a holiday band */
+function SpecialRowBar({ pid, pkgIdx }: { pid: string; pkgIdx: number }) {
+  const { dispatch } = useStore();
+  const { t } = useLang();
+  const [kind, setKind] = useState<'milestone' | 'holiday'>('milestone');
+  const [text, setText] = useState('');
+  const [date, setDate] = useState('');
+  const [busy, setBusy] = useState(false);
+  return (
+    <div className="panel" style={{ marginTop: 10, padding: '12px 16px', borderColor: '#e7b3ae' }}>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+        <span style={{ fontSize: 12.5, fontWeight: 700, color: '#b23a32' }}>⚑ {t('添加提示行', 'Add annotation row')}</span>
+        <select className="in sm" value={kind} onChange={(e) => setKind(e.target.value as 'milestone' | 'holiday')} style={{ width: 'auto' }}>
+          <option value="milestone">{t('卡点行(红)', 'Milestone (red)')}</option>
+          <option value="holiday">{t('假期行(如 CNY HOLIDAY)', 'Holiday band')}</option>
+        </select>
+        <input className="in sm" placeholder={kind === 'holiday' ? 'CNY HOLIDAY' : t('如:资料需在 3 月 1 日前提供', 'e.g. Info required before 1 Mar')}
+          value={text} onChange={(e) => setText(e.target.value)} style={{ flex: 1, minWidth: 220 }} />
+        {kind === 'milestone' && <input type="date" className="in sm" value={date} onChange={(e) => setDate(e.target.value)} />}
+        <button className="btn-navy sm" disabled={busy || !text.trim()}
+          onClick={async () => { setBusy(true); const ok = await dispatch(pid, { type: 'addSpecialRow', pkg: pkgIdx, kind, text: text.trim(), date }); setBusy(false); if (ok) { setText(''); setDate(''); } }}>
+          {busy ? t('添加中…', 'Adding…') : t('添加', 'Add')}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/* REQ-002: delivery calendar — a Gantt-style timeline derived from planDates,
+   so it stays time-linked (change a phase's weeks → its bar span moves). The
+   computed delivery = the last phase's end (#8). */
+function DeliveryCalendar({ p, pkg, pd, t0, lang, t }: {
+  p: Project; pkg: Project['packages'][0]; pd: (import('@/lib/project').PlanDate | null)[];
+  t0: Date; lang: 'zh' | 'en'; t: (zh: string, en: string) => string;
+}) {
+  const DAY = 86400000;
+  const rows = pkg.schedule.map((r, i) => ({ r, i, d: pd[i] })).filter((x): x is { r: typeof pkg.schedule[0]; i: number; d: import('@/lib/project').PlanDate } => !!x.d);
+  if (!rows.length) {
+    return <div className="panel" style={{ padding: 16, marginBottom: 14, fontSize: 12.5, color: 'var(--text2)' }}>{t('暂无可显示日期的阶段(填了周期/开始日后自动生成日历)。', 'No dated phases yet — set start & weeks to build the calendar.')}</div>;
+  }
+  const starts = rows.map((x) => x.d.start.getTime());
+  const ends = rows.map((x) => x.d.end.getTime());
+  const del = parseISO(pkg.delivery);
+  const finish = Math.max(...ends); // computed delivery = last phase end
+  let min = Math.min(...starts, t0.getTime());
+  let max = Math.max(...ends, del ? del.getTime() : 0);
+  min -= 2 * DAY; max += 4 * DAY;
+  const total = max - min || 1;
+  const pct = (ms: number) => ((ms - min) / total) * 100;
+  const ticks: Date[] = [];
+  const cur = new Date(min); cur.setDate(1);
+  while (cur.getTime() < max) { ticks.push(new Date(cur)); cur.setMonth(cur.getMonth() + 1); }
+  const monthLbl = (d: Date) => `${d.getFullYear()}/${d.getMonth() + 1}`;
+  const lines = [
+    { at: t0.getTime(), color: 'var(--info)', label: t('今天', 'Today') },
+    { at: finish, color: 'var(--bronze)', label: t('交付(最后阶段)', 'Delivery') },
+  ];
+
+  return (
+    <div className="panel" style={{ padding: '14px 16px', marginBottom: 14 }}>
+      <div className="mini-label" style={{ fontWeight: 700, color: 'var(--navy900)', marginBottom: 4 }}>📅 {t('交付日历', 'Delivery calendar')}
+        <span style={{ fontWeight: 400, color: 'var(--text2)', marginLeft: 8 }}>{t('交付日 = 最后阶段结束', 'Delivery = last phase end')}: <b className="tnum" style={{ color: 'var(--bronze)' }}>{fmtDate(new Date(finish))}</b></span>
+      </div>
+      <div style={{ overflowX: 'auto' }}>
+        <div style={{ minWidth: 620 }}>
+          {/* header: months + line labels */}
+          <div style={{ display: 'grid', gridTemplateColumns: '150px 1fr', columnGap: 10 }}>
+            <div />
+            <div style={{ position: 'relative', height: 22, borderBottom: '1px solid var(--row-line)', marginBottom: 6 }}>
+              {ticks.map((d, k) => (
+                <span key={k} className="tnum" style={{ position: 'absolute', left: `${pct(d.getTime())}%`, fontSize: 10, color: 'var(--text2)', borderLeft: '1px solid var(--row-line)', paddingLeft: 3, height: 22 }}>{monthLbl(d)}</span>
+              ))}
+              {lines.map((ln, k) => (
+                <span key={`l${k}`} style={{ position: 'absolute', left: `${pct(ln.at)}%`, top: -2, fontSize: 9.5, color: ln.color, fontWeight: 700, transform: 'translateX(-50%)', whiteSpace: 'nowrap' }}>{ln.label}</span>
+              ))}
+            </div>
+          </div>
+          {/* one row per phase */}
+          {rows.map(({ r, i, d }) => {
+            const m = macroStage(r, i);
+            const color = r.custom ? '#7c5bd6' : MACRO[m][2];
+            const over = r.status !== 'done' && d.end < t0;
+            return (
+              <div key={r.id || i} style={{ display: 'grid', gridTemplateColumns: '150px 1fr', columnGap: 10, alignItems: 'center', padding: '3px 0' }}>
+                <Ell full={lang === 'zh' ? r.task : r.taskEn} style={{ fontSize: 11.5, color: r.status === 'done' ? 'var(--text2)' : 'var(--text)' }}>
+                  {r.freeze ? '🔒 ' : ''}{lang === 'zh' ? r.task : r.taskEn || r.task}
+                </Ell>
+                <div style={{ position: 'relative', height: 20 }}>
+                  {lines.map((ln, k) => <span key={`v${k}`} style={{ position: 'absolute', left: `${pct(ln.at)}%`, top: 0, bottom: 0, width: 1, background: ln.color, opacity: 0.5 }} />)}
+                  <div title={`${fmtDate(d.start)} → ${fmtDate(d.end)}`}
+                    style={{
+                      position: 'absolute', left: `${pct(d.start.getTime())}%`, width: `${Math.max(0.8, pct(d.end.getTime()) - pct(d.start.getTime()))}%`,
+                      top: 3, height: 14, background: color, borderRadius: 4, opacity: r.status === 'done' ? 0.5 : 1,
+                      border: over ? '1.5px solid var(--danger)' : 'none', boxSizing: 'border-box',
+                    }} />
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
   );
 }
 

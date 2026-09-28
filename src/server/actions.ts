@@ -4,11 +4,11 @@
 
 import type { Identity } from '@/lib/permissions';
 import {
-  canAssign, canCommercial, canDecide, canEdit, canEditFinance, canRowEdit, isFull,
-} from '@/lib/permissions';
+  canAssign, canCommercial, canDecide, canEdit, canEditFinance, canRowEdit, isFull, canDelete , canMeta } from '@/lib/permissions';
 import { buildPackage, deriveStatuses, fitWindow, newId, parseISO, isoDate, totalDays } from '@/lib/project';
 import { SVC, type Template } from '@/lib/templates';
-import type { ChecklistStatus, Project, ScheduleStatus } from '@/lib/types';
+import type { CalendarSchedule, CalendarStage, ChecklistStatus, Project, ReceiptRecord, ScheduleStatus } from '@/lib/types';
+import { cleanReceipt, sortReceipts, syncFromLatest, syncToLatest } from '@/lib/receipts';
 
 /* Optional context the route supplies so we can rebuild from edited templates
    without importing the DB layer here (keeps this file client-safe for types). */
@@ -25,12 +25,26 @@ export type ProjectAction =
   | { type: 'addRow'; pkg: number }
   | { type: 'removeRow'; pkg: number; idx: number }
   | { type: 'moveRow'; pkg: number; idx: number; dir: -1 | 1 }
+  | { type: 'reorderRow'; pkg: number; from: number; to: number }
+  | { type: 'setSchedStyle'; value: 'classic' | 'weeks' | 'dates' }
+  | { type: 'addSpecialRow'; pkg: number; kind: 'milestone' | 'holiday'; text: string; date: string }
   | { type: 'setClStatus'; pkg: number; gi: number; ii: number; value: ChecklistStatus }
-  | { type: 'editCl'; pkg: number; gi: number; ii: number; field: 'date' | 'remark' | 'zh' | 'en' | 'owner'; value: string }
+  | { type: 'editCl'; pkg: number; gi: number; ii: number; field: 'date' | 'remark' | 'zh' | 'en' | 'owner' | 'received'; value: string }
+  /* REQ-042: 收料记录(多条、不覆盖) */
+  | { type: 'addReceipt'; pkg: number; gi: number; ii: number; rec: Partial<ReceiptRecord> }
+  | { type: 'editReceipt'; pkg: number; gi: number; ii: number; id: string; rec: Partial<ReceiptRecord> }
+  | { type: 'removeReceipt'; pkg: number; gi: number; ii: number; id: string }
+  | { type: 'renameGroup'; pkg: number; gi: number; name: string; nameEn?: string }
+  | { type: 'renameProject'; name: string }
+  | { type: 'setQuotationNo'; value: string }
+  | { type: 'setClient'; value: string }
+  | { type: 'removeGroup'; pkg: number; gi: number }
+  | { type: 'setNoCategories'; pkg: number; value: boolean }
   | { type: 'toggleHighlight'; pkg: number; gi: number; ii: number }
   | { type: 'addItem'; pkg: number; gi: number; items?: { zh: string; en: string }[] }
   | { type: 'removeItem'; pkg: number; gi: number; ii: number }
   | { type: 'moveItem'; pkg: number; gi: number; ii: number; dir: -1 | 1 }
+  | { type: 'reorderItem'; pkg: number; gi: number; from: number; to: number }
   | { type: 'addGroup'; pkg: number; name: string }
   | { type: 'resetChecklist'; pkg: number }
   | { type: 'attachShot'; pkg: number; gi: number; ii: number; data: string }
@@ -42,12 +56,17 @@ export type ProjectAction =
   | { type: 'setDelivery'; value: string }
   | { type: 'setBuffer'; value: number }
   | { type: 'setDiff'; value: string }
-  | { type: 'setPoints'; value: number }
+  | { type: 'setPoints'; value: number | null }
+  | { type: 'setPkgTier'; pkg: number; id: string; value?: number | null }
+  /* REQ-040: 日历排期存回项目 */
+  | { type: 'saveCalendar'; pkg: number; stages: CalendarStage[]; boundaries: string[]; syncDelivery?: boolean }
+  | { type: 'saveCalendarArchives'; pkg: number; archives: NonNullable<CalendarSchedule['archives']> }
   | { type: 'addOwner'; name: string }
   | { type: 'removeOwner'; name: string }
   | { type: 'transferProject'; from: string; to: string; includeTasks: boolean }
   | { type: 'submitHandover'; salesBrief: string; assignedPmId: string }
   | { type: 'acceptHandover' }
+  | { type: 'editHandover'; salesBrief: string; assignedPmId: string }
   | { type: 'submitCompletion'; summary: string; links: string }
   | { type: 'decideCompletion'; decision: 'approved' | 'rejected' | 'changes_requested'; note: string }
   | { type: 'salesVerify'; scopeMatches: boolean; jobOrderUpdated: boolean; finalInvoiceAllowed: boolean }
@@ -68,7 +87,8 @@ export type ProjectAction =
   | { type: 'editUpdate'; field: 'done' | 'nextNodes' | 'risks' | 'needDirector' | 'clientPending' | 'budget'; value: string }
   | { type: 'setDecision'; field: 'dDecision' | 'dStatus'; value: string }
   | { type: 'setRecord'; pkg: number; patch: Record<string, string> }
-  | { type: 'addServicePackage'; svc: string; patch: Record<string, string> }
+  | { type: 'addServicePackage'; svc: string; patch: Record<string, string>; asNew?: boolean; label?: string }
+  | { type: 'removeServicePackage'; pkg: number }
   | { type: 'addCustomNode'; pkg: number; name: string; date: string; owner: string; atIdx?: number }
   | { type: 'toggleInvoiced' };
 
@@ -194,20 +214,159 @@ export function applyAction(u: Identity, p: Project, a: ProjectAction, ctx: Acti
       logIt(p, u.name, `调整阶段顺序 Reorder phase`);
       break;
     }
+    case 'reorderRow': {
+      // REQ-002: drag-to-reorder — move a phase from one index to another
+      if (!canEdit(u, p)) throw new PermissionError('无编辑权限');
+      const pk = p.packages[a.pkg];
+      if (!pk) throw new ValidationError('无效的服务包');
+      const n = pk.schedule.length;
+      if (a.from < 0 || a.from >= n || a.to < 0 || a.to >= n || a.from === a.to) break;
+      const arr = pk.schedule;
+      const [moved] = arr.splice(a.from, 1);
+      arr.splice(a.to, 0, moved);
+      logIt(p, u.name, `拖动调整阶段顺序 Reorder: ${moved.task}`);
+      break;
+    }
     case 'setClStatus': {
       if (!canEdit(u, p)) throw new PermissionError('无编辑权限');
       const { it } = getItem(p, a.pkg, a.gi, a.ii);
       const was = it.status;
       it.status = a.value;
+      syncToLatest(it, u.name);   // REQ-042: 行上改状态 = 改 Latest 那条
       it.updatedAt = Date.now();
       logIt(p, u.name, `清单「${it.zh}」: ${was}→${a.value}`);
+      break;
+    }
+    /* ===== REQ-042: 每个信息项的多条收料记录 =====
+       追加不覆盖:收到 v02 是新增一条,v01 留在历史里。
+       每次动完都把 Latest 同步回 item 的老字段(status/date/received/remark)——
+       导出、KPI、进度统计读的都还是那几个字段,这样它们一行都不用改。 */
+    case 'addReceipt': {
+      if (!canEdit(u, p)) throw new PermissionError('无编辑权限');
+      const { it } = getItem(p, a.pkg, a.gi, a.ii);
+      if (!Array.isArray(it.receipts)) it.receipts = [];
+      if (it.receipts.length >= 60) throw new ValidationError('一个信息项最多 60 条收料记录');
+      const fresh = cleanReceipt(a.rec || {}, u.name);
+      /* 接收人默认就是录的人(多数时候是同一个),留个默认免得每条都要手填;
+         想改在表单里改,编辑时清空就是真清空,服务端不再回填。 */
+      if (!fresh.receivedBy) fresh.receivedBy = u.name;
+      it.receipts = sortReceipts([fresh, ...it.receipts]);
+      syncFromLatest(it);
+      it.updatedAt = Date.now();
+      logIt(p, u.name, `清单「${it.zh}」新增收料记录${a.rec?.fileName ? `:${String(a.rec.fileName).slice(0, 60)}` : ''}`);
+      break;
+    }
+    case 'editReceipt': {
+      if (!canEdit(u, p)) throw new PermissionError('无编辑权限');
+      const { it } = getItem(p, a.pkg, a.gi, a.ii);
+      const list = it.receipts || [];
+      const cur = list.find((r) => r.id === a.id);
+      if (!cur) throw new ValidationError('找不到这条收料记录');
+      /* 保留原 id 与首次录入人,改的是内容 */
+      const next = { ...cleanReceipt(a.rec || {}, cur.by || u.name, cur.id), at: cur.at || Date.now() };
+      it.receipts = sortReceipts(list.map((r) => (r.id === a.id ? next : r)));
+      syncFromLatest(it);
+      it.updatedAt = Date.now();
+      logIt(p, u.name, `清单「${it.zh}」修改了一条收料记录`);
+      break;
+    }
+    case 'removeReceipt': {
+      if (!canEdit(u, p)) throw new PermissionError('无编辑权限');
+      const { it } = getItem(p, a.pkg, a.gi, a.ii);
+      const list = it.receipts || [];
+      if (!list.some((r) => r.id === a.id)) throw new ValidationError('找不到这条收料记录');
+      it.receipts = list.filter((r) => r.id !== a.id);
+      /* 全删光了就把老字段退回未收到,不要留一个「已收到」却查无记录的状态 */
+      if (it.receipts.length) syncFromLatest(it);
+      else { it.status = 'pending'; it.date = ''; it.received = ''; }
+      it.updatedAt = Date.now();
+      logIt(p, u.name, `清单「${it.zh}」删除了一条收料记录`);
       break;
     }
     case 'editCl': {
       if (!canEdit(u, p)) throw new PermissionError('无编辑权限');
       const { it } = getItem(p, a.pkg, a.gi, a.ii);
+      const was = (it as any)[a.field];
       (it as any)[a.field] = a.value;
+      /* REQ-013: filling in "received content / file name" auto-advances the
+         item to Received and stamps today's date — but only from Pending and
+         only when the field was previously empty, so a manual Status/Date
+         always wins and editing a remark never changes the status. */
+      if (a.field === 'received' && !String(was || '').trim() && String(a.value || '').trim()) {
+        if (it.status === 'pending') it.status = 'received';
+        if (!it.date) it.date = isoDate(new Date());
+      }
+      /* REQ-042: 行上直接改「收到内容 / 日期」时,把改动落到 Latest ——
+         否则行上写着已收到、展开记录却是空的,两套表示会分叉。
+         备注不在其列:清单项备注是对外的,记录备注是内部的,两者不互通。 */
+      if (a.field === 'received' || a.field === 'date') syncToLatest(it, u.name);
       it.updatedAt = Date.now();
+      break;
+    }
+    /* REQ-028: 改项目名。权限沿用 canMeta —— PD/BD/Sales/PM 可改,viewer 只读。
+       项目名是各处的显示主键(列表、登记表、导出、日志),所以只做最基本的
+       非空与长度校验,不去动名字里自带的编号(140- 之类由用户自己写)。 */
+    case 'renameProject': {
+      if (!canMeta(u, p)) throw new PermissionError('无修改项目名的权限');
+      const name = String(a.name || '').trim().slice(0, 120);
+      if (!name) throw new ValidationError('项目名不能为空');
+      if (name === p.name) break;
+      const was = p.name;
+      p.name = name;
+      logIt(p, u.name, `项目更名:「${was}」→「${name}」`);
+      break;
+    }
+    /* REQ-031: 报价单号。非必填、纯文本,不做唯一性校验也不接外部报价系统 —— 
+       它现在只是个便于对账检索的记录字段。 */
+    case 'setQuotationNo': {
+      if (!canMeta(u, p)) throw new PermissionError('无修改报价号的权限');
+      const v = String(a.value || '').trim().slice(0, 60);
+      if (v === (p.quotationNo || '')) break;
+      p.quotationNo = v;
+      logIt(p, u.name, `报价号 Quotation No.=${v || '—'}`);
+      break;
+    }
+    /* REQ-039: Job Record 顶上那张「同步自项目创建」的表保留只读,但表里每一项
+       都得在别处改得动 —— 客户名以前只能在建项目时填,建完就锁死了。 */
+    case 'setClient': {
+      if (!canMeta(u, p)) throw new PermissionError('无修改客户的权限');
+      const v = String(a.value || '').trim().slice(0, 120);
+      if (v === (p.client || '')) break;
+      const was = p.client;
+      p.client = v;
+      logIt(p, u.name, `客户:「${was || '—'}」→「${v || '—'}」`);
+      break;
+    }
+    case 'renameGroup': {
+      // REQ-014: rename a checklist category
+      if (!canEdit(u, p)) throw new PermissionError('无编辑权限');
+      const pk = p.packages[a.pkg];
+      if (!pk || !pk.checklist[a.gi]) throw new ValidationError('无效的分类');
+      const g = pk.checklist[a.gi];
+      const name = String(a.name || '').slice(0, 120).trim();
+      if (!name) throw new ValidationError('分类名不能为空');
+      const old = g.group;
+      g.group = name;
+      if (a.nameEn !== undefined) g.groupEn = String(a.nameEn).slice(0, 120);
+      logIt(p, u.name, `重命名清单分类: ${old} → ${name}`);
+      break;
+    }
+    case 'removeGroup': {
+      // REQ-014: delete a checklist category (with its items)
+      if (!canEdit(u, p)) throw new PermissionError('无编辑权限');
+      const pk = p.packages[a.pkg];
+      if (!pk || !pk.checklist[a.gi]) throw new ValidationError('无效的分类');
+      const [g] = pk.checklist.splice(a.gi, 1);
+      logIt(p, u.name, `删除清单分类: ${g.group}`);
+      break;
+    }
+    case 'setNoCategories': {
+      // REQ-014: flat mode — no fixed categories for this package
+      if (!canEdit(u, p)) throw new PermissionError('无编辑权限');
+      const pk = p.packages[a.pkg];
+      if (!pk) throw new ValidationError('无效的服务包');
+      pk.noCategories = !!a.value;
+      logIt(p, u.name, pk.noCategories ? '清单切换为「无固定分类」' : '清单恢复分类模式');
       break;
     }
     case 'toggleHighlight': {
@@ -243,6 +402,20 @@ export function applyAction(u: Identity, p: Project, a: ProjectAction, ctx: Acti
       const j = a.ii + (a.dir === 1 ? 1 : -1);
       if (j < 0 || j >= g.items.length) break; // at an edge, no-op
       [g.items[a.ii], g.items[j]] = [g.items[j], g.items[a.ii]];
+      break;
+    }
+    case 'reorderItem': {
+      /* REQ-012: drag-to-reorder checklist items inside a category. The array
+         order IS the persisted order (same as the schedule), so there's no
+         second `order` field to drift out of sync. */
+      if (!canEdit(u, p)) throw new PermissionError('无编辑权限');
+      const pk = p.packages[a.pkg];
+      const g = pk && pk.checklist[a.gi];
+      if (!g) throw new ValidationError('无效的分类');
+      const n = g.items.length;
+      if (a.from < 0 || a.from >= n || a.to < 0 || a.to >= n || a.from === a.to) break;
+      const [moved] = g.items.splice(a.from, 1);
+      g.items.splice(a.to, 0, moved);
       break;
     }
     case 'addGroup': {
@@ -357,10 +530,85 @@ export function applyAction(u: Identity, p: Project, a: ProjectAction, ctx: Acti
       p.difficulty = a.value as Project['difficulty'];
       break;
     }
+    /* REQ-038: 手填积分现在会盖过积分规则算出来的分,所以要标记出来 ——
+       建项目时按难度自动播的种子分不是人填的,不能挡住规则。
+       value 传 null 就是「不手填了,回到按规则算」。 */
     case 'setPoints': {
       if (!canAssign(u, p)) throw new PermissionError('仅 PD/BD 可制定积分');
+      if (a.value == null) {
+        p.pointsManual = false;
+        logIt(p, u.name, '积分改回按积分规则自动计算');
+        break;
+      }
       p.points = Number(a.value) || 0;
-      logIt(p, u.name, `积分设为 ${p.points}`);
+      p.pointsManual = true;
+      logIt(p, u.name, `积分手动设为 ${p.points}`);
+      break;
+    }
+    /* REQ-038: PM 给一份业务选积分档位。区间档(LED 3–7)再带上选定的分值。
+       规则是全局的,但「这个项目这块 LED 算几分」是项目内的判断,所以放开给
+       项目编辑权 —— 需求写的就是「无法自动判定时由 PM 选档」。 */
+    /* ===== REQ-040: 日历排期 =====
+       只存 boundaries + 阶段 + 备注;起止和工期是派生值,存下来早晚对不上。
+       与老的 schedule 数组并存 —— 导出 / KPI / 进度统计读的还是那一套。 */
+    case 'saveCalendar': {
+      if (!canEdit(u, p)) throw new PermissionError('无编辑权限');
+      const pk = p.packages[a.pkg];
+      if (!pk) throw new ValidationError('无效的服务包');
+      const stages = (Array.isArray(a.stages) ? a.stages : []).slice(0, 50).map((x, i) => ({
+        id: String(x?.id || `stage-${i}`).slice(0, 80),
+        name: String(x?.name || `阶段 ${i + 1}`).slice(0, 120),
+        /* 空串不落库 —— 存一个空的英文位和没有这一位是两回事,
+           前者会让回落逻辑白跑一趟。 */
+        ...(x?.nameEn ? { nameEn: String(x.nameEn).slice(0, 120) } : {}),
+        tone: String(x?.tone || 'coral').slice(0, 20),
+        note: String(x?.note || '').slice(0, 200),
+      }));
+      if (!stages.length) throw new ValidationError('至少要有一个阶段');
+      const boundaries = (Array.isArray(a.boundaries) ? a.boundaries : [])
+        .map((d) => String(d)).filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d)).slice(0, 51);
+      /* N 个阶段要 N+1 个分界点 —— 对不上就是还没排完,不落库 */
+      if (boundaries.length && boundaries.length !== stages.length + 1) {
+        throw new ValidationError('阶段数与分界点数对不上,请重新排一次');
+      }
+      const prev = pk.calendar;
+      pk.calendar = {
+        stages, boundaries,
+        version: (prev?.version || 0) + 1,
+        updatedAt: Date.now(), updatedBy: u.name,
+        archives: prev?.archives || [],
+      };
+      /* 打通交付日:最后一个分界点就是这份业务排到的交付日。
+         只在用户勾了同步时才动项目的交付日 —— 不声不响改掉交付日太吓人。 */
+      const last = boundaries[boundaries.length - 1];
+      if (last) {
+        pk.delivery = last;
+        if (a.syncDelivery) {
+          const was = p.delivery;
+          p.delivery = last;
+          if (was !== last) logIt(p, u.name, `交付日按日历排期更新:${was || '—'} → ${last}`);
+        }
+      }
+      logIt(p, u.name, `${svcName(pk.svc)} 保存日历排期(第 ${pk.calendar.version} 版,${stages.length} 阶段)`);
+      break;
+    }
+    case 'saveCalendarArchives': {
+      if (!canEdit(u, p)) throw new PermissionError('无编辑权限');
+      const pk = p.packages[a.pkg];
+      if (!pk) throw new ValidationError('无效的服务包');
+      if (!pk.calendar) throw new ValidationError('还没有日历排期');
+      pk.calendar.archives = (Array.isArray(a.archives) ? a.archives : []).slice(0, 30);
+      break;
+    }
+    case 'setPkgTier': {
+      if (!canEdit(u, p)) throw new PermissionError('无编辑权限');
+      const pk = p.packages[a.pkg];
+      if (!pk) throw new ValidationError('无效的业务');
+      const id = String(a.id || '').trim().slice(0, 40);
+      if (!id) { delete pk.pointTier; logIt(p, u.name, `${svcName(pk.svc)} 清除积分档位`); break; }
+      const val = a.value == null ? undefined : Number(a.value);
+      pk.pointTier = { id, ...(val != null && Number.isFinite(val) ? { value: Math.max(0, Math.min(1000, val)) } : {}) };
+      logIt(p, u.name, `${svcName(pk.svc)} 积分档位 ${id}${val != null ? ` = ${val}` : ''}`);
       break;
     }
     case 'addOwner': {
@@ -427,6 +675,28 @@ export function applyAction(u: Identity, p: Project, a: ProjectAction, ctx: Acti
       /* make sure the assigned PM owns the project so it flows to My Tasks */
       if (!(p.owners || []).includes(pm)) p.owners = [...(p.owners || []), pm];
       logIt(p, u.name, `提交交接给 PM「${pm}」Submit handover`);
+      break;
+    }
+    /* REQ-022: PM 接收之前,Sales 还能改简报或改派 PM。
+       这刻意不走 submitHandover —— 后者在 workflow_actions 里有
+       (project, submit_handover, workflowVersion) 的唯一键,一个版本只允许提交
+       一次(防重复提交的 P0 保障)。改内容是另一回事,不该消耗那把钥匙。
+       submittedAt 保持不变:SLA 的计时从首次提交那一刻起算,改内容不重置。 */
+    case 'editHandover': {
+      if (!canCommercial(u, p)) throw new PermissionError('仅 Sales / PD / BD 可修改交接');
+      const h = p.handover!;
+      if (h.status !== 'submitted') {
+        throw new ValidationError(h.status === 'accepted' ? 'PM 已接单,交接不可再改' : '尚未发起交接');
+      }
+      const pm = String(a.assignedPmId || '').trim();
+      if (!pm) throw new ValidationError('请指定接单 PM');
+      const was = h.assignedPmId;
+      h.salesBrief = String(a.salesBrief || '');
+      h.assignedPmId = pm;
+      /* 新 PM 要能在「我的待办」里看到项目;原 PM 留在成员里不动 ——
+         他可能是 PD 另外指派的,这里不该替人做减法。 */
+      if (!(p.owners || []).includes(pm)) p.owners = [...(p.owners || []), pm];
+      logIt(p, u.name, was === pm ? '修改交接简报 Edit handover brief' : `交接改派 PM「${was}」→「${pm}」`);
       break;
     }
     case 'acceptHandover': {
@@ -622,18 +892,42 @@ export function applyAction(u: Identity, p: Project, a: ProjectAction, ctx: Acti
       if (!canEdit(u, p)) throw new PermissionError('无编辑权限');
       const svc = String(a.svc || '').trim();
       if (!svc) throw new ValidationError('无效的业务类型');
-      let pk = p.packages.find((x) => x.svc === svc);
+      /* REQ-026: asNew=true 时无条件新开一份实例(一个项目可以有两块 LED);
+         不带 asNew 时保持原来的「有就并进去」—— 登记表的新增记录与 CSV 导入
+         走的是那条路,它们按项目名+业务找记录,不该一导入就冒出重复卡片。 */
+      let pk = a.asNew ? undefined : p.packages.find((x) => x.svc === svc);
       if (!pk) {
+        if (p.packages.length >= 24) throw new ValidationError('一个项目最多 24 份业务');
         pk = { svc, start: '', delivery: '', buffer: 0, owner: '', status: 'active', schedule: [], checklist: [] };
+        const label = String(a.label || '').slice(0, 40).trim();
+        if (label) pk.label = label;
+        /* 新实例带上该业务的默认排期与信息清单,和建项目时一致 */
+        const tpl = tplForSvc?.(svc);
+        if (tpl) { const built = buildPackage(svc, '', tpl); pk.schedule = built.schedule; pk.checklist = built.checklist; }
         p.packages.push(pk);
         if (!Array.isArray(p.services)) p.services = [];
-        if (!p.services.includes(svc)) p.services.push(svc);
+        if (!p.services.includes(svc)) p.services.push(svc);   // services 是类型清单,仍然去重
       }
       const rec: Record<string, string | number | undefined> = { ...(pk.record || {}) };
       for (const [k, v] of Object.entries(a.patch || {})) { if (k === 'updatedAt') continue; rec[k] = String(v ?? '').slice(0, 2000); }
       rec.updatedAt = Date.now();
       pk.record = rec;
-      logIt(p, u.name, `新增登记记录 Add record: ${svc}`);
+      logIt(p, u.name, `${a.asNew ? '新增业务' : '新增登记记录'} ${svcName(svc)}${pk.label ? '·' + pk.label : ''}`);
+      break;
+    }
+    /* REQ-026: 删掉一份业务实例。整包连排期、信息清单、资料一起没,
+       所以按 REQ-008 的口径只放给 Sales / PD / BD,和删项目同一档。 */
+    case 'removeServicePackage': {
+      if (!canDelete(u)) throw new PermissionError('仅 Sales / PD / BD 可删除业务');
+      const pk = p.packages[a.pkg];
+      if (!pk) throw new ValidationError('无效的服务包');
+      if (p.packages.length <= 1) throw new ValidationError('至少要保留一份业务');
+      p.packages.splice(a.pkg, 1);
+      /* services 是类型清单:只有该类型一份不剩时才从清单里摘掉 */
+      if (!p.packages.some((x) => x.svc === pk.svc)) {
+        p.services = (p.services || []).filter((x) => x !== pk.svc);
+      }
+      logIt(p, u.name, `删除业务 ${svcName(pk.svc)}${pk.label ? '·' + pk.label : ''}`);
       break;
     }
     case 'addCustomNode': {
@@ -652,6 +946,29 @@ export function applyAction(u: Identity, p: Project, a: ProjectAction, ctx: Acti
       const at = typeof a.atIdx === 'number' && a.atIdx >= 0 && a.atIdx < pk.schedule.length ? a.atIdx + 1 : pk.schedule.length;
       pk.schedule.splice(at, 0, row);
       logIt(p, u.name, `新增自定义节点 Custom node: ${name}`);
+      break;
+    }
+    case 'setSchedStyle': {
+      // REQ-018: which schedule template this project uses (view + export)
+      if (!canEdit(u, p)) throw new PermissionError('无编辑权限');
+      if (!['classic', 'weeks', 'dates'].includes(a.value)) throw new ValidationError('无效的排期样式');
+      p.schedStyle = a.value;
+      break;
+    }
+    case 'addSpecialRow': {
+      // REQ-018 style B: red milestone / holiday band rows
+      if (!canEdit(u, p)) throw new PermissionError('无编辑权限');
+      const pk = p.packages[a.pkg];
+      if (!pk) throw new ValidationError('无效的服务包');
+      const text = String(a.text || '').slice(0, 200).trim();
+      if (!text) throw new ValidationError('请填写内容');
+      pk.schedule.push({
+        id: newId(), no: '', phase: text, task: text, taskEn: text,
+        owner: '', assignee: '', weeks: 0, typical: '—', gate: '', freeze: false,
+        status: 'todo', note: '', s: String(a.date || ''), e: String(a.date || ''),
+        kind: a.kind,
+      });
+      logIt(p, u.name, `${a.kind === 'holiday' ? '新增假期行' : '新增卡点行'}: ${text}`);
       break;
     }
     case 'setArchived': {

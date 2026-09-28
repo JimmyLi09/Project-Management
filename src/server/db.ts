@@ -68,6 +68,7 @@ export function getDb(): Database.Database {
   seedIfEmpty(db);
   maybeSeedDemo(db);
   backfillIds(db);
+  backfillSerials(db);
   scheduleBackups(db);
   return db;
 }
@@ -93,6 +94,42 @@ function backfillIds(d: Database.Database) {
     const { updatedAt: _drop, ...data } = m as any;
     upd.run(JSON.stringify(data), r.id);
   }
+}
+
+/* REQ-006: assign a sequential project NO. to any project missing one, in
+   creation order, continuing from the current max. Runs once at startup. */
+let serialsBackfilled = false;
+function backfillSerials(d: Database.Database) {
+  if (serialsBackfilled) return;
+  serialsBackfilled = true;
+  const rows = d.prepare('SELECT id, data FROM projects ORDER BY created_at ASC').all() as { id: string; data: string }[];
+  const parsed: { id: string; o: any }[] = [];
+  let max = 0;
+  for (const r of rows) {
+    let o: any;
+    try { o = JSON.parse(r.data); } catch { continue; }
+    parsed.push({ id: r.id, o });
+    if (typeof o.serial === 'number' && o.serial > max) max = o.serial;
+  }
+  const upd = d.prepare('UPDATE projects SET data = ? WHERE id = ?');
+  for (const { id, o } of parsed) {
+    if (typeof o.serial === 'number' && o.serial > 0) continue;
+    o.serial = ++max;
+    const { updatedAt: _u, version: _v, ...data } = o;
+    upd.run(JSON.stringify(data), id);
+  }
+}
+
+/* next project NO. — one past the current max across all projects */
+export function nextProjectSerial(): number {
+  const rows = getDb().prepare('SELECT data FROM projects').all() as { data: string }[];
+  let max = 0;
+  for (const r of rows) {
+    let o: any;
+    try { o = JSON.parse(r.data); } catch { continue; }
+    if (typeof o.serial === 'number' && o.serial > max) max = o.serial;
+  }
+  return max + 1;
 }
 
 /* ---- built-in daily backups (local/server deployments) ----
@@ -165,6 +202,289 @@ function migrateSchema(d: Database.Database) {
   /* v2.2 §4.2 [P0-3]: optimistic-lock version on projects */
   const pcols = (d.prepare('PRAGMA table_info(projects)').all() as { name: string }[]).map((c) => c.name);
   if (!pcols.includes('version')) d.exec('ALTER TABLE projects ADD COLUMN version INTEGER NOT NULL DEFAULT 0');
+  /* REQ-016: simple global key-value settings (e.g. export company notes) */
+  d.exec('CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL DEFAULT \'\')');
+  /* REQ-012: user-saved schedule/checklist snippets. Named user_templates so it
+     never collides with `templates` (the per-service production template admin). */
+  /* REQ-023: 每个服务类型的资料卡字段定义(覆盖 lib/records.ts 里的出厂默认) */
+  d.exec(`CREATE TABLE IF NOT EXISTS record_fields (
+    svc TEXT PRIMARY KEY,
+    fields TEXT NOT NULL,
+    updated_at INTEGER NOT NULL,
+    updated_by TEXT NOT NULL DEFAULT ''
+  )`);
+  d.exec(`CREATE TABLE IF NOT EXISTS user_templates (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    type TEXT NOT NULL,
+    name TEXT NOT NULL,
+    payload TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    created_by TEXT NOT NULL DEFAULT ''
+  )`);
+  /* REQ-035: 知识库。正文是 Markdown;每次保存把「上一版」压进 kb_versions,
+     所以历史可看可回退。附件单独一张表,别把文档行撑大。 */
+  d.exec(`CREATE TABLE IF NOT EXISTS kb_docs (
+    id TEXT PRIMARY KEY,
+    title TEXT NOT NULL,
+    title_en TEXT NOT NULL DEFAULT '',
+    category TEXT NOT NULL DEFAULT 'other',
+    tags TEXT NOT NULL DEFAULT '[]',
+    body TEXT NOT NULL DEFAULT '',
+    anchors TEXT NOT NULL DEFAULT '{}',
+    attachments TEXT NOT NULL DEFAULT '[]',
+    version INTEGER NOT NULL DEFAULT 1,
+    updated_at INTEGER NOT NULL,
+    updated_by TEXT NOT NULL DEFAULT '',
+    created_at INTEGER NOT NULL,
+    created_by TEXT NOT NULL DEFAULT ''
+  )`);
+  d.exec(`CREATE TABLE IF NOT EXISTS kb_versions (
+    doc_id TEXT NOT NULL,
+    version INTEGER NOT NULL,
+    title TEXT NOT NULL DEFAULT '',
+    body TEXT NOT NULL DEFAULT '',
+    summary TEXT NOT NULL DEFAULT '',
+    at INTEGER NOT NULL,
+    by TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY (doc_id, version)
+  )`);
+  d.exec(`CREATE TABLE IF NOT EXISTS kb_files (
+    id TEXT PRIMARY KEY,
+    doc_id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    mime TEXT NOT NULL DEFAULT '',
+    data TEXT NOT NULL
+  )`);
+  /* REQ-036: 新人培训。路径定义一张表,每人每路径的进度一张表,
+     每次考核的成绩单独留痕(需求要「记录成绩与尝试次数」)。 */
+  d.exec(`CREATE TABLE IF NOT EXISTS training_paths (
+    id TEXT PRIMARY KEY,
+    title TEXT NOT NULL,
+    title_en TEXT NOT NULL DEFAULT '',
+    role TEXT NOT NULL DEFAULT '',
+    assignees TEXT NOT NULL DEFAULT '[]',
+    steps TEXT NOT NULL DEFAULT '[]',
+    quiz TEXT NOT NULL DEFAULT '[]',
+    pass_score INTEGER NOT NULL DEFAULT 80,
+    admin_only INTEGER NOT NULL DEFAULT 0,
+    updated_at INTEGER NOT NULL,
+    updated_by TEXT NOT NULL DEFAULT '',
+    created_at INTEGER NOT NULL,
+    created_by TEXT NOT NULL DEFAULT ''
+  )`);
+  d.exec(`CREATE TABLE IF NOT EXISTS training_progress (
+    path_id TEXT NOT NULL,
+    user_name TEXT NOT NULL,
+    done TEXT NOT NULL DEFAULT '[]',
+    done_at TEXT NOT NULL DEFAULT '{}',
+    attempts INTEGER NOT NULL DEFAULT 0,
+    best_score REAL,
+    passed_quiz INTEGER NOT NULL DEFAULT 0,
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY (path_id, user_name)
+  )`);
+  d.exec(`CREATE TABLE IF NOT EXISTS training_attempts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    path_id TEXT NOT NULL,
+    user_name TEXT NOT NULL,
+    score REAL NOT NULL,
+    passed INTEGER NOT NULL DEFAULT 0,
+    at INTEGER NOT NULL
+  )`);
+  /* REQ-037: KPI 规则。和积分规则同一套做法 —— 只增不改,带生效日。 */
+  d.exec(`CREATE TABLE IF NOT EXISTS kpi_rules (
+    version INTEGER PRIMARY KEY AUTOINCREMENT,
+    rules TEXT NOT NULL,
+    effective_from TEXT NOT NULL DEFAULT '',
+    note TEXT NOT NULL DEFAULT '',
+    created_at INTEGER NOT NULL,
+    created_by TEXT NOT NULL DEFAULT ''
+  )`);
+  /* REQ-038: 积分规则。只增不改 —— 每次保存写一个新版本,老版本留着,
+     历史项目按它创建时生效的那一版计分。 */
+  d.exec(`CREATE TABLE IF NOT EXISTS point_rules (
+    version INTEGER PRIMARY KEY AUTOINCREMENT,
+    rules TEXT NOT NULL,
+    effective_from TEXT NOT NULL DEFAULT '',
+    note TEXT NOT NULL DEFAULT '',
+    created_at INTEGER NOT NULL,
+    created_by TEXT NOT NULL DEFAULT ''
+  )`);
+}
+
+/* ---- REQ-035: 知识库 ---- */
+export interface KbRow {
+  id: string; title: string; title_en: string; category: string; tags: string; body: string;
+  anchors: string; attachments: string; version: number;
+  updated_at: number; updated_by: string; created_at: number; created_by: string;
+}
+export interface KbVersionRow { doc_id: string; version: number; title: string; body: string; summary: string; at: number; by: string }
+
+export function listKbDocs(): KbRow[] {
+  return getDb().prepare('SELECT * FROM kb_docs ORDER BY updated_at DESC').all() as KbRow[];
+}
+export function getKbDoc(id: string): KbRow | undefined {
+  return getDb().prepare('SELECT * FROM kb_docs WHERE id = ?').get(id) as KbRow | undefined;
+}
+export function insertKbDoc(r: KbRow) {
+  getDb().prepare(`INSERT INTO kb_docs
+      (id, title, title_en, category, tags, body, anchors, attachments, version, updated_at, updated_by, created_at, created_by)
+      VALUES (@id, @title, @title_en, @category, @tags, @body, @anchors, @attachments, @version, @updated_at, @updated_by, @created_at, @created_by)`).run(r);
+}
+export function updateKbDoc(r: KbRow) {
+  getDb().prepare(`UPDATE kb_docs SET title=@title, title_en=@title_en, category=@category, tags=@tags,
+      body=@body, anchors=@anchors, attachments=@attachments, version=@version,
+      updated_at=@updated_at, updated_by=@updated_by WHERE id=@id`).run(r);
+}
+export function deleteKbDoc(id: string) {
+  const d = getDb();
+  d.prepare('DELETE FROM kb_versions WHERE doc_id = ?').run(id);
+  d.prepare('DELETE FROM kb_files WHERE doc_id = ?').run(id);
+  d.prepare('DELETE FROM kb_docs WHERE id = ?').run(id);
+}
+export function listKbVersions(docId: string): KbVersionRow[] {
+  return getDb().prepare('SELECT doc_id, version, title, body, summary, at, by FROM kb_versions WHERE doc_id = ? ORDER BY version DESC')
+    .all(docId) as KbVersionRow[];
+}
+export function insertKbVersion(v: KbVersionRow) {
+  getDb().prepare('INSERT INTO kb_versions (doc_id, version, title, body, summary, at, by) VALUES (@doc_id, @version, @title, @body, @summary, @at, @by)').run(v);
+}
+/* 附件另存一张表:文档行本身要频繁读列表,别让 base64 把它撑大 */
+export function insertKbFile(docId: string, id: string, name: string, mime: string, data: string) {
+  getDb().prepare('INSERT OR REPLACE INTO kb_files (id, doc_id, name, mime, data) VALUES (?, ?, ?, ?, ?)')
+    .run(id, docId, name, mime, data);
+}
+export function getKbFile(id: string): { id: string; doc_id: string; name: string; mime: string; data: string } | undefined {
+  return getDb().prepare('SELECT * FROM kb_files WHERE id = ?').get(id) as never;
+}
+export function deleteKbFile(id: string) {
+  getDb().prepare('DELETE FROM kb_files WHERE id = ?').run(id);
+}
+
+/* ---- REQ-036: 新人培训 ---- */
+export interface TrainingPathRow {
+  id: string; title: string; title_en: string; role: string; assignees: string; steps: string; quiz: string;
+  pass_score: number; admin_only: number; updated_at: number; updated_by: string; created_at: number; created_by: string;
+}
+export interface TrainingProgressRow {
+  path_id: string; user_name: string; done: string; done_at: string;
+  attempts: number; best_score: number | null; passed_quiz: number; updated_at: number;
+}
+
+export const listTrainingPaths = (): TrainingPathRow[] =>
+  getDb().prepare('SELECT * FROM training_paths ORDER BY created_at ASC').all() as TrainingPathRow[];
+export const getTrainingPath = (id: string): TrainingPathRow | undefined =>
+  getDb().prepare('SELECT * FROM training_paths WHERE id = ?').get(id) as TrainingPathRow | undefined;
+export function insertTrainingPath(r: TrainingPathRow) {
+  getDb().prepare(`INSERT INTO training_paths
+    (id, title, title_en, role, assignees, steps, quiz, pass_score, admin_only, updated_at, updated_by, created_at, created_by)
+    VALUES (@id, @title, @title_en, @role, @assignees, @steps, @quiz, @pass_score, @admin_only, @updated_at, @updated_by, @created_at, @created_by)`).run(r);
+}
+export function updateTrainingPath(r: TrainingPathRow) {
+  getDb().prepare(`UPDATE training_paths SET title=@title, title_en=@title_en, role=@role, assignees=@assignees,
+    steps=@steps, quiz=@quiz, pass_score=@pass_score, admin_only=@admin_only,
+    updated_at=@updated_at, updated_by=@updated_by WHERE id=@id`).run(r);
+}
+export function deleteTrainingPath(id: string) {
+  const d = getDb();
+  d.prepare('DELETE FROM training_attempts WHERE path_id = ?').run(id);
+  d.prepare('DELETE FROM training_progress WHERE path_id = ?').run(id);
+  d.prepare('DELETE FROM training_paths WHERE id = ?').run(id);
+}
+export const listTrainingProgress = (): TrainingProgressRow[] =>
+  getDb().prepare('SELECT * FROM training_progress').all() as TrainingProgressRow[];
+export const getTrainingProgress = (pathId: string, user: string): TrainingProgressRow | undefined =>
+  getDb().prepare('SELECT * FROM training_progress WHERE path_id = ? AND user_name = ?').get(pathId, user) as TrainingProgressRow | undefined;
+export function upsertTrainingProgress(r: TrainingProgressRow) {
+  getDb().prepare(`INSERT INTO training_progress (path_id, user_name, done, done_at, attempts, best_score, passed_quiz, updated_at)
+    VALUES (@path_id, @user_name, @done, @done_at, @attempts, @best_score, @passed_quiz, @updated_at)
+    ON CONFLICT(path_id, user_name) DO UPDATE SET done=@done, done_at=@done_at, attempts=@attempts,
+      best_score=@best_score, passed_quiz=@passed_quiz, updated_at=@updated_at`).run(r);
+}
+export function insertTrainingAttempt(pathId: string, user: string, score: number, passed: boolean) {
+  getDb().prepare('INSERT INTO training_attempts (path_id, user_name, score, passed, at) VALUES (?, ?, ?, ?, ?)')
+    .run(pathId, user, score, passed ? 1 : 0, Date.now());
+}
+export const listTrainingAttempts = (pathId?: string): { id: number; path_id: string; user_name: string; score: number; passed: number; at: number }[] =>
+  (pathId
+    ? getDb().prepare('SELECT * FROM training_attempts WHERE path_id = ? ORDER BY at DESC').all(pathId)
+    : getDb().prepare('SELECT * FROM training_attempts ORDER BY at DESC LIMIT 500').all()) as never;
+
+/* ---- REQ-038: 积分规则版本 ---- */
+export interface PointRuleRow {
+  version: number; rules: string; effective_from: string; note: string; created_at: number; created_by: string;
+}
+export function listPointRules(): PointRuleRow[] {
+  return getDb().prepare('SELECT * FROM point_rules ORDER BY version ASC').all() as PointRuleRow[];
+}
+/* ---- REQ-037: KPI 规则版本(结构与积分规则一致) ---- */
+export function listKpiRules(): PointRuleRow[] {
+  return getDb().prepare('SELECT * FROM kpi_rules ORDER BY version ASC').all() as PointRuleRow[];
+}
+export function insertKpiRules(rulesJson: string, effectiveFrom: string, note: string, by: string): number {
+  const info = getDb()
+    .prepare('INSERT INTO kpi_rules (rules, effective_from, note, created_at, created_by) VALUES (?, ?, ?, ?, ?)')
+    .run(rulesJson, effectiveFrom, note, Date.now(), by);
+  return Number(info.lastInsertRowid);
+}
+
+export function insertPointRules(rulesJson: string, effectiveFrom: string, note: string, by: string): number {
+  const info = getDb()
+    .prepare('INSERT INTO point_rules (rules, effective_from, note, created_at, created_by) VALUES (?, ?, ?, ?, ?)')
+    .run(rulesJson, effectiveFrom, note, Date.now(), by);
+  return Number(info.lastInsertRowid);
+}
+
+/* ---- REQ-012: user-saved templates (schedule / checklist snippets) ---- */
+export interface UserTemplate { id: number; type: string; name: string; payload: string; created_at: number; created_by: string }
+export function listUserTemplates(type?: string): UserTemplate[] {
+  const d = getDb();
+  return (type
+    ? d.prepare('SELECT * FROM user_templates WHERE type = ? ORDER BY created_at DESC').all(type)
+    : d.prepare('SELECT * FROM user_templates ORDER BY created_at DESC').all()) as UserTemplate[];
+}
+export function getUserTemplate(id: number): UserTemplate | undefined {
+  return getDb().prepare('SELECT * FROM user_templates WHERE id = ?').get(id) as UserTemplate | undefined;
+}
+export function saveUserTemplate(type: string, name: string, payload: string, by: string): UserTemplate {
+  const now = Date.now();
+  const info = getDb()
+    .prepare('INSERT INTO user_templates (type, name, payload, created_at, created_by) VALUES (?, ?, ?, ?, ?)')
+    .run(type, name, payload, now, by);
+  return { id: Number(info.lastInsertRowid), type, name, payload, created_at: now, created_by: by };
+}
+export function deleteUserTemplate(id: number) {
+  getDb().prepare('DELETE FROM user_templates WHERE id = ?').run(id);
+}
+
+/* ---- REQ-023: per-service record field schema (overrides lib/records.ts) ----
+   One row per service type. Job Record and Project Registers both read this,
+   so a change in either place shows up in both — that's the "同源" the spec
+   asks for. Field *values* stay on each project's packages[i].record. */
+export function listRecordFields(): Record<string, unknown> {
+  const rows = getDb().prepare('SELECT svc, fields FROM record_fields').all() as { svc: string; fields: string }[];
+  const out: Record<string, unknown> = {};
+  rows.forEach((r) => { try { out[r.svc] = JSON.parse(r.fields); } catch { /* 坏行忽略,回落到出厂默认 */ } });
+  return out;
+}
+export function setRecordFields(svc: string, fieldsJson: string, by: string) {
+  getDb()
+    .prepare(`INSERT INTO record_fields (svc, fields, updated_at, updated_by) VALUES (?, ?, ?, ?)
+              ON CONFLICT(svc) DO UPDATE SET fields = excluded.fields, updated_at = excluded.updated_at, updated_by = excluded.updated_by`)
+    .run(svc, fieldsJson, Date.now(), by);
+}
+export function resetRecordFields(svc: string) {
+  getDb().prepare('DELETE FROM record_fields WHERE svc = ?').run(svc);
+}
+
+/* ---- REQ-016: global app settings (key-value) ---- */
+export function getSetting(key: string): string {
+  const row = getDb().prepare('SELECT value FROM app_settings WHERE key = ?').get(key) as { value: string } | undefined;
+  return row ? row.value : '';
+}
+export function setSetting(key: string, value: string) {
+  getDb().prepare('INSERT INTO app_settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value')
+    .run(key, value);
 }
 
 /* ---- secret for session signing (persisted so sessions survive restarts) ---- */

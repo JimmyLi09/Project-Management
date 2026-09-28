@@ -60,6 +60,8 @@ button { cursor: pointer; border: none; background: none; color: inherit; font-s
 .side-badge { min-width: 20px; height: 20px; padding: 0 6px; border-radius: 10px; background: var(--navy700); color: #fff; font-size: 11px; font-weight: 700; display: flex; align-items: center; justify-content: center }
 .side-item.active .side-badge { background: rgba(255, 255, 255, .22) }
 .side-user { border-top: 1px solid var(--border); padding: 14px; display: flex; align-items: center; gap: 11px }
+/* REQ-041: 单行省略号的统一写法,配 ui.tsx 的 <Ell>(溢出才挂 tooltip) */
+.ell { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0 }
 .side-user .nm { font-size: 13px; font-weight: 600; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis }
 .side-user .rl { font-size: 11px; color: var(--text2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis }
 
@@ -72,6 +74,8 @@ button { cursor: pointer; border: none; background: none; color: inherit; font-s
 .searchbox svg { color: var(--text2); flex-shrink: 0 }
 .icon-btn { position: relative; width: 44px; height: 44px; border-radius: 8px; border: 1px solid var(--border); background: var(--card); color: var(--text2); display: flex; align-items: center; justify-content: center; flex-shrink: 0 }
 .icon-btn:hover { background: var(--row-line2) }
+/* REQ-041: 双语并排开关的「开」态 —— 底色轻轻压一下,一眼看出现在是开着的 */
+.icon-btn.on { background: var(--hover-bg) }
 .icon-btn .dot-badge { position: absolute; top: 10px; right: 11px; width: 7px; height: 7px; border-radius: 50%; background: var(--danger); border: 1.5px solid var(--card) }
 .btn-navy { display: inline-flex; align-items: center; gap: 8px; height: 44px; padding: 0 17px; border-radius: 8px; background: var(--navy900); color: #fff; font-weight: 600; font-size: 14px; border: none; flex-shrink: 0 }
 .btn-navy:hover { background: #0a1c34 }
@@ -172,11 +176,18 @@ textarea.in { width: 100%; min-height: 46px; resize: vertical }
 .ex-doc th, .ex-doc td { border: 1px solid #ccc; padding: 6px 9px; font-size: 12px; text-align: left; vertical-align: top }
 .ex-doc th { background: #f0f2f5 }
 .ex-doc .grp-h { background: #e8edf2; font-weight: 700 }
+/* REQ-017: print layout. The old `inset:0` clamped .ex-wrap to one viewport
+   so only page 1 printed; height must stay auto for multi-page output. */
 @media print {
   body * { visibility: hidden }
   .ex-wrap, .ex-wrap * { visibility: visible }
-  .ex-wrap { position: absolute; inset: 0; padding: 0 }
-  .ex-actions, .ex-colbar { display: none !important }
+  .ex-wrap { position: absolute; left: 0; top: 0; width: 100%; height: auto; bottom: auto; overflow: visible; padding: 0 }
+  .ex-actions, .ex-colbar, .ex-noteedit { display: none !important }
+  .ex-doc table { table-layout: fixed; break-inside: auto }
+  .ex-doc th, .ex-doc td { word-break: break-word; overflow-wrap: anywhere }
+  .ex-doc tr { break-inside: avoid; page-break-inside: avoid }
+  .ex-doc thead { display: table-header-group }
+  .ex-doc h2, .ex-doc h3 { break-after: avoid-page; break-inside: avoid }
 }
 
 /* ── stage steps (project lifecycle) ────────────────────── */
@@ -210,3 +221,45 @@ textarea.in { width: 100%; min-height: 46px; resize: vertical }
   .content { padding: 18px }
   .two { grid-template-columns: 1fr }
 }
+
+/* ===== REQ-021: 导出封面页 =====
+   独占第一页,后面正文另起一页。屏幕预览和打印用同一套盒子,
+   只是打印时靠 break-after 强制分页。 */
+.ex-cover {
+  min-height: 60vh; display: flex; flex-direction: column;
+  padding: 8px 0 26px; margin-bottom: 26px; border-bottom: 1px solid var(--border);
+}
+.ex-cover .exc-top { display: flex; align-items: baseline; gap: 12px; border-bottom: 3px solid var(--navy900); padding-bottom: 10px }
+.ex-cover .exc-brand { font-size: 19px; font-weight: 700; letter-spacing: .22em; color: var(--navy900) }
+.ex-cover .exc-kind { margin-left: auto; font-size: 12px; font-weight: 600; letter-spacing: .1em; text-transform: uppercase; color: var(--bronze) }
+/* 0917 变更单:封面中部原来上下各留 44/34px,加上垂直居中显得更空 —— 收紧一档 */
+.ex-cover .exc-mid { flex: 1; display: flex; flex-direction: column; justify-content: center; padding: 26px 0 22px }
+.ex-cover .exc-no { font-size: 13px; font-weight: 700; letter-spacing: .1em; color: var(--bronze); margin-bottom: 8px; font-variant-numeric: tabular-nums }
+.ex-cover .exc-name { font-size: 30px; font-weight: 600; line-height: 1.25; color: var(--navy900); margin: 0 0 10px; max-width: 22ch }
+.ex-cover .exc-client { font-size: 15px; color: #555 }
+.ex-cover .exc-meta { width: 100%; border-collapse: collapse; margin: 0; table-layout: fixed }
+.ex-cover .exc-meta th, .ex-cover .exc-meta td { border: 1px solid #ccc; padding: 7px 10px; font-size: 12px; text-align: left; word-break: break-word }
+/* 固定四列:标签窄、值宽,两组左右对称 */
+.ex-cover .exc-meta th { background: #f0f2f5; width: 16%; white-space: nowrap }
+.ex-cover .exc-meta td { width: 34% }
+
+@media print {
+  /* 封面独占一页,正文从第二页开始 */
+  .ex-cover { min-height: calc(100vh - 60px); border-bottom: none; margin-bottom: 0; break-after: page; page-break-after: always }
+  .ex-cover .exc-name { font-size: 26px }
+}
+
+/* ===== REQ-035: 知识库 =====
+   打印一篇文档时,只留正文 —— 工具条、版本历史、编辑器一律不上纸。
+   复用 REQ-017 那套「只显示要打印的那块」的做法。 */
+@media print {
+  body:has(.ex-print-doc) * { visibility: hidden }
+  .ex-print-doc, .ex-print-doc * { visibility: visible }
+  .ex-print-doc { position: absolute; left: 0; top: 0; width: 100%; padding: 0 }
+  .ex-print-doc .kb-bar, .ex-print-doc .kb-bar * { display: none !important }
+  .md-doc h2, .md-doc h3 { break-after: avoid-page }
+  .md-doc tr, .md-doc figure, .md-doc pre { break-inside: avoid }
+  .md-doc img { max-width: 100% }
+}
+.md-doc > *:first-child { margin-top: 0 }
+.md-table th, .md-table td { word-break: break-word }

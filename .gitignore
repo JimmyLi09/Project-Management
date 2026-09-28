@@ -9,3 +9,6 @@ next-env.d.ts
 services/drawing/.venv/
 services/drawing/**/__pycache__/
 services/drawing/.pytest_cache/
+
+# 端到端脚本没设 S 环境变量时会把截图写到 ./undefined/ —— 别跟进版本库
+undefined/

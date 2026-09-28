@@ -1,35 +1,47 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { useStore } from '../store';
 import {
   deliverySlack, fmtDate, infoProgress, isRiskDismissed, nextFreeze, overdueItems, parseISO,
   pkgProgress, pkgStart, planDates, plannedFinish, projectHealth, projPoints,
-  projStage, riskKey, schedProgress, todayMid,
+  projStage, riskKey, schedProgress, todayMid, pkgSuffix,
 } from '@/lib/project';
-import { canAssign, canCommercial, canDecide, canEdit, canEditFinance, isFull } from '@/lib/permissions';
+import { rulePoints, ruleFor } from '@/lib/points';
+import {
+  canAssign, canCommercial, canCreate, canDecide, canDelete, canEdit, canEditFinance, isFull,
+  canSeeWorkflow, canSeeWorkflowTimeline, canSeeHandoverBlock, canSeeCompletionBlock,
+  canSeeVerifyBlock, canSeeFinanceBlock, isPM, canMeta,
+} from '@/lib/permissions';
 import { DIFF, STAGES, stageIdx, svcColor, svcName } from '@/lib/templates';
+import { contactRoleTerm, diffTerm, fieldGroupTerm } from '@/lib/terms';
 import { useLang } from '@/lib/i18n';
-import { Avatar, HM, Icon, Pill, ProgressBar, TM } from '../ui';
+import { Avatar, Ell, HM, Icon, Pill, ProgressBar, TM } from '../ui';
 import ScheduleTab from './ScheduleTab';
 import ChecklistTab from './ChecklistTab';
 import JobRecordTab from './JobRecordTab';
 import ExportOverlay from './ExportOverlay';
 import TransferModal from '../TransferModal';
-import type { Project } from '@/lib/types';
+import type { Project, ProjectContact } from '@/lib/types';
 
 export default function ProjectDetail() {
-  const { projects, view, setView, me, dispatch, removeProject, go, users } = useStore();
+  const { projects, view, setView, me, dispatch, removeProject, go, users, refresh, openProject, setToast, rulesFor } = useStore();
   const { lang, t } = useLang();
-  const [showExport, setShowExport] = useState(false);
+  const [exportScope, setExportScope] = useState<null | 'all' | 'schedule' | 'checklist'>(null);
   const [transferFrom, setTransferFrom] = useState<string | null>(null);
   const [assignOpen, setAssignOpen] = useState(false);
+  const [copyOpen, setCopyOpen] = useState(false);
+  const [renaming, setRenaming] = useState(false);   // REQ-028
+  const [quoting, setQuoting] = useState(false);     // REQ-031
+  const [clienting, setClienting] = useState(false); // REQ-039
   const p = projects.find((x) => x.id === view.pid);
   if (!p) {
     return <div className="panel" style={{ padding: 40, textAlign: 'center', color: 'var(--text2)' }}>{t('项目加载中…', 'Loading project…')}</div>;
   }
 
   const ed = canEdit(me, p);
+  /* REQ-038: 这个项目按它创建时生效的那一版积分规则计分 */
+  const pts = projPoints(p, rulesFor(p.created));
   const tab = view.tab || 'overview';
   const pkgIdx = Math.min(view.pkg || 0, p.packages.length - 1);
   const stage = projStage(p);
@@ -49,13 +61,106 @@ export default function ProjectDetail() {
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 16, flexWrap: 'wrap', paddingBottom: 18 }}>
           <div style={{ minWidth: 0 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-              <h1 style={{ fontSize: 22, fontWeight: 600, color: 'var(--navy900)', letterSpacing: '-.01em' }}>{p.name}</h1>
+              {/* REQ-028: 详情页不再显示系统编号(与 REQ-025 列表一致,编号只是不显示、
+                  数据仍在);项目名可就地改 —— 副本改名、打错字都不用重建项目。 */}
+              {renaming ? (
+                <input
+                  className="in"
+                  autoFocus
+                  aria-label={t('项目名', 'Project name')}
+                  defaultValue={p.name}
+                  maxLength={120}
+                  style={{ fontSize: 20, fontWeight: 600, color: 'var(--navy900)', minWidth: 280, maxWidth: 520 }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Escape') { setRenaming(false); return; }
+                    if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+                  }}
+                  onBlur={async (e) => {
+                    const v = e.target.value.trim();
+                    if (!v) { setToast(t('项目名不能为空', 'Project name cannot be empty')); e.target.value = p.name; setRenaming(false); return; }
+                    if (v !== p.name) await dispatch(p.id, { type: 'renameProject', name: v });
+                    setRenaming(false);
+                  }}
+                />
+              ) : (
+                <h1 style={{ fontSize: 22, fontWeight: 600, color: 'var(--navy900)', letterSpacing: '-.01em', display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span
+                    onClick={() => canMeta(me, p) && setRenaming(true)}
+                    title={canMeta(me, p) ? t('点击改名', 'Click to rename') : undefined}
+                    style={{ cursor: canMeta(me, p) ? 'text' : 'default' }}>
+                    {p.name}
+                  </span>
+                  {canMeta(me, p) && (
+                    <button onClick={() => setRenaming(true)} title={t('改名', 'Rename')}
+                      style={{ fontSize: 13, color: 'var(--text2)', padding: '2px 4px', lineHeight: 1 }}>✎</button>
+                  )}
+                </h1>
+              )}
               <Pill m={HM[h]} />
               {p.archived && <span className="badge" style={{ background: '#eef1f4', color: '#51606f' }}>📦 {t('已归档', 'Archived')}</span>}
             </div>
-            <div style={{ fontSize: 13.5, color: 'var(--text2)', marginTop: 4 }}>
-              {p.client || '—'} · PM {(p.owners || []).join(', ') || t('未指派', 'unassigned')}
-              {p.start ? <> · {t('起', 'from')} {fmtDate(parseISO(p.start))}</> : null}
+            <div style={{ fontSize: 13.5, color: 'var(--text2)', marginTop: 4, display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+              {/* REQ-039: 客户名以前建完项目就改不了了(Job Record 那张只读表却在
+                  显示它)。和报价号一样,点一下就地改。 */}
+              {clienting ? (
+                <input
+                  className="in sm"
+                  autoFocus
+                  aria-label={t('客户', 'Client')}
+                  defaultValue={p.client || ''}
+                  maxLength={120}
+                  style={{ width: 200 }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Escape') { setClienting(false); return; }
+                    if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+                  }}
+                  onBlur={async (e) => {
+                    const v = e.target.value.trim();
+                    if (v !== (p.client || '')) await dispatch(p.id, { type: 'setClient', value: v });
+                    setClienting(false);
+                  }}
+                />
+              ) : (
+                <button
+                  onClick={() => canMeta(me, p) && setClienting(true)}
+                  title={canMeta(me, p) ? t('点击修改客户', 'Click to edit the client') : undefined}
+                  style={{ fontSize: 13.5, color: p.client ? 'var(--text2)' : '#b6bfc9', cursor: canMeta(me, p) ? 'text' : 'default', padding: 0 }}>
+                  {p.client || (canMeta(me, p) ? t('＋ 客户', '＋ client') : '—')}
+                </button>
+              )}
+              <span>
+                · PM {(p.owners || []).join(', ') || t('未指派', 'unassigned')}
+                {p.start ? <> · {t('起', 'from')} {fmtDate(parseISO(p.start))}</> : null}
+              </span>
+              {/* REQ-031: 报价单号 —— 点一下就地改,不填就显示占位 */}
+              <span style={{ color: 'var(--border)' }}>·</span>
+              {quoting ? (
+                <input
+                  className="in sm"
+                  autoFocus
+                  aria-label={t('报价单号', 'Quotation number')}
+                  defaultValue={p.quotationNo || ''}
+                  maxLength={60}
+                  placeholder="Q-2026-0123"
+                  style={{ width: 170 }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Escape') { setQuoting(false); return; }
+                    if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+                  }}
+                  onBlur={async (e) => {
+                    const v = e.target.value.trim();
+                    if (v !== (p.quotationNo || '')) await dispatch(p.id, { type: 'setQuotationNo', value: v });
+                    setQuoting(false);
+                  }}
+                />
+              ) : (
+                <button
+                  onClick={() => canMeta(me, p) && setQuoting(true)}
+                  title={canMeta(me, p) ? t('点击填写 / 修改报价单号', 'Click to set the quotation number') : undefined}
+                  style={{ fontSize: 13.5, color: p.quotationNo ? 'var(--text2)' : '#b6bfc9', cursor: canMeta(me, p) ? 'text' : 'default', padding: 0 }}>
+                  {t('报价号', 'Quote')} {p.quotationNo || (canMeta(me, p) ? t('＋ 填写', '＋ add') : '—')}
+                </button>
+              )}
             </div>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 12 }}>
               {p.services.map((k) => <span key={k} className="svc-chip" style={{ color: svcColor(k), padding: '3px 9px', fontSize: 11.5 }}>{svcName(k, lang)}</span>)}
@@ -75,7 +180,11 @@ export default function ProjectDetail() {
               </div>
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              <button className="btn-line sm" onClick={() => setShowExport(true)}><Icon name="download" size={13} />{t('导出', 'Export')}</button>
+              <button className="btn-line sm" onClick={() => setExportScope('all')}><Icon name="download" size={13} />{t('导出', 'Export')}</button>
+              {/* REQ-012: duplicate this project (whole / schedule only / checklist only) */}
+              {canCreate(me) && (
+                <button className="btn-line sm" onClick={() => setCopyOpen(true)}>⧉ {t('复制项目', 'Copy project')}</button>
+              )}
               {stage === 'complete' && canCommercial(me, p) && (
                 <button className="btn-line sm" onClick={() => dispatch(p.id, { type: 'toggleInvoiced' })}>{t('标记开票/收尾', 'Mark invoiced')}</button>
               )}
@@ -87,7 +196,7 @@ export default function ProjectDetail() {
                   📦 {p.archived ? t('取消归档', 'Unarchive') : t('归档', 'Archive')}
                 </button>
               )}
-              {isFull(me) && (
+              {canDelete(me) && (
                 <button className="btn-line sm danger" onClick={async () => {
                   if (confirm(t('确认删除此项目?对所有协作成员生效。', 'Delete this project for everyone?'))) { if (await removeProject(p.id)) go('projects'); }
                 }}>{t('删除', 'Delete')}</button>
@@ -141,16 +250,28 @@ export default function ProjectDetail() {
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <span className="mini-label">{t('难度', 'Difficulty')}</span>
             <select className="in sm" value={p.difficulty} onChange={(e) => dispatch(p.id, { type: 'setDiff', value: e.target.value })}>
-              {Object.entries(DIFF).map(([k, v]) => <option key={k} value={k}>{v[0]}</option>)}
+              {Object.keys(DIFF).map((k) => <option key={k} value={k}>{diffTerm(k, lang)}</option>)}
             </select>
           </div>
+          {/* REQ-038: 积分默认按「积分规则」算(见下方积分卡)。这里手填等于人工
+              盖过规则 —— 所以标出来,并留一个回到自动的入口。 */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <span className="mini-label">{t('积分', 'Points')}</span>
-            <input type="number" min={0} className="in sm" style={{ width: 70 }} defaultValue={projPoints(p)} key={projPoints(p)}
-              onBlur={(e) => { const v = parseInt(e.target.value) || 0; if (v !== projPoints(p)) dispatch(p.id, { type: 'setPoints', value: v }); }} />
+            <input type="number" min={0} className="in sm" style={{ width: 70 }} defaultValue={pts} key={pts}
+              title={p.pointsManual ? t('手填,已盖过积分规则', 'Manual — overrides the points rules') : t('按积分规则自动算出;在这里填数会盖过规则', 'From the points rules; typing here overrides them')}
+              onBlur={(e) => { const v = parseInt(e.target.value) || 0; if (v !== pts) dispatch(p.id, { type: 'setPoints', value: v }); }} />
+            {p.pointsManual && (
+              <button className="btn-line sm" title={t('改回按积分规则自动计算', 'Go back to the rule-based score')}
+                onClick={() => dispatch(p.id, { type: 'setPoints', value: null })}>↺ {t('按规则', 'Auto')}</button>
+            )}
           </div>
         </div>
       )}
+      {/* REQ-022: 售后卡片对 PM 整块隐藏后,「接受交接」这个按钮也跟着没了。
+          给被指派的 PM 一条独立的接单横幅 —— 他要的只是这一个动作,
+          不需要为此把整套售后流程重新摆到他面前。 */}
+      <HandoverInbox p={p} />
+
       {!ed && (
         <div className="panel" style={{ padding: '11px 18px', marginBottom: 20, fontSize: 12.5, color: 'var(--text2)', display: 'flex', gap: 8, alignItems: 'center' }}>
           <Icon name="lock" size={14} />
@@ -170,19 +291,24 @@ export default function ProjectDetail() {
       {tab === 'schedule' && (
         <ScheduleTab
           key={`${p.id}:${pkgIdx}`}
-          p={p} pkgIdx={pkgIdx} onExport={() => setShowExport(true)} onPkg={(i) => setView({ ...view, pkg: i })}
+          p={p} pkgIdx={pkgIdx} onExport={() => setExportScope('schedule')} onPkg={(i) => setView({ ...view, pkg: i })}
         />
       )}
       {tab === 'checklist' && (
         <ChecklistTab
           key={`${p.id}:${pkgIdx}`}
-          p={p} pkgIdx={pkgIdx} onExport={() => setShowExport(true)} onPkg={(i) => setView({ ...view, pkg: i })}
+          p={p} pkgIdx={pkgIdx} onExport={() => setExportScope('checklist')} onPkg={(i) => setView({ ...view, pkg: i })}
         />
       )}
       {tab === 'jobrecord' && <JobRecordTab key={p.id} p={p} />}
-      {showExport && <ExportOverlay p={p} onClose={() => setShowExport(false)} />}
+      {exportScope && <ExportOverlay p={p} scope={exportScope} onClose={() => setExportScope(null)} />}
       {transferFrom && (
         <TransferModal from={transferFrom} pid={p.id} onClose={() => setTransferFrom(null)} />
+      )}
+      {copyOpen && (
+        <CopyProjectModal p={p} onClose={() => setCopyOpen(false)}
+          onDone={async (newId) => { setCopyOpen(false); await refresh(); openProject(newId); }}
+          onError={(m) => setToast(m)} />
       )}
       {assignOpen && (
         <AssignModal
@@ -222,9 +348,194 @@ function AssignModal({ candidates, onClose, onAssign }: { candidates: string[]; 
   );
 }
 
+/* ===== REQ-022 — 给 PM 的接单横幅 =====
+   售后工作流整块对 PM 不可见,但「接受交接」是 PM 必须做的动作。
+   这里只露出他需要的那一件事:简报 + 一个接单按钮。 */
+function HandoverInbox({ p }: { p: Project }) {
+  const { me, dispatch } = useStore();
+  const { t } = useLang();
+  const [busy, setBusy] = useState(false);
+  const h = p.handover;
+  /* 只给被指派的那位 PM;PD/BD 在售后卡片里本来就能接 */
+  if (!isPM(me) || !h || h.status !== 'submitted' || h.assignedPmId !== me.name) return null;
+
+  return (
+    <div className="panel" style={{ padding: '14px 18px', marginBottom: 20, borderLeft: '3px solid var(--bronze)' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+        <span style={{ fontSize: 13.5, fontWeight: 700, color: 'var(--navy900)' }}>
+          📥 {t('这个项目交接给你了', 'This project was handed to you')}
+        </span>
+        <span style={{ fontSize: 12, color: 'var(--text2)' }}>
+          {h.submittedBy} · {h.submittedAt ? fmtDate(new Date(h.submittedAt)) : ''}
+        </span>
+        <div style={{ flex: 1 }} />
+        <button className="btn-navy sm" disabled={busy}
+          onClick={async () => { setBusy(true); await dispatch(p.id, { type: 'acceptHandover' }); setBusy(false); }}>
+          ✓ {t('接受交接,开始制作', 'Accept → start production')}
+        </button>
+      </div>
+      {h.salesBrief && (
+        <div style={{ marginTop: 10, fontSize: 12.5, whiteSpace: 'pre-wrap', background: 'var(--hover-bg)', borderRadius: 8, padding: '9px 11px' }}>
+          {h.salesBrief}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* REQ-012: copy a project — whole thing, or just its schedule / checklist.
+   The copy always starts clean: new NO., stage back to 售前, every status,
+   date, remark and the whole post-sales workflow reset server-side. */
+function CopyProjectModal({ p, onClose, onDone, onError }: {
+  p: Project; onClose: () => void; onDone: (id: string) => void; onError: (msg: string) => void;
+}) {
+  const { t } = useLang();
+  const [mode, setMode] = useState<'entire' | 'schedule' | 'checklist'>('entire');
+  const [busy, setBusy] = useState(false);
+  const MODES: [typeof mode, string, string, string, string][] = [
+    ['entire', '复制整个项目', 'Copy entire project', '服务、排期、信息清单、联系人、服务内容全部带走(不含 Job Record 与进度)。', 'Services, schedule, checklist, contacts and scope — progress and Job Record excluded.'],
+    ['schedule', '仅复制排期', 'Schedule only', '只带走各服务的阶段与周期,信息清单留空。', 'Only the phases/durations per service; the checklist starts empty.'],
+    ['checklist', '仅复制信息清单', 'Checklist only', '只带走分类与信息项,排期留空。', 'Only categories and items; the schedule starts empty.'],
+  ];
+
+  async function run() {
+    setBusy(true);
+    const res = await fetch('/api/projects/copy', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sourceId: p.id, mode }),
+    });
+    const data = await res.json().catch(() => ({}));
+    setBusy(false);
+    if (!res.ok || !data.project) { onError(data.error || t('复制失败', 'Copy failed')); return; }
+    onDone(data.project.id);
+  }
+
+  return (
+    <div className="overlay" onClick={(e) => { if (e.target === e.currentTarget && !busy) onClose(); }}>
+      <div className="modal" style={{ maxWidth: 520 }}>
+        <h2>{t('复制项目', 'Copy project')}</h2>
+        <div className="msub">{t(`以「${p.name}」为模板新建一个项目。`, `Create a new project from "${p.name}".`)}</div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, margin: '4px 0 6px' }}>
+          {MODES.map(([k, zh, en, dzh, den]) => (
+            <label key={k} style={{
+              display: 'flex', gap: 10, alignItems: 'flex-start', padding: '10px 12px', cursor: 'pointer',
+              border: `1px solid ${mode === k ? 'var(--navy700)' : 'var(--border)'}`, borderRadius: 8,
+              background: mode === k ? '#f2f6fd' : undefined,
+            }}>
+              <input type="radio" name="copy-mode" checked={mode === k} onChange={() => setMode(k)} style={{ marginTop: 3 }} />
+              <span>
+                <span style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--navy900)' }}>{t(zh, en)}</span>
+                <span style={{ display: 'block', fontSize: 11.5, color: 'var(--text2)', marginTop: 2 }}>{t(dzh, den)}</span>
+              </span>
+            </label>
+          ))}
+        </div>
+        <div style={{ fontSize: 11.5, color: 'var(--text2)' }}>
+          {t('副本会拿到新的项目编号,阶段回到「售前」,所有状态/日期/备注/图片清空。',
+             'The copy gets a new NO., returns to the Presales stage, and every status, date, note and photo is cleared.')}
+        </div>
+        <div className="modal-actions">
+          <button className="btn-line" onClick={onClose} disabled={busy}>{t('取消', 'Cancel')}</button>
+          <button className="btn-navy" onClick={run} disabled={busy}>{busy ? t('复制中…', 'Copying…') : t('创建副本', 'Create copy')}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ===== REQ-038: 这个项目的积分怎么来的 =====
+   规则本身在「规则设置 · 积分规则」里定,是全公司口径;这里只做两件事:
+   ① 把每份业务落到哪一档、几分摊开给人看(不是一个凭空的总分);
+   ② 自动判不出来的(资料卡里没那个数、或落到 LED 3–7 这种区间档上),
+      让 PM 就地选 —— 需求写的「无法自动判定时由 PM 选档」就是这里。 */
+function PointsPanel({ p, canEd }: { p: Project; canEd: boolean }) {
+  const { lang, t } = useLang();
+  const { dispatch, rulesFor } = useStore();
+  const rules = rulesFor(p.created);
+  const { total, parts } = rulePoints(rules, p);
+  const pending = parts.filter((x) => x.needsPick).length;
+  const shown = projPoints(p, rules);
+  /* 一份业务都没落到档上 —— 规则还接管不了,显示的是旧口径的分 */
+  const fallback = !p.pointsManual && !parts.some((x) => x.source !== 'none');
+
+  return (
+    <div className="panel" style={{ padding: 20 }}>
+      <div className="panel-title" style={{ fontSize: 15, marginBottom: 4, display: 'flex', alignItems: 'center', gap: 8 }}>
+        {t('积分明细', 'Points breakdown')}
+        <span className="tnum" style={{ marginLeft: 'auto', fontSize: 18, fontWeight: 700, color: 'var(--navy900)' }}>{shown}</span>
+      </div>
+      <div style={{ fontSize: 11.5, color: 'var(--text2)', marginBottom: 10 }}>
+        {p.pointsManual
+          ? t(`当前是手填分,已盖过下面按规则算出的 ${total} 分。`, `Manual score in force — overrides the rule-based ${total}.`)
+          : fallback
+            ? t('下面各业务都还没落到档上,暂时按旧口径(难度 × 业务数)显示。选完档就按规则算。',
+                'No package is tiered yet, so the legacy score (difficulty × services) still shows. Pick tiers below and the rules take over.')
+            : t('按「规则设置 · 积分规则」自动计算。', 'Computed from Rules · Points rules.')}
+        {pending > 0 && <b style={{ color: '#b8860b' }}> {t(`还有 ${pending} 项待选档。`, ` ${pending} still need a tier.`)}</b>}
+      </div>
+
+      {p.packages.map((pk, i) => {
+        const rule = ruleFor(rules, pk.svc);
+        const part = parts[i];
+        const label = svcName(pk.svc, lang) + (pkgSuffix(p, i) ? ' ' + pkgSuffix(p, i) : '');
+        if (!rule) return (
+          <div key={i} style={{ display: 'flex', gap: 8, padding: '8px 0', borderTop: '1px solid var(--row-line2)', fontSize: 12.5 }}>
+            <span style={{ flex: 1 }}>{label}</span>
+            <span style={{ color: 'var(--text2)' }}>{t('未定积分规则', 'no rule')}</span>
+          </div>
+        );
+        const tier = part.tier;
+        const range = tier && tier.min != null && tier.max != null;
+        return (
+          <div key={i} style={{ padding: '9px 0', borderTop: '1px solid var(--row-line2)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12.5 }}>
+              <span style={{ width: 8, height: 8, borderRadius: 2, background: svcColor(pk.svc), flexShrink: 0 }} />
+              <span style={{ flex: 1, minWidth: 0 }}>{label}</span>
+              <span className="tnum" style={{ fontWeight: 700, color: part.needsPick ? '#b8860b' : 'var(--navy900)' }}>
+                {part.needsPick ? t('待选', 'pick') : part.points}
+              </span>
+              {part.source === 'auto' && (
+                <span className="badge" style={{ background: 'var(--hover-bg)', color: 'var(--text2)', fontSize: 10 }}
+                  title={rule.metric ? t(`按资料卡的「${rule.metric.zh}」自动落档`, `auto-tiered from "${rule.metric.en}"`) : undefined}>
+                  {t('自动', 'auto')}
+                </span>
+              )}
+            </div>
+            {canEd && (
+              <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginTop: 6, flexWrap: 'wrap' }}>
+                <select className="in sm" style={{ flex: 1, minWidth: 150 }} value={pk.pointTier?.id || ''}
+                  onChange={(e) => dispatch(p.id, { type: 'setPkgTier', pkg: i, id: e.target.value })}>
+                  <option value="">{t('— 自动判档 —', '— auto —')}</option>
+                  {rule.tiers.map((tr) => (
+                    <option key={tr.id} value={tr.id}>
+                      {(lang === 'zh' ? tr.zh : tr.en)} · {tr.min != null ? `${tr.min}–${tr.max}` : tr.points}
+                    </option>
+                  ))}
+                </select>
+                {range && (
+                  <input className="in sm" type="number" step={0.5} min={tier!.min} max={tier!.max} style={{ width: 76 }}
+                    title={t(`区间 ${tier!.min}–${tier!.max},按规模 / 复杂度选一个分值`, `Range ${tier!.min}–${tier!.max} — pick by scale / complexity`)}
+                    key={String(pk.pointTier?.value)} defaultValue={pk.pointTier?.value ?? ''}
+                    placeholder={`${tier!.min}–${tier!.max}`}
+                    onBlur={(e) => {
+                      const v = Number(e.target.value);
+                      if (!Number.isFinite(v) || !e.target.value) return;
+                      dispatch(p.id, { type: 'setPkgTier', pkg: i, id: tier!.id, value: v });
+                    }} />
+                )}
+              </div>
+            )}
+          </div>
+        );
+      })}
+      {p.packages.length === 0 && <div style={{ fontSize: 12.5, color: 'var(--text2)', padding: '8px 0' }}>{t('此项目暂无业务。', 'No services yet.')}</div>}
+    </div>
+  );
+}
+
 function OverviewTab({ p, onSchedule }: { p: Project; onSchedule: (pkg: number) => void }) {
   const { lang, t } = useLang();
-  const { dispatch, me, users } = useStore();
+  const { dispatch, me, users, rulesFor } = useStore();
   const canEd = canEdit(me, p);
   const sp = schedProgress(p);
   const ip = infoProgress(p);
@@ -255,7 +566,9 @@ function OverviewTab({ p, onSchedule }: { p: Project; onSchedule: (pkg: number) 
   }));
   if (nf && !risks.length) risks.push({
     key: '', // the "next freeze" hint is informational, not a clearable risk
-    title: t(`下一冻结点:${nf.row.phase}`, `Next freeze point: ${nf.row.phase}`),
+    /* REQ-041: phase 只有中文,EN 下退到任务的英文名 —— 「Next freeze point: 信息」
+       那种半截英文比什么都别扭。 */
+    title: t(`下一冻结点:${nf.row.phase}`, `Next freeze point: ${nf.row.taskEn || nf.row.phase}`),
     detail: `${svcName(nf.svc, lang)}${nf.date ? ' · ' + fmtDate(nf.date) : ''} — ${t('冻结前须客户确认', 'client sign-off required before freeze')}`,
     color: 'var(--bronze)', icon: 'lock',
   });
@@ -334,10 +647,33 @@ function OverviewTab({ p, onSchedule }: { p: Project; onSchedule: (pkg: number) 
           <div className="panel-title" style={{ fontSize: 15, marginBottom: 14 }}>{t('交付核算', 'Delivery Check')}</div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10, fontSize: 13 }}>
             <Row k={t('计划完成', 'Planned finish')} v={fin ? fmtDate(fin) : '—'} />
-            <Row k={t('交付日', 'Required delivery')} v={p.delivery ? fmtDate(parseISO(p.delivery)) : '—'} />
-            <Row k="Buffer" v={t(`${p.buffer || 0} 天`, `${p.buffer || 0} days`)} />
+            {/* REQ-039: 交付日 / Buffer 之前只有建项目时能填。Job Record 那张只读表
+                在显示交付日,总得有个地方改得动 —— 就在这里改。 */}
+            {canEd ? (
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
+                <span style={{ color: 'var(--text2)' }}>{t('交付日', 'Required delivery')}</span>
+                <input className="in sm" type="date" aria-label={t('交付日', 'Required delivery')}
+                  style={{ width: 152 }} value={p.delivery || ''}
+                  onChange={(e) => dispatch(p.id, { type: 'setDelivery', value: e.target.value })} />
+              </div>
+            ) : <Row k={t('交付日', 'Required delivery')} v={p.delivery ? fmtDate(parseISO(p.delivery)) : '—'} />}
+            {canEd ? (
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
+                <span style={{ color: 'var(--text2)' }}>Buffer</span>
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                  {/* 数字框按 onBlur 存 —— 逐键触发的话每敲一位就是一次版本写入 */}
+                  <input className="in sm" type="number" min={0} max={365} aria-label="Buffer"
+                    style={{ width: 74 }} key={p.buffer || 0} defaultValue={p.buffer || 0}
+                    onBlur={(e) => {
+                      const v = Math.max(0, Math.min(365, parseInt(e.target.value) || 0));
+                      if (v !== (p.buffer || 0)) dispatch(p.id, { type: 'setBuffer', value: v });
+                    }} />
+                  <span style={{ color: 'var(--text2)', fontSize: 12 }}>{t('天', 'days')}</span>
+                </span>
+              </div>
+            ) : <Row k="Buffer" v={t(`${p.buffer || 0} 天`, `${p.buffer || 0} days`)} />}
             <Row k={t('信息确认', 'Info checklist')} v={`${ip.done}/${ip.total} · ${ip.pct}%`} />
-            <Row k={t('积分', 'Points')} v={String(projPoints(p))} />
+            <Row k={t('积分', 'Points')} v={String(projPoints(p, rulesFor(p.created)))} />
             <div style={{ borderTop: '1px solid var(--row-line)', paddingTop: 10, fontWeight: 600, color: slack === null ? 'var(--text2)' : slack >= 0 ? 'var(--success)' : 'var(--danger)' }}>
               {slack === null ? t('填交付日后自动核算', 'Set a delivery date to auto-check')
                 : slack >= 0 ? t(`✓ 富余 ${slack} 天(含 buffer)`, `✓ ${slack} days slack (incl. buffer)`)
@@ -345,6 +681,8 @@ function OverviewTab({ p, onSchedule }: { p: Project; onSchedule: (pkg: number) 
             </div>
           </div>
         </div>
+
+        <PointsPanel p={p} canEd={canEd} />
 
         <div className="panel" style={{ padding: 20 }}>
           <div className="panel-title" style={{ fontSize: 15, marginBottom: 8 }}><Icon name="users" style={{ color: 'var(--navy700)' }} />{t('项目团队', 'Assigned Team')}</div>
@@ -366,40 +704,8 @@ function OverviewTab({ p, onSchedule }: { p: Project; onSchedule: (pkg: number) 
           {(p.owners || []).length === 0 && team.length === 0 && <div style={{ fontSize: 12.5, color: 'var(--text2)', padding: '8px 0' }}>{t('尚未指派人员', 'No one assigned yet')}</div>}
         </div>
 
-        {/* R5-2: company contacts (client / main con / architect …) */}
-        <div className="panel" style={{ padding: 20 }}>
-          <div className="panel-title" style={{ fontSize: 15, marginBottom: 12 }}>{t('联系人', 'Contacts')}</div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-            {(p.contacts || []).map((c, ci) => (
-              <div key={ci} style={{ borderTop: ci ? '1px solid var(--row-line2)' : 'none', paddingTop: ci ? 12 : 0 }}>
-                {canEd ? (
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 7 }}>
-                    <input className="in sm" defaultValue={c.role} placeholder={t('角色(如 客户/总包)', 'Role (e.g. Client)')}
-                      onBlur={(e) => e.target.value !== c.role && dispatch(p.id, { type: 'editContact', idx: ci, field: 'role', value: e.target.value })} />
-                    <input className="in sm" defaultValue={c.company} placeholder={t('公司', 'Company')}
-                      onBlur={(e) => e.target.value !== c.company && dispatch(p.id, { type: 'editContact', idx: ci, field: 'company', value: e.target.value })} />
-                    <input className="in sm" defaultValue={c.person} placeholder={t('联系人', 'Contact person')}
-                      onBlur={(e) => e.target.value !== c.person && dispatch(p.id, { type: 'editContact', idx: ci, field: 'person', value: e.target.value })} />
-                    <input className="in sm" defaultValue={c.phone} placeholder={t('电话', 'Phone')}
-                      onBlur={(e) => e.target.value !== c.phone && dispatch(p.id, { type: 'editContact', idx: ci, field: 'phone', value: e.target.value })} />
-                    <input className="in sm" style={{ gridColumn: '1 / -1' }} defaultValue={c.email} placeholder={t('邮箱', 'Email')}
-                      onBlur={(e) => e.target.value !== c.email && dispatch(p.id, { type: 'editContact', idx: ci, field: 'email', value: e.target.value })} />
-                    <button className="btn-line sm danger" style={{ justifySelf: 'start' }} onClick={() => dispatch(p.id, { type: 'removeContact', idx: ci })}>✕ {t('删除', 'Remove')}</button>
-                  </div>
-                ) : (
-                  <div>
-                    <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--navy900)' }}>{c.company || c.person || '—'} {c.role && <span style={{ fontSize: 11, fontWeight: 500, color: 'var(--text2)' }}>· {c.role}</span>}</div>
-                    <div style={{ fontSize: 12, color: 'var(--text2)' }}>
-                      {[c.person, c.phone, c.email].filter(Boolean).join(' · ') || t('无联系方式', 'no contact details')}
-                    </div>
-                  </div>
-                )}
-              </div>
-            ))}
-            {(p.contacts || []).length === 0 && <div style={{ fontSize: 12.5, color: 'var(--text2)' }}>{t('暂无联系人', 'No contacts yet')}</div>}
-          </div>
-          {canEd && <button className="btn-line sm" style={{ marginTop: 12, borderStyle: 'dashed' }} onClick={() => dispatch(p.id, { type: 'addContact' })}>+ {t('添加联系人', 'Add contact')}</button>}
-        </div>
+        {/* R5-2 联系人 · REQ-030: 默认只读展示,点「编辑」才进编辑态 */}
+        <ContactsPanel p={p} canEd={canEd} />
 
         <div className="panel" style={{ padding: 20 }}>
           <div className="panel-title" style={{ fontSize: 15, marginBottom: 8, cursor: 'pointer' }} onClick={() => setLogOpen(!logOpen)}>
@@ -471,6 +777,9 @@ function WorkflowPanel({ p, users, me, dispatch }: {
   const [cSummary, setCSummary] = useState('');
   const [cLinks, setCLinks] = useState('');
   const [pdNote, setPdNote] = useState('');
+  /* REQ-022: 交接块「接收后收起」的展开状态 + 提交到接收之间的修改态 */
+  const [handoverOpen, setHandoverOpen] = useState(false);
+  const [editHandover, setEditHandover] = useState(false);
   const [scopeOk, setScopeOk] = useState(true);
   const [jobOk, setJobOk] = useState(true);
   const [invAllowed, setInvAllowed] = useState(true);
@@ -505,6 +814,18 @@ function WorkflowPanel({ p, users, me, dispatch }: {
   ];
   const curIdx = steps.findIndex((s) => !s.done);
 
+  /* ===== REQ-022 — 按角色决定这张卡片露出多少 =====
+     PM 整块不见(连时间线也不留),其余角色只看到自己要动手的那几块。
+     ④⑤⑥(核对/开票/收款)再叠一条阶段闸:项目没做完就没有可核对的东西。 */
+  const lateStage = stageIdx(projStage(p)) >= stageIdx('complete');
+  const seeHandover   = canSeeHandoverBlock(me);
+  const seeCompletion = canSeeCompletionBlock(me);
+  const seeVerify     = canSeeVerifyBlock(me) && lateStage;
+  const seeFinance    = canSeeFinanceBlock(me) && lateStage;
+  const anyBlock = seeHandover || seeCompletion || seeVerify || seeFinance;
+  /* 一块都看不到、时间线也不给,就整张卡片不渲染(不占位、不留空白) */
+  if (!canSeeWorkflow(me) || (!anyBlock && !canSeeWorkflowTimeline(me))) return null;
+
   return (
     <div className="panel" style={{ padding: 20 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 14 }}>
@@ -528,16 +849,32 @@ function WorkflowPanel({ p, users, me, dispatch }: {
                 {isCur && !s.done && <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--bronze)' }} />}
               </div>
               <div style={{ fontSize: 10.5, fontWeight: s.done || isCur ? 700 : 500, color: txt, marginTop: 5, textAlign: 'center', whiteSpace: 'nowrap' }}>{i + 1}. {lang === 'zh' ? s.zh : s.en}</div>
-              {(s.at || s.who) && <div className="tnum" style={{ fontSize: 9.5, color: 'var(--text2)', marginTop: 1, textAlign: 'center', whiteSpace: 'nowrap', maxWidth: 76, overflow: 'hidden', textOverflow: 'ellipsis' }}>{[s.who, s.at].filter(Boolean).join(' · ')}</div>}
+              {(s.at || s.who) && <Ell className="tnum" style={{ fontSize: 9.5, color: 'var(--text2)', marginTop: 1, textAlign: 'center', maxWidth: 76 }}>{[s.who, s.at].filter(Boolean).join(' · ')}</Ell>}
             </div>
           );
         })}
       </div>
 
-      {/* Step 1 — Sales → PM handover */}
+      {/* Step 1 — Sales → PM handover (REQ-022: Sales / PD·BD only) */}
+      {seeHandover && (h && h.status === 'accepted' && !handoverOpen ? (
+        /* REQ-022: PM 接收之后「交接即结束」—— 收成一行摘要,想看再展开。
+           提交到接收之间不收,那段时间 Sales 还要能改。 */
+        <div style={{ border: '1px solid var(--row-line)', borderRadius: 10, padding: '11px 14px', display: 'flex', alignItems: 'center', gap: 9, flexWrap: 'wrap' }}>
+          <span style={{ color: 'var(--success)', fontWeight: 600, fontSize: 12.5 }}>✓ {t('已交接给', 'Handed to')} {h.assignedPmId}</span>
+          <span style={{ fontSize: 12, color: 'var(--text2)' }}>
+            · {h.submittedBy} {h.submittedAt ? fmtDate(new Date(h.submittedAt)) : ''}
+          </span>
+          <div style={{ flex: 1 }} />
+          <button className="btn-line sm" onClick={() => setHandoverOpen(true)}>{t('展开', 'Expand')}</button>
+        </div>
+      ) : (
       <div style={{ border: '1px solid var(--row-line)', borderRadius: 10, padding: 14 }}>
-        <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--navy900)', marginBottom: 8 }}>
-          ① {t('交接:Sales → PM', 'Handover: Sales → PM')}
+        <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--navy900)', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span>① {t('交接:Sales → PM', 'Handover: Sales → PM')}</span>
+          <div style={{ flex: 1 }} />
+          {h && h.status === 'accepted' && (
+            <button className="btn-line sm" onClick={() => setHandoverOpen(false)}>{t('收起', 'Collapse')}</button>
+          )}
         </div>
 
         {(!h || h.status === 'not_started') && (
@@ -570,6 +907,35 @@ function WorkflowPanel({ p, users, me, dispatch }: {
                 ✓ {t('接受交接,进入生产', 'Accept handover → Production')}
               </button>
             )}
+            {/* REQ-022: 提交到接收之间 Sales 仍可修改简报 / 换人 */}
+            {canSubmit && (editHandover ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 9, borderTop: '1px solid var(--row-line)', paddingTop: 10 }}>
+                <textarea className="in" value={brief} onChange={(e) => setBrief(e.target.value)} style={{ minHeight: 64 }}
+                  placeholder={t('交接简报:范围 / 商务要点 / 客户注意事项…', 'Handover brief: scope / commercials / client notes…')} />
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                  <select className="in sm" value={pm} onChange={(e) => setPm(e.target.value)} style={{ minWidth: 180 }}>
+                    <option value="">{t('— 指派接单 PM —', '— assign PM —')}</option>
+                    {pmNames.map((n) => <option key={n} value={n}>{n}</option>)}
+                  </select>
+                  <button className="btn-navy sm" disabled={busy || !pm}
+                    onClick={async () => {
+                      setBusy(true);
+                      /* 走 editHandover 而不是 submitHandover —— 后者一个工作流版本
+                         只允许提交一次(防重复提交),改内容不该消耗那把钥匙。 */
+                      const ok = await dispatch(p.id, { type: 'editHandover', salesBrief: brief, assignedPmId: pm });
+                      setBusy(false);
+                      if (ok) setEditHandover(false);
+                    }}>{t('保存修改', 'Save changes')}</button>
+                  <button className="btn-line sm" onClick={() => setEditHandover(false)}>{t('取消', 'Cancel')}</button>
+                </div>
+              </div>
+            ) : (
+              <button className="btn-line sm" style={{ alignSelf: 'flex-start' }}
+                title={t('PM 接收前还可以改简报或换人', 'Editable until the PM accepts')}
+                onClick={() => { setBrief(h.salesBrief || ''); setPm(h.assignedPmId || ''); setEditHandover(true); }}>
+                ✎ {t('修改交接', 'Edit handover')}
+              </button>
+            ))}
           </div>
         )}
 
@@ -583,9 +949,11 @@ function WorkflowPanel({ p, users, me, dispatch }: {
           </div>
         )}
       </div>
+      ))}
 
-      {/* Step 2 — PM completion package + PD approval (unlocks after handover accepted) */}
-      {h && h.status === 'accepted' && cr && (
+      {/* Step 2 — completion package + PD approval (REQ-022: PD / BD only；
+          PM 的提交入口已移到排期页底部 CompletionCard) */}
+      {seeCompletion && h && h.status === 'accepted' && cr && (
         <div style={{ border: '1px solid var(--row-line)', borderRadius: 10, padding: 14, marginTop: 12 }}>
           <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--navy900)', marginBottom: 8 }}>
             ② {t('完成包 + PD 审批', 'Completion package + PD approval')}
@@ -645,8 +1013,8 @@ function WorkflowPanel({ p, users, me, dispatch }: {
         </div>
       )}
 
-      {/* Step 3 — Sales verify (unlocks once production completed) */}
-      {prodDone && sv && (
+      {/* Step 3 — Sales verify (REQ-022: Sales / PD·BD，且项目已进入「完成」阶段) */}
+      {seeVerify && prodDone && sv && (
         <div style={{ border: '1px solid var(--row-line)', borderRadius: 10, padding: 14, marginTop: 12 }}>
           <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--navy900)', marginBottom: 8 }}>③ {t('Sales 核对', 'Sales verification')}</div>
           {sv.status === 'verified' ? (
@@ -675,8 +1043,8 @@ function WorkflowPanel({ p, users, me, dispatch }: {
         </div>
       )}
 
-      {/* Step 4 — Finance: invoice + payment status (ref-only, §7) */}
-      {sv && sv.status === 'verified' && sv.finalInvoiceAllowed && inv && (
+      {/* Step 4 — Finance: invoice + payment status (REQ-022: Finance 可操作，Sales / PD·BD 只读) */}
+      {seeFinance && sv && sv.status === 'verified' && sv.finalInvoiceAllowed && inv && (
         <div style={{ border: '1px solid var(--row-line)', borderRadius: 10, padding: 14, marginTop: 12 }}>
           <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--navy900)', marginBottom: 4 }}>④ {t('Finance 开票 / 收款', 'Finance: invoice / payment')}</div>
           <div style={{ fontSize: 11, color: 'var(--text2)', marginBottom: 10 }}>{t('仅记录状态与单号,不记金额(以现有 Finance 系统为准)。', 'Status & reference only — no amounts (source of truth is your Finance system).')}</div>
@@ -710,8 +1078,9 @@ function WorkflowPanel({ p, users, me, dispatch }: {
         </div>
       )}
 
-      {/* Payment Risk — non-blocking banner + control */}
-      {pr && (pr.level !== 'none' || canCommercial(me, p)) && (
+      {/* Payment Risk — non-blocking banner + control
+          (REQ-022: 属于售后商业信息,跟着开票/收款那一闸走) */}
+      {seeFinance && pr && (pr.level !== 'none' || canCommercial(me, p)) && (
         <div style={{ borderRadius: 10, padding: '10px 14px', marginTop: 12, background: pr.level === 'high' ? '#fbe9e7' : pr.level === 'watch' ? '#fbf0dc' : 'var(--hover-bg)', border: '1px solid var(--row-line)' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
             <span style={{ fontSize: 12.5, fontWeight: 700, color: pr.level === 'high' ? '#b23a32' : pr.level === 'watch' ? '#a8690b' : 'var(--text2)' }}>
@@ -780,5 +1149,185 @@ function HistoryModal({ pid, onClose }: { pid: string; onClose: () => void }) {
         ))}
       </div>
     </div>
+  );
+}
+
+/* ===== REQ-030 — 项目详情·联系人 =====
+   原来一进来就是一排输入框,容易误改也显得杂乱。改成默认只读展示,
+   点「编辑」整块一起进编辑态(和 Job Record 的「总编辑」一个思路),
+   保存 / 取消明确。角色改成下拉,选「其他」再手填。 */
+const CONTACT_ROLES: [string, string][] = [
+  ['客户 Client', 'Client'],
+  ['总包 Main-con', 'Main contractor'],
+  ['建筑师 Architect', 'Architect'],
+  ['景观 Landscape', 'Landscape'],
+  ['室内 Interior', 'Interior'],
+  ['创意 Creative', 'Creative'],
+];
+
+function ContactsPanel({ p, canEd }: { p: Project; canEd: boolean }) {
+  const { dispatch, setToast, projects } = useStore();
+  const { lang, t } = useLang();
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState<ProjectContact[]>([]);
+  const [busy, setBusy] = useState(false);
+
+  const list = p.contacts || [];
+
+  /* 公司下拉的选项 = 全平台已经录过的公司名。没有单独一张「公司表」,
+     也不该为这个建一张 —— 录过一次就进下拉,这已经够用了。
+     大小写/前后空格不同视作同一家,显示时用第一次录入的写法。 */
+  const knownCompanies = useMemo(() => {
+    const seen = new Map<string, string>();
+    for (const pr of projects) {
+      for (const c of pr.contacts || []) {
+        const name = String(c.company || '').trim();
+        if (!name) continue;
+        const key = name.toLowerCase();
+        if (!seen.has(key)) seen.set(key, name);
+      }
+    }
+    return [...seen.values()].sort((a, b) => a.localeCompare(b, 'zh-Hans-CN'));
+  }, [projects]);
+
+  function begin() {
+    setDraft(list.map((c) => ({ ...c })));
+    setEditing(true);
+  }
+  type CField = 'role' | 'company' | 'person' | 'phone' | 'email';
+  const set = (i: number, field: CField, v: string) =>
+    setDraft((d) => d.map((c, k) => (k === i ? { ...c, [field]: v } : c)));
+
+  /* 服务端的联系人动作是「按下标逐条改」,没有整块替换的 action。
+     这里在保存时把差异拆成 添加 / 逐字段修改 / 删除 依次下发 ——
+     删除从后往前,免得前面的删掉后后面的下标全串位。 */
+  async function save() {
+    setBusy(true);
+    try {
+      for (let i = list.length; i < draft.length; i++) {
+        if (!(await dispatch(p.id, { type: 'addContact' }))) throw new Error('add');
+      }
+      for (let i = list.length - 1; i >= draft.length; i--) {
+        if (!(await dispatch(p.id, { type: 'removeContact', idx: i }))) throw new Error('remove');
+      }
+      const fields: CField[] = ['role', 'company', 'person', 'phone', 'email'];
+      for (let i = 0; i < draft.length; i++) {
+        const was = list[i];
+        for (const f of fields) {
+          const v = String(draft[i][f] ?? '');
+          if (!was || String(was[f] ?? '') !== v) {
+            if (!(await dispatch(p.id, { type: 'editContact', idx: i, field: f, value: v }))) throw new Error('edit');
+          }
+        }
+      }
+      setEditing(false);
+    } catch {
+      setToast(t('保存联系人时出错,请刷新后重试', 'Could not save contacts — refresh and try again'));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="panel" style={{ padding: 20 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+        <span className="panel-title" style={{ fontSize: 15 }}>{t('联系人', 'Contacts')}</span>
+        <div style={{ flex: 1 }} />
+        {canEd && !editing && (
+          <button className="btn-line sm" onClick={begin}><Icon name="edit" size={13} />{t('编辑', 'Edit')}</button>
+        )}
+      </div>
+
+      {!editing ? (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          {list.map((c, ci) => (
+            <div key={ci} style={{ borderTop: ci ? '1px solid var(--row-line2)' : 'none', paddingTop: ci ? 12 : 0 }}>
+              <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--navy900)' }}>
+                {c.company || c.person || '—'}
+                {c.role && <span style={{ fontSize: 11, fontWeight: 500, color: 'var(--text2)' }}> · {contactRoleTerm(c.role, lang)}</span>}
+              </div>
+              <div style={{ fontSize: 12, color: 'var(--text2)' }}>
+                {[c.person, c.phone, c.email].filter(Boolean).join(' · ') || t('无联系方式', 'no contact details')}
+              </div>
+            </div>
+          ))}
+          {list.length === 0 && (
+            <div style={{ fontSize: 12.5, color: 'var(--text2)' }}>
+              {t('暂无联系人。', 'No contacts yet.')}
+              {canEd && <button style={{ color: 'var(--navy700)', fontWeight: 600, marginLeft: 6 }} onClick={begin}>{t('去添加', 'Add one')}</button>}
+            </div>
+          )}
+        </div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          {draft.map((c, ci) => (
+            <div key={ci} style={{ borderTop: ci ? '1px solid var(--row-line2)' : 'none', paddingTop: ci ? 12 : 0, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 7 }}>
+              <RoleSelect value={c.role} onChange={(v) => set(ci, 'role', v)} />
+              {/* 0917 变更单:公司也改下拉。选项来自全平台已经录过的公司名 ——
+                  同一个建筑师 / 总包会在很多项目里反复出现,每次重打一遍
+                  既费事又容易打出三种写法。选「其他」照样手填。 */}
+              <PickOrType value={c.company} options={knownCompanies} placeholder={t('公司', 'Company')}
+                onChange={(v) => set(ci, 'company', v)} />
+              <input className="in sm" value={c.person} placeholder={t('联系人', 'Contact person')} onChange={(e) => set(ci, 'person', e.target.value)} />
+              <input className="in sm" value={c.phone} placeholder={t('电话', 'Phone')} onChange={(e) => set(ci, 'phone', e.target.value)} />
+              <input className="in sm" style={{ gridColumn: '1 / -1' }} value={c.email} placeholder={t('邮箱', 'Email')} onChange={(e) => set(ci, 'email', e.target.value)} />
+              <button className="btn-line sm danger" style={{ justifySelf: 'start' }}
+                onClick={() => setDraft((d) => d.filter((_, k) => k !== ci))}>✕ {t('删除', 'Remove')}</button>
+            </div>
+          ))}
+          <button className="btn-line sm" style={{ borderStyle: 'dashed', alignSelf: 'flex-start' }}
+            onClick={() => setDraft((d) => [...d, { role: '', company: '', person: '', phone: '', email: '' }])}>
+            + {t('添加联系人', 'Add contact')}
+          </button>
+          <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', borderTop: '1px solid var(--row-line)', paddingTop: 12 }}>
+            <button className="btn-line sm" onClick={() => setEditing(false)} disabled={busy}>{t('取消', 'Cancel')}</button>
+            <button className="btn-navy sm" onClick={save} disabled={busy}>{busy ? t('保存中…', 'Saving…') : t('保存', 'Save')}</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* 角色下拉:命中固定枚举就选枚举,否则落到「其他」并露出手填框 ——
+   老数据里那些手打的角色不会因为换成下拉就丢掉。 */
+function RoleSelect({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const { lang, t } = useLang();
+  /* REQ-041: 下拉里显示的名字与只读态那一行走同一个词条(中文只显示「客户」,
+     不再是存进库的那串「客户 Client」);存的值一个字都不变。 */
+  return <PickOrType value={value} placeholder={t('角色', 'Role')}
+    options={CONTACT_ROLES.map(([zh]) => zh)} labelOf={(v) => contactRoleTerm(v, lang)}
+    onChange={onChange} />;
+}
+
+/* 下拉 + 「其他(手填)」。值不在选项里(老数据手打的)就直接进手填态,
+   不会因为换成下拉把已有内容丢掉 —— 这是 REQ-030 定下的规矩,
+   0917 变更单把公司也纳进来,所以抽成一个共用件。 */
+function PickOrType({ value, options, placeholder, labelOf, onChange }: {
+  value: string; options: string[]; placeholder: string;
+  labelOf?: (v: string) => string; onChange: (v: string) => void;
+}) {
+  const { t } = useLang();
+  const known = options.includes(value);
+  const [other, setOther] = useState(!known && !!value);
+  if (other || options.length === 0) {
+    return (
+      <div style={{ display: 'flex', gap: 5 }}>
+        <input className="in sm" style={{ minWidth: 0 }} value={value} placeholder={placeholder}
+          onChange={(e) => onChange(e.target.value)} />
+        {options.length > 0 && (
+          <button className="btn-line sm" title={t('回到下拉选择', 'Back to the list')}
+            onClick={() => { setOther(false); onChange(''); }}>↺</button>
+        )}
+      </div>
+    );
+  }
+  return (
+    <select className="in sm" value={known ? value : ''}
+      onChange={(e) => { if (e.target.value === '__other') { setOther(true); onChange(''); } else onChange(e.target.value); }}>
+      <option value="">— {placeholder} —</option>
+      {options.map((o) => <option key={o} value={o}>{labelOf ? labelOf(o) : o}</option>)}
+      <option value="__other">{t('其他(手填)', 'Other (type it)')}</option>
+    </select>
   );
 }

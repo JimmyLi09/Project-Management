@@ -12,11 +12,12 @@
    The other five (LED / 3D Links / MAXHUB / AV / Others) use the suggested
    columns from the spec — flagged `confirmed: false` — pending PD tweak. */
 
+import { compileFormula, evalFormula, findFormulaCycle } from './formula';
 import type { ServiceRecord } from './types';
 export type { ServiceRecord };
 
 export type RegisterKind = 'install' | 'delivery';
-export type FieldType = 'text' | 'date' | 'url' | 'textarea' | 'select';
+export type FieldType = 'text' | 'date' | 'url' | 'textarea' | 'select' | 'number' | 'formula';
 
 export interface FieldDef {
   key: string;
@@ -25,6 +26,12 @@ export interface FieldDef {
   type: FieldType;
   required?: boolean;               // counts toward the "资料不完整" KPI
   options?: [string, string, string][]; // for select: [value, zh, en]
+  /* REQ-027 —— 公式字段 */
+  formula?: string;                 // 用户填的表达式,引用同卡其它字段的 key
+  decimals?: number;                // 结果小数位,默认 2
+  group?: string;                   // 分组名;同组字段聚在一起、组内两列排布
+  /* REQ-039 —— 关键信息:资料卡与登记表里加粗显示,一眼能找到 */
+  highlight?: boolean;
 }
 
 export interface RegisterDef {
@@ -59,6 +66,31 @@ export const defaultStatus = (kind: RegisterKind) => (kind === 'install' ? 'pend
 export const statusMeta = (kind: RegisterKind, key: string): StatusMeta =>
   statusFamily(kind).find((s) => s[0] === key) || [key, key, key, 'var(--text2)'];
 
+/* ===== REQ-039: LED 计算口径(源:《Calculator reference》)=====
+   写在这里只是「出厂默认」—— 落到界面上它们是普通的 REQ-027 公式字段,
+   PD 在「增减字段」里能改系数、能加自己的算式,不需要动代码。
+     SQM     = 长(mm) × 宽(mm) ÷ 1,000,000
+     Max KW  = SQM × 450W ÷ 1000
+     AVG KW  = Max KW × 0.5      (≈250W/㎡)
+     Heat KW = AVG KW × 0.8
+   电源线 / 数据线数量参考表里本来就是手填(无公式),保持手填。 */
+const G_BASIC = '基本信息 Basics';
+const G_DIM = '尺寸与计算 Dimension & Calc';
+const G_POWER = '电源与线缆 Power & Cable';
+const G_INSTALL = '安装与保修 Install & Warranty';
+const G_REMARK = '备注 Remarks';
+
+const opt = (...vals: ([string, string, string] | [string, string])[]): [string, string, string][] =>
+  vals.map((v) => [v[0], v[1], (v[2] ?? v[1]) as string]);
+
+const LED_PITCH = opt(...(['P0.9', 'P1.25', 'P1.53', 'P1.86', 'P2', 'P2.5', 'P3', 'P4', 'P5', 'P6', 'P8', 'P10'].map((x) => [x, x] as [string, string])));
+const LED_TYPE = opt(['fixed', 'Fixed 固装', 'Fixed'], ['rental', 'Rental 租赁', 'Rental'], ['transparent', 'Transparent 透明屏', 'Transparent'],
+  ['floor', 'Floor 地砖屏', 'Floor'], ['curved', 'Curved 弧形屏', 'Curved'], ['outdoor', 'Outdoor 户外屏', 'Outdoor']);
+const LED_LOCATION = opt(['indoor', 'Indoor 室内', 'Indoor'], ['outdoor', 'Outdoor 室外', 'Outdoor'], ['lobby', 'Lobby 大堂', 'Lobby'],
+  ['gallery', 'Sales Gallery 售楼处', 'Sales Gallery'], ['showroom', 'Showroom 展厅', 'Showroom'], ['meeting', 'Meeting Room 会议室', 'Meeting Room']);
+const YES_NO = opt(['yes', '有', 'Yes'], ['no', '无', 'No']);
+const YES_NO_CLIENT = opt(['yes', '有', 'Yes'], ['no', '无', 'No'], ['client', '客户提供', 'By client']);
+
 /* ---- the 7 registers — columns mirror the studio's Google Sheet tabs ----
    Required fields are limited to project info (name is a project-level column,
    so the only required record field is the site address, per PD); 3D Links also
@@ -72,6 +104,9 @@ export const REGISTERS: RegisterDef[] = [
       { key: 'projectDetail', zh: 'Project detail 项目详情', en: 'Project detail', type: 'text' },
       { key: 'clientContact', zh: 'Client Contact 客户联系人', en: 'Client Contact Person', type: 'text' },
       { key: 'modelMaker', zh: 'Model Maker 模型师', en: 'Model Maker', type: 'text' },
+      /* REQ-038: 积分按比例分档(1:30–1:50 = 5 分,50 以上 = 3 分)。
+         填了这一栏,积分就自动落档,不用 PM 再选。 */
+      { key: 'scaleRatio', zh: '比例 1:N', en: 'Scale 1:N', type: 'number' },
       { key: 'handoverDate', zh: 'Handover Date 交付日期', en: 'Handover Date', type: 'date' },
       { key: 'expirationDate', zh: 'Expiration Date 有效期', en: 'Expiration Date', type: 'date' },
     ],
@@ -96,26 +131,42 @@ export const REGISTERS: RegisterDef[] = [
     // LED sheet: Address · Main Con · Metal Frame · Installation · Signed Off ·
     // Dimension (L/H/SQM) · Quantity (L/H/Total) · Type · DB Box · Power/Data
     // Cable · Speaker · Remarks.  PD edits: drop Launch, add Warranty.
+    /* REQ-039: LED 自带一套「内置计算器」—— 长宽填完,面积 / 功率 / 散热
+       自动算出来(口径见 LED_CALC)。它走的就是 REQ-027 的公式字段,
+       所以 PD 想换系数、加一条自己的算式,在「增减字段」里改就行,
+       不需要动代码;电源线 / 数据线参考表里本来就是手填,保持手填。 */
     svc: 'led', kind: 'install', confirmed: true,
     fields: [
-      { key: 'siteAddress', zh: 'Address 地址', en: 'Address', type: 'text', required: true },
-      { key: 'mainCon', zh: 'Main Con', en: 'Main Con', type: 'text' },
-      { key: 'metalFrame', zh: 'Metal Frame 金属框', en: 'Metal Frame', type: 'text' },
-      { key: 'installation', zh: 'Installation 安装日期', en: 'Installation', type: 'date' },
-      { key: 'signedOff', zh: 'Signed Off 签收', en: 'Signed Off', type: 'date' },
-      { key: 'dimL', zh: 'L (mm)', en: 'L (mm)', type: 'text' },
-      { key: 'dimH', zh: 'H (mm)', en: 'H (mm)', type: 'text' },
-      { key: 'sqm', zh: 'SQM 面积', en: 'SQM', type: 'text' },
-      { key: 'qtyL', zh: '数量 L', en: 'Qty L', type: 'text' },
-      { key: 'qtyH', zh: '数量 H', en: 'Qty H', type: 'text' },
-      { key: 'qtyTotal', zh: '数量 Total', en: 'Qty Total', type: 'text' },
-      { key: 'ledType', zh: 'Type 类型', en: 'Type', type: 'text' },
-      { key: 'dbBox', zh: 'DB Box (KW)', en: 'DB Box (KW)', type: 'text' },
-      { key: 'powerCable', zh: 'Power Cable (No.)', en: 'Power Cable (No.)', type: 'text' },
-      { key: 'dataCable', zh: 'Data Cable (No.)', en: 'Data Cable (No.)', type: 'text' },
-      { key: 'speaker', zh: 'Speaker 音箱', en: 'Speaker', type: 'text' },
-      { key: 'remarks', zh: 'Remarks 备注', en: 'Remarks', type: 'textarea' },
-      { key: 'warranty', zh: 'Warranty 保修到期', en: 'Warranty', type: 'date' },
+      { key: 'siteAddress', zh: 'Address 地址', en: 'Address', type: 'text', required: true, group: G_BASIC, highlight: true },
+      { key: 'mainCon', zh: 'Main Con', en: 'Main Con', type: 'text', group: G_BASIC },
+      { key: 'location', zh: 'Location 位置', en: 'Location', type: 'select', group: G_BASIC, options: LED_LOCATION },
+      { key: 'ledType', zh: 'Type 类型', en: 'Type', type: 'select', group: G_BASIC, options: LED_TYPE },
+      { key: 'resolution', zh: 'Screen Resolution 点间距', en: 'Screen Resolution', type: 'select', group: G_BASIC, options: LED_PITCH, highlight: true },
+      { key: 'metalFrame', zh: 'Metal Frame 金属框', en: 'Metal Frame', type: 'select', group: G_BASIC, options: YES_NO_CLIENT },
+      { key: 'speaker', zh: 'Speaker 音箱', en: 'Speaker', type: 'select', group: G_BASIC, options: YES_NO },
+
+      { key: 'dimL', zh: 'Length 长 (mm)', en: 'Length (mm)', type: 'number', group: G_DIM, highlight: true },
+      { key: 'dimH', zh: 'Width 宽 (mm)', en: 'Width (mm)', type: 'number', group: G_DIM, highlight: true },
+      { key: 'sqm', zh: 'SQM 面积 (㎡)', en: 'SQM', type: 'formula', formula: 'dimL * dimH / 1000000', decimals: 3, group: G_DIM, highlight: true },
+      { key: 'qtyL', zh: '数量 L', en: 'Qty L', type: 'number', group: G_DIM },
+      { key: 'qtyH', zh: '数量 H', en: 'Qty H', type: 'number', group: G_DIM },
+      /* 0917 变更单:数量 Total = 数量L × 数量H,不再手填 */
+      { key: 'qtyTotal', zh: '数量 Total', en: 'Qty Total', type: 'formula', formula: 'qtyL * qtyH', decimals: 0, group: G_DIM, highlight: true },
+
+      /* 0917 变更单按 Calculator reference 对齐字段名:
+         DB Box (KW) 就是原来的 Max KW(SQM × 450 / 1000),散热 = DB × 0.5 × 0.8。
+         原先中间那个 AVG KW 去掉 —— 它是派生值,不落库,去掉不丢任何数据,
+         而变更单给的字段清单里也没有它。 */
+      { key: 'dbBox', zh: 'DB Box (KW)', en: 'DB Box (KW)', type: 'formula', formula: 'sqm * 450 / 1000', decimals: 2, group: G_POWER, highlight: true },
+      { key: 'heatKw', zh: 'Heat 散热 (KW)', en: 'Heat (KW)', type: 'formula', formula: 'dbBox * 0.5 * 0.8', decimals: 2, group: G_POWER, highlight: true },
+      { key: 'powerCable', zh: '20A 单相电源线 (条)', en: '20A single-phase power cable (No.)', type: 'number', group: G_POWER },
+      { key: 'dataCable', zh: 'Cat6 数据线 (条)', en: 'Cat6 data cable (No.)', type: 'number', group: G_POWER },
+
+      { key: 'installation', zh: 'Installation 安装日期', en: 'Installation', type: 'date', group: G_INSTALL, highlight: true },
+      { key: 'signedOff', zh: 'Signed Off 签收', en: 'Signed Off', type: 'date', group: G_INSTALL },
+      { key: 'warranty', zh: 'Warranty 保修到期', en: 'Warranty', type: 'date', group: G_INSTALL },
+
+      { key: 'remarks', zh: 'Remarks 备注', en: 'Remarks', type: 'textarea', group: G_REMARK },
     ],
   },
   {
@@ -127,6 +178,8 @@ export const REGISTERS: RegisterDef[] = [
     fields: [
       { key: 'projectRecord', zh: 'Project Record 项目编号', en: 'Project Record', type: 'text' },
       { key: 'unitType', zh: 'Unit Type 单元类型', en: 'Project Unit Type', type: 'text' },
+      /* REQ-038: 积分按房数分档(1–2 房 = 2 分、3–4 房 = 3.5 分、4 房以上 = 5 分) */
+      { key: 'rooms', zh: '房数 Rooms', en: 'Rooms', type: 'number' },
       { key: 'clientContact', zh: 'Client Contact 客户联系人', en: 'Client Contact Person', type: 'text' },
       { key: 'shootingDate', zh: 'Shooting Date 拍摄日期', en: 'Shooting Date', type: 'date' },
       { key: 'handoverDate', zh: 'Handover Date 交付日期', en: 'Handover Date', type: 'date' },
@@ -181,15 +234,150 @@ export const REGISTERS: RegisterDef[] = [
 export const REGISTER_SVCS = REGISTERS.map((r) => r.svc);
 export const registerDef = (svc: string): RegisterDef | undefined => REGISTERS.find((r) => r.svc === svc);
 
+/* ===== REQ-023: 每个服务类型的字段可以被用户改掉 =====
+   上面的 REGISTERS 是出厂默认;用户在「增减字段」里改过之后,改动存进
+   record_fields 表,按 svc 覆盖 fields。Job Record 与项目档案登记表读的是
+   同一份覆盖表 —— 改一次两边一致,这正是需求要的「同源」。
+   字段值仍然挂在各项目的 packages[i].record 上,不动。 */
+export type FieldOverrides = Record<string, FieldDef[]>;
+
+/* 取某个登记表的生效字段:有覆盖用覆盖,没有就用出厂默认 */
+export function fieldsOf(def: RegisterDef, ov?: FieldOverrides): FieldDef[] {
+  const custom = ov && ov[def.svc];
+  return custom && custom.length ? custom : def.fields;
+}
+
+/* ===== 0917 变更单 · REQ-023:出厂没有登记表的业务也能自己加字段 =====
+   出厂只给 7 类业务配了登记表,别的业务(网站 / 无人机 / 宣传册…)在 Job Record
+   里只有一句「暂无资料登记表」,连一个格子都填不了。PD 在那张卡上点「加字段」
+   之后,record_fields 里就有了这个 svc 的列定义,它跟内置的 7 张表走同一条路:
+   同一份覆盖表、同一个 setRecord、同一张 record —— 只是出厂默认是空的。
+   状态按交付类走(没装机概念的业务多半是交付型),confirmed 置 true,
+   因为这几列本来就是 PD 自己定的,没有「待确认」一说。 */
+export const baseDefOf = (svc: string): RegisterDef =>
+  registerDef(svc) || { svc, kind: 'delivery', confirmed: true, fields: [] };
+
+/* 这个业务现在有没有登记表可看 —— 内置的有,或者 PD 自己加过列 */
+export const hasRecordDef = (svc: string, ov?: FieldOverrides): boolean =>
+  !!registerDef(svc) || !!(ov && ov[svc] && ov[svc].length);
+
+/* PD 自建的登记表(内置 7 张之外的),按 svc 排一下给跨项目档案页做页签 */
+export const customRegisterSvcs = (ov?: FieldOverrides): string[] =>
+  Object.keys(ov || {}).filter((svc) => !registerDef(svc) && (ov as FieldOverrides)[svc].length).sort();
+
+export const FIELD_TYPES: [FieldType, string, string][] = [
+  ['text', '文本', 'Text'],
+  ['number', '数字', 'Number'],
+  ['date', '日期', 'Date'],
+  ['select', '下拉', 'Dropdown'],
+  ['url', '链接', 'Link'],
+  ['textarea', '多行文本', 'Long text'],
+  ['formula', '公式', 'Formula'],
+];
+
+/* 校验一份字段定义:key 必须存在且唯一,类型必须合法。服务端落库前跑一遍,
+   免得一个手滑的 key 冲突把整张表的数据读花。 */
+export function validateFields(raw: unknown): { ok: true; fields: FieldDef[] } | { ok: false; error: string } {
+  if (!Array.isArray(raw)) return { ok: false, error: '字段定义必须是数组' };
+  if (raw.length > 60) return { ok: false, error: '字段最多 60 个' };
+  const types = new Set(FIELD_TYPES.map((x) => x[0]));
+  const seen = new Set<string>();
+  const out: FieldDef[] = [];
+  for (const item of raw) {
+    const f = item as Partial<FieldDef>;
+    const key = String(f?.key || '').trim();
+    if (!key) return { ok: false, error: '字段 key 不能为空' };
+    if (!/^[A-Za-z][A-Za-z0-9_]{0,39}$/.test(key)) return { ok: false, error: `字段 key「${key}」只能用字母开头的字母/数字/下划线` };
+    if (seen.has(key)) return { ok: false, error: `字段 key「${key}」重复` };
+    seen.add(key);
+    const type = String(f?.type || 'text') as FieldType;
+    if (!types.has(type)) return { ok: false, error: `字段「${key}」的类型无效` };
+    const zh = String(f?.zh || key).slice(0, 60);
+    const def: FieldDef = { key, zh, en: String(f?.en || zh).slice(0, 60), type };
+    if (f?.required) def.required = true;
+    if (f?.group) def.group = String(f.group).slice(0, 40);
+    if (f?.highlight) def.highlight = true;   // REQ-039: 关键信息加粗
+    if (type === 'formula') {
+      def.formula = String(f?.formula || '').slice(0, 500);
+      const dp = Number(f?.decimals);
+      def.decimals = Number.isFinite(dp) && dp >= 0 && dp <= 6 ? Math.floor(dp) : 2;
+    }
+    if (type === 'select') {
+      const opts = Array.isArray(f?.options) ? f!.options! : [];
+      def.options = opts.slice(0, 40).map((o) => {
+        const a = Array.isArray(o) ? o : [String(o), String(o), String(o)];
+        const v = String(a[0] ?? '').slice(0, 60);
+        return [v, String(a[1] ?? v).slice(0, 60), String(a[2] ?? a[1] ?? v).slice(0, 60)] as [string, string, string];
+      }).filter((o) => o[0]);
+      if (!def.options.length) return { ok: false, error: `下拉字段「${zh}」至少要有一个选项` };
+    }
+    out.push(def);
+  }
+
+  /* REQ-027: 公式要等所有字段都收齐了才能校验 —— 它可能引用后面定义的字段。
+     两步:先逐条编译(语法 + 引用是否存在),再整体查循环引用。
+     循环引用必须在这里拦下:漏掉的话渲染时会无限递归,页面直接卡死。 */
+  const allKeys = new Set(out.map((f) => f.key));
+  const deps: Record<string, string[]> = {};
+  for (const f of out) {
+    if (f.type !== 'formula') continue;
+    if (!f.formula || !f.formula.trim()) return { ok: false, error: `公式字段「${f.zh}」还没填表达式` };
+    const c = compileFormula(f.formula, allKeys);
+    if (!c.ok) return { ok: false, error: `公式字段「${f.zh}」:${c.error}` };
+    deps[f.key] = c.refs;
+  }
+  const cycle = findFormulaCycle(deps);
+  if (cycle) {
+    const label = (k: string) => out.find((f) => f.key === k)?.zh || k;
+    return { ok: false, error: `公式循环引用:${cycle.map(label).join(' → ')}` };
+  }
+
+  return { ok: true, fields: out };
+}
+
+/* REQ-027: 算出一张资料卡上某个公式字段的值。
+   派生值,不落库 —— 每次渲染时算,免得存下来之后和源字段对不上。
+   算不出来(空值 / 非数字 / 除零 / 坏公式)一律返回 null,显示「—」。 */
+export function computeFormula(field: FieldDef, fields: FieldDef[], rec: ServiceRecord | undefined): number | null {
+  if (field.type !== 'formula' || !field.formula) return null;
+  const values: Record<string, string> = {};
+  fields.forEach((f) => { if (f.type !== 'formula') values[f.key] = recordVal(rec, f.key); });
+  /* 公式可以引用另一个公式字段 —— 递归解析,深度由 evalFormula 兜底 */
+  const resolve = (key: string, depth: number): number | null => {
+    const t = fields.find((f) => f.key === key);
+    if (!t || t.type !== 'formula' || !t.formula) return null;
+    return evalFormula(t.formula, values, resolve, depth);
+  };
+  return evalFormula(field.formula, values, resolve);
+}
+
+/* 公式结果的显示串。
+   REQ-039: 算不出来时,如果这个 key 上有历史手填值(比如 SQM 以前是文本列、
+   有人直接填过数字),回落显示那个旧值,不要让改列类型把老数据「弄丢」。
+   源字段一填,算出来的值立刻盖过旧值。 */
+export function formulaText(field: FieldDef, fields: FieldDef[], rec: ServiceRecord | undefined): string {
+  const v = computeFormula(field, fields, rec);
+  if (v != null) return v.toFixed(field.decimals ?? 2);
+  const legacy = recordVal(rec, field.key).trim();
+  return legacy || '—';
+}
+
+/* 下拉字段的显示文字:值对得上选项就显示选项名,对不上(改类型前留下的旧值)
+   就原样显示 —— 显示不了才是真丢数据。 */
+export function optionLabel(f: FieldDef, val: string, lang: 'zh' | 'en'): string {
+  const o = (f.options || []).find((x) => x[0] === val);
+  return o ? (lang === 'zh' ? o[1] : o[2]) : val;
+}
+
 /* ---- record helpers ---- */
 export const recordVal = (rec: ServiceRecord | undefined, key: string): string =>
   rec && rec[key] != null ? String(rec[key]) : '';
 
 /* a required field is blank → the record is "incomplete" (also true when draft) */
-export function isIncomplete(def: RegisterDef, rec: ServiceRecord | undefined): boolean {
+export function isIncomplete(def: RegisterDef, rec: ServiceRecord | undefined, ov?: FieldOverrides): boolean {
   if (!rec) return true;
   if ((rec.status || defaultStatus(def.kind)) === 'draft') return true;
-  return def.fields.some((f) => f.required && !recordVal(rec, f.key).trim());
+  return fieldsOf(def, ov).some((f) => f.required && !recordVal(rec, f.key).trim());
 }
 
 /* delivery records expiring within `days` (default 30) of the watch date, not

@@ -1,12 +1,14 @@
 'use client';
 
 import React, { useState } from 'react';
+import { ItemReceipts, ReceivingLog } from './ReceiptLog';
 import { useStore } from '../store';
 import { canEdit } from '@/lib/permissions';
 import { getBuiltinTemplate, svcColor, svcName } from '@/lib/templates';
-import { parseISO, todayMid } from '@/lib/project';
+import { parseISO, todayMid , pkgSuffix } from '@/lib/project';
 import { useLang } from '@/lib/i18n';
 import { Avatar, CM, Icon, Pill } from '../ui';
+import FragmentBar from '../FragmentBar';
 import type { ChecklistStatus, Project } from '@/lib/types';
 
 const CYCLE: Record<ChecklistStatus, ChecklistStatus> = {
@@ -33,11 +35,21 @@ export default function ChecklistTab({ p, pkgIdx, onExport, onPkg }: {
   p: Project; pkgIdx: number; onExport: () => void; onPkg: (i: number) => void;
 }) {
   const { me, dispatch, users } = useStore();
-  const { lang, t } = useLang();
+  const { lang, t, dual } = useLang();
   const [editMode, setEditMode] = useState(false);
+  /* REQ-005: 信息清单默认只读,点「编辑」才可改字段(状态/日期/备注/图片) */
+  const [fieldEdit, setFieldEdit] = useState(false);
   const [lightbox, setLightbox] = useState<string | null>(null);
   const [collapsed, setCollapsed] = useState<Record<number, boolean>>({});
+  /* REQ-012: drag-to-reorder items inside a category (gi:ii identifies a row) */
+  const [drag, setDrag] = useState<{ gi: number; ii: number } | null>(null);
+  const [dragOver, setDragOver] = useState<string | null>(null);
+  /* REQ-042: 两套视图 —— 对外清单(每项只看最新)/ 内部收料记录(全部记录+路径)。
+     展开某一项看它的全部收料历史时记下 gi:ii。 */
+  const [view, setView] = useState<'external' | 'log'>('external');
+  const [openRec, setOpenRec] = useState<string | null>(null);
   const ed = canEdit(me, p);
+  const fe = ed && fieldEdit;
   const pkg = p.packages[pkgIdx];
   const assigneeNames = users.filter((u) => u.role !== 'viewer').map((u) => u.name);
   const today = todayMid();
@@ -49,7 +61,9 @@ export default function ChecklistTab({ p, pkgIdx, onExport, onPkg }: {
     if (it.status === 'confirmed') doneN++;
     if (it.status === 'pending') pendingN++;
     const due = parseISO(it.date);
-    if (due && due < today && it.status !== 'confirmed') overdueN++;
+    // REQ-003: overdue = 未收到(pending) 且已过截止日。已收到/需修改/已确认等
+    // 都不算逾期(资料已到位或已在处理),避免把「已收到」误报成逾期。
+    if (due && due < today && it.status === 'pending') overdueN++;
   }));
   const pct = totalN ? Math.round((doneN / totalN) * 100) : 0;
 
@@ -97,9 +111,13 @@ export default function ChecklistTab({ p, pkgIdx, onExport, onPkg }: {
     return null;
   }
 
-  const cols = editMode && ed
-    ? 'minmax(280px,2.4fr) 160px 132px 116px 118px 30px'
-    : 'minmax(280px,2.4fr) 160px 132px 116px 118px';
+  /* REQ-014: flat mode drops the Owner column (Item / Status+received / Date / Remark);
+     REQ-019: template columns are Item · Status(含收到内容) · Date received. */
+  const flat = !!pkg.noCategories;
+  /* REQ-024: 「参考图」列插在 信息项 与 负责人 之间(无分类模式下就在信息项之后) */
+  const cols = flat
+    ? (editMode && ed ? 'minmax(260px,2.4fr) 132px 220px 132px 34px' : 'minmax(260px,2.4fr) 132px 220px 132px')
+    : (editMode && ed ? 'minmax(240px,2.2fr) 132px 150px 220px 124px 34px' : 'minmax(240px,2.2fr) 132px 150px 220px 124px');
 
   return (
     <>
@@ -109,7 +127,7 @@ export default function ChecklistTab({ p, pkgIdx, onExport, onPkg }: {
             <button key={i} className={`chip ${i === pkgIdx ? 'active' : ''}`}
               style={i === pkgIdx ? { background: svcColor(pk.svc), borderColor: svcColor(pk.svc) } : undefined}
               onClick={() => onPkg(i)}>
-              {svcName(pk.svc, lang)}
+              {svcName(pk.svc, lang)}{pkgSuffix(p, i) ? ' ' + pkgSuffix(p, i) : ''}
             </button>
           ))}
         </div>
@@ -139,7 +157,9 @@ export default function ChecklistTab({ p, pkgIdx, onExport, onPkg }: {
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 14, flexWrap: 'wrap' }}>
         <div style={{ fontSize: 13, color: 'var(--text2)' }}>
-          {t('点状态徽章向前推进(右键选择指定状态)', 'Click a status badge to advance it (right-click to pick)')}
+          {editMode && ed
+            ? <span style={{ color: 'var(--navy700)' }}>⠿ {t('拖动右侧手柄可在同一分类内调整信息项顺序', 'Drag the ⠿ handle to reorder items within a category')}</span>
+            : t('点状态徽章向前推进(右键选择指定状态)', 'Click a status badge to advance it (right-click to pick)')}
         </div>
         <div style={{ flex: 1 }} />
         {ed && editMode && (
@@ -149,9 +169,44 @@ export default function ChecklistTab({ p, pkgIdx, onExport, onPkg }: {
             ↺ {t('恢复默认', 'Reset')}
           </button>
         )}
+        {ed && (
+          <button className={`btn-line sm ${fieldEdit ? '' : ''}`} style={fieldEdit ? { borderColor: 'var(--navy700)', color: 'var(--navy900)', fontWeight: 600 } : undefined}
+            onClick={() => setFieldEdit(!fieldEdit)}>
+            {fieldEdit ? t('完成', 'Done') : t('编辑', 'Edit')}
+          </button>
+        )}
         {ed && <button className="btn-line sm" onClick={() => setEditMode(!editMode)}>{editMode ? t('完成编辑', 'Done editing') : t('增减信息项', 'Edit items')}</button>}
-        <button className="btn-line sm" onClick={onExport}><Icon name="download" size={13} />{t('导出', 'Export')}</button>
+        {/* REQ-014: category mode toggle */}
+        {ed && (
+          <label className="btn-line sm" style={{ cursor: 'pointer', display: 'inline-flex', gap: 6, alignItems: 'center' }}
+            title={t('开启后清单不分分类,仅 信息项/状态/日期/备注', 'Flat list — Item / Status / Date / Remark only')}>
+            <input type="checkbox" checked={flat} onChange={(e) => dispatch(p.id, { type: 'setNoCategories', pkg: pkgIdx, value: e.target.checked })} />
+            {t('无固定分类', 'No categories')}
+          </label>
+        )}
+        <button className="btn-line sm" onClick={onExport}><Icon name="download" size={13} />{t('导出清单', 'Export Checklist')}</button>
       </div>
+
+      {/* REQ-042: 对外清单 / 内部收料记录 两套视图 */}
+      <div className="detail-tabs" style={{ borderTop: 'none', marginBottom: 4 }}>
+        <button className={`detail-tab${view === 'external' ? ' active' : ''}`} onClick={() => setView('external')}
+          title={t('给顾问 / 客户看的:每项只显示最新状态,不含服务器路径与内部备注',
+                   'For consultants / clients: latest status per item, no server paths or internal remarks')}>
+          {t('对外清单', 'External checklist')}
+        </button>
+        <button className={`detail-tab${view === 'log' ? ' active' : ''}`} onClick={() => setView('log')}
+          title={t('团队内部用:每项的全部收料记录,含路径与备注', 'Internal: every receiving record with paths and remarks')}>
+          {t('内部收料记录', 'Receiving log')}
+        </button>
+      </div>
+
+      {view === 'log' ? (
+        <ReceivingLog p={p} pkgIdx={pkgIdx} canEd={ed}
+          onOpenItem={(gi, ii) => { setView('external'); setOpenRec(`${gi}:${ii}`); }} />
+      ) : (
+      <>
+      {/* REQ-012: import this package's checklist from another project / a saved template */}
+      {ed && <FragmentBar p={p} pkgIdx={pkgIdx} kind="checklist" />}
 
       <div className="panel clip">
         {/* column headers (image7) */}
@@ -161,10 +216,10 @@ export default function ChecklistTab({ p, pkgIdx, onExport, onPkg }: {
           fontSize: 11, fontWeight: 700, letterSpacing: '.04em', textTransform: 'uppercase', color: 'var(--text2)',
         }}>
           <div>{t('信息项', 'Item')}</div>
-          <div>{t('负责人', 'Owner')}</div>
-          <div>{t('截止日期', 'Due date')}</div>
-          <div>{t('最后更新', 'Last update')}</div>
-          <div>{t('状态', 'Status')}</div>
+          <div>{t('参考图', 'Reference')}</div>
+          {!flat && <div>{t('负责人', 'Owner')}</div>}
+          <div>{t('状态 / 收到内容', 'Status / Received')}</div>
+          <div>{t('收到日期', 'Date received')}</div>
           {editMode && ed && <div />}
         </div>
 
@@ -175,29 +230,59 @@ export default function ChecklistTab({ p, pkgIdx, onExport, onPkg }: {
           const isCol = !!collapsed[gi];
           return (
             <div key={gi}>
-              {/* collapsible bold section header */}
-              <button onClick={() => setCollapsed((s) => ({ ...s, [gi]: !s[gi] }))}
-                style={{
-                  width: '100%', display: 'flex', alignItems: 'center', gap: 10, padding: '16px 24px',
-                  background: 'var(--card-bg, #fff)', borderBottom: '1px solid var(--row-line)', textAlign: 'left',
-                }}>
-                <span style={{ transform: isCol ? 'rotate(-90deg)' : 'none', transition: 'transform .15s', color: 'var(--text2)', fontSize: 12 }}>▾</span>
-                <span style={{ width: 9, height: 9, borderRadius: 2, background: g.color, flexShrink: 0 }} />
-                <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--navy900)' }}>{lang === 'zh' ? g.group : g.groupEn}</span>
-                <span style={{ fontWeight: 400, color: 'var(--text2)', fontSize: 12 }}>{lang === 'zh' ? g.groupEn : g.group}</span>
-                <span className="badge" style={{ background: 'var(--hover-bg)', color: 'var(--text2)' }}>{applicable.length}</span>
-                <div style={{ flex: 1 }} />
-                <span className="tnum" style={{ fontSize: 12.5, fontWeight: 600, color: gpct >= 100 ? 'var(--success)' : 'var(--text2)' }}>{gpct}%</span>
-              </button>
+              {/* collapsible bold section header — hidden in flat mode (REQ-014) */}
+              {!flat && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '16px 24px', borderBottom: '1px solid var(--row-line)' }}>
+                <button onClick={() => setCollapsed((s) => ({ ...s, [gi]: !s[gi] }))}
+                  style={{ display: 'flex', alignItems: 'center', gap: 10, background: 'none', textAlign: 'left', flex: 1, minWidth: 0, padding: 0 }}>
+                  <span style={{ transform: isCol ? 'rotate(-90deg)' : 'none', transition: 'transform .15s', color: 'var(--text2)', fontSize: 12 }}>▾</span>
+                  <span style={{ width: 9, height: 9, borderRadius: 2, background: g.color, flexShrink: 0 }} />
+                  <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--navy900)' }}>{lang === 'zh' ? g.group : g.groupEn}</span>
+                  {/* REQ-041: 另一种语言的栏目名,受「双语并排」开关控制 */}
+                  {dual && <span style={{ fontWeight: 400, color: 'var(--text2)', fontSize: 12 }}>{lang === 'zh' ? g.groupEn : g.group}</span>}
+                  <span className="badge" style={{ background: 'var(--hover-bg)', color: 'var(--text2)' }}>{applicable.length}</span>
+                  <div style={{ flex: 1 }} />
+                  <span className="tnum" style={{ fontSize: 12.5, fontWeight: 600, color: gpct >= 100 ? 'var(--success)' : 'var(--text2)' }}>{gpct}%</span>
+                </button>
+                {/* REQ-014: rename / delete category */}
+                {ed && editMode && (
+                  <>
+                    <button className="btn-line sm" title={t('重命名分类', 'Rename category')}
+                      onClick={() => {
+                        const name = prompt(t('分类名称(中)', 'Category name'), g.group);
+                        if (name == null || !name.trim()) return;
+                        const nameEn = prompt(t('分类名称(英,可空)', 'Category name (EN, optional)'), g.groupEn) ?? g.groupEn;
+                        dispatch(p.id, { type: 'renameGroup', pkg: pkgIdx, gi, name: name.trim(), nameEn });
+                      }}>✎</button>
+                    <button className="btn-line sm danger" title={t('删除分类', 'Delete category')}
+                      onClick={() => { if (confirm(t(`删除分类「${g.group}」及其 ${g.items.length} 个信息项?`, `Delete category "${g.group}" and its ${g.items.length} items?`))) dispatch(p.id, { type: 'removeGroup', pkg: pkgIdx, gi }); }}>✕</button>
+                  </>
+                )}
+              </div>
+              )}
 
               {!isCol && g.items.map((it, ii) => {
                 const due = parseISO(it.date);
-                const overdue = due && due < today && it.status !== 'confirmed' && it.status !== 'na';
+                // REQ-003: 仅「未收到 pending」且过期才标逾期(已收到不算)
+                const overdue = due && due < today && it.status === 'pending';
                 const shots = it.shots && it.shots.length ? it.shots : (it.shot ? [it.shot] : []);
+                const over = dragOver === `${gi}:${ii}` && drag && drag.gi === gi && drag.ii !== ii;
                 return (
-                  <div key={it.id || ii} style={{
+                  <React.Fragment key={it.id || ii}>
+                  <div
+                    onDragOver={editMode && ed ? (e) => { if (drag && drag.gi === gi) { e.preventDefault(); setDragOver(`${gi}:${ii}`); } } : undefined}
+                    onDrop={editMode && ed ? (e) => {
+                      e.preventDefault();
+                      if (drag && drag.gi === gi && drag.ii !== ii) dispatch(p.id, { type: 'reorderItem', pkg: pkgIdx, gi, from: drag.ii, to: ii });
+                      setDrag(null); setDragOver(null);
+                    } : undefined}
+                    style={{
                     display: 'grid', gridTemplateColumns: cols, gap: 16,
-                    alignItems: 'start', padding: '18px 24px', borderBottom: '1px solid var(--row-line)',
+                    alignItems: 'start', padding: '18px 24px 18px 21px', borderBottom: '1px solid var(--row-line)',
+                    /* REQ-019: 未收到 Pending 用黄底高亮 */
+                    background: it.status === 'pending' ? '#fffbeb' : undefined,
+                    borderLeft: `3px solid ${over ? 'var(--navy700)' : 'transparent'}`,
+                    opacity: drag && drag.gi === gi && drag.ii === ii ? 0.45 : 1,
                   }}>
                     {/* ── Item: name, thumbnails, remark ── */}
                     <div style={{ minWidth: 0 }}>
@@ -211,42 +296,13 @@ export default function ChecklistTab({ p, pkgIdx, onExport, onPkg }: {
                       ) : (
                         <>
                           <div style={{ fontSize: 13.5, fontWeight: 500 }}>{lang === 'zh' ? it.zh : it.en || it.zh}</div>
-                          <div style={{ fontSize: 11.5, color: 'var(--text2)' }}>{lang === 'zh' ? it.en : it.zh}</div>
+                          {dual && <div style={{ fontSize: 11.5, color: 'var(--text2)' }}>{lang === 'zh' ? it.en : it.zh}</div>}
                         </>
                       )}
 
-                      {/* thumbnails (multi-image) + uploader */}
-                      <div style={{ marginTop: 10, display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
-                        {shots.map((s, si) => (
-                          <span key={si} style={{ position: 'relative', display: 'inline-flex' }}>
-                            <img src={s} alt="" title={t('点击放大', 'Click to enlarge')}
-                              style={{ width: 54, height: 38, objectFit: 'cover', borderRadius: 6, border: '1px solid var(--border)', cursor: 'pointer' }}
-                              onClick={() => setLightbox(s)} />
-                            {ed && (
-                              <button title={t('删除此图', 'Remove image')}
-                                onClick={() => dispatch(p.id, { type: 'removeShot', pkg: pkgIdx, gi, ii, shotIdx: si })}
-                                style={{ position: 'absolute', top: -6, right: -6, width: 16, height: 16, borderRadius: 8, background: 'var(--danger)', color: '#fff', fontSize: 10, lineHeight: '16px', textAlign: 'center' }}>✕</button>
-                            )}
-                          </span>
-                        ))}
-                        {ed && (
-                          <label
-                            tabIndex={0}
-                            title={t('点击选择,或拖入 / 粘贴图片(可多张)', 'Click to select, or drag / paste images (multiple)')}
-                            style={{ fontSize: 11, color: '#234f97', background: '#e7eefb', borderRadius: 6, padding: '4px 9px', cursor: 'pointer', outline: 'none' }}
-                            onDragOver={(e) => { e.preventDefault(); (e.currentTarget as HTMLElement).style.background = '#c9dcff'; }}
-                            onDragLeave={(e) => { (e.currentTarget as HTMLElement).style.background = '#e7eefb'; }}
-                            onDrop={(e) => { e.preventDefault(); (e.currentTarget as HTMLElement).style.background = '#e7eefb'; processImageFile(gi, ii, imageFromDataTransfer(e.dataTransfer)); }}
-                            onPaste={(e) => { const f = imageFromDataTransfer(e.clipboardData); if (f) { e.preventDefault(); processImageFile(gi, ii, f); } }}>
-                            📎 {shots.length ? t('加图', 'Add image') : t('上传 / 拖入 / 粘贴', 'Upload / drag / paste')}
-                            <input type="file" accept="image/*" multiple style={{ display: 'none' }} onChange={(e) => attachShot(gi, ii, e.target)} />
-                          </label>
-                        )}
-                      </div>
-
                       {/* remark — wrapping textarea (D3), with highlight star (C3) */}
                       <div style={{ marginTop: 10, display: 'flex', alignItems: 'flex-start', gap: 6 }}>
-                        {ed && (
+                        {fe && (
                           <button title={it.highlight ? t('取消重点', 'Unmark important') : t('标为重点', 'Mark important')}
                             onClick={() => dispatch(p.id, { type: 'toggleHighlight', pkg: pkgIdx, gi, ii })}
                             style={{ flex: '0 0 auto', fontSize: 15, lineHeight: 1, padding: '3px 3px', background: 'none', color: it.highlight ? '#D98A12' : '#c2cad3' }}>
@@ -255,42 +311,70 @@ export default function ChecklistTab({ p, pkgIdx, onExport, onPkg }: {
                         )}
                         <textarea className="in sm" rows={1}
                           placeholder={t('下一步 / 备注…(可换行)', 'Next step / note… (multi-line)')}
-                          defaultValue={it.remark} readOnly={!ed}
+                          defaultValue={it.remark} readOnly={!fe}
                           style={{
                             width: '100%', minHeight: 30, resize: 'vertical', lineHeight: 1.5, whiteSpace: 'pre-wrap',
                             ...(it.highlight ? { background: '#fff6e2', borderColor: '#e6b657', color: '#8a5a0f', fontWeight: 600 } : {}),
                           }}
-                          onBlur={(e) => { if (ed && e.target.value !== it.remark) dispatch(p.id, { type: 'editCl', pkg: pkgIdx, gi, ii, field: 'remark', value: e.target.value }); }} />
+                          onBlur={(e) => { if (fe && e.target.value !== it.remark) dispatch(p.id, { type: 'editCl', pkg: pkgIdx, gi, ii, field: 'remark', value: e.target.value }); }} />
                       </div>
                     </div>
 
-                    {/* ── Owner (avatar + name); highlight the person ── */}
-                    <div style={{ minWidth: 0 }}>
-                      {editMode && ed ? (
-                        <input className="in sm" list="cl-owner-names" defaultValue={it.owner || ''} placeholder={t('负责人', 'Owner')}
-                          onBlur={(e) => e.target.value !== (it.owner || '') && dispatch(p.id, { type: 'editCl', pkg: pkgIdx, gi, ii, field: 'owner', value: e.target.value })} />
-                      ) : it.owner ? (
-                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7, fontSize: 13, fontWeight: 700, color: 'var(--navy900)' }}>
-                          <Avatar name={it.owner} size={24} />{it.owner}
-                        </span>
-                      ) : (
-                        <span style={{ fontSize: 12, color: '#b6bfc9' }}>{t('未指派', 'Unassigned')}</span>
-                      )}
+                    {/* ── REQ-024 参考图 Reference ──
+                        查看态只读缩略图(点开看大图),编辑态可上传 / 拖入 / 粘贴 / 删除。
+                        复用信息清单原有的图片通道(attachShot / removeShot),不新建图床。 */}
+                    <div style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                      <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
+                        {shots.map((s, si) => (
+                          <span key={si} style={{ position: 'relative', display: 'inline-flex' }}>
+                            <img src={s} alt="" title={t('点击放大', 'Click to enlarge')}
+                              style={{ width: 58, height: 42, objectFit: 'cover', borderRadius: 6, border: '1px solid var(--border)', cursor: 'zoom-in' }}
+                              onClick={() => setLightbox(s)} />
+                            {fe && (
+                              <button title={t('删除此图', 'Remove image')}
+                                onClick={() => dispatch(p.id, { type: 'removeShot', pkg: pkgIdx, gi, ii, shotIdx: si })}
+                                style={{ position: 'absolute', top: -6, right: -6, width: 16, height: 16, borderRadius: 8, background: 'var(--danger)', color: '#fff', fontSize: 10, lineHeight: '16px', textAlign: 'center' }}>✕</button>
+                            )}
+                          </span>
+                        ))}
+                      </div>
+                      {fe ? (
+                        <label
+                          tabIndex={0}
+                          title={t('点击选择,或拖入 / 粘贴图片(可多张)', 'Click to select, or drag / paste images (multiple)')}
+                          style={{ fontSize: 11, color: '#234f97', background: '#e7eefb', borderRadius: 6, padding: '4px 8px', cursor: 'pointer', outline: 'none', textAlign: 'center' }}
+                          onDragOver={(e) => { e.preventDefault(); (e.currentTarget as HTMLElement).style.background = '#c9dcff'; }}
+                          onDragLeave={(e) => { (e.currentTarget as HTMLElement).style.background = '#e7eefb'; }}
+                          onDrop={(e) => { e.preventDefault(); (e.currentTarget as HTMLElement).style.background = '#e7eefb'; processImageFile(gi, ii, imageFromDataTransfer(e.dataTransfer)); }}
+                          onPaste={(e) => { const f = imageFromDataTransfer(e.clipboardData); if (f) { e.preventDefault(); processImageFile(gi, ii, f); } }}>
+                          📎 {shots.length ? t('加图', 'Add') : t('上传 / 拖入 / 粘贴', 'Upload / drag / paste')}
+                          <input type="file" accept="image/*" multiple style={{ display: 'none' }} onChange={(e) => attachShot(gi, ii, e.target)} />
+                        </label>
+                      ) : shots.length === 0 ? (
+                        <span style={{ fontSize: 11.5, color: '#b6bfc9' }}>{t('暂无参考图', 'No reference')}</span>
+                      ) : null}
                     </div>
 
-                    {/* ── Due date ── */}
-                    <div>
-                      <input type="date" className="in sm" style={{ width: '100%', ...(overdue ? { borderColor: '#e7a19b', color: '#b23a32' } : {}) }} value={it.date} disabled={!ed}
-                        onChange={(e) => dispatch(p.id, { type: 'editCl', pkg: pkgIdx, gi, ii, field: 'date', value: e.target.value })} />
-                    </div>
+                    {/* ── Owner (hidden in flat mode, REQ-014) ── */}
+                    {!flat && (
+                      <div style={{ minWidth: 0 }}>
+                        {editMode && ed ? (
+                          <input className="in sm" list="cl-owner-names" defaultValue={it.owner || ''} placeholder={t('负责人', 'Owner')}
+                            onBlur={(e) => e.target.value !== (it.owner || '') && dispatch(p.id, { type: 'editCl', pkg: pkgIdx, gi, ii, field: 'owner', value: e.target.value })} />
+                        ) : it.owner ? (
+                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7, fontSize: 13, fontWeight: 700, color: 'var(--navy900)' }}>
+                            <Avatar name={it.owner} size={24} />{it.owner}
+                          </span>
+                        ) : (
+                          <span style={{ fontSize: 12, color: '#b6bfc9' }}>{t('未指派', 'Unassigned')}</span>
+                        )}
+                      </div>
+                    )}
 
-                    {/* ── Last update ── */}
-                    <div style={{ fontSize: 12, color: 'var(--text2)', paddingTop: 6 }}>{relTime(it.updatedAt, lang === 'zh')}</div>
-
-                    {/* ── Status ── */}
-                    <div style={{ paddingTop: 2 }}>
-                      {ed ? (
-                        <button title={t('点击推进状态,右键选择', 'Click to advance, right-click to pick')} style={{ padding: 0, background: 'none' }}
+                    {/* ── Status + 收到内容 (REQ-013/019) ── */}
+                    <div style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                      {fe ? (
+                        <button title={t('点击推进状态,右键选择', 'Click to advance, right-click to pick')} style={{ padding: 0, background: 'none', alignSelf: 'flex-start' }}
                           onClick={() => dispatch(p.id, { type: 'setClStatus', pkg: pkgIdx, gi, ii, value: CYCLE[it.status] })}
                           onContextMenu={(e) => {
                             e.preventDefault();
@@ -304,13 +388,46 @@ export default function ChecklistTab({ p, pkgIdx, onExport, onPkg }: {
                           <Pill m={CM[it.status]} />
                         </button>
                       ) : (
-                        <Pill m={CM[it.status]} />
+                        <span style={{ alignSelf: 'flex-start' }}><Pill m={CM[it.status]} /></span>
                       )}
+                      {fe ? (
+                        <input className="in sm" defaultValue={it.received || ''} key={`rcv-${it.id || ii}-${it.received || ''}`}
+                          placeholder={t('收到内容 / 文件名…', 'Received content / file name…')}
+                          title={t('填入后自动标记「已收到」并填今天的日期', 'Filling this auto-sets Received + today’s date')}
+                          onBlur={(e) => e.target.value !== (it.received || '') && dispatch(p.id, { type: 'editCl', pkg: pkgIdx, gi, ii, field: 'received', value: e.target.value })} />
+                      ) : it.received ? (
+                        <span style={{ fontSize: 12, color: 'var(--text)', wordBreak: 'break-word' }}>📄 {it.received}</span>
+                      ) : null}
+                      {/* REQ-042: 这一项收过几次 —— 点开看全部历史 */}
+                      <button className="btn-line sm" style={{ alignSelf: 'flex-start', marginTop: 2 }}
+                        title={t('查看 / 追加这一项的收料记录(多次收料不会互相覆盖)',
+                                 'View / append this item’s receiving records — versions never overwrite each other')}
+                        onClick={() => setOpenRec(openRec === `${gi}:${ii}` ? null : `${gi}:${ii}`)}>
+                        🗂 {t('记录', 'Records')} ({(it.receipts || []).length})
+                        {(it.receipts || []).length > 1 && (
+                          <span className="badge" style={{ background: 'var(--navy900)', color: '#fff', marginLeft: 5 }}>
+                            {t(`${(it.receipts || []).length} 版`, `${(it.receipts || []).length} versions`)}
+                          </span>
+                        )}
+                      </button>
+                    </div>
+
+                    {/* ── Date received ── */}
+                    <div>
+                      <input type="date" className="in sm" style={{ width: '100%', ...(overdue ? { borderColor: '#e7a19b', color: '#b23a32' } : {}) }} value={it.date} disabled={!fe}
+                        onChange={(e) => dispatch(p.id, { type: 'editCl', pkg: pkgIdx, gi, ii, field: 'date', value: e.target.value })} />
+                      <div style={{ fontSize: 10.5, color: 'var(--text2)', marginTop: 3 }}>{relTime(it.updatedAt, lang === 'zh')}</div>
                     </div>
 
                     {/* ── edit actions: reorder + delete ── */}
                     {editMode && ed && (
                       <div style={{ display: 'flex', flexDirection: 'column', gap: 2, alignItems: 'center' }}>
+                        {/* REQ-012: drag handle — reorder inside this category */}
+                        <span draggable
+                          onDragStart={(e) => { setDrag({ gi, ii }); e.dataTransfer.effectAllowed = 'move'; }}
+                          onDragEnd={() => { setDrag(null); setDragOver(null); }}
+                          title={t('拖动调整顺序（同一分类内）', 'Drag to reorder within this category')}
+                          style={{ cursor: 'grab', color: 'var(--text2)', userSelect: 'none', fontSize: 14, lineHeight: 1 }}>⠿</span>
                         <button title={t('上移', 'Move up')} disabled={ii === 0} style={{ opacity: ii === 0 ? 0.3 : 1, fontSize: 12, lineHeight: 1 }}
                           onClick={() => dispatch(p.id, { type: 'moveItem', pkg: pkgIdx, gi, ii, dir: -1 })}>▲</button>
                         <button style={{ color: 'var(--danger)', fontWeight: 700 }} title={t('删除', 'Delete')}
@@ -320,6 +437,13 @@ export default function ChecklistTab({ p, pkgIdx, onExport, onPkg }: {
                       </div>
                     )}
                   </div>
+                  {/* REQ-042: 展开这一项的全部收料记录(Item History) */}
+                  {openRec === `${gi}:${ii}` && (
+                    <ItemReceipts p={p} pkgIdx={pkgIdx} gi={gi} ii={ii}
+                      receipts={it.receipts || []} canEd={ed}
+                      onClose={() => setOpenRec(null)} />
+                  )}
+                  </React.Fragment>
                 );
               })}
 
@@ -342,6 +466,9 @@ export default function ChecklistTab({ p, pkgIdx, onExport, onPkg }: {
             const nm = prompt(t('新栏目名称(中文):', 'New section name:'), t('特殊需求', 'Special requirements'));
             if (nm) dispatch(p.id, { type: 'addGroup', pkg: pkgIdx, name: nm });
           }}>+ {t('添加新栏目', 'Add section')}</button>
+      )}
+
+      </>
       )}
 
       <datalist id="cl-owner-names">{assigneeNames.map((n) => <option key={n} value={n} />)}</datalist>

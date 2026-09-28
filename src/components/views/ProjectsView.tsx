@@ -4,9 +4,10 @@ import React, { useMemo, useState } from 'react';
 import { useStore } from '../store';
 import { fmtDate, isoDate, parseISO, projectHealth, projStage, schedProgress } from '@/lib/project';
 import { canCreate } from '@/lib/permissions';
-import { DIFF, SVC, svcColor, svcName } from '@/lib/templates';
+import { DIFF, SVC, stageIdx, svcColor, svcName } from '@/lib/templates';
+import { diffTerm } from '@/lib/terms';
 import { useLang } from '@/lib/i18n';
-import { Avatar, AvatarStack, HM, Icon, Pill, ProgressBar } from '../ui';
+import { Avatar, AvatarStack, Ell, HM, Icon, Pill, ProgressBar } from '../ui';
 import type { Project } from '@/lib/types';
 
 type ViewMode = 'cards' | 'compact' | 'list';
@@ -117,8 +118,10 @@ function CompactCard({ p, onOpen }: { p: Project; onOpen: () => void }) {
       onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.boxShadow = 'var(--shadow)'; }}>
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8 }}>
         <div style={{ minWidth: 0 }}>
-          <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--navy900)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.name}</div>
-          <div style={{ fontSize: 11.5, color: 'var(--text2)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.client || '—'}</div>
+          <Ell style={{ fontSize: 14, fontWeight: 600, color: 'var(--navy900)' }}>
+            {p.name}
+          </Ell>
+          <Ell style={{ fontSize: 11.5, color: 'var(--text2)' }}>{p.client || '—'}</Ell>
         </div>
         <Pill m={HM[h]} />
       </div>
@@ -136,17 +139,68 @@ function CompactCard({ p, onOpen }: { p: Project; onOpen: () => void }) {
 }
 
 /* R5-1: list/details view — a dense table, most projects visible at once */
+/* REQ-025: Excel 式列头排序 —— 点一次升序,再点降序,第三次回到默认。
+   不做独立的排序控件,排序入口就是列头本身。 */
+type SortKey = 'name' | 'services' | 'pm' | 'stage' | 'progress' | 'delivery' | 'health';
+const HEALTH_ORDER: Record<string, number> = { completed: 0, ontrack: 1, watch: 2, risk: 3, late: 4 };
+
 function ProjectList({ list, onOpen }: { list: Project[]; onOpen: (id: string) => void }) {
   const { lang, t } = useLang();
+  const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 } | null>(null);
   const th: React.CSSProperties = { padding: '11px 16px', fontSize: 11, fontWeight: 700, letterSpacing: '.04em', textTransform: 'uppercase', color: 'var(--text2)', textAlign: 'left', whiteSpace: 'nowrap' };
   const cols = '2fr 1.4fr 90px 120px 1.1fr 96px 96px';
+
+  const rows = useMemo(() => {
+    if (!sort) return list;   // 默认序 = 列表原顺序,也就是按项目编号
+    const val = (p: Project): string | number => {
+      const stage = projStage(p);
+      switch (sort.key) {
+        case 'name': return p.name.toLowerCase();
+        case 'services': return p.services.map((k) => svcName(k, lang)).join(',').toLowerCase();
+        case 'pm': return ((p.owners || [])[0] || '').toLowerCase();
+        case 'stage': return stageIdx(stage);
+        case 'progress': return schedProgress(p).pct;
+        /* 没填交付日的一律排到最后 —— 空值夹在中间最难扫 */
+        case 'delivery': return p.delivery || '9999-99-99';
+        case 'health': {
+          const done = stage === 'complete' || stage === 'invoice';
+          return HEALTH_ORDER[done ? 'completed' : projectHealth(p)] ?? 9;
+        }
+      }
+    };
+    return [...list].sort((a, b) => {
+      const va = val(a), vb = val(b);
+      if (va < vb) return -sort.dir;
+      if (va > vb) return sort.dir;
+      return 0;
+    });
+  }, [list, sort, lang]);
+
+  const Th = ({ k, label }: { k: SortKey; label: string }) => {
+    const on = sort?.key === k;
+    return (
+      <button
+        onClick={() => setSort((s) => (s && s.key === k ? (s.dir === 1 ? { key: k, dir: -1 } : null) : { key: k, dir: 1 }))}
+        title={t('点击排序;再点反向;第三次恢复默认', 'Click to sort; again to reverse; a third click restores the default')}
+        style={{ ...th, display: 'flex', alignItems: 'center', gap: 4, width: '100%', background: 'none', cursor: 'pointer', color: on ? 'var(--navy900)' : 'var(--text2)' }}>
+        {label}
+        <span style={{ fontSize: 9, opacity: on ? 1 : 0.25 }}>{on ? (sort!.dir === 1 ? '▲' : '▼') : '⇅'}</span>
+      </button>
+    );
+  };
+
   return (
     <div className="panel clip">
       <div style={{ display: 'grid', gridTemplateColumns: cols, gap: 12, background: 'var(--hover-bg)', borderBottom: '1px solid var(--row-line)' }}>
-        <div style={th}>{t('项目', 'Project')}</div><div style={th}>{t('服务', 'Services')}</div><div style={th}>PM</div>
-        <div style={th}>{t('阶段', 'Stage')}</div><div style={th}>{t('进度', 'Progress')}</div><div style={th}>{t('交付', 'Delivery')}</div><div style={th}>{t('健康', 'Health')}</div>
+        <Th k="name" label={t('项目', 'Project')} />
+        <Th k="services" label={t('服务', 'Services')} />
+        <Th k="pm" label="PM" />
+        <Th k="stage" label={t('阶段', 'Stage')} />
+        <Th k="progress" label={t('进度', 'Progress')} />
+        <Th k="delivery" label={t('交付', 'Delivery')} />
+        <Th k="health" label={t('健康', 'Health')} />
       </div>
-      {list.map((p) => {
+      {rows.map((p) => {
         const sp = schedProgress(p);
         const stage = projStage(p);
         const done = stage === 'complete' || stage === 'invoice';
@@ -157,8 +211,10 @@ function ProjectList({ list, onOpen }: { list: Project[]; onOpen: (id: string) =
         return (
           <div key={p.id} className="row-hover" style={{ display: 'grid', gridTemplateColumns: cols, gap: 12, alignItems: 'center', padding: '13px 16px', borderBottom: '1px solid var(--row-line)', cursor: 'pointer' }} onClick={() => onOpen(p.id)}>
             <div style={{ minWidth: 0 }}>
-              <div style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--navy900)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.name}</div>
-              <div style={{ fontSize: 11.5, color: 'var(--text2)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.client || '—'}</div>
+              <Ell style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--navy900)' }}>
+                {p.name}
+              </Ell>
+              <Ell style={{ fontSize: 11.5, color: 'var(--text2)' }}>{p.client || '—'}</Ell>
             </div>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, minWidth: 0 }}>
               {p.services.slice(0, 2).map((k) => <span key={k} className="svc-chip" style={{ color: svcColor(k), fontSize: 10.5 }}>{svcName(k, lang)}</span>)}
@@ -236,29 +292,31 @@ function ProjectCard({ p, onOpen }: { p: Project; onOpen: () => void }) {
   );
 }
 
-/* ===== New Project modal (opened from the topbar) ===== */
+/* ===== New Project modal (opened from the topbar) =====
+   REQ-010: sectioned form (客户信息 / 相关公司 / 服务类型 / 项目属性) with
+   dynamic add/remove company blocks, each carrying person/phone/email. */
+interface CompanyDraft { role: string; company: string; person: string; phone: string; email: string }
+const COMPANY_ROLES: [string, string][] = [
+  ['总包 Main Con', 'Main Contractor'], ['建筑师 Architect', 'Architect'], ['景观 Landscape', 'Landscape'],
+  ['室内 Interior', 'Interior'], ['创意 Creative', 'Creative'],
+];
+
 export function NewProjectModal({ onClose }: { onClose: () => void }) {
   const { me, users, createProject, openProject } = useStore();
   const { lang, t } = useLang();
   const [name, setName] = useState('');
   const [client, setClient] = useState('');
+  const [quotationNo, setQuotationNo] = useState('');   // REQ-031
   const [services, setServices] = useState<string[]>(['cgi']);
   const [owners, setOwners] = useState(me.role === 'pm' ? me.name : '');
   const [difficulty, setDifficulty] = useState('medium');
   const [start, setStart] = useState(isoDate(new Date()));
   const [delivery, setDelivery] = useState('');
   const [buffer, setBuffer] = useState(0);
-  const [mainContractor, setMainContractor] = useState('');
-  const [architect, setArchitect] = useState('');
-  const [landscape, setLandscape] = useState('');
-  const [interior, setInterior] = useState('');
-  const [creative, setCreative] = useState('');
   const [clientPerson, setClientPerson] = useState('');
   const [clientPhone, setClientPhone] = useState('');
   const [clientEmail, setClientEmail] = useState('');
-  const [mainConPerson, setMainConPerson] = useState('');
-  const [mainConPhone, setMainConPhone] = useState('');
-  const [mainConEmail, setMainConEmail] = useState('');
+  const [companies, setCompanies] = useState<CompanyDraft[]>([]);
   const [busy, setBusy] = useState(false);
 
   function toggleSvc(k: string) {
@@ -267,35 +325,86 @@ export function NewProjectModal({ onClose }: { onClose: () => void }) {
       return [...s, k];
     });
   }
+  const setComp = (i: number, k: keyof CompanyDraft, v: string) =>
+    setCompanies((cs) => cs.map((c, ci) => (ci === i ? { ...c, [k]: v } : c)));
 
   async function submit() {
     if (!name.trim()) return;
     setBusy(true);
     const p = await createProject({
-      name: name.trim(), client, services,
+      name: name.trim(), client, quotationNo: quotationNo.trim(), services,
       owners: owners.split(',').map((s) => s.trim()).filter(Boolean),
       difficulty, start, delivery, buffer,
-      mainContractor, architect, landscape, interior, creative,
       clientPerson, clientPhone, clientEmail,
-      mainConPerson, mainConPhone, mainConEmail,
+      companies: companies.filter((c) => c.company || c.person || c.phone || c.email),
     });
     setBusy(false);
     if (p) { onClose(); openProject(p.id); }
   }
 
   const pmNames = users.filter((u) => u.role === 'pm' || u.role === 'director' || u.role === 'bd').map((u) => u.name);
+  const Section = ({ zh, en }: { zh: string; en: string }) => (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 10, margin: '16px 0 10px' }}>
+      <span style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--navy900)', letterSpacing: '.03em' }}>{t(zh, en)}</span>
+      <div style={{ flex: 1, height: 1, background: 'var(--row-line)' }} />
+    </div>
+  );
 
   return (
     <div className="overlay" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <div className="modal">
         <h2>{t('新建项目', 'New Project')}</h2>
-        <div className="msub">{t('选择一个或多个服务;含模板的服务会自动生成排期与信息清单。', 'Pick one or more services; templated services auto-generate a schedule and checklist.')}</div>
-        <div className="field">
-          <label>{t('项目名称', 'Project name')}</label>
-          <input value={name} onChange={(e) => setName(e.target.value)} placeholder={t('例:Dunearn Road Condo', 'e.g. Dunearn Road Condo')} autoFocus />
+        <div className="msub">{t('按分区填写;相关公司按需添加,不必每项都有。', 'Fill in by section; add related companies only as needed.')}</div>
+        {/* REQ-031: 报价单号跟项目名同一行 —— 建项目时顺手记下,日后对账好找 */}
+        <div className="two">
+          <div className="field">
+            <label>{t('项目名称', 'Project name')}</label>
+            <input value={name} onChange={(e) => setName(e.target.value)} placeholder={t('例:Dunearn Road Condo', 'e.g. Dunearn Road Condo')} autoFocus />
+          </div>
+          <div className="field">
+            <label>{t('报价单号 Quotation No.(可选)', 'Quotation No. (optional)')}</label>
+            <input value={quotationNo} onChange={(e) => setQuotationNo(e.target.value)} maxLength={60} placeholder="Q-2026-0123" />
+          </div>
         </div>
+
+        <Section zh="① 客户信息" en="① Client" />
+        <div className="field" style={{ marginBottom: 6 }}><label>{t('客户 公司', 'Client company')}</label>
+          <input value={client} onChange={(e) => setClient(e.target.value)} placeholder={t('developer / 客户', 'developer / client')} /></div>
+        <div className="two" style={{ marginBottom: 4 }}>
+          <div className="field"><label>{t('联系人(可选)', 'Contact (optional)')}</label><input value={clientPerson} onChange={(e) => setClientPerson(e.target.value)} placeholder={t('姓名', 'name')} /></div>
+          <div className="field"><label>{t('电话(可选)', 'Phone (optional)')}</label><input value={clientPhone} onChange={(e) => setClientPhone(e.target.value)} placeholder="+65 ..." /></div>
+          <div className="field"><label>{t('邮箱(可选)', 'Email (optional)')}</label><input value={clientEmail} onChange={(e) => setClientEmail(e.target.value)} placeholder="name@company.com" /></div>
+        </div>
+
+        <Section zh="② 相关公司(按需添加)" en="② Related companies (as needed)" />
+        {companies.length === 0 && (
+          <div className="msub" style={{ margin: '0 0 8px' }}>{t('没有就不加。点下方按钮添加总包/建筑师/景观等。', 'None? Skip. Use the button below to add Main Con / Architect / Landscape etc.')}</div>
+        )}
+        {companies.map((c, i) => (
+          <div key={i} style={{ border: '1px solid var(--row-line)', borderRadius: 10, padding: '10px 12px', marginBottom: 8 }}>
+            <div className="two" style={{ marginBottom: 4 }}>
+              <div className="field">
+                <label>{t('角色', 'Role')}</label>
+                <input list="company-roles" value={c.role} onChange={(e) => setComp(i, 'role', e.target.value)} placeholder={t('如 总包 / 建筑师…', 'e.g. Main Con / Architect…')} />
+              </div>
+              <div className="field"><label>{t('公司名', 'Company')}</label><input value={c.company} onChange={(e) => setComp(i, 'company', e.target.value)} /></div>
+            </div>
+            <div className="two">
+              <div className="field"><label>{t('联系人', 'Contact')}</label><input value={c.person} onChange={(e) => setComp(i, 'person', e.target.value)} placeholder={t('姓名', 'name')} /></div>
+              <div className="field"><label>{t('电话', 'Phone')}</label><input value={c.phone} onChange={(e) => setComp(i, 'phone', e.target.value)} placeholder="+65 ..." /></div>
+              <div className="field"><label>Email</label><input value={c.email} onChange={(e) => setComp(i, 'email', e.target.value)} placeholder="name@company.com" /></div>
+            </div>
+            <button className="btn-line sm danger" style={{ marginTop: 6 }} onClick={() => setCompanies((cs) => cs.filter((_, ci) => ci !== i))}>− {t('删除此公司', 'Remove company')}</button>
+          </div>
+        ))}
+        <datalist id="company-roles">{COMPANY_ROLES.map(([zh, en]) => <option key={zh} value={lang === 'zh' ? zh : en} />)}</datalist>
+        <button className="btn-line sm" style={{ borderStyle: 'dashed', marginBottom: 4 }}
+          onClick={() => setCompanies((cs) => [...cs, { role: '', company: '', person: '', phone: '', email: '' }])}>
+          ＋ {t('添加相关公司', 'Add company')}
+        </button>
+
+        <Section zh="③ 服务类型" en="③ Services" />
         <div className="field">
-          <label>{t('服务(可多选)', 'Services (multi-select)')}</label>
           <div className="svc-multi">
             {Object.entries(SVC).map(([k, v]) => (
               <button key={k} className={`svc-opt ${services.includes(k) ? 'sel' : ''}`} onClick={() => toggleSvc(k)}>
@@ -303,40 +412,20 @@ export function NewProjectModal({ onClose }: { onClose: () => void }) {
               </button>
             ))}
           </div>
+          <div className="msub" style={{ marginTop: 4 }}>{t('点选添加/移除;含模板的服务会自动生成排期与信息清单。', 'Click to add/remove; templated services auto-generate a schedule & checklist.')}</div>
         </div>
-        {/* 客户 — 公司 + 可选联系人/电话/邮箱 (每个公司几个基础信息) */}
-        <div className="field" style={{ marginBottom: 6 }}><label>{t('客户 公司', 'Client company')}</label>
-          <input value={client} onChange={(e) => setClient(e.target.value)} placeholder={t('developer / 客户', 'developer / client')} /></div>
-        <div className="two" style={{ marginBottom: 4 }}>
-          <div className="field"><label>{t('客户联系人(可选)', 'Contact person (optional)')}</label><input value={clientPerson} onChange={(e) => setClientPerson(e.target.value)} placeholder={t('姓名', 'name')} /></div>
-          <div className="field"><label>{t('电话(可选)', 'Phone (optional)')}</label><input value={clientPhone} onChange={(e) => setClientPhone(e.target.value)} placeholder="+65 ..." /></div>
-          <div className="field"><label>{t('邮箱(可选)', 'Email (optional)')}</label><input value={clientEmail} onChange={(e) => setClientEmail(e.target.value)} placeholder="name@company.com" /></div>
-        </div>
-        {/* 总包 — 公司 + 可选联系人/电话/邮箱 */}
-        <div className="field" style={{ marginBottom: 6 }}><label>{t('总包 公司', 'Main contractor company')}</label>
-          <input value={mainContractor} onChange={(e) => setMainContractor(e.target.value)} /></div>
-        <div className="two" style={{ marginBottom: 4 }}>
-          <div className="field"><label>{t('总包联系人(可选)', 'Contact person (optional)')}</label><input value={mainConPerson} onChange={(e) => setMainConPerson(e.target.value)} placeholder={t('姓名', 'name')} /></div>
-          <div className="field"><label>{t('电话(可选)', 'Phone (optional)')}</label><input value={mainConPhone} onChange={(e) => setMainConPhone(e.target.value)} placeholder="+65 ..." /></div>
-          <div className="field"><label>{t('邮箱(可选)', 'Email (optional)')}</label><input value={mainConEmail} onChange={(e) => setMainConEmail(e.target.value)} placeholder="name@company.com" /></div>
-        </div>
-        <div className="msub" style={{ margin: '2px 0 10px' }}>{t('其他公司(建筑师/景观等)可先填公司名,联系人可创建后在项目「联系人」里补充。', 'Other companies: enter the name here; contact details can be added later in the project’s Contacts panel.')}</div>
+
+        <Section zh="④ 项目属性" en="④ Project attributes" />
         <div className="two">
-          <div className="field"><label>{t('建筑师', 'Architect')}</label><input value={architect} onChange={(e) => setArchitect(e.target.value)} /></div>
-          <div className="field"><label>{t('景观师', 'Landscape architect')}</label><input value={landscape} onChange={(e) => setLandscape(e.target.value)} /></div>
-          <div className="field"><label>{t('室内设计', 'Interior designer')}</label><input value={interior} onChange={(e) => setInterior(e.target.value)} /></div>
-          <div className="field"><label>{t('创意代理', 'Creative agency')}</label><input value={creative} onChange={(e) => setCreative(e.target.value)} /></div>
           <div className="field">
             <label>{t('负责 PM(逗号分隔多人)', 'PM (comma-separated)')}</label>
             <input value={owners} onChange={(e) => setOwners(e.target.value)} placeholder={pmNames.slice(0, 2).join(', ') || '张三, 李四'} list="pm-names" />
             <datalist id="pm-names">{pmNames.map((n) => <option key={n} value={n} />)}</datalist>
           </div>
-        </div>
-        <div className="two">
           <div className="field">
             <label>{t('难度', 'Difficulty')}</label>
             <select value={difficulty} onChange={(e) => setDifficulty(e.target.value)}>
-              {Object.entries(DIFF).map(([k, v]) => <option key={k} value={k}>{v[0]} · {v[1]}{t('分', ' pts')}</option>)}
+              {Object.entries(DIFF).map(([k, v]) => <option key={k} value={k}>{diffTerm(k, lang)} · {v[1]}{t('分', ' pts')}</option>)}
             </select>
           </div>
           <div className="field"><label>{t('起始日(=最终信息确认日)', 'Start (= info confirmed date)')}</label><input type="date" value={start} onChange={(e) => setStart(e.target.value)} /></div>

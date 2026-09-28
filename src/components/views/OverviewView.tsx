@@ -1,21 +1,23 @@
 'use client';
 
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import { useStore } from '../store';
 import {
-  fmtDate, isMyProject, overdueItems, pendingWorkflowAction, pkgStart, planDates, projectHealth, projStage,
+  fmtDate, isMyProject, overdueItems, pendingWorkflowAction, pkgStart, planDates, projCode, projectHealth, projStage,
   schedProgress, staleInfo, todayMid,
 } from '@/lib/project';
 import { teamLoads } from '@/lib/alloc';
 import { svcColor } from '@/lib/templates';
 import { useLang } from '@/lib/i18n';
-import { Avatar, HM, Icon, Pill, ProgressBar, healthColor } from '../ui';
+import { Avatar, Ell, healthColor, HM, Icon, Pill, ProgressBar } from '../ui';
 import type { Project } from '@/lib/types';
 
 export default function OverviewView() {
-  const { projects, users, me, setView, go, openProject } = useStore();
+  const { projects, users, me, setView, go, openProject, rulesFor } = useStore();
   const { lang, t } = useLang();
   const t0 = todayMid();
+  /* REQ-011: which KPI is drilled open (null = none) */
+  const [drill, setDrill] = useState<null | 'active' | 'ontime' | 'risks'>(null);
 
   /* Overview is personalised: PM/member see their own projects; PD/BD/Sales see all (A5) */
   const active = useMemo(
@@ -103,18 +105,21 @@ export default function OverviewView() {
     return items.slice(0, 5);
   }, [projects, me, lang, t]);
 
-  const loads = useMemo(() => teamLoads(projects, users).slice(0, 5), [projects, users]);
+  const loads = useMemo(() => teamLoads(projects, users, rulesFor).slice(0, 5), [projects, users, rulesFor]);
   const boardList = [...active].sort((a, b) => b.created - a.created).slice(0, 6);
 
   return (
     <>
       <div className="kpi-grid">
         <Kpi label={t('进行中项目', 'Active Projects')} value={String(active.length)} icon="layers" tint="#2E63B7" tintBg="#e7eefb"
-          delta={newThisMonth ? t(`本月新增 ${newThisMonth}`, `+${newThisMonth} this month`) : t('本月无新增', 'none new this month')} deltaColor="var(--text2)" />
+          delta={newThisMonth ? t(`本月新增 ${newThisMonth}`, `+${newThisMonth} this month`) : t('本月无新增', 'none new this month')} deltaColor="var(--text2)"
+          onClick={() => setDrill('active')} />
         <Kpi label={t('按期率', 'On-time Rate')} value={`${onTimeRate}%`} icon="target" tint="#16865B" tintBg="#e6f2ec"
-          delta={needAttention ? t(`${needAttention} 个需关注`, `${needAttention} need attention`) : t('全部按期', 'All on track')} deltaColor={needAttention ? 'var(--warning)' : 'var(--success)'} />
+          delta={needAttention ? t(`${needAttention} 个需关注`, `${needAttention} need attention`) : t('全部按期', 'All on track')} deltaColor={needAttention ? 'var(--warning)' : 'var(--success)'}
+          onClick={() => setDrill('ontime')} />
         <Kpi label={t('未解决风险', 'Open Risks')} value={String(openRisks)} icon="alert" tint="#D4483F" tintBg="#fbe9e7"
-          delta={t(`本周到期 ${dueThisWeek} 项`, `${dueThisWeek} due this week`)} deltaColor={openRisks ? 'var(--danger)' : 'var(--text2)'} />
+          delta={t(`本周到期 ${dueThisWeek} 项`, `${dueThisWeek} due this week`)} deltaColor={openRisks ? 'var(--danger)' : 'var(--text2)'}
+          onClick={() => setDrill('risks')} />
       </div>
 
       {/* v2.2 workflow inbox — what needs my action right now */}
@@ -127,7 +132,7 @@ export default function OverviewView() {
             <div key={p.id} className="row-hover" style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 22px', borderTop: '1px solid var(--row-line)', cursor: 'pointer' }} onClick={() => openProject(p.id)}>
               <span className="badge" style={{ background: '#fbf0dc', color: '#a8690b', flexShrink: 0 }}>{lang === 'zh' ? label : labelEn}</span>
               <div style={{ minWidth: 0 }}>
-                <div style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--navy900)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.name}</div>
+                <Ell style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--navy900)' }}>{p.name}</Ell>
                 <div style={{ fontSize: 11.5, color: 'var(--text2)' }}>{p.client || '—'}</div>
               </div>
               <div style={{ flex: 1 }} />
@@ -165,7 +170,7 @@ export default function OverviewView() {
                   <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
                     <Avatar name={a.name} size={30} />
                     <div style={{ minWidth: 0 }}>
-                      <div style={{ fontSize: 13, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{a.name}</div>
+                      <Ell style={{ fontSize: 13, fontWeight: 600 }}>{a.name}</Ell>
                       <div style={{ fontSize: 11, color: 'var(--text2)' }}>{a.isPM ? t('项目经理', 'Project Manager') : t('制作', 'Production')}</div>
                     </div>
                   </div>
@@ -188,8 +193,8 @@ export default function OverviewView() {
               <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '13px 22px', borderBottom: '1px solid var(--row-line2)' }}>
                 <span style={{ width: 8, height: 8, borderRadius: '50%', flexShrink: 0, background: tk.over ? 'var(--danger)' : tk.status === 'wip' ? 'var(--info)' : '#c4d0dd' }} />
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 13.5, fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{lang === 'zh' ? tk.title : tk.titleEn}</div>
-                  <div style={{ fontSize: 11.5, color: 'var(--text2)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{tk.project}</div>
+                  <Ell style={{ fontSize: 13.5, fontWeight: 500 }}>{lang === 'zh' ? tk.title : tk.titleEn}</Ell>
+                  <Ell style={{ fontSize: 11.5, color: 'var(--text2)' }}>{tk.project}</Ell>
                 </div>
                 <span className="tnum" style={{ fontSize: 12, fontWeight: 600, color: tk.over ? 'var(--danger)' : 'var(--text2)' }}>
                   {tk.due ? fmtDate(tk.due).slice(0, 6) : '—'}
@@ -209,7 +214,7 @@ export default function OverviewView() {
                 onClick={() => setView({ name: 'project', pid: d.pid, tab: 'overview', pkg: 0 })}>
                 <span style={{ color: d.color, flexShrink: 0, marginTop: 1, display: 'flex' }}><Icon name={d.icon} size={16} /></span>
                 <div style={{ minWidth: 0 }}>
-                  <div style={{ fontSize: 13, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{d.title}</div>
+                  <Ell style={{ fontSize: 13, fontWeight: 600 }}>{d.title}</Ell>
                   <div style={{ fontSize: 12, color: 'var(--text2)', marginTop: 1 }}>{d.detail}</div>
                 </div>
               </div>
@@ -217,15 +222,83 @@ export default function OverviewView() {
           </div>
         </div>
       </div>
+
+      {/* REQ-011: KPI drill-down modal */}
+      {drill && (
+        <div className="overlay" onClick={(e) => { if (e.target === e.currentTarget) setDrill(null); }}>
+          <div className="modal" style={{ maxWidth: 620 }}>
+            <div style={{ display: 'flex', alignItems: 'center', marginBottom: 4 }}>
+              <h2 style={{ margin: 0 }}>
+                {drill === 'active' ? t('进行中项目', 'Active Projects') : drill === 'ontime' ? t('按期情况', 'On-time detail') : t('未解决风险', 'Open Risks')}
+              </h2>
+              <div style={{ flex: 1 }} />
+              <button className="btn-line sm" onClick={() => setDrill(null)}>{t('关闭', 'Close')}</button>
+            </div>
+            <div className="msub" style={{ marginBottom: 10 }}>{t('点任一条进入对应项目。', 'Click a row to open its project.')}</div>
+
+            {drill !== 'risks' && (
+              <>
+                {(drill === 'ontime' ? [...active].sort((a, b) => (projectHealth(a) === 'ok' ? 1 : 0) - (projectHealth(b) === 'ok' ? 1 : 0)) : active).map((p) => {
+                  const h = projectHealth(p);
+                  const sp = schedProgress(p);
+                  return (
+                    <div key={p.id} className="row-hover" style={{ display: 'flex', alignItems: 'center', gap: 11, padding: '11px 8px', borderTop: '1px solid var(--row-line)', cursor: 'pointer' }}
+                      onClick={() => { setDrill(null); openProject(p.id); }}>
+                      <div style={{ minWidth: 0, flex: 1 }}>
+                        <Ell style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--navy900)' }}>
+                          {projCode(p) && <span className="tnum" style={{ color: 'var(--bronze)', marginRight: 5 }}>{projCode(p)}</span>}{p.name}
+                        </Ell>
+                        <div style={{ fontSize: 11.5, color: 'var(--text2)' }}>{p.client || '—'} · {(p.owners || [])[0] || t('未指派', 'unassigned')} · {sp.pct}%</div>
+                      </div>
+                      <Pill m={HM[h]} />
+                    </div>
+                  );
+                })}
+                {active.length === 0 && <div style={{ padding: 20, textAlign: 'center', color: 'var(--text2)', fontSize: 13 }}>{t('暂无进行中项目。', 'No active projects.')}</div>}
+              </>
+            )}
+
+            {drill === 'risks' && (
+              <>
+                {active.flatMap((p) => [
+                  ...overdueItems(p).map((od) => ({
+                    pid: p.id, key: `od-${p.id}-${od.pi}-${od.idx}`, color: 'var(--danger)',
+                    title: lang === 'zh' ? od.row.task : od.row.taskEn || od.row.task,
+                    detail: `${projCode(p) ? projCode(p) + ' ' : ''}${p.name} · ${t(`逾期 ${od.days} 天`, `${od.days}d overdue`)}`,
+                  })),
+                  ...p.packages.flatMap((pk, pi) => pk.schedule.map((r, i) => ({ r, pi, i })).filter((x) => x.r.status === 'block').map((x) => ({
+                    pid: p.id, key: `bl-${p.id}-${x.pi}-${x.i}`, color: 'var(--warning)',
+                    title: lang === 'zh' ? x.r.task : x.r.taskEn || x.r.task,
+                    detail: `${projCode(p) ? projCode(p) + ' ' : ''}${p.name} · ${t('受阻', 'Blocked')}`,
+                  }))),
+                ]).map((it) => (
+                  <div key={it.key} className="row-hover" style={{ display: 'flex', alignItems: 'center', gap: 11, padding: '11px 8px', borderTop: '1px solid var(--row-line)', cursor: 'pointer' }}
+                    onClick={() => { setDrill(null); openProject(it.pid); }}>
+                    <span style={{ width: 8, height: 8, borderRadius: 4, background: it.color, flexShrink: 0 }} />
+                    <div style={{ minWidth: 0, flex: 1 }}>
+                      <Ell style={{ fontSize: 13, fontWeight: 600 }}>{it.title}</Ell>
+                      <div style={{ fontSize: 11.5, color: 'var(--text2)' }}>{it.detail}</div>
+                    </div>
+                    <Icon name="back" size={14} style={{ transform: 'rotate(180deg)', color: 'var(--text2)' }} />
+                  </div>
+                ))}
+                {openRisks === 0 && <div style={{ padding: 20, textAlign: 'center', color: 'var(--text2)', fontSize: 13 }}>✓ {t('暂无未解决风险。', 'No open risks.')}</div>}
+              </>
+            )}
+          </div>
+        </div>
+      )}
     </>
   );
 }
 
-function Kpi({ label, value, icon, tint, tintBg, delta, deltaColor }: {
-  label: string; value: string; icon: string; tint: string; tintBg: string; delta: string; deltaColor: string;
+function Kpi({ label, value, icon, tint, tintBg, delta, deltaColor, onClick }: {
+  label: string; value: string; icon: string; tint: string; tintBg: string; delta: string; deltaColor: string; onClick?: () => void;
 }) {
+  const { t } = useLang();
   return (
-    <div className="kpi">
+    <div className="kpi" onClick={onClick} role={onClick ? 'button' : undefined}
+      style={onClick ? { cursor: 'pointer' } : undefined} title={onClick ? t('点击查看明细', 'Click for details') : undefined}>
       <div className="kpi-top">
         <div className="kpi-label">{label}</div>
         <span className="kpi-icon" style={{ background: tintBg, color: tint }}><Icon name={icon} size={18} /></span>
@@ -253,10 +326,10 @@ function BoardRow({ p, onOpen }: { p: Project; onOpen: () => void }) {
       style={{ display: 'grid', gridTemplateColumns: 'minmax(150px,1.7fr) 34px minmax(90px,1.1fr) 108px', gap: 16, alignItems: 'center', padding: '15px 22px', borderBottom: '1px solid var(--row-line)', cursor: 'pointer' }}
     >
       <div style={{ minWidth: 0 }}>
-        <div style={{ fontSize: 14.5, fontWeight: 600, color: 'var(--navy900)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.name}</div>
-        <div style={{ fontSize: 12.5, color: 'var(--text2)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+        <Ell style={{ fontSize: 14.5, fontWeight: 600, color: 'var(--navy900)' }}>{p.name}</Ell>
+        <Ell style={{ fontSize: 12.5, color: 'var(--text2)' }}>
           {p.client || '—'} · {stageLabel} · {t('交付', 'Del')} {p.delivery ? fmtDate(new Date(p.delivery + 'T00:00:00')).slice(0, 6) : '—'}
-        </div>
+        </Ell>
       </div>
       <div>{pm ? <Avatar name={pm} size={30} /> : <span style={{ color: 'var(--text2)', fontSize: 12 }}>—</span>}</div>
       <ProgressBar pct={sp.pct} color={svcColor(p.services[0])} />

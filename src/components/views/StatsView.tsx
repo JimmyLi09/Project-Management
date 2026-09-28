@@ -9,7 +9,7 @@ import { useLang } from '@/lib/i18n';
 import { Avatar } from '../ui';
 
 export default function StatsView() {
-  const { projects } = useStore();
+  const { projects, rulesFor } = useStore();
   const { lang, t } = useLang();
   const wf = useMemo(() => workflowMetrics(projects), [projects]);
   const pct = (r: number | null) => (r == null ? '—' : `${Math.round(r * 100)}%`);
@@ -17,7 +17,7 @@ export default function StatsView() {
   const byPM: Record<string, { count: number; pts: number; active: number }> = {};
   let totalPts = 0;
   projects.forEach((p) => {
-    const pts = projPoints(p);
+    const pts = projPoints(p, rulesFor(p.created));   // REQ-038
     totalPts += pts;
     const owners = p.owners && p.owners.length ? p.owners : [t('(未指派)', '(unassigned)')];
     owners.forEach((n) => {

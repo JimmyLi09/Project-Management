@@ -1,8 +1,11 @@
 /* ===== Isomorphic domain logic (used by both server and client) ===== */
 
 import { GENERIC, TPL, diffPoints, STAGES, stageIdx, type Template } from './templates';
+import { rulePoints, type PointRules } from './points';
+import { seedReceipt } from './receipts';
 import type {
   ChecklistGroup,
+  ChecklistItem,
   DirectorUpdate,
   Project,
   ScheduleRow,
@@ -31,6 +34,7 @@ export const isoDate = (d: Date) => d.toISOString().slice(0, 10);
 export interface NewProjectInput {
   name: string;
   client: string;
+  quotationNo?: string;   // REQ-031
   services: string[];
   owners?: string[];
   difficulty?: string;
@@ -49,6 +53,9 @@ export interface NewProjectInput {
   mainConPerson?: string; // optional main-contractor contact captured on create
   mainConPhone?: string;
   mainConEmail?: string;
+  /* REQ-010: dynamic related-company blocks (role + company + person/phone/email).
+     Known roles also fill the fixed parties fields for existing views. */
+  companies?: { role: string; company: string; person: string; phone: string; email: string }[];
 }
 
 export function buildPackage(svc: string, start: string, tpl?: Template): ServicePackage {
@@ -62,7 +69,7 @@ export function buildPackage(svc: string, start: string, tpl?: Template): Servic
     status: 'active',
     schedule: t.schedule.map((p) => ({
       id: newId(), no: p[0], phase: p[1], task: p[2], taskEn: p[3], owner: p[4], assignee: '',
-      weeks: p[5], typical: p[6], gate: p[7], freeze: p[8], status: 'todo' as const,
+      weeks: p[5], typical: p[6], typicalEn: p[9] || '', gate: p[7], gateEn: p[10] || '', freeze: p[8], status: 'todo' as const,
       note: '', s: '', e: '',
     })),
     checklist: t.checklist.map((g) => ({
@@ -72,6 +79,14 @@ export function buildPackage(svc: string, start: string, tpl?: Template): Servic
   };
 }
 
+/* REQ-006: display code for a project's sequential NO. (zero-padded to 3).
+   projLabel prefixes the name, e.g. "020 · Lentor Mansion". */
+export const projCode = (p: { serial?: number }): string => (p.serial ? String(p.serial).padStart(3, '0') : '');
+export const projLabel = (p: { serial?: number; name: string }): string => {
+  const c = projCode(p);
+  return c ? `${c} · ${p.name}` : p.name;
+};
+
 export function newProject(o: NewProjectInput, tplLookup?: (svc: string) => Template): Project {
   const services = o.services && o.services.length ? o.services : ['others'];
   const difficulty = (o.difficulty || 'medium') as Project['difficulty'];
@@ -79,6 +94,7 @@ export function newProject(o: NewProjectInput, tplLookup?: (svc: string) => Temp
     id: uid(),
     name: o.name,
     client: o.client,
+    quotationNo: (o.quotationNo || '').trim(),   // REQ-031
     services,
     stage: 'presales',
     difficulty,
@@ -91,11 +107,13 @@ export function newProject(o: NewProjectInput, tplLookup?: (svc: string) => Temp
     created: Date.now(),
     update: emptyUpdate(),
     parties: {
-      mainContractor: o.mainContractor || '',
-      architect: o.architect || '',
-      landscape: o.landscape || '',
-      interior: o.interior || '',
-      creative: o.creative || '',
+      /* known roles from the dynamic company blocks also fill the fixed
+         parties fields so existing views (overview, exports) keep working */
+      mainContractor: o.mainContractor || compRole(o, /总包|main\s*con/i) || '',
+      architect: o.architect || compRole(o, /建筑|architect/i) || '',
+      landscape: o.landscape || compRole(o, /景观|landscape/i) || '',
+      interior: o.interior || compRole(o, /室内|interior|\bid\b/i) || '',
+      creative: o.creative || compRole(o, /创意|creative/i) || '',
     },
     /* seed the contact directory: a client row (+ any parties given), so the
        Contacts module has data from day one (R5-2/R5-4) */
@@ -107,10 +125,18 @@ export function newProject(o: NewProjectInput, tplLookup?: (svc: string) => Temp
       ...(o.landscape ? [{ role: '景观 Landscape', company: o.landscape, person: '', phone: '', email: '' }] : []),
       ...(o.interior ? [{ role: '室内 Interior', company: o.interior, person: '', phone: '', email: '' }] : []),
       ...(o.creative ? [{ role: '创意 Creative', company: o.creative, person: '', phone: '', email: '' }] : []),
+      /* REQ-010: dynamic company blocks straight into the directory */
+      ...(o.companies || []).map((c) => ({ role: c.role || '', company: c.company || '', person: c.person || '', phone: c.phone || '', email: c.email || '' })),
     ].filter((c) => c.company || c.person || c.phone || c.email),
     log: [],
     packages: services.map((svc) => buildPackage(svc, o.start || '', tplLookup ? tplLookup(svc) : undefined)),
   };
+}
+
+/* first company whose role matches, from the dynamic blocks (REQ-010) */
+function compRole(o: NewProjectInput, re: RegExp): string {
+  const hit = (o.companies || []).find((c) => re.test(c.role || ''));
+  return hit ? hit.company || '' : '';
 }
 
 export function emptyUpdate(): DirectorUpdate {
@@ -120,7 +146,20 @@ export function emptyUpdate(): DirectorUpdate {
   };
 }
 
-export function projPoints(p: Project): number {
+/* 积分规则对这个项目「拿得出主意」吗 —— 至少有一份业务落到了档上。
+   一份都判不出来(老项目、资料卡里还没有判档用的数)就别用规则的 0 分去
+   盖掉原来的分:上线当天不能让所有人的负载积分一夜归零。
+   PM 在项目里选完档,规则自然就接管了。 */
+function rulesDecide(p: Project, rules: PointRules): boolean {
+  return rulePoints(rules, p).parts.some((x) => x.source !== 'none');
+}
+
+/* REQ-038: 优先级 —— 手填 > 积分规则 > 按难度播的旧口径。
+   建项目时会按难度自动播一个种子分,那不是人填的,所以不能拿它挡住规则;
+   只有 pointsManual 为 true(有人真的在项目里改过)才盖过规则。
+   不传 rules 时行为和以前完全一致,老调用点不受影响。 */
+export function projPoints(p: Project, rules?: PointRules): number {
+  if (rules && !p.pointsManual && rulesDecide(p, rules)) return rulePoints(rules, p).total;
   return p.points != null
     ? p.points
     : diffPoints(p.difficulty) * ((p.services && p.services.length) || 1);
@@ -153,6 +192,15 @@ export function migrate(p: any): Project {
       /* fold a legacy single shot into the shots[] array */
       if (!Array.isArray(it.shots)) it.shots = it.shot ? [it.shot] : [];
       if (it.shot) delete it.shot;
+      /* REQ-042: 老数据里那一条收料信息搬成 receipts 的第一条(Latest)。
+         真收到过东西才生成 —— 空项凭空多一条什么都没有的记录更难看。 */
+      /* 空数组也要再看一眼 —— 项目是「先建(那时什么都没收到,种子为空)、
+         后填收到内容」的,如果只判 undefined,这些项就永远补不上第一条。 */
+      if (!Array.isArray(it.receipts)) it.receipts = [];
+      if (it.receipts.length === 0) {
+        const seed = seedReceipt(it as ChecklistItem);
+        if (seed) it.receipts = [seed];
+      }
     }));
   });
   if (!p.update) p.update = {};
@@ -481,4 +529,18 @@ export function staleInfo(u: DirectorUpdate | undefined, lang: 'zh' | 'en' = 'zh
   if (days > 14) return { cls: 'stale-bad', txt: staleTxt };
   if (days > 7) return { cls: 'stale-warn', txt: staleTxt };
   return { cls: 'stale-ok', txt: days <= 0 ? (en ? 'updated today' : '今日更新') : en ? `${days}d ago` : `${days}天前` };
+}
+
+/* ===== REQ-026: 一个项目可以有多份同类业务 =====
+   区分方式:填了实例名就用实例名,没填就按同类里的第几份标 ①②③。
+   只有一份时不加任何后缀 —— 绝大多数项目是这种情况,不该平白多出个「①」。 */
+const CIRCLED = ['①', '②', '③', '④', '⑤', '⑥', '⑦', '⑧', '⑨', '⑩'];
+export function pkgSuffix(p: Project, idx: number): string {
+  const pk = p.packages[idx];
+  if (!pk) return '';
+  if (pk.label) return pk.label;
+  const same = p.packages.filter((x) => x.svc === pk.svc);
+  if (same.length <= 1) return '';
+  const ord = same.indexOf(pk);
+  return CIRCLED[ord] || `#${ord + 1}`;
 }

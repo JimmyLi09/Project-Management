@@ -7,9 +7,12 @@ import type { Project, User } from '@/lib/types';
 import type { ProjectAction } from '@/server/actions';
 import type { Identity } from '@/lib/permissions';
 import type { Handoff, StoredDrawing } from '@/av/core/handoff';
+import type { FieldOverrides } from '@/lib/records';
+import { DEFAULT_POINT_RULES, rulesAt, type PointRuleVersion, type PointRules } from '@/lib/points';
+import { DEFAULT_KPI_RULES, kpiRulesAt, type KpiRuleVersion, type KpiRules } from '@/lib/kpi';
 
 export interface View {
-  name: 'overview' | 'projects' | 'team' | 'mytasks' | 'dupdate' | 'stats' | 'contacts' | 'finance' | 'registers' | 'avinquiry' | 'ledingest' | 'ledstudio' | 'prjstudio' | 'elvstudio' | 'pvstudio' | 'avcost' | 'avquote' | 'avcases' | 'avprices' | 'users' | 'templates' | 'project';
+  name: 'overview' | 'projects' | 'team' | 'mytasks' | 'dupdate' | 'stats' | 'contacts' | 'finance' | 'registers' | 'avinquiry' | 'ledingest' | 'ledstudio' | 'prjstudio' | 'elvstudio' | 'pvstudio' | 'avcost' | 'avquote' | 'avcases' | 'avprices' | 'users' | 'templates' | 'rules' | 'knowledge' | 'training' | 'kpi' | 'project';
   pid?: string;
   tab?: 'overview' | 'schedule' | 'checklist' | 'jobrecord';
   pkg?: number;
@@ -39,6 +42,18 @@ interface Store {
   setLedIngest: (r: StoredDrawing | null) => void;
   ledHandoff: Handoff | null;
   setLedHandoff: (h: Handoff | null) => void;
+  /* REQ-023: 用户改过的资料卡字段定义,按服务类型覆盖出厂默认 */
+  recordFields: FieldOverrides;
+  refreshRecordFields: () => Promise<void>;
+  /* REQ-038: 积分规则的全部版本 + 「当下这一版」。按项目创建日取版本用 rulesFor。 */
+  pointRuleVersions: PointRuleVersion[];
+  pointRules: PointRules;
+  rulesFor: (createdAt: number) => PointRules;
+  refreshPointRules: () => Promise<void>;
+  /* REQ-037: KPI 规则,和积分规则同一套版本机制 */
+  kpiRuleVersions: KpiRuleVersion[];
+  kpiRules: KpiRules;
+  refreshKpiRules: () => Promise<void>;
 }
 
 const Ctx = createContext<Store | null>(null);
@@ -51,6 +66,9 @@ export const useStore = () => {
 export function StoreProvider({ user, children }: { user: User; children: React.ReactNode }) {
   const [projects, setProjects] = useState<Project[]>([]);
   const [users, setUsers] = useState<User[]>([]);
+  const [recordFields, setRecordFields] = useState<FieldOverrides>({});
+  const [pointRuleVersions, setPointRuleVersions] = useState<PointRuleVersion[]>([]);
+  const [kpiRuleVersions, setKpiRuleVersions] = useState<KpiRuleVersion[]>([]);
   const [view, setView] = useState<View>({ name: 'overview' });
   const [toast, setToast] = useState('');
   const [ledProjectId, setLedProjectId] = useState('');
@@ -75,13 +93,33 @@ export function StoreProvider({ user, children }: { user: User; children: React.
     if (res.ok) setUsers((await res.json()).users);
   }, []);
 
+  /* REQ-023: 字段定义是全局的,和项目数据分开取一次即可 */
+  const refreshRecordFields = useCallback(async () => {
+    const res = await fetch('/api/record-fields');
+    if (res.ok) setRecordFields(((await res.json()).overrides || {}) as FieldOverrides);
+  }, []);
+
+  /* REQ-038: 积分规则同样是全局的,取一次即可 */
+  const refreshPointRules = useCallback(async () => {
+    const res = await fetch('/api/point-rules');
+    if (res.ok) setPointRuleVersions(((await res.json()).versions || []) as PointRuleVersion[]);
+  }, []);
+
+  const refreshKpiRules = useCallback(async () => {
+    const res = await fetch('/api/kpi-rules');
+    if (res.ok) setKpiRuleVersions(((await res.json()).versions || []) as KpiRuleVersion[]);
+  }, []);
+
   useEffect(() => {
     refresh();
     refreshUsers();
+    refreshRecordFields();
+    refreshPointRules();
+    refreshKpiRules();
     /* light polling so teammates' changes appear without manual reload */
     const t = setInterval(refresh, 30_000);
     return () => clearInterval(t);
-  }, [refresh, refreshUsers]);
+  }, [refresh, refreshUsers, refreshRecordFields, refreshPointRules, refreshKpiRules]);
 
   const dispatch = useCallback((pid: string, action: ProjectAction) => {
     /* v2.2 [P0-3] strict optimistic lock. Serialize per project so a user's own
@@ -169,7 +207,16 @@ export function StoreProvider({ user, children }: { user: User; children: React.
     setLedIngest,
     ledHandoff,
     setLedHandoff,
-  }), [user, projects, users, view, toast, dispatch, createProject, removeProject, refresh, refreshUsers, ledProjectId, ledIngest, ledHandoff]);
+    recordFields,
+    refreshRecordFields,
+    pointRuleVersions,
+    pointRules: rulesAt(pointRuleVersions, Date.now()),
+    rulesFor: (createdAt: number) => (pointRuleVersions.length ? rulesAt(pointRuleVersions, createdAt) : DEFAULT_POINT_RULES),
+    refreshPointRules,
+    kpiRuleVersions,
+    kpiRules: kpiRuleVersions.length ? kpiRulesAt(kpiRuleVersions, Date.now()) : DEFAULT_KPI_RULES,
+    refreshKpiRules,
+  }), [user, projects, users, view, toast, dispatch, createProject, removeProject, refresh, refreshUsers, recordFields, refreshRecordFields, pointRuleVersions, refreshPointRules, kpiRuleVersions, refreshKpiRules, ledProjectId, ledIngest, ledHandoff]);
 
   return <Ctx.Provider value={store}>{children}</Ctx.Provider>;
 }

@@ -91,7 +91,9 @@ export interface ScheduleRow {
   assignee: string; // individual person name
   weeks: number;
   typical: string;
+  typicalEn?: string;   // REQ-041: 典型工期的英文;缺省时回落到中文那一份
   gate: string;
+  gateEn?: string;      // REQ-041: 冻结点提示的英文;同上
   freeze: boolean;
   status: ScheduleStatus;
   note: string;
@@ -99,6 +101,29 @@ export interface ScheduleRow {
   e: string; // ISO end override
   delayNote?: string; // reason for a delay/date adjustment (shows a red mark)
   custom?: boolean; // §5: manually-inserted node (ad-hoc sample / extra request)
+  /* REQ-018 style B: full-width annotation rows in the date-based template —
+     'milestone' = red deadline note, 'holiday' = centred red holiday band */
+  kind?: 'milestone' | 'holiday';
+}
+
+/* ===== REQ-042: 一个信息项的一条「收料记录」 =====
+   同一份文件在项目周期里会收到好几版(v01/v02/v03),以前只能记一条、
+   后面覆盖前面,历史就没了。现在每收一次追加一条,最新的置顶标 Latest。 */
+export interface ReceiptRecord {
+  id: string;
+  date: string;        // 收到日期 ISO
+  fileName: string;    // 文件名称
+  from: string;        // 来自(谁给的)
+  via: string;         // 收到方式 Email / WhatsApp / …
+  path: string;        // 保存路径(server location)—— 只记路径,不托管文件
+  status: ChecklistStatus;
+  remark: string;
+  at: number;          // 录入时间,用于同日多条时的排序
+  by: string;          // 谁录的(服务端写,不可改)
+  /* 0917:Shermin PPT 第 5 页那一列。与 by 是两回事 —— 东西可能是 A 收的、
+     B 代录的,多数时候同一个人,所以新建时默认填录入人,但可以改。
+     老记录没有这一位,读出来是 undefined,显示成「—」,不去猜。 */
+  receivedBy?: string; // 接收人
 }
 
 export interface ChecklistItem {
@@ -108,11 +133,39 @@ export interface ChecklistItem {
   status: ChecklistStatus;
   date: string;
   remark: string;
+  received?: string; // REQ-013/019: what was received (file name / note) — filling it auto-sets Received + today
   shot?: string; // legacy single dataURL thumbnail (migrated into shots)
   shots?: string[]; // multiple dataURL thumbnails per item
   owner?: string; // responsible person (name), shown with an avatar
   highlight?: boolean; // mark this item's remark as important (bright colour)
   updatedAt?: number; // last time this item changed (for "last update" column)
+  /* REQ-042: 全部收料记录,时间倒序(第 0 条 = Latest)。
+     老数据由 migrate() 把原来那一条搬成第一条,原字段(status/date/received/
+     remark)继续保留并跟着 Latest 走 —— 导出、KPI、看板那些地方读的还是它们,
+     不需要跟着一起改。 */
+  receipts?: ReceiptRecord[];
+}
+
+/* REQ-040: 日历式排期的落库形态。boundaries 是 N+1 个本地日期
+   (N 个阶段的分界点),阶段起止 / 工期由它派生 —— 派生值不存,
+   免得和 boundaries 对不上。 */
+export interface CalendarStage {
+  id: string;
+  name: string;
+  /* 出厂阶段名的英文位;用户改名后丢弃。老数据没有这一位,回落到 name。
+     详见 docs/i18n-词条维护.md §3。 */
+  nameEn?: string;
+  tone: string;
+  note?: string;
+}
+export interface CalendarSchedule {
+  stages: CalendarStage[];
+  boundaries: string[];      // ISO 本地日期
+  version: number;           // 每存一次 +1,用来看改过几轮
+  updatedAt: number;
+  updatedBy: string;
+  /* 项目级命名存档(替掉浏览器 localStorage) */
+  archives?: { id: string; name: string; savedAt: string; stages: CalendarStage[]; boundaries: string[] }[];
 }
 
 export interface ChecklistGroup {
@@ -141,6 +194,16 @@ export interface ServicePackage {
   resourceLinks?: string; // free text: web links / network paths to renders, VR, drone, models
   scopeItems?: ScopeItem[]; // R5-3: deliverables breakdown (item / qty / notes)
   record?: ServiceRecord; // business "资料 record" — single source for Job Record & Registers
+  noCategories?: boolean; // REQ-014: flat checklist (no fixed categories) for this package
+  label?: string;         // REQ-026: 同类业务有多份时的实例名(如「大堂 LED」);留空则按序号显示
+  /* REQ-038: PM 给这份业务选的积分档位。区间档(LED 3–7)再带上选定的分值。
+     没选就按资料卡里的数自动落档;都判不出来就等 PM 选。 */
+  pointTier?: { id: string; value?: number };
+  /* REQ-040: 日历排期(stage-calendar-planner)。与老的 schedule 数组**并存** ——
+     导出 / KPI / 进度统计读的都是 schedule,所以那套一行不动;
+     日历排期是另一种排法,项目可以两种都用、也可以只用一种。
+     只存 boundaries + 阶段 + 备注,起止和工期是派生值,不入库。 */
+  calendar?: CalendarSchedule;
 }
 
 /* business record attached to a service package (Job Record / Project Registers).
@@ -195,14 +258,25 @@ export interface ProjectContact {
 
 export type Difficulty = 'easy' | 'medium' | 'hard' | 'complex';
 
+/* REQ-018: which schedule template the project renders/exports with.
+   classic = the original phase editor; weeks = per-service grouped table with
+   subtotals; dates = the Scale-Model date-range template. */
+export type SchedStyle = 'classic' | 'weeks' | 'dates';
+
 export interface Project {
   id: string;
+  serial?: number; // REQ-006: sequential project NO. (auto-assigned on create)
+  quotationNo?: string; // REQ-031: 报价单号(非必填,纯文本如 Q-2026-0123)
+  schedStyle?: SchedStyle;
   name: string;
   client: string;
   services: string[];
   stage: string;
   difficulty: Difficulty;
   points: number;
+  /* REQ-038: 有人手填过积分。建项目时按难度自动播的种子分不算手填 ——
+     只有它为 true 时,手填的分才盖过积分规则算出来的分。 */
+  pointsManual?: boolean;
   owners: string[]; // PM names
   perm: string[]; // extra names with production edit permission
   start: string;

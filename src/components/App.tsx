@@ -4,9 +4,10 @@ import React, { useEffect, useMemo, useState } from 'react';
 import type { User } from '@/lib/types';
 import { StoreProvider, useStore } from './store';
 import { allOverdue, fmtDate, isMyProject, pendingWorkflowAction } from '@/lib/project';
-import { canCreate, canViewPrices, isFull, ROLE_LABEL } from '@/lib/permissions';
+import { canCreate, canViewPrices, isFull } from '@/lib/permissions';
+import { roleTerm } from '@/lib/terms';
 import { useLang } from '@/lib/i18n';
-import { Avatar, AvatarSrcProvider, Icon } from './ui';
+import { Avatar, AvatarSrcProvider, Ell, Icon } from './ui';
 import OverviewView from './views/OverviewView';
 import ProjectsView, { NewProjectModal } from './views/ProjectsView';
 import TeamView from './views/TeamView';
@@ -28,6 +29,10 @@ import LedStudioView from './views/LedStudioView';
 import FinanceView from './views/FinanceView';
 import UsersView from './views/UsersView';
 import TemplatesView from './views/TemplatesView';
+import RulesView from './views/RulesView';
+import KnowledgeView from './views/KnowledgeView';
+import TrainingView from './views/TrainingView';
+import KpiView from './views/KpiView';
 import ProjectDetail from './views/ProjectDetail';
 
 export default function App({ user }: { user: User }) {
@@ -59,6 +64,10 @@ const PAGE_META: Record<string, { title: [string, string]; sub: [string, string]
   ledstudio: { title: ['LED 方案配置', 'LED Configuration'], sub: ['LED 词条 · 公式引擎 · 箱体拼接与线路出图', 'LED fields · formula engine · cabinet layout & wiring drawing'] },
   finance: { title: ['收款看板', 'Collections'], sub: ['开票与收款全局视图 · 逾期预警 · 可导出', 'Invoicing & payment across projects · overdue alerts · exportable'] },
   users: { title: ['用户管理', 'Users'], sub: ['账号、角色与访问权限', 'Accounts, roles and access'] },
+  knowledge: { title: ['运营中心 · 知识库', 'Knowledge Base'], sub: ['公司制度 / SOP / 培训资料 —— 可编辑、留版本、可导入导出', 'Company policies, SOPs and training material — versioned, importable and exportable'] },
+  training: { title: ['新人培训', 'Training'], sub: ['按角色的培训路径 · 进度追踪 · 考核小测(教材来自知识库)', 'Role-based paths, progress tracking and quizzes — material lives in the knowledge base'] },
+  kpi: { title: ['KPI 看板', 'KPI Board'], sub: ['四维加权 · 数据全部来自平台已有机制,可点开看每一分怎么来的', 'Four weighted dimensions, all computed from existing data — click through to see how each score is derived'] },
+  rules: { title: ['规则设置', 'Rules'], sub: ['积分规则:按业务分档、可改、留版本(来源《项目积分算法》)', 'Points rules: tiers per service, editable, versioned'] },
   templates: { title: ['模板管理', 'Templates'], sub: ['编辑生产排期与信息清单模板(仅影响之后新建的项目)', 'Edit schedule & checklist templates (affects new projects only)'] },
 };
 
@@ -70,7 +79,7 @@ function Shell() {
     users.forEach((u) => { if (u.avatar) m[u.name] = u.avatar; });
     return m;
   }, [users]);
-  const { lang, setLang, t } = useLang();
+  const { lang, setLang, t, dual, setDual } = useLang();
   const [showNew, setShowNew] = useState(false);
   const [notifOpen, setNotifOpen] = useState(false);
   const [search, setSearch] = useState('');
@@ -165,13 +174,17 @@ function Shell() {
           {canViewPrices(me) && navItem('avprices', 'settings', t('AV 价格库', 'AV Price Library'))}
           {(isFull(me) || me.role === 'finance') && navItem('finance', 'trending', t('收款看板', 'Collections'), financeAlertCount)}
           {isFull(me) && navItem('users', 'settings', t('用户管理', 'Users'))}
+          {navItem('knowledge', 'book', t('知识库', 'Knowledge'))}
+          {navItem('training', 'check', t('新人培训', 'Training'))}
+          {isFull(me) && navItem('kpi', 'target', t('KPI 看板', 'KPI Board'))}
+          {isFull(me) && navItem('rules', 'settings', t('规则设置', 'Rules'))}
           {isFull(me) && navItem('templates', 'layers', t('模板管理', 'Templates'))}
         </nav>
         <div className="side-user">
           <Avatar name={user.name} size={34} />
           <div style={{ flex: 1, lineHeight: 1.2, minWidth: 0 }}>
             <div className="nm">{user.name}</div>
-            <div className="rl">{user.position || ROLE_LABEL[user.role]}</div>
+            <div className="rl">{user.position || roleTerm(user.role, lang)}</div>
           </div>
           <button title={t('修改密码', 'Change password')} onClick={() => setShowPw(true)} style={{ color: 'var(--text2)', display: 'flex' }}>
             <Icon name="lock" size={15} />
@@ -215,6 +228,27 @@ function Shell() {
           >
             {lang === 'zh' ? 'EN' : '中文'}
           </button>
+          {/* REQ-041 双语并排开关 —— 管的是排期任务 / 清单信息项 / 模板卡片
+              这些**内容**下面那行另一种语言的小字,不影响界面文案。
+              中文模式默认开(对着中文图纸干活好核对),英文模式默认关
+              (给客户看时下面挂一行中文不像话),点一下就改,记住选择。 */}
+          <button
+            className={`icon-btn${dual ? ' on' : ''}`}
+            title={dual
+              ? t('双语并排:开 —— 任务 / 信息项下面压一行英文。点一下收起来。',
+                  'Bilingual: on — the other language sits under each task / item. Click to collapse it.')
+              : t('双语并排:关 —— 只显示当前语言。点一下把另一种语言显示出来。',
+                  'Bilingual: off — current language only. Click to show the other one too.')}
+            aria-pressed={dual}
+            style={{
+              width: 'auto', padding: '0 10px', fontSize: 11, fontWeight: 700, letterSpacing: '.03em',
+              color: dual ? 'var(--navy900)' : 'var(--text2)',
+              borderColor: dual ? 'var(--navy700)' : undefined,
+            }}
+            onClick={() => setDual(!dual)}
+          >
+            {t('中/EN', 'ZH/EN')}
+          </button>
           <button className="icon-btn bell-btn" aria-label="Notifications" onClick={(e) => { e.stopPropagation(); setNotifOpen(!notifOpen); }}>
             <Icon name="bell" />
             {overdue.length > 0 && <span className="dot-badge" />}
@@ -242,7 +276,7 @@ function Shell() {
                 >
                   <span className="badge" style={{ background: '#fbe9e7', color: '#b23a32', flexShrink: 0 }}>{t(`逾期 ${o.days} 天`, `${o.days}d late`)}</span>
                   <div style={{ minWidth: 0 }}>
-                    <div style={{ fontSize: 13, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{o.p.name}</div>
+                    <Ell style={{ fontSize: 13, fontWeight: 600 }}>{o.p.name}</Ell>
                     <div style={{ fontSize: 11.5, color: 'var(--text2)' }}>{o.row.task} · {t('应完成', 'due')} {fmtDate(o.due)}</div>
                   </div>
                 </div>
@@ -273,6 +307,10 @@ function Shell() {
             {view.name === 'avprices' && <AvPricesView />}
             {view.name === 'finance' && <FinanceView />}
             {view.name === 'users' && <UsersView />}
+            {view.name === 'knowledge' && <KnowledgeView />}
+            {view.name === 'training' && <TrainingView />}
+            {view.name === 'kpi' && <KpiView />}
+            {view.name === 'rules' && <RulesView />}
             {view.name === 'templates' && <TemplatesView />}
             {view.name === 'project' && <ProjectDetail />}
           </div>
