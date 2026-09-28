@@ -3,11 +3,13 @@
 import { GENERIC, TPL, diffPoints, STAGES, stageIdx, type Template } from './templates';
 import { rulePoints, type PointRules } from './points';
 import { seedReceipt } from './receipts';
+import { canSeeProject } from './permissions';
 import type {
   ChecklistGroup,
   ChecklistItem,
   DirectorUpdate,
   Project,
+  Role,
   ScheduleRow,
   ServicePackage,
   Stage,
@@ -37,6 +39,7 @@ export interface NewProjectInput {
   quotationNo?: string;   // REQ-031
   services: string[];
   owners?: string[];
+  engineer?: string;   // REQ-043: 项目级的工程师指派,一个项目一个人
   difficulty?: string;
   points?: number | null;
   start: string;
@@ -100,6 +103,7 @@ export function newProject(o: NewProjectInput, tplLookup?: (svc: string) => Temp
     difficulty,
     points: o.points != null ? o.points : diffPoints(difficulty) * services.length,
     owners: o.owners || [],
+    engineer: (o.engineer || '').trim() || undefined,
     perm: [],
     start: o.start,
     delivery: o.delivery || '',
@@ -290,7 +294,9 @@ export function pendingWorkflowAction(p: Project, me: { name: string; role: stri
   if (p.archived) return null;
   const full = me.role === 'director' || me.role === 'bd';
   const commercial = full || me.role === 'sales';
-  const owns = (p.owners || []).includes(me.name) || (p.perm || []).includes(me.name);
+  /* REQ-043: 项目工程师和 PM 一样能提交完成包(canSubmitCompletionHere 走的就是
+     canEdit),待办清单这里也得把他算进来,否则界面上按钮在、提醒没有。 */
+  const owns = (p.owners || []).includes(me.name) || (p.perm || []).includes(me.name) || p.engineer === me.name;
   const h = p.handover, cr = p.completionReview, sv = p.salesVerification, inv = p.invoiceClose;
 
   if (h) {
@@ -447,11 +453,10 @@ export function allOverdue(list: Project[]): OverdueItem[] {
 /* Whether a project is "mine" — used to scope risk/alert surfaces so each
    person sees only their own; PD/BD/Sales/Viewer see everything. */
 export function isMyProject(p: Project, me: { name: string; role: string }): boolean {
-  if (me.role === 'pm' || me.role === 'member') {
-    if ((p.owners || []).includes(me.name)) return true;
-    return p.packages.some((pk) => pk.schedule.some((r) => r.assignee === me.name));
-  }
-  return true; // director / bd / sales / viewer
+  /* REQ-043: 判据搬到 permissions.canSeeProject 了 —— 这里和服务端过滤用的
+     必须是同一套,分两份写迟早会各走各的(比如这份原来就漏了 perm 和
+     engineer)。留着这个名字是因为调用点还在用它。 */
+  return canSeeProject({ name: me.name, role: me.role as Role }, p);
 }
 
 export type Health = 'ok' | 'risk' | 'over';

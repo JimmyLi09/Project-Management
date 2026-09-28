@@ -17,8 +17,11 @@ export const identityOf = (u: User): Identity => ({ name: u.name, role: u.role }
 
 export const isFull = (u: Identity) => u.role === 'director' || u.role === 'bd';
 
+/* REQ-043: 项目上被点名的工程师,对这个项目和 PM 一样能改生产内容
+   —— 「每个项目单独一个 engineer」,他就是这个项目的人,不是路过帮忙勾一行的。
+   老项目没有 engineer 字段,这一条对它们恒为假,行为一个字没变。 */
 export const canEdit = (u: Identity, p: Project) =>
-  isFull(u) || (p.owners || []).includes(u.name) || (p.perm || []).includes(u.name);
+  isFull(u) || (p.owners || []).includes(u.name) || (p.perm || []).includes(u.name) || p.engineer === u.name;
 
 export const canCommercial = (u: Identity, _p?: Project) => isFull(u) || u.role === 'sales';
 
@@ -26,15 +29,17 @@ export const canCommercial = (u: Identity, _p?: Project) => isFull(u) || u.role 
    收窄的只有 pm 与 member 这两个「干活的」角色。director / bd 本来就看全部;
    sales 要跟自己没建过的单子、finance 要给所有项目开票、viewer 就是拿来旁观
    的 —— 项目上并没有「Sales 对接人」这类归属字段,硬把他们也收窄等于让他们
-   看不见该管的项目。这三个角色本期保持看全部(PR 里已列出待确认)。
+   看不见该管的项目。这三个角色保持看全部(0922 已确认)。
 
-   归属的判据和 canEdit 用的是同一批数据(owners = PM,perm = 参与人),再加上
-   「有一行任务点名指派给我」—— Engineer(member)是靠 👤 指派干活的,不进
-   owners/perm,不算这一条他就一个项目都看不见。 */
+   归属的判据和 canEdit 用的是同一批数据:owners = PM,engineer = 这个项目的
+   工程师(项目级指派,一个项目一个人),perm = 额外参与人。最后再兜一条「有
+   一行任务点名指派给我」—— 没被指派为项目工程师、只是来帮一行忙的人,也得
+   看得见那个项目,否则他连自己的待办都点不开。 */
 export const isScopedRole = (u: Identity) => u.role === 'pm' || u.role === 'member';
 
 export const isOnProject = (u: Identity, p: Project) =>
   (p.owners || []).includes(u.name)
+  || p.engineer === u.name
   || (p.perm || []).includes(u.name)
   || (p.packages || []).some((pk) => (pk.schedule || []).some((r) => r.assignee === u.name));
 

@@ -32,6 +32,8 @@ export async function POST(req: NextRequest) {
     quotationNo: String(body.quotationNo || '').slice(0, 60),   // REQ-031
     services: services.length ? services : ['others'],
     owners: Array.isArray(body.owners) ? body.owners.map(String).filter(Boolean) : [],
+    engineer: String(body.engineer || '').slice(0, 120),   // REQ-043
+
     difficulty: String(body.difficulty || 'medium'),
     start: String(body.start || ''),
     delivery: String(body.delivery || ''),

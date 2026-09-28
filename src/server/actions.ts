@@ -63,6 +63,7 @@ export type ProjectAction =
   | { type: 'saveCalendarArchives'; pkg: number; archives: NonNullable<CalendarSchedule['archives']> }
   | { type: 'addOwner'; name: string }
   | { type: 'removeOwner'; name: string }
+  | { type: 'setEngineer'; name: string }   // REQ-043: 指派 / 换掉 / 清空项目工程师
   | { type: 'transferProject'; from: string; to: string; includeTasks: boolean }
   | { type: 'submitHandover'; salesBrief: string; assignedPmId: string }
   | { type: 'acceptHandover' }
@@ -106,6 +107,9 @@ export function transferInProject(
     if (!p.owners.includes(to)) p.owners.push(to);
     changed = true;
   }
+  /* REQ-043: 工程师也是项目级指派 —— 人休假 / 离职时,这一栏不跟着走,项目
+     就还挂在走掉的人名下,新来的人看不见它。 */
+  if (p.engineer === from) { p.engineer = to; changed = true; }
   p.packages.forEach((pk) => {
     if (pk.owner === from) { pk.owner = to; changed = true; }
     if (includeTasks) {
@@ -623,6 +627,17 @@ export function applyAction(u: Identity, p: Project, a: ProjectAction, ctx: Acti
     case 'removeOwner': {
       if (!canAssign(u, p)) throw new PermissionError('仅 PD/BD 可调整人员');
       p.owners = (p.owners || []).filter((n) => n !== a.name);
+      break;
+    }
+    /* REQ-043: 项目工程师。和指派 PM 同一档权限 —— 这个字段决定谁看得见、
+       改得动这个项目,不能让被指派的人自己改。填空字符串就是撤下来。 */
+    case 'setEngineer': {
+      if (!canAssign(u, p)) throw new PermissionError('仅 PD/BD 可指派工程师');
+      const nm = (a.name || '').trim();
+      const was = p.engineer || '';
+      if (nm === was) break;
+      p.engineer = nm || undefined;
+      logIt(p, u.name, nm ? `指派工程师: ${nm}${was ? `(原 ${was})` : ''}` : `撤下工程师: ${was}`);
       break;
     }
     case 'transferProject': {

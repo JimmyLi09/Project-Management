@@ -804,6 +804,7 @@ function propagateRename(oldName: string, newName: string) {
     let changed = false;
     if ((p.owners || []).includes(oldName)) { p.owners = p.owners.map((n) => (n === oldName ? newName : n)); changed = true; }
     if ((p.perm || []).includes(oldName)) { p.perm = p.perm.map((n) => (n === oldName ? newName : n)); changed = true; }
+    if (p.engineer === oldName) { p.engineer = newName; changed = true; }   // REQ-043
     p.packages.forEach((pk) => {
       if (pk.owner === oldName) { pk.owner = newName; changed = true; }
       pk.schedule.forEach((r) => { if (r.assignee === oldName) { r.assignee = newName; changed = true; } });

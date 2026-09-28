@@ -317,6 +317,7 @@ export function NewProjectModal({ onClose }: { onClose: () => void }) {
   const [quotationNo, setQuotationNo] = useState('');   // REQ-031
   const [services, setServices] = useState<string[]>(['cgi']);
   const [owners, setOwners] = useState(me.role === 'pm' ? me.name : '');
+  const [engineer, setEngineer] = useState('');   // REQ-043
   const [difficulty, setDifficulty] = useState('medium');
   const [start, setStart] = useState(isoDate(new Date()));
   const [delivery, setDelivery] = useState('');
@@ -342,6 +343,7 @@ export function NewProjectModal({ onClose }: { onClose: () => void }) {
     const p = await createProject({
       name: name.trim(), client, quotationNo: quotationNo.trim(), services,
       owners: owners.split(',').map((s) => s.trim()).filter(Boolean),
+      engineer: engineer.trim(),
       difficulty, start, delivery, buffer,
       clientPerson, clientPhone, clientEmail,
       companies: companies.filter((c) => c.company || c.person || c.phone || c.email),
@@ -351,6 +353,9 @@ export function NewProjectModal({ onClose }: { onClose: () => void }) {
   }
 
   const pmNames = users.filter((u) => u.role === 'pm' || u.role === 'director' || u.role === 'bd').map((u) => u.name);
+  /* REQ-043: 工程师是项目级指派,一个项目一个人。候选名单取 member(平台里
+     「工程师 / 团队成员」就是这个角色),PM 也允许 —— 小项目常常 PM 自己兼。 */
+  const engNames = users.filter((u) => u.role === 'member' || u.role === 'pm').map((u) => u.name);
   const Section = ({ zh, en }: { zh: string; en: string }) => (
     <div style={{ display: 'flex', alignItems: 'center', gap: 10, margin: '16px 0 10px' }}>
       <span style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--navy900)', letterSpacing: '.03em' }}>{t(zh, en)}</span>
@@ -429,6 +434,13 @@ export function NewProjectModal({ onClose }: { onClose: () => void }) {
             <label>{t('负责 PM(逗号分隔多人)', 'PM (comma-separated)')}</label>
             <input value={owners} onChange={(e) => setOwners(e.target.value)} placeholder={pmNames.slice(0, 2).join(', ') || '张三, 李四'} list="pm-names" />
             <datalist id="pm-names">{pmNames.map((n) => <option key={n} value={n} />)}</datalist>
+          </div>
+          {/* REQ-043: 指派谁,谁才看得见这个项目 —— 建项目时就填,省得工程师
+              上来发现列表是空的。留空也行,之后在项目里补。 */}
+          <div className="field">
+            <label>{t('工程师(可选,一人)', 'Engineer (optional, one person)')}</label>
+            <input value={engineer} onChange={(e) => setEngineer(e.target.value)} placeholder={engNames[0] || t('姓名', 'name')} list="eng-names" />
+            <datalist id="eng-names">{engNames.map((n) => <option key={n} value={n} />)}</datalist>
           </div>
           <div className="field">
             <label>{t('难度', 'Difficulty')}</label>

@@ -278,6 +278,9 @@ export interface Project {
      只有它为 true 时,手填的分才盖过积分规则算出来的分。 */
   pointsManual?: boolean;
   owners: string[]; // PM names
+  /* REQ-043: 这个项目的工程师。和 PM 一样是项目级的指派,一个项目一个人。
+     可选 —— 老项目没有这个字段,读出来是 undefined,不迁移。 */
+  engineer?: string;
   perm: string[]; // extra names with production edit permission
   start: string;
   delivery: string;
