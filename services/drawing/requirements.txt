@@ -1,0 +1,9 @@
+ezdxf==1.4.4
+# B 级矢量 PDF 解析
+pymupdf==1.28.2
+# C 级图纸视觉识别（仅在设置 ANTHROPIC_API_KEY 时使用）
+anthropic==1.8.0
+# 技术方案书（Word）
+python-docx==1.1.2
+# 历史案例：读取公司统计表（xlsx）
+openpyxl==3.1.5

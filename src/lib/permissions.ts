@@ -47,6 +47,31 @@ export const canDelete = (u: Identity) => isFull(u) || u.role === 'sales';
 
 export const canAdmin = (u: Identity) => isFull(u);
 
+/* AV platform · LED spec v1.0 §11. PD/BD stand in for 管理员.
+   销售 may start a project and upload drawings but not review them or export
+   drawings; 人工校核 and 出图 belong to the PM — on projects they are assigned
+   to. Without a project these answer the role-level question (what to show);
+   with one, whether this person may act on that project. */
+export const canUploadDrawing = (u: Identity, p?: Project) =>
+  isFull(u) || u.role === 'sales' || (u.role === 'pm' && (!p || canEdit(u, p)));
+export const canReviewDrawing = (u: Identity, p?: Project) =>
+  isFull(u) || (u.role === 'pm' && (!p || canEdit(u, p)));
+export const canExportLed = (u: Identity) => isFull(u) || u.role === 'pm';
+
+/* Price library and costing. Cost prices are commercial data: production
+   members and read-only viewers do not see them. Only PD / BD edit prices and
+   company parameters (管理员, §11). Saving a configuration or a cost sheet is
+   the project PM's job, like review. */
+export const canViewPrices = (u: Identity) => u.role !== 'member' && u.role !== 'viewer';
+export const canEditPrices = (u: Identity) => isFull(u);
+export const canCostProject = (u: Identity, p?: Project) => canReviewDrawing(u, p);
+
+/* 07 报价审批 (2026-09-26): sales or the project's PM put a quotation together
+   and submit it; every quotation needs PD / BD approval before it goes out. */
+export const canSubmitQuote = (u: Identity, p?: Project) =>
+  isFull(u) || u.role === 'sales' || (u.role === 'pm' && (!p || canEdit(u, p)));
+export const canApproveQuote = (u: Identity) => isFull(u);
+
 /* ===== REQ-022: who sees which part of the post-sales workflow =====
    Sales 管两头(交接、核对/开票/收款),PM 只管制作 —— 整张售后卡片对 PM
    完全不出现。这些只影响前端呈现:服务端 applyAction 里每个 action 自己的

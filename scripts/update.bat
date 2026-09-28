@@ -37,6 +37,22 @@ call npm install || goto :err
 echo ==^> 构建 Building...
 call npm run build || goto :err
 
+echo ==^> 制图服务 Python ^(AV 平台: 图纸解析 / DXF / 技术方案书 / 历史案例^)...
+REM 虚拟环境在 services\drawing\.venv(已 .gitignore,更新不会动它)。没装 Python 时
+REM 只提示,不中断: AV 以外的功能不受影响。
+set "PYV=services\drawing\.venv"
+if not exist "%PYV%\Scripts\python.exe" (
+  where py >nul 2>nul && py -3 -m venv "%PYV%"
+)
+if not exist "%PYV%\Scripts\python.exe" (
+  where python >nul 2>nul && python -m venv "%PYV%"
+)
+if exist "%PYV%\Scripts\python.exe" (
+  "%PYV%\Scripts\python.exe" -m pip install -q -r services\drawing\requirements.txt && echo √ 制图服务依赖已就绪 || echo ! 制图服务依赖安装失败, 需能上外网. AV 的图纸解析 / DXF / 方案书 / 案例导入暂不可用
+) else (
+  echo ! 未找到 Python, 建议 3.11. AV 的图纸解析 / DXF / 方案书 / 案例导入需要它, 装好后重新运行本脚本
+)
+
 echo ==^> 重启服务 Restarting...
 where pm2 >nul 2>nul
 if %errorlevel%==0 (

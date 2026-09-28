@@ -9,12 +9,14 @@
 
 1. **Node.js 20 LTS** —— https://nodejs.org → 下载「LTS」版 → 一路「Next」安装。
 2. **Git** —— https://git-scm.com/download/win → 下载安装 → 一路默认。
-3. 建议给这台电脑在路由器里**固定内网 IP**（如 `192.168.1.50`），避免重启后地址变化。
+3. **Python 3.11**（AV 方案成本平台的图纸解析 / DXF / 方案书 / 历史案例要用）—— https://www.python.org/downloads/windows/ → 安装时勾选「Add python.exe to PATH」。之后每次运行 `scripts\update.bat` 会自动建好并更新它的依赖。
+4. 建议给这台电脑在路由器里**固定内网 IP**（如 `192.168.1.50`），避免重启后地址变化。
 
 验证：按 `Win+R` 输入 `cmd` 回车，打开命令行，逐条执行，能显示版本号即可：
 ```
 node -v
 git -v
+py -3 --version
 ```
 
 ---

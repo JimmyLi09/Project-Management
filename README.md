@@ -61,6 +61,42 @@ npm run build && npm start
 
 登录 PD 后在「用户 Users」页为 PM / 团队成员创建账号;项目中的「负责 PM / 指派👤」按**姓名**匹配账号姓名。
 
+## 局域网部署(Docker)
+
+服务器装好 Docker 后执行一次:
+
+```bash
+git clone <repo> audax && cd audax
+docker compose up -d --build
+```
+
+浏览器打开 `http://<服务器IP>:8080`,用上面的初始账号登录,**首次登录必须改密码**。客户端不需要安装任何东西。
+
+- 一个容器:Next.js 应用 + Python 制图服务(图纸解析、DXF 出图)。数据库、每日备份与图纸样本库都在卷 `audax-data`(容器内 `/app/data`),**这个卷需纳入服务器备份**。
+- 升级:`git pull && docker compose up -d --build`,数据不受影响。
+- 可选环境变量(写在同目录的 `.env` 文件里):`SESSION_SECRET` 会话密钥(留空则自动生成并保存在库里);`ANTHROPIC_API_KEY` 用于 C 级图纸的视觉识别。
+- C 级扫描件的 OCR 体积较大,默认不装;需要时 `docker compose build --build-arg WITH_OCR=1` 后再 `up -d`。
+- 每日备份另存到 NAS:在 `docker-compose.yml` 里把 NAS 目录挂进容器,并设置 `AUDAX_BACKUP_DIR` 为容器内路径。
+
+## AV 方案成本平台
+
+依据《LED 业务线开发交付规格说明书 v1.0》起步,现覆盖 01 立项询价 → 07 报价审批,LED(已校准)与投影、弱电、光伏(草案规则包)四条业务线。代码自成一块,可整体抽离为独立的 AV 平台仓库:
+
+```
+src/av/core/          # TypeScript 确定性计算内核,无框架依赖(各业务线规则包、排布、线路、校验、出图、成本、报价、跨线去重)
+services/drawing/     # Python 制图服务:DXF 生成(ezdxf)、图纸分级与解析(DXF / 矢量 PDF / OCR / 视觉)
+src/components/views/ # 各步骤界面(侧栏「AV 立项询价」到「AV 报价审批」)
+```
+
+```bash
+npm test                          # 内核验收测试
+npm run led:regression            # 9 个历史项目回归对照
+npm run led:drawing -- 144 out    # 出图:drawing JSON + SVG + 箱体清单
+cd services/drawing && .venv/bin/python -m pytest   # 制图服务测试
+```
+
+需求与待决事项见 `docs/requirements/010`–`018`。
+
 ## 后续路线(规划文件 Phase 2–4)
 
 - 文件上传(原图存储)、评论与 @成员

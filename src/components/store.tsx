@@ -6,12 +6,13 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useR
 import type { Project, User } from '@/lib/types';
 import type { ProjectAction } from '@/server/actions';
 import type { Identity } from '@/lib/permissions';
+import type { Handoff, StoredDrawing } from '@/av/core/handoff';
 import type { FieldOverrides } from '@/lib/records';
 import { DEFAULT_POINT_RULES, rulesAt, type PointRuleVersion, type PointRules } from '@/lib/points';
 import { DEFAULT_KPI_RULES, kpiRulesAt, type KpiRuleVersion, type KpiRules } from '@/lib/kpi';
 
 export interface View {
-  name: 'overview' | 'projects' | 'team' | 'mytasks' | 'dupdate' | 'stats' | 'contacts' | 'finance' | 'registers' | 'users' | 'templates' | 'rules' | 'knowledge' | 'training' | 'kpi' | 'project';
+  name: 'overview' | 'projects' | 'team' | 'mytasks' | 'dupdate' | 'stats' | 'contacts' | 'finance' | 'registers' | 'avinquiry' | 'ledingest' | 'ledstudio' | 'prjstudio' | 'elvstudio' | 'pvstudio' | 'avcost' | 'avquote' | 'avcases' | 'avprices' | 'users' | 'templates' | 'rules' | 'knowledge' | 'training' | 'kpi' | 'project';
   pid?: string;
   tab?: 'overview' | 'schedule' | 'checklist' | 'jobrecord';
   pkg?: number;
@@ -33,6 +34,14 @@ interface Store {
   removeProject: (pid: string) => Promise<boolean>;
   refresh: () => Promise<void>;
   refreshUsers: () => Promise<void>;
+  /* AV · LED: the drawing under 04 review survives switching views, and the
+     reviewed values are handed to 05 exactly once. */
+  ledProjectId: string;
+  setLedProjectId: (id: string) => void;
+  ledIngest: StoredDrawing | null;
+  setLedIngest: (r: StoredDrawing | null) => void;
+  ledHandoff: Handoff | null;
+  setLedHandoff: (h: Handoff | null) => void;
   /* REQ-023: 用户改过的资料卡字段定义,按服务类型覆盖出厂默认 */
   recordFields: FieldOverrides;
   refreshRecordFields: () => Promise<void>;
@@ -62,6 +71,9 @@ export function StoreProvider({ user, children }: { user: User; children: React.
   const [kpiRuleVersions, setKpiRuleVersions] = useState<KpiRuleVersion[]>([]);
   const [view, setView] = useState<View>({ name: 'overview' });
   const [toast, setToast] = useState('');
+  const [ledProjectId, setLedProjectId] = useState('');
+  const [ledIngest, setLedIngest] = useState<StoredDrawing | null>(null);
+  const [ledHandoff, setLedHandoff] = useState<Handoff | null>(null);
   /* latest known version per project (updated synchronously on every write) and
      a per-project promise chain, so a single user's rapid successive edits
      serialize and each carries the freshest version — strict CAS still rejects
@@ -189,6 +201,12 @@ export function StoreProvider({ user, children }: { user: User; children: React.
     removeProject,
     refresh,
     refreshUsers,
+    ledProjectId,
+    setLedProjectId,
+    ledIngest,
+    setLedIngest,
+    ledHandoff,
+    setLedHandoff,
     recordFields,
     refreshRecordFields,
     pointRuleVersions,
@@ -198,7 +216,7 @@ export function StoreProvider({ user, children }: { user: User; children: React.
     kpiRuleVersions,
     kpiRules: kpiRuleVersions.length ? kpiRulesAt(kpiRuleVersions, Date.now()) : DEFAULT_KPI_RULES,
     refreshKpiRules,
-  }), [user, projects, users, view, toast, dispatch, createProject, removeProject, refresh, refreshUsers, recordFields, refreshRecordFields, pointRuleVersions, refreshPointRules, kpiRuleVersions, refreshKpiRules]);
+  }), [user, projects, users, view, toast, dispatch, createProject, removeProject, refresh, refreshUsers, recordFields, refreshRecordFields, pointRuleVersions, refreshPointRules, kpiRuleVersions, refreshKpiRules, ledProjectId, ledIngest, ledHandoff]);
 
   return <Ctx.Provider value={store}>{children}</Ctx.Provider>;
 }

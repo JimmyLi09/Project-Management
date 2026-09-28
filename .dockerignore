@@ -1,0 +1,9 @@
+node_modules
+.next
+data
+out
+.git
+services/drawing/.venv
+**/__pycache__
+services/drawing/.pytest_cache
+*.tsbuildinfo
