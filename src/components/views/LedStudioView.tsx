@@ -118,7 +118,7 @@ export default function LedStudioView() {
     URL.revokeObjectURL(url);
   }
 
-  async function exportFile(kind: 'svg' | 'bom' | 'dxf' | 'proposal') {
+  async function exportFile(kind: 'svg' | 'bom' | 'dxf' | 'proposal', lang: 'zh' | 'en' = 'zh') {
     try {
       assertExportable(result);
     } catch (e) {
@@ -130,10 +130,10 @@ export default function LedStudioView() {
     else if (kind === 'bom') download('led-cabinets.csv', bomCsv(result.layout), 'text/csv;charset=utf-8');
     else {
       /* DXF and the Word proposal are rendered by the drawing service; the server recomputes and re-applies the export gate */
-      const title = fromDrawing?.project ?? fromDrawing?.drawing ?? t('方案配置', 'Configuration');
+      const title = fromDrawing?.project ?? fromDrawing?.drawing ?? '';   // the server names an untitled export in the document's language
       const res = await fetch('/api/av/export', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ kind, cfg: { ...cfg, led_cab_lib: lib.length ? lib : undefined }, packVersion, title, client: project?.client ?? '' }),
+        body: JSON.stringify({ kind, lang, cfg: { ...cfg, led_cab_lib: lib.length ? lib : undefined }, packVersion, title, client: project?.client ?? '' }),
       }).catch(() => null);
       if (!res?.ok) {
         const body = res ? await res.json().catch(() => ({})) : {};
@@ -141,7 +141,7 @@ export default function LedStudioView() {
         return;
       }
       const blob = await res.blob();
-      download(kind === 'dxf' ? 'led-layout.dxf' : 'led-proposal.docx', blob, blob.type);
+      download(kind === 'dxf' ? 'led-layout.dxf' : `led-proposal-${lang}.docx`, blob, blob.type);
     }
   }
 
@@ -375,7 +375,8 @@ export default function LedStudioView() {
                 <button className="btn-line" onClick={() => exportFile('svg')}><Icon name="download" size={14} /> SVG</button>
                 <button className="btn-line" onClick={() => exportFile('bom')}><Icon name="download" size={14} /> {t('箱体清单', 'Cabinets')}</button>
                 <button className="btn-line" onClick={() => exportFile('dxf')}><Icon name="download" size={14} /> DXF</button>
-                <button className="btn-line" onClick={() => exportFile('proposal')}><Icon name="download" size={14} /> {t('技术方案 (Word)', 'Proposal (Word)')}</button>
+                <button className="btn-line" onClick={() => exportFile('proposal', 'zh')}><Icon name="download" size={14} /> {t('技术方案（中文）', 'Proposal (Chinese)')}</button>
+                <button className="btn-line" onClick={() => exportFile('proposal', 'en')}><Icon name="download" size={14} /> {t('技术方案（英文）', 'Proposal (English)')}</button>
               </span>
             )}
           </div>

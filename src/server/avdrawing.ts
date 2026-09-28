@@ -49,7 +49,7 @@ export async function runDrawingCli(args: string[], stdin?: string): Promise<Rec
 
 /* Render a JSON payload to a file with one of the service's renderers and
    return the bytes: avdrawing.dxf (a drawing from src/av/core/drawing.ts ->
-   R2010, mm, the §8.1 layers) or avdrawing.proposal (a ProposalPayload -> the
+   R2010, mm, the §8.1 layers) or avdrawing.proposal (a ProposalDoc -> the
    Word technical proposal). */
 export async function renderFile(module: 'avdrawing.dxf' | 'avdrawing.proposal', payload: unknown, ext: string): Promise<Buffer> {
   const dir = await mkdtemp(path.join(os.tmpdir(), 'av-render-'));

@@ -1,14 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { compute } from '@/av/core/compute';
 import { assertExportable, buildDrawing } from '@/av/core/drawing';
-import { proposalPayload } from '@/av/core/proposal';
+import { proposalDoc } from '@/av/core/proposal';
 import type { LedConfig } from '@/av/core/types';
 import { canExportLed, identityOf } from '@/lib/permissions';
 import { DrawingServiceError, renderFile } from '@/server/avdrawing';
 import { currentUser } from '@/server/session';
 
-/* POST { kind: 'dxf' | 'proposal', cfg, packVersion, title, client? } -> the LED
-   layout as DXF, or the technical proposal as Word. The server recomputes from
+/* POST { kind: 'dxf' | 'proposal', cfg, packVersion, title, client?, lang? } -> the
+   LED layout as DXF, or the technical proposal as Word in Chinese or English. The server recomputes from
    the parameters rather than taking anything from the screen, so the export
    gate (A6: uncalibrated groups, blocking findings) holds for every download. */
 const KINDS = {
@@ -23,7 +23,7 @@ export async function POST(req: NextRequest) {
   const user = await currentUser();
   if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
   if (!canExportLed(identityOf(user))) return NextResponse.json({ error: '仅 PM 可导出图纸与方案书' }, { status: 403 });
-  const body = (await req.json().catch(() => ({}))) as { kind?: string; cfg?: LedConfig; packVersion?: string; title?: string; client?: string };
+  const body = (await req.json().catch(() => ({}))) as { kind?: string; cfg?: LedConfig; packVersion?: string; title?: string; client?: string; lang?: string };
   const kind = body.kind === 'proposal' || body.kind === 'dxf' ? KINDS[body.kind] : null;
   if (!kind) return NextResponse.json({ error: '未知的导出类型' }, { status: 400 });
   if (!body.cfg || !body.packVersion) return NextResponse.json({ error: '缺少方案参数' }, { status: 400 });
@@ -35,10 +35,14 @@ export async function POST(req: NextRequest) {
   } catch (e) {
     return NextResponse.json({ error: e instanceof Error ? e.message : '方案参数无效' }, { status: 400 });
   }
-  const title = String(body.title || '').trim() || 'LED';
+  const lang = body.lang === 'en' ? 'en' : 'zh';
+  const title = String(body.title || '').trim() || (kind.ext === 'dxf' ? 'LED' : lang === 'en' ? 'Untitled project' : '未命名项目');
   const payload = kind.ext === 'dxf'
     ? buildDrawing(result, { project: title })
-    : proposalPayload(result, { title, client: String(body.client || '').trim() });
+    : proposalDoc(result, {
+      title, client: String(body.client || '').trim(), lang,
+      date: new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Singapore' }),
+    });
   if (!payload) return NextResponse.json({ error: '排布无解，不能导出' }, { status: 400 });
   try {
     const bytes = await renderFile(kind.module, payload, kind.ext);
