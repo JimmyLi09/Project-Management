@@ -1,5 +1,5 @@
 import crypto from 'crypto';
-import { cookies } from 'next/headers';
+import { cookies, headers } from 'next/headers';
 import { getSecret, getUserById } from './db';
 import type { User } from '@/lib/types';
 
@@ -39,8 +39,12 @@ export function parseToken(token: string | undefined): SessionPayload | null {
 
 export async function setSessionCookie(userId: number) {
   const store = await cookies();
+  // Over the public HTTPS link (Cloudflare Tunnel sets X-Forwarded-Proto) the
+  // cookie is HTTPS-only; plain http://<server IP>:3000 on the intranet keeps working.
+  const https = (await headers()).get('x-forwarded-proto') === 'https';
   store.set(COOKIE, createToken(userId), {
     httpOnly: true,
+    secure: https,
     sameSite: 'lax',
     path: '/',
     maxAge: MAX_AGE,
