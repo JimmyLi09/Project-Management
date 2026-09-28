@@ -19,7 +19,7 @@
 ## 2. DXF 直接下载
 
 - 05 LED 方案配置的「DXF」按钮直接下载 `led-layout.dxf`（R2010、单位 mm、§8.1 八图层），不再需要下载数据包再手工执行命令。
-- 接口 `POST /api/av/dxf { cfg, packVersion, title }`：服务端按参数重新计算并再次执行导出闸门（未校准参数组、阻断项一律 400），
+- 接口 `POST /api/av/export { kind: 'dxf', cfg, packVersion, title }`：服务端按参数重新计算并再次执行导出闸门（未校准参数组、阻断项一律 400），
   再由制图服务渲染。仅 PM / PD / BD 可导出（与原导出权限一致）。
 
 ## 3. 验收

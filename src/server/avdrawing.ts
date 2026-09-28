@@ -1,6 +1,6 @@
 /* ===== Bridge to the Python drawing service (services/drawing) =====
    Spawns `python -m avdrawing.ingest.cli` per request: JSON on stdout, errors as
-   {"error": ...} with exit code 2; and `python -m avdrawing.dxf` to render DXF. One app, one intranet server (§14), no
+   {"error": ...} with exit code 2; and the DXF / Word renderers. One app, one intranet server (§14), no
    second long-running process to supervise. */
 
 import { spawn } from 'child_process';
@@ -47,15 +47,17 @@ export async function runDrawingCli(args: string[], stdin?: string): Promise<Rec
   );
 }
 
-/* Render a drawing (src/av/core/drawing.ts) to DXF with ezdxf: R2010, mm, the
-   §8.1 layers. Returns the file's bytes. */
-export async function renderDxf(drawing: unknown): Promise<Buffer> {
-  const dir = await mkdtemp(path.join(os.tmpdir(), 'av-dxf-'));
+/* Render a JSON payload to a file with one of the service's renderers and
+   return the bytes: avdrawing.dxf (a drawing from src/av/core/drawing.ts ->
+   R2010, mm, the §8.1 layers) or avdrawing.proposal (a ProposalPayload -> the
+   Word technical proposal). */
+export async function renderFile(module: 'avdrawing.dxf' | 'avdrawing.proposal', payload: unknown, ext: string): Promise<Buffer> {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'av-render-'));
   try {
-    const src = path.join(dir, 'drawing.json');
-    const dst = path.join(dir, 'out.dxf');
-    await writeFile(src, JSON.stringify(drawing));
-    const { code, err } = await runPython(['-m', 'avdrawing.dxf', src, dst]);
+    const src = path.join(dir, 'payload.json');
+    const dst = path.join(dir, `out.${ext}`);
+    await writeFile(src, JSON.stringify(payload));
+    const { code, err } = await runPython(['-m', module, src, dst]);
     if (code !== 0) throw new DrawingServiceError(err.trim().split('\n').pop() || `制图服务退出码 ${code}`);
     return await readFile(dst);
   } finally {
