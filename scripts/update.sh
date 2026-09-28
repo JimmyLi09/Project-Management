@@ -35,6 +35,21 @@ npm install
 echo "==> 构建 Building…"
 npm run build
 
+echo "==> 制图服务 Python（AV 平台：图纸解析 / DXF / 技术方案书 / 历史案例）…"
+# 虚拟环境在 services/drawing/.venv(已 .gitignore,更新不会动它)。没装 Python 时
+# 只提示,不中断:AV 以外的功能不受影响。
+PYV=services/drawing/.venv
+if [ ! -x "$PYV/bin/python" ] && command -v python3 >/dev/null 2>&1; then
+  python3 -m venv "$PYV" || true
+fi
+if [ -x "$PYV/bin/python" ]; then
+  "$PYV/bin/python" -m pip install -q -r services/drawing/requirements.txt \
+    && echo "✓ 制图服务依赖已就绪" \
+    || echo "⚠ 制图服务依赖安装失败(需能上外网),AV 的图纸解析 / DXF / 方案书 / 案例导入暂不可用"
+else
+  echo "⚠ 未找到 python3(建议 3.11)。AV 的图纸解析 / DXF / 方案书 / 案例导入需要它,装好后重新运行本脚本"
+fi
+
 echo "==> 重启服务 Restarting…"
 if command -v pm2 >/dev/null 2>&1; then
   pm2 restart audax 2>/dev/null || pm2 start npm --name audax -- start

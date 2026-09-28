@@ -10,7 +10,9 @@ import os from 'os';
 import path from 'path';
 
 const SERVICE_DIR = path.join(process.cwd(), 'services', 'drawing');
-const PYTHON = process.env.AV_PYTHON || path.join(SERVICE_DIR, '.venv', 'bin', 'python');
+const PYTHON = process.env.AV_PYTHON || (process.platform === 'win32'
+  ? path.join(SERVICE_DIR, '.venv', 'Scripts', 'python.exe')
+  : path.join(SERVICE_DIR, '.venv', 'bin', 'python'));
 const TIMEOUT_MS = 120_000;
 
 export const SAMPLE_STORE = path.join(process.cwd(), 'data', 'av-samples', 'led.jsonl');
@@ -20,13 +22,17 @@ export class DrawingServiceError extends Error {}
 function runPython(args: string[], stdin?: string): Promise<{ code: number | null; out: string; err: string }> {
   if (!existsSync(PYTHON)) {
     return Promise.reject(new DrawingServiceError(
-      `制图服务未安装（找不到 ${PYTHON}）。按 services/drawing/README.md 建立虚拟环境，或设置 AV_PYTHON。`,
+      `制图服务未安装（找不到 ${PYTHON}）。装好 Python 3.11 后重新运行 scripts/update，或按 services/drawing/README.md 建立虚拟环境，或设置 AV_PYTHON。`,
     ));
   }
   return new Promise((resolve, reject) => {
-    const child = spawn(PYTHON, args, { cwd: SERVICE_DIR });
+    // UTF-8 both ways: a Windows pipe otherwise defaults to the ANSI code page and
+    // Chinese in the JSON output (or in a drawing's file name) fails to encode.
+    const child = spawn(PYTHON, args, { cwd: SERVICE_DIR, env: { ...process.env, PYTHONUTF8: '1', PYTHONIOENCODING: 'utf-8' } });
     let out = '';
     let err = '';
+    child.stdout.setEncoding('utf8');   // decode across chunk boundaries (large case imports)
+    child.stderr.setEncoding('utf8');
     const timer = setTimeout(() => { child.kill(); reject(new DrawingServiceError('制图服务超时')); }, TIMEOUT_MS);
     child.stdout.on('data', (d) => { out += d; });
     child.stderr.on('data', (d) => { err += d; });
