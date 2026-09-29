@@ -263,3 +263,90 @@ textarea.in { width: 100%; min-height: 46px; resize: vertical }
 }
 .md-doc > *:first-child { margin-top: 0 }
 .md-table th, .md-table td { word-break: break-word }
+
+/* ===== 0929 AV 模块改版(原型:AV 方案成本模块 · UI/UX 改版原型)=====
+   只在 AV 模块内生效。底色偏冷、卡片不带阴影、圆角 10px、主色更橙 ——
+   这几个变量一重定义,模块里现成的 .panel / .kpi / .badge 就跟着换了,
+   不用逐个组件改;站里其余页面读的还是 :root 那一套,一个像素不动。 */
+.av-mod {
+  --bg: #F5F6F8;
+  --card: #FFFFFF;
+  --border: #E5E7EB;
+  --row-line: #F0F1F3;
+  --row-line2: #F5F6F7;
+  --hover-bg: #FAFBFC;
+  --text: #1F2328;
+  --text2: #6B7280;
+  --navy900: #1F2328;
+  --navy700: #2F6FA8;
+  --bronze: #C4652A;
+  --av-accent-ink: #B85C1E;
+  --av-accent-bg: #FDF3EB;
+  --av-accent-line: #F0CDAE;
+  --shadow: none;
+  color: var(--text);
+}
+.av-mod .panel, .av-mod .kpi { border-radius: 10px; box-shadow: none }
+.av-mod .kpi { padding: 18px 20px }
+.av-mod .kpi-value { font-size: 30px; color: var(--text) }
+
+/* 面包屑 */
+.av-crumb { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: #9CA3AF; margin-bottom: 6px }
+.av-crumb button { font-size: 12.5px; color: #9CA3AF; cursor: pointer }
+.av-crumb button:hover { color: var(--bronze) }
+
+/* 页头:标题 + 一句说明 + 右侧动作 */
+.av-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; margin-bottom: 18px; flex-wrap: wrap }
+.av-head h1 { margin: 0 0 4px 0; font-size: 22px; font-weight: 700; color: var(--text) }
+.av-head p { margin: 0; font-size: 13px; color: var(--text2) }
+
+/* 页内标签 —— 原来是四个独立菜单,现在是一页里的四个标签 */
+.av-tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); margin-bottom: 16px; flex-wrap: wrap }
+.av-tab {
+  display: flex; align-items: center; gap: 7px; padding: 11px 18px; font-size: 14px;
+  color: var(--text2); cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -1px;
+}
+.av-tab:hover:not(:disabled) { color: var(--av-accent-ink) }
+.av-tab.on { font-weight: 700; color: var(--av-accent-ink); border-bottom-color: var(--bronze) }
+.av-tab:disabled { color: #C9CDD2; cursor: default }
+.av-tab-n { font-size: 12px; font-weight: 700; background: var(--hover-bg); color: var(--text2); padding: 2px 8px; border-radius: 20px }
+.av-tab.on .av-tab-n { background: var(--av-accent-bg); color: var(--av-accent-ink) }
+.av-tab-off { font-size: 12px; color: #C9CDD2 }
+
+/* 侧栏里的 AV 分组:一个可展开的父项 + 6 个子项 */
+.nav-group { margin: 6px 0 }
+.nav-group-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%;
+  padding: 11px 14px; border-radius: 9px; font-size: 14px; font-weight: 600; cursor: pointer;
+  color: var(--text2);
+}
+.nav-group-head:hover { background: var(--hover-bg) }
+.nav-group.open > .nav-group-head,
+.nav-group.here > .nav-group-head { background: #FDF3EB; color: #B85C1E; font-weight: 700 }
+.nav-group.open > .nav-group-head { border-radius: 9px 9px 0 0 }
+.nav-group-caret { transition: transform .15s ease; flex-shrink: 0 }
+.nav-group.open .nav-group-caret { transform: rotate(90deg) }
+.nav-sub { background: #FEF9F4; border-radius: 0 0 9px 9px; padding: 4px 0 8px 0; overflow: hidden }
+.nav-sub button {
+  display: block; width: 100%; text-align: left; padding: 9px 14px 9px 29px;
+  font-size: 13.5px; color: var(--text2); cursor: pointer; border-left: 3px solid transparent;
+}
+.nav-sub button:hover { color: #B85C1E }
+.nav-sub button.on { padding-left: 26px; font-weight: 700; color: #B85C1E; border-left-color: #C4652A }
+
+/* AV 工作台的项目表 */
+.av-row {
+  display: grid; grid-template-columns: 2.4fr 2.2fr 1.2fr 1fr 1fr; gap: 14px; align-items: center;
+  padding: 14px 20px; border-top: 1px solid var(--row-line2); font-size: 13.5px; min-width: 0;
+}
+.av-row-head {
+  padding: 11px 20px; background: var(--hover-bg); border-top: none;
+  font-size: 12px; font-weight: 700; color: var(--text2);
+}
+.av-next { font-size: 13px; font-weight: 500; color: var(--bronze); cursor: pointer; text-align: left; justify-self: start }
+.av-next:hover { color: var(--av-accent-ink); text-decoration: underline }
+.av-empty { padding: 26px 20px; text-align: center; font-size: 13px; color: var(--text2) }
+@media (max-width: 1100px) {
+  .av-row { grid-template-columns: 1.6fr 1.4fr 1fr; }
+  .av-row > :nth-child(4) { display: none }
+}

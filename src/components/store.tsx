@@ -13,13 +13,17 @@ import { DEFAULT_POINT_RULES, rulesAt, type PointRuleVersion, type PointRules } 
 import { DEFAULT_KPI_RULES, kpiRulesAt, type KpiRuleVersion, type KpiRules } from '@/lib/kpi';
 
 export interface View {
-  name: 'overview' | 'projects' | 'team' | 'mytasks' | 'dupdate' | 'stats' | 'contacts' | 'finance' | 'registers' | 'avinquiry' | 'ledingest' | 'ledstudio' | 'prjstudio' | 'elvstudio' | 'pvstudio' | 'avcost' | 'avquote' | 'avcases' | 'avprices' | 'users' | 'templates' | 'rules' | 'knowledge' | 'training' | 'kpi' | 'project';
+  name: 'overview' | 'projects' | 'team' | 'mytasks' | 'dupdate' | 'stats' | 'contacts' | 'finance' | 'registers' | 'avhome' | 'avconfig' | 'avcostquote' | 'avlibrary' | 'avinquiry' | 'ledingest' | 'ledstudio' | 'prjstudio' | 'elvstudio' | 'pvstudio' | 'avcost' | 'avquote' | 'avcases' | 'avprices' | 'users' | 'templates' | 'rules' | 'knowledge' | 'training' | 'kpi' | 'project';
   pid?: string;
   tab?: 'overview' | 'schedule' | 'checklist' | 'jobrecord';
   pkg?: number;
   /* 0922 变更单:从统计 / 汇报上的某个数字点进来时,带上「那个数字数的是
      哪一组项目」—— 项目列表照它过滤,并在顶上标出来、可一键清除。 */
   focus?: Focus;
+  /* 0929 AV 改版:合并页里现在开着哪个标签(方案配置的业务线、成本与报价的
+     两档、资料库的两档)。放在 view 上而不是各页自己的 state —— 从工作台
+     「去报价 ›」这种链接要能直接落到指定标签上。 */
+  sub?: string;
 }
 
 interface Store {
