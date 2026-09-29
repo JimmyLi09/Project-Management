@@ -2,7 +2,7 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import type { User } from '@/lib/types';
-import { StoreProvider, useStore } from './store';
+import { StoreProvider, useStore, type View } from './store';
 import { allOverdue, fmtDate, isMyProject, pendingWorkflowAction } from '@/lib/project';
 import { canCreate, canViewPrices, isFull } from '@/lib/permissions';
 import { roleTerm } from '@/lib/terms';
@@ -17,6 +17,10 @@ import StatsView from './views/StatsView';
 import ContactsView from './views/ContactsView';
 import RegistersView from './views/RegistersView';
 import AvCostView from './views/AvCostView';
+import AvHomeView from './views/AvHomeView';
+import AvConfigView from './views/AvConfigView';
+import AvCostQuoteView from './views/AvCostQuoteView';
+import AvLibraryView from './views/AvLibraryView';
 import AvInquiryView from './views/AvInquiryView';
 import AvPricesView from './views/AvPricesView';
 import PrjStudioView from './views/PrjStudioView';
@@ -116,6 +120,30 @@ function Shell() {
     </button>
   );
 
+  /* ===== 0929 改版:AV 收成一个分组 =====
+     原来 10 个 AV 入口平铺在侧栏里,和项目、待办、档案挤在一起,一眼扫不完。
+     现在收成一个可展开的父项 + 6 个子项。当前在 AV 模块里就自动展开;手动
+     开合的状态记在浏览器里,不跟着刷新丢。 */
+  const AV_VIEWS: View['name'][] = [
+    'avhome', 'avinquiry', 'ledingest', 'avconfig', 'avcostquote', 'avlibrary',
+    /* 老的单页入口仍然渲染得出来(工作台的「下一步」和 AvSteps 会跳过去),
+       所以也算在「人在 AV 模块里」之内 */
+    'ledstudio', 'prjstudio', 'elvstudio', 'pvstudio', 'avcost', 'avquote', 'avcases', 'avprices',
+  ];
+  const inAv = AV_VIEWS.includes(view.name);
+  const [avOpen, setAvOpen] = useState(() => {
+    if (typeof window === 'undefined') return false;
+    return localStorage.getItem('audax.avNavOpen') === '1';
+  });
+  const toggleAv = () => {
+    const next = !(avOpen || inAv);
+    setAvOpen(next);
+    try { localStorage.setItem('audax.avNavOpen', next ? '1' : '0'); } catch {}
+  };
+  const avSub = (name: View['name'], label: string, on?: boolean) => (
+    <button key={name} className={(on ?? view.name === name) ? 'on' : ''} onClick={() => go(name)}>{label}</button>
+  );
+
   const myOpenCount = useMemo(() => {
     let n = 0;
     projects.forEach((p) => {
@@ -162,16 +190,27 @@ function Shell() {
           {navItem('stats', 'trending', t('统计报表', 'Reports'))}
           {navItem('contacts', 'users', t('通讯录', 'Contacts'))}
           {navItem('registers', 'layers', t('项目档案', 'Registers'))}
-          {navItem('avinquiry', 'plus', t('AV 立项询价', 'AV Inquiry'))}
-          {navItem('ledingest', 'layers', t('LED 图纸校核', 'LED Drawing Review'))}
-          {navItem('ledstudio', 'target', t('LED 方案配置', 'LED Configuration'))}
-          {navItem('prjstudio', 'presentation', t('投影方案配置', 'Projection Config'))}
-          {navItem('elvstudio', 'layers', t('弱电方案配置', 'ELV Config'))}
-          {navItem('pvstudio', 'grid', t('光伏方案配置', 'Solar PV Config'))}
-          {canViewPrices(me) && navItem('avcost', 'trending', t('AV 成本核算', 'AV Costing'))}
-          {canViewPrices(me) && navItem('avquote', 'check', t('AV 报价审批', 'AV Quotation'))}
-          {canViewPrices(me) && navItem('avcases', 'search', t('AV 历史案例', 'AV Past Projects'))}
-          {canViewPrices(me) && navItem('avprices', 'settings', t('AV 价格库', 'AV Price Library'))}
+          <div className={`nav-group${avOpen || inAv ? ' open' : ''}${inAv ? ' here' : ''}`} data-testid="av-group">
+            <button className="nav-group-head" onClick={toggleAv} aria-expanded={avOpen || inAv}>
+              <Icon name="target" size={17} />
+              <span className="grow" style={{ textAlign: 'left' }}>{t('AV 方案成本', 'AV Platform')}</span>
+              <svg className="nav-group-caret" width="13" height="13" viewBox="0 0 14 14" fill="none"
+                stroke="currentColor" strokeWidth="1.8" aria-hidden="true"><path d="M5 3 L9.5 7 L5 11" /></svg>
+            </button>
+            {(avOpen || inAv) && (
+              <div className="nav-sub" data-testid="av-subnav">
+                {avSub('avhome', t('AV 工作台', 'Workbench'))}
+                {avSub('avinquiry', t('立项询价', 'Inquiry'))}
+                {avSub('ledingest', t('图纸校核', 'Drawing review'))}
+                {avSub('avconfig', t('方案配置', 'Configuration'),
+                  ['avconfig', 'ledstudio', 'prjstudio', 'elvstudio', 'pvstudio'].includes(view.name))}
+                {canViewPrices(me) && avSub('avcostquote', t('成本与报价', 'Cost & quotation'),
+                  ['avcostquote', 'avcost', 'avquote'].includes(view.name))}
+                {canViewPrices(me) && avSub('avlibrary', t('资料库', 'Library'),
+                  ['avlibrary', 'avcases', 'avprices'].includes(view.name))}
+              </div>
+            )}
+          </div>
           {(isFull(me) || me.role === 'finance') && navItem('finance', 'trending', t('收款看板', 'Collections'), financeAlertCount)}
           {isFull(me) && navItem('users', 'settings', t('用户管理', 'Users'))}
           {navItem('knowledge', 'book', t('知识库', 'Knowledge'))}
@@ -295,6 +334,10 @@ function Shell() {
             {view.name === 'stats' && <StatsView />}
             {view.name === 'contacts' && <ContactsView />}
             {view.name === 'registers' && <RegistersView />}
+            {view.name === 'avhome' && <AvHomeView />}
+            {view.name === 'avconfig' && <AvConfigView />}
+            {view.name === 'avcostquote' && <AvCostQuoteView />}
+            {view.name === 'avlibrary' && <AvLibraryView />}
             {view.name === 'avinquiry' && <AvInquiryView />}
             {view.name === 'ledingest' && <LedIngestView />}
             {view.name === 'ledstudio' && <LedStudioView />}
