@@ -1,9 +1,12 @@
+# Comments here must stay ASCII/English: on an English Windows server pip reads
+# this file in the system code page (cp1252) and non-ASCII bytes raise
+# UnicodeDecodeError, which aborts the whole install. See AV-014 section 9.
 ezdxf==1.4.4
-# B 级矢量 PDF 解析
+# Grade B: vector PDF parsing
 pymupdf==1.28.2
-# C 级图纸视觉识别（仅在设置 ANTHROPIC_API_KEY 时使用）
+# Grade C: drawing vision recognition (only used when ANTHROPIC_API_KEY is set)
 anthropic==1.8.0
-# 技术方案书（Word）
+# Technical proposal (Word)
 python-docx==1.1.2
-# 历史案例：读取公司统计表（xlsx）
+# Case library: read the company project spreadsheet (xlsx)
 openpyxl==3.1.5

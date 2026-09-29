@@ -40,6 +40,10 @@ call npm run build || goto :err
 echo ==^> 制图服务 Python ^(AV 平台: 图纸解析 / DXF / 技术方案书 / 历史案例^)...
 REM 虚拟环境在 services\drawing\.venv(已 .gitignore,更新不会动它)。没装 Python 时
 REM 只提示,不中断: AV 以外的功能不受影响。
+REM 英文版 Windows 的系统编码是 cp1252,pip 会按它读 requirements.txt,里面只要有
+REM 一个非 ASCII 字节就报 UnicodeDecodeError 整个装不上。那份文件的注释已改成英文,
+REM 这里再设一道 PYTHONUTF8=1 兜底 —— 以后谁往里写了中文也不会炸。
+set "PYTHONUTF8=1"
 set "PYV=services\drawing\.venv"
 if not exist "%PYV%\Scripts\python.exe" (
   where py >nul 2>nul && py -3 -m venv "%PYV%"
