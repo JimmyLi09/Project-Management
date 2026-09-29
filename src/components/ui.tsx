@@ -183,3 +183,40 @@ export function Ell({ full, className, style, children, onClick }: {
     </div>
   );
 }
+
+/* ===== 0922 变更单 · REQ-011 / REQ-034:可下钻的数字 =====
+   统计与汇报上的每个数字都是一组项目数出来的,点它就该看到那一组。
+
+   数为 0 时不做成可点的:点开是一张空列表,白跑一趟,而且一排数字里有一半
+   点不动会让人以为坏了 —— 不如从样子上就看得出这个数没东西可看。
+   虚下划线是「可下钻」的统一记号,颜色用棕色,和站里其它强调色一致。 */
+export function Drill({ enabled = true, title, onClick, children, style }: {
+  enabled?: boolean;
+  title?: string;
+  onClick: () => void;
+  children: React.ReactNode;
+  style?: React.CSSProperties;
+}) {
+  if (!enabled) return <span style={style}>{children}</span>;
+  return (
+    <span
+      role="button"
+      tabIndex={0}
+      data-drill="1"
+      title={title}
+      onClick={(e) => { e.stopPropagation(); onClick(); }}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); onClick(); }
+      }}
+      style={{
+        cursor: 'pointer',
+        textDecoration: 'underline',
+        textDecorationStyle: 'dotted',
+        textDecorationColor: 'var(--bronze)',
+        textUnderlineOffset: 3,
+        ...style,
+      }}>
+      {children}
+    </span>
+  );
+}

@@ -75,6 +75,12 @@ export interface StepStat {
   target: number | null;    // SLA target (working days); null = reference only
   onTime: number;           // # of samples within target (0 when no SLA)
   onTimeRate: number | null; // onTime / samples, null when no SLA or no samples
+  /* 0922 变更单:这几个数字要能点开看是哪些项目。样本集是一边算耗时一边攒
+     出来的(要知道每个项目在这一步花了几天),外面用谓词重算不出来,所以
+     顺手把 id 带出去。late = 超过 SLA 的那些 —— 点一个不及格的达标率,
+     想看的是谁拖的,不是全部样本。 */
+  ids: string[];
+  lateIds: string[];
 }
 
 export interface WorkflowMetrics {
@@ -82,6 +88,7 @@ export interface WorkflowMetrics {
   overallSamples: number;   // total SLA-bearing observations
   overallOnTime: number;
   overallRate: number | null;
+  overallLateIds: string[]; // 0922 变更单:总体达标率点开 = 所有未达标的项目
 }
 
 export function workflowMetrics(projects: Project[]): WorkflowMetrics {
@@ -89,6 +96,8 @@ export function workflowMetrics(projects: Project[]): WorkflowMetrics {
   const steps: StepStat[] = STEPS.map((s) => {
     const target = SLA_TARGETS[s.key] ?? null;
     const durations: number[] = [];
+    const ids: string[] = [];
+    const lateIds: string[] = [];
     let onTime = 0;
     live.forEach((p) => {
       if (!s.reached(p)) return;
@@ -97,7 +106,9 @@ export function workflowMetrics(projects: Project[]): WorkflowMetrics {
       if (from == null || to == null || to < from) return;
       const d = workingDaysBetween(new Date(from), new Date(to));
       durations.push(d);
+      ids.push(p.id);
       if (target != null && d <= target) onTime++;
+      else if (target != null) lateIds.push(p.id);
     });
     const samples = durations.length;
     const avgDays = samples ? durations.reduce((a, b) => a + b, 0) / samples : null;
@@ -105,20 +116,24 @@ export function workflowMetrics(projects: Project[]): WorkflowMetrics {
     return {
       key: s.key, zh: s.zh, en: s.en, samples, avgDays, maxDays, target, onTime,
       onTimeRate: target != null && samples ? onTime / samples : null,
+      ids, lateIds,
     };
   });
 
   let overallSamples = 0;
   let overallOnTime = 0;
+  const overallLate = new Set<string>();
   steps.forEach((s) => {
     if (s.target == null) return;
     overallSamples += s.samples;
     overallOnTime += s.onTime;
+    s.lateIds.forEach((id) => overallLate.add(id));
   });
   return {
     steps,
     overallSamples,
     overallOnTime,
     overallRate: overallSamples ? overallOnTime / overallSamples : null,
+    overallLateIds: [...overallLate],
   };
 }
