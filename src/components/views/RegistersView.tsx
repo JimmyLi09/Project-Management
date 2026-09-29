@@ -10,8 +10,10 @@ import { Icon } from '../ui';
 import { FieldEditor } from './JobRecordTab';
 import {
   REGISTERS, baseDefOf, customRegisterSvcs, statusFamily, statusMeta, defaultStatus, recordVal, fieldVal, projSourceOf, projFieldVal, fieldsOf, formulaText,
+  isDerivedKey, isOverridden, derivedVal,
   isIncomplete, isExpiring, type RegisterDef, type FieldDef,
 } from '@/lib/records';
+import type { AvDerived } from '@/lib/records';
 import type { Project, ServicePackage } from '@/lib/types';
 
 interface Row { p: Project; pi: number; pk: ServicePackage; }
@@ -27,7 +29,7 @@ function mainDate(def: RegisterDef, pk: ServicePackage, p: Project): string {
 }
 
 export default function RegistersView() {
-  const { projects, me, dispatch, openProject, refresh, setToast, recordFields } = useStore();
+  const { projects, me, dispatch, openProject, refresh, setToast, recordFields, avDerived } = useStore();
   const { lang, t } = useLang();
   const [svc, setSvc] = useState(REGISTERS[0].svc);
   const [q, setQ] = useState('');
@@ -115,7 +117,7 @@ export default function RegistersView() {
       if (sort.key === 'status') return String((r.pk.record?.status as string) || defaultStatus(def.kind));
       const key = sort.key.slice(2);
       const f = def.fields.find((x) => x.key === key);
-      const v = f && f.type === 'formula' ? formulaText(f, def.fields, r.pk.record) : (f ? fieldVal(f, r.pk.record, r.p) : recordVal(r.pk.record, key));
+      const v = f && f.type === 'formula' ? formulaText(f, def.fields, r.pk.record, avDerived[r.p.id]) : (f ? fieldVal(f, r.pk.record, r.p, avDerived[r.p.id]) : recordVal(r.pk.record, key));
       /* 空值一律排最后,升降序都是 —— 空格夹在中间最难扫 */
       return v.trim() ? v.toLowerCase() : '\uffff';
     };
@@ -159,7 +161,7 @@ export default function RegistersView() {
     const body = rows.map((r) => {
       const sm = statusMeta(def.kind, (r.pk.record?.status as string) || defaultStatus(def.kind));
       return [r.p.name + (pkgSuffix(r.p, r.pi) ? ' ' + pkgSuffix(r.p, r.pi) : ''), r.p.client || '', (r.p.owners || []).join(' / '), lang === 'zh' ? sm[1] : sm[2],
-        ...def.fields.map((f) => (f.type === 'formula' ? formulaText(f, def.fields, r.pk.record) : fieldVal(f, r.pk.record, r.p)).replace(/\n/g, ' '))];
+        ...def.fields.map((f) => (f.type === 'formula' ? formulaText(f, def.fields, r.pk.record, avDerived[r.p.id]) : fieldVal(f, r.pk.record, r.p, avDerived[r.p.id])).replace(/\n/g, ' '))];
     });
     const csv = [head, ...body].map((r) => r.map(esc).join(',')).join('\r\n');
     const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' });
@@ -296,12 +298,12 @@ export default function RegistersView() {
                     {def.fields.map((f) => (
                       <td key={f.key} style={{ ...cell, maxWidth: 220, padding: cellEditing === `${r.p.id}:${r.pi}:${f.key}` ? 4 : undefined }}>
                         {f.type === 'formula' ? (
-                          <b className="tnum">{formulaText(f, def.fields, rec)}</b>
+                          <b className="tnum">{formulaText(f, def.fields, rec, avDerived[r.p.id])}</b>
                         ) : cellEditing === `${r.p.id}:${r.pi}:${f.key}` ? (
                           <CellEditor
-                            f={f} val={fieldVal(f, rec, r.p)} lang={lang}
+                            f={f} val={fieldVal(f, rec, r.p, avDerived[r.p.id])} lang={lang}
                             onDone={async (v) => {
-                              if (v !== fieldVal(f, rec, r.p)) await dispatch(r.p.id, { type: 'setRecord', pkg: r.pi, patch: { [f.key]: v } });
+                              if (v !== fieldVal(f, rec, r.p, avDerived[r.p.id])) await dispatch(r.p.id, { type: 'setRecord', pkg: r.pi, patch: { [f.key]: v } });
                               setCellEditing(null);
                             }}
                             onCancel={() => setCellEditing(null)}
@@ -311,7 +313,8 @@ export default function RegistersView() {
                             onClick={() => canEditCells && setCellEditing(`${r.p.id}:${r.pi}:${f.key}`)}
                             title={canEditCells ? t('点击就地编辑', 'Click to edit') : undefined}
                             style={{ cursor: canEditCells ? 'text' : 'default', minHeight: 18 }}>
-                            <CellVal f={f} val={fieldVal(f, rec, r.p)} />
+                            <CellVal f={f} val={fieldVal(f, rec, r.p, avDerived[r.p.id])} />
+                            <DerivedMark fkey={f.key} rec={rec} d={avDerived[r.p.id]} />
                           </div>
                         )}
                       </td>
@@ -341,7 +344,7 @@ export default function RegistersView() {
            'Note: records come from existing service packages on projects. "Add record" and CSV import land in the next stage (need project pick + transactional import).')}
       </div>
 
-      {edit && <EditModal row={edit} def={def} onClose={() => setEdit(null)} onSave={async (patch) => {
+      {edit && <EditModal row={edit} def={def} derived={avDerived[edit.p.id]} onClose={() => setEdit(null)} onSave={async (patch) => {
         const ok = await dispatch(edit.p.id, { type: 'setRecord', pkg: edit.pi, patch });
         if (ok) setEdit(null);
       }} />}
@@ -562,12 +565,12 @@ function CellVal({ f, val }: { f: FieldDef; val: string }) {
   return <span title={val} style={{ fontSize: 12.5, whiteSpace: f.type === 'textarea' ? 'normal' : 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', display: 'inline-block', maxWidth: 210 }}>{val}</span>;
 }
 
-function EditModal({ row, def, onClose, onSave }: { row: Row; def: RegisterDef; onClose: () => void; onSave: (patch: Record<string, string>) => void }) {
+function EditModal({ row, def, derived, onClose, onSave }: { row: Row; def: RegisterDef; derived?: AvDerived; onClose: () => void; onSave: (patch: Record<string, string>) => void }) {
   const { lang, t } = useLang();
   const rec = row.pk.record;
   const [draft, setDraft] = useState<Record<string, string>>(() => {
     const d: Record<string, string> = { status: (rec?.status as string) || defaultStatus(def.kind) };
-    def.fields.forEach((f) => { d[f.key] = fieldVal(f, rec, row.p); });
+    def.fields.forEach((f) => { d[f.key] = fieldVal(f, rec, row.p, derived); });
     return d;
   });
   const [busy, setBusy] = useState(false);
@@ -665,4 +668,32 @@ function CellEditor({ f, val, lang, onDone, onCancel }: {
   return <input className="in sm" autoFocus
     type={f.type === 'date' ? 'date' : f.type === 'number' ? 'number' : 'text'}
     value={v} onKeyDown={keys} onBlur={commit} onChange={(e) => setV(e.target.value)} style={{ width: '100%' }} />;
+}
+
+/* REQ-039:这一格的数是哪来的。带过来的标一个淡淡的「配」;人改过、且和带过来的
+   不一样,就标「已人工调整」,把原来那个数留在 hover 里 —— 不留的话没人知道
+   改之前是多少,也就没法判断该信哪个。 */
+function DerivedMark({ fkey, rec, d }: { fkey: string; rec: ServicePackage['record']; d?: AvDerived }) {
+  const { t } = useLang();
+  if (!d || !isDerivedKey(fkey)) return null;
+  const dv = derivedVal(fkey, d);
+  if (dv == null) return null;
+  const when = new Date(d.at).toLocaleDateString();
+  if (isOverridden(fkey, rec, d)) {
+    return (
+      <span className="badge" data-testid="derived-override"
+        title={t(`方案配置算出来是 ${dv}(${d.packVersion} · ${when})`, `Configuration computed ${dv} (${d.packVersion} · ${when})`)}
+        style={{ background: '#fdf3eb', color: '#8A4A17', marginLeft: 6 }}>
+        {t('已人工调整', 'edited')}
+      </span>
+    );
+  }
+  if (recordVal(rec, fkey).trim()) return null;   // 抄了一份一样的,不必标
+  return (
+    <span className="badge" data-testid="derived-auto"
+      title={t(`来自 LED 方案配置(${d.packVersion} · ${when})`, `From the LED configuration (${d.packVersion} · ${when})`)}
+      style={{ background: 'var(--hover-bg)', color: 'var(--text2)', marginLeft: 6 }}>
+      {t('配', 'auto')}
+    </span>
+  );
 }

@@ -338,10 +338,12 @@ export function validateFields(raw: unknown): { ok: true; fields: FieldDef[] } |
 /* REQ-027: 算出一张资料卡上某个公式字段的值。
    派生值,不落库 —— 每次渲染时算,免得存下来之后和源字段对不上。
    算不出来(空值 / 非数字 / 除零 / 坏公式)一律返回 null,显示「—」。 */
-export function computeFormula(field: FieldDef, fields: FieldDef[], rec: ServiceRecord | undefined): number | null {
+export function computeFormula(field: FieldDef, fields: FieldDef[], rec: ServiceRecord | undefined, d?: AvDerived): number | null {
   if (field.type !== 'formula' || !field.formula) return null;
   const values: Record<string, string> = {};
-  fields.forEach((f) => { if (f.type !== 'formula') values[f.key] = recordVal(rec, f.key); });
+  /* REQ-039:数量 Total = 数量L × 数量H。L 和 H 可能是方案配置带过来的、
+     根本不在 record 里 —— 这里也得走同一套兜底,否则 Total 会算成 0。 */
+  fields.forEach((f) => { if (f.type !== 'formula') values[f.key] = fieldVal(f, rec, undefined, d); });
   /* 公式可以引用另一个公式字段 —— 递归解析,深度由 evalFormula 兜底 */
   const resolve = (key: string, depth: number): number | null => {
     const t = fields.find((f) => f.key === key);
@@ -355,8 +357,8 @@ export function computeFormula(field: FieldDef, fields: FieldDef[], rec: Service
    REQ-039: 算不出来时,如果这个 key 上有历史手填值(比如 SQM 以前是文本列、
    有人直接填过数字),回落显示那个旧值,不要让改列类型把老数据「弄丢」。
    源字段一填,算出来的值立刻盖过旧值。 */
-export function formulaText(field: FieldDef, fields: FieldDef[], rec: ServiceRecord | undefined): string {
-  const v = computeFormula(field, fields, rec);
+export function formulaText(field: FieldDef, fields: FieldDef[], rec: ServiceRecord | undefined, d?: AvDerived): string {
+  const v = computeFormula(field, fields, rec, d);
   if (v != null) return v.toFixed(field.decimals ?? 2);
   const legacy = recordVal(rec, field.key).trim();
   return legacy || '—';
@@ -409,10 +411,54 @@ export function projFieldVal(src: ProjSource, p: Project): string {
 
 /* 读一个格子的值。带上项目就走同源那套;不带(比如还没拿到项目的场合)
    退回读 record —— 调用点漏传不会炸,只是读到老值。 */
-export const fieldVal = (f: FieldDef, rec: ServiceRecord | undefined, p?: Project): string => {
+export const fieldVal = (f: FieldDef, rec: ServiceRecord | undefined, p?: Project, d?: AvDerived): string => {
   const src = p && projSourceOf(f.key);
-  return src ? projFieldVal(src, p) : recordVal(rec, f.key);
+  if (src) return projFieldVal(src, p);
+  const raw = recordVal(rec, f.key);
+  /* REQ-039:手填过就以手填为准(覆写),没填过才用方案配置带过来的 */
+  if (raw !== '') return raw;
+  const dv = derivedVal(f.key, d);
+  return dv == null ? '' : String(dv);
 };
+
+/* ===== REQ-039 收尾:资料卡上四个数由 LED 方案配置带过来(0929 确认)=====
+   数量 L / 数量 H / 电源线 / 数据线。它们是 LED 规则包 F3(箱体排布)与
+   F6–F9(回路与线缆)的输出 —— 资料卡上没有箱体库和控制系统这些输入,自己
+   算不出来,所以不是公式字段,而是从方案配置带过来的派生值。
+
+   「带过来但允许覆写」:record 里没有值就显示带过来的数;有人填过就以他填的
+   为准,并在界面上标出来、把带过来的那个数留在 hover 里。现场和图纸对不上是
+   常事,不能不让人改;但改过和没改过必须一眼分得出。 */
+export interface AvDerived {
+  qtyL: number;
+  qtyH: number;
+  qtyTotal: number;
+  powerCable: number;
+  dataCable: number;
+  packVersion: string;
+  at: number;
+}
+
+const DERIVED_KEYS: Record<string, keyof AvDerived> = {
+  qtyL: 'qtyL', qtyH: 'qtyH', powerCable: 'powerCable', dataCable: 'dataCable',
+};
+
+export const isDerivedKey = (key: string) => key in DERIVED_KEYS;
+
+export function derivedVal(key: string, d?: AvDerived): number | undefined {
+  const k = DERIVED_KEYS[key];
+  return k && d ? (d[k] as number) : undefined;
+}
+
+/* 这一格是不是「人改过、和带过来的不一样」。相等就不算覆写 —— 有人照着
+   方案配置抄了一遍进去,没必要标成人工调整。 */
+export function isOverridden(key: string, rec: ServiceRecord | undefined, d?: AvDerived): boolean {
+  if (!isDerivedKey(key) || !d) return false;
+  const raw = recordVal(rec, key).trim();
+  if (!raw) return false;
+  const dv = derivedVal(key, d);
+  return dv != null && Number(raw) !== dv;
+}
 
 export type ProjFieldResult = { ok: true; log: string | null } | { ok: false; error: string };
 

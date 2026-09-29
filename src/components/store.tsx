@@ -7,7 +7,7 @@ import type { Project, User } from '@/lib/types';
 import type { ProjectAction } from '@/server/actions';
 import type { Identity } from '@/lib/permissions';
 import type { Handoff, StoredDrawing } from '@/av/core/handoff';
-import type { FieldOverrides } from '@/lib/records';
+import type { AvDerived, FieldOverrides } from '@/lib/records';
 import type { Focus } from '@/lib/focus';
 import { DEFAULT_POINT_RULES, rulesAt, type PointRuleVersion, type PointRules } from '@/lib/points';
 import { DEFAULT_KPI_RULES, kpiRulesAt, type KpiRuleVersion, type KpiRules } from '@/lib/kpi';
@@ -55,6 +55,10 @@ interface Store {
   /* REQ-023: 用户改过的资料卡字段定义,按服务类型覆盖出厂默认 */
   recordFields: FieldOverrides;
   refreshRecordFields: () => Promise<void>;
+  /* REQ-039:资料卡上数量 L/H、电源线、数据线由 LED 方案配置带过来。
+     按项目 id 存一份,登记表跨项目一张表也只取这一次。 */
+  avDerived: Record<string, AvDerived>;
+  refreshAvDerived: () => Promise<void>;
   /* REQ-038: 积分规则的全部版本 + 「当下这一版」。按项目创建日取版本用 rulesFor。 */
   pointRuleVersions: PointRuleVersion[];
   pointRules: PointRules;
@@ -77,6 +81,7 @@ export function StoreProvider({ user, children }: { user: User; children: React.
   const [projects, setProjects] = useState<Project[]>([]);
   const [users, setUsers] = useState<User[]>([]);
   const [recordFields, setRecordFields] = useState<FieldOverrides>({});
+  const [avDerived, setAvDerived] = useState<Record<string, AvDerived>>({});
   const [pointRuleVersions, setPointRuleVersions] = useState<PointRuleVersion[]>([]);
   const [kpiRuleVersions, setKpiRuleVersions] = useState<KpiRuleVersion[]>([]);
   const [view, setView] = useState<View>({ name: 'overview' });
@@ -109,6 +114,12 @@ export function StoreProvider({ user, children }: { user: User; children: React.
     if (res.ok) setRecordFields(((await res.json()).overrides || {}) as FieldOverrides);
   }, []);
 
+  /* REQ-039: LED 方案配置算出来的那几个数,一次取全 */
+  const refreshAvDerived = useCallback(async () => {
+    const res = await fetch('/api/av/derived');
+    if (res.ok) setAvDerived(((await res.json()).derived || {}) as Record<string, AvDerived>);
+  }, []);
+
   /* REQ-038: 积分规则同样是全局的,取一次即可 */
   const refreshPointRules = useCallback(async () => {
     const res = await fetch('/api/point-rules');
@@ -124,12 +135,13 @@ export function StoreProvider({ user, children }: { user: User; children: React.
     refresh();
     refreshUsers();
     refreshRecordFields();
+    refreshAvDerived();
     refreshPointRules();
     refreshKpiRules();
     /* light polling so teammates' changes appear without manual reload */
     const t = setInterval(refresh, 30_000);
     return () => clearInterval(t);
-  }, [refresh, refreshUsers, refreshRecordFields, refreshPointRules, refreshKpiRules]);
+  }, [refresh, refreshUsers, refreshRecordFields, refreshAvDerived, refreshPointRules, refreshKpiRules]);
 
   const dispatch = useCallback((pid: string, action: ProjectAction) => {
     /* v2.2 [P0-3] strict optimistic lock. Serialize per project so a user's own
@@ -220,6 +232,8 @@ export function StoreProvider({ user, children }: { user: User; children: React.
     setLedHandoff,
     recordFields,
     refreshRecordFields,
+    avDerived,
+    refreshAvDerived,
     pointRuleVersions,
     pointRules: rulesAt(pointRuleVersions, Date.now()),
     rulesFor: (createdAt: number) => (pointRuleVersions.length ? rulesAt(pointRuleVersions, createdAt) : DEFAULT_POINT_RULES),
@@ -227,7 +241,7 @@ export function StoreProvider({ user, children }: { user: User; children: React.
     kpiRuleVersions,
     kpiRules: kpiRuleVersions.length ? kpiRulesAt(kpiRuleVersions, Date.now()) : DEFAULT_KPI_RULES,
     refreshKpiRules,
-  }), [user, projects, users, view, toast, dispatch, createProject, removeProject, refresh, refreshUsers, recordFields, refreshRecordFields, pointRuleVersions, refreshPointRules, kpiRuleVersions, refreshKpiRules, ledProjectId, ledIngest, ledHandoff]);
+  }), [user, projects, users, view, toast, dispatch, createProject, removeProject, refresh, refreshUsers, recordFields, refreshRecordFields, avDerived, refreshAvDerived, pointRuleVersions, refreshPointRules, kpiRuleVersions, refreshKpiRules, ledProjectId, ledIngest, ledHandoff]);
 
   return <Ctx.Provider value={store}>{children}</Ctx.Provider>;
 }
