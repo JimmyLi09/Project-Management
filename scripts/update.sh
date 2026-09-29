@@ -38,6 +38,9 @@ npm run build
 echo "==> 制图服务 Python（AV 平台：图纸解析 / DXF / 技术方案书 / 历史案例）…"
 # 虚拟环境在 services/drawing/.venv(已 .gitignore,更新不会动它)。没装 Python 时
 # 只提示,不中断:AV 以外的功能不受影响。
+# PYTHONUTF8=1 与 update.bat 保持一致:这边的 locale 通常本来就是 UTF-8,
+# 但两个脚本的行为最好别有差别,免得只在其中一台上复现的问题。
+export PYTHONUTF8=1
 PYV=services/drawing/.venv
 if [ ! -x "$PYV/bin/python" ] && command -v python3 >/dev/null 2>&1; then
   python3 -m venv "$PYV" || true
