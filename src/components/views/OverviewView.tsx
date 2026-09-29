@@ -3,7 +3,7 @@
 import React, { useMemo, useState } from 'react';
 import { useStore } from '../store';
 import {
-  fmtDate, isMyProject, overdueItems, pendingWorkflowAction, pkgStart, pkgSuffix, planDates, projCode, projectHealth, projStage,
+  fmtDate, isMyProject, overdueItems, pendingWorkflowAction, pkgStart, pkgSuffix, planDates, projectHealth, projStage,
   schedProgress, staleInfo, todayMid,
 } from '@/lib/project';
 import { teamLoads } from '@/lib/alloc';
@@ -65,7 +65,7 @@ export default function OverviewView() {
     const rows = active.flatMap((p) => [
       ...overdueItems(p).map((od) => ({
         pid: p.id, key: `od-${p.id}-${od.pi}-${od.idx}`, color: 'var(--danger)',
-        code: projCode(p), project: p.name,
+        project: p.name,
         issue: join(svc(p, od.pi), od.row.phase, lang === 'zh' ? od.row.task : od.row.taskEn || od.row.task),
         days: od.days as number | null,
       })),
@@ -74,7 +74,7 @@ export default function OverviewView() {
         .filter((x) => x.r.status === 'block')
         .map((x) => ({
           pid: p.id, key: `bl-${p.id}-${x.pi}-${x.i}`, color: 'var(--warning)',
-          code: projCode(p), project: p.name,
+          project: p.name,
           issue: join(svc(p, x.pi), x.r.phase, lang === 'zh' ? x.r.task : x.r.taskEn || x.r.task),
           days: null as number | null,
         }))),
@@ -281,7 +281,7 @@ export default function OverviewView() {
                       onClick={() => { setDrill(null); openProject(p.id); }}>
                       <div style={{ minWidth: 0, flex: 1 }}>
                         <Ell style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--navy900)' }}>
-                          {projCode(p) && <span className="tnum" style={{ color: 'var(--bronze)', marginRight: 5 }}>{projCode(p)}</span>}{p.name}
+                          {p.name}
                         </Ell>
                         <div style={{ fontSize: 11.5, color: 'var(--text2)' }}>{p.client || '—'} · {(p.owners || [])[0] || t('未指派', 'unassigned')} · {sp.pct}%</div>
                       </div>
@@ -306,7 +306,7 @@ export default function OverviewView() {
                     <span style={{ width: 8, height: 8, borderRadius: 4, background: it.color, flexShrink: 0 }} />
                     <div style={{ minWidth: 0, flex: 1 }}>
                       <Ell style={{ fontSize: 13.5, fontWeight: 700, color: 'var(--navy900)' }}>
-                        {it.code && <span className="tnum" style={{ color: 'var(--bronze)', marginRight: 5 }}>{it.code}</span>}{it.project}
+                        {it.project}
                       </Ell>
                       <Ell style={{ fontSize: 11.5, color: 'var(--text2)' }}>{it.issue}</Ell>
                     </div>
