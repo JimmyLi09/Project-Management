@@ -9,8 +9,10 @@ import { useLang } from '@/lib/i18n';
 import { Icon } from '../ui';
 import {
   REGISTERS, baseDefOf, hasRecordDef, statusFamily, statusMeta, defaultStatus, recordVal, fieldVal, isIncomplete, fieldsOf, FIELD_TYPES, formulaText, optionLabel,
+  isDerivedKey, isOverridden, derivedVal,
   type FieldDef, type FieldType, type RegisterDef,
 } from '@/lib/records';
+import type { AvDerived } from '@/lib/records';
 import type { Project, ServicePackage } from '@/lib/types';
 import JobRecordExport from './JobRecordExport';
 import KbLinks from '../KbLinks';
@@ -276,7 +278,7 @@ function RecordCard({ p, pk, pkgIdx, def: baseDef, canEd, register }: {
   p: Project; pk: ServicePackage; pkgIdx: number; def: RegisterDef; canEd: boolean;
   register?: (idx: number, api: { begin: () => void; save: () => Promise<void>; cancel: () => void } | null) => void;
 }) {
-  const { dispatch, me, recordFields } = useStore();
+  const { dispatch, me, recordFields, avDerived } = useStore();
   const { lang, t } = useLang();
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState<Record<string, string>>({});
@@ -286,13 +288,15 @@ function RecordCard({ p, pk, pkgIdx, def: baseDef, canEd, register }: {
   const def = useMemo<RegisterDef>(() => ({ ...baseDef, fields: fieldsOf(baseDef, recordFields) }), [baseDef, recordFields]);
 
   const rec = pk.record;
+  /* REQ-039:这个项目 LED 方案配置算出来的那几个数 */
+  const derived = avDerived[p.id];
   const status = (rec?.status as string) || defaultStatus(def.kind);
   const incomplete = isIncomplete(def, rec, undefined, p);
   const fam = statusFamily(def.kind);
 
   function begin() {
     const d: Record<string, string> = { status };
-    def.fields.forEach((f) => { if (f.type !== 'formula') d[f.key] = fieldVal(f, rec, p); });
+    def.fields.forEach((f) => { if (f.type !== 'formula') d[f.key] = fieldVal(f, rec, p, derived); });
     setDraft(d);
     setEditing(true);
   }
@@ -385,7 +389,7 @@ function RecordCard({ p, pk, pkgIdx, def: baseDef, canEd, register }: {
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(260px,1fr))', gap: '0 18px', padding: '0 18px' }}>
                 {gfields.map((f) => {
                   const isF = f.type === 'formula';
-                  const val = isF ? formulaText(f, def.fields, rec) : fieldVal(f, rec, p);
+                  const val = isF ? formulaText(f, def.fields, rec, derived) : fieldVal(f, rec, p, derived);
                   const missing = !isF && f.required && !val.trim();
                   /* REQ-039: 关键信息粗体 —— 公式算出来的结果本来就是重点,一并加粗 */
                   const key = !!f.highlight || isF;
@@ -401,6 +405,8 @@ function RecordCard({ p, pk, pkgIdx, def: baseDef, canEd, register }: {
                           ? <b className="tnum" style={{ color: val === '—' ? '#b6bfc9' : 'var(--navy900)' }}>{val}</b>
                           : val ? <FieldValue f={f} val={val} lang={lang} />
                           : <span style={{ color: missing ? '#b8860b' : '#b6bfc9', fontWeight: 400 }}>{missing ? t('待补充', 'to fill') : '—'}</span>}
+                        {/* REQ-039:这个数是方案配置带过来的,还是人改过的 */}
+                        <DerivedMark fkey={f.key} rec={rec} d={derived} />
                       </span>
                     </div>
                   );
@@ -681,4 +687,32 @@ function groupFields(fields: FieldDef[]): [string, FieldDef[]][] {
   });
   order.sort((a, b) => (a === '' ? -1 : b === '' ? 1 : 0));   // 未分组的置顶,其余保持出现顺序
   return order.map((g) => [g, map.get(g)!]);
+}
+
+/* REQ-039:资料卡上数量 L/H、电源线、数据线由 LED 方案配置带过来。带过来的标
+   一个淡淡的「配」;人改过、且和带过来的不一样,标「已人工调整」,把原来那个
+   数留在 hover 里 —— 不留就没人知道改之前是多少,也没法判断该信哪个。 */
+function DerivedMark({ fkey, rec, d }: { fkey: string; rec: ServicePackage['record']; d?: AvDerived }) {
+  const { t } = useLang();
+  if (!d || !isDerivedKey(fkey)) return null;
+  const dv = derivedVal(fkey, d);
+  if (dv == null) return null;
+  const when = new Date(d.at).toLocaleDateString();
+  if (isOverridden(fkey, rec, d)) {
+    return (
+      <span className="badge" data-testid="derived-override"
+        title={t(`方案配置算出来是 ${dv}(${d.packVersion} · ${when})`, `Configuration computed ${dv} (${d.packVersion} · ${when})`)}
+        style={{ background: '#fdf3eb', color: '#8A4A17', marginLeft: 6 }}>
+        {t('已人工调整', 'edited')}
+      </span>
+    );
+  }
+  if (recordVal(rec, fkey).trim()) return null;
+  return (
+    <span className="badge" data-testid="derived-auto"
+      title={t(`来自 LED 方案配置(${d.packVersion} · ${when})`, `From the LED configuration (${d.packVersion} · ${when})`)}
+      style={{ background: 'var(--hover-bg)', color: 'var(--text2)', marginLeft: 6 }}>
+      {t('配', 'auto')}
+    </span>
+  );
 }
