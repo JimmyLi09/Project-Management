@@ -70,7 +70,7 @@ git clone <repo> audax && cd audax
 docker compose up -d --build
 ```
 
-浏览器打开 `http://<服务器IP>:8080`,用上面的初始账号登录,**首次登录必须改密码**。客户端不需要安装任何东西。
+浏览器打开 `http://<服务器IP>:3000`,用上面的初始账号登录,**首次登录必须改密码**。客户端不需要安装任何东西。
 
 - 一个容器:Next.js 应用 + Python 制图服务(图纸解析、DXF 出图)。数据库、每日备份与图纸样本库都在卷 `audax-data`(容器内 `/app/data`),**这个卷需纳入服务器备份**。
 - 升级:`git pull && docker compose up -d --build`,数据不受影响。

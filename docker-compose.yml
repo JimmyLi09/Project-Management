@@ -1,9 +1,9 @@
-# 局域网部署：docker compose up -d --build，浏览器打开 http://<服务器IP>:8080
+# 局域网部署：docker compose up -d --build，浏览器打开 http://<服务器IP>:3000
 services:
   app:
     build: .
     ports:
-      - "8080:8080"
+      - "3000:3000"
     environment:
       # 会话签名密钥；留空时自动生成并保存在数据库里
       SESSION_SECRET: ${SESSION_SECRET:-}

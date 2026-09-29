@@ -25,5 +25,5 @@ COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/.next ./.next
 ENV NODE_ENV=production AUDAX_DATA_DIR=/app/data
 VOLUME /app/data
-EXPOSE 8080
-CMD ["node", "node_modules/next/dist/bin/next", "start", "-p", "8080", "-H", "0.0.0.0"]
+EXPOSE 3000
+CMD ["node", "node_modules/next/dist/bin/next", "start", "-p", "3000", "-H", "0.0.0.0"]

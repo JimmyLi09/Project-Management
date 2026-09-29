@@ -40,7 +40,7 @@ export function parseToken(token: string | undefined): SessionPayload | null {
 export async function setSessionCookie(userId: number) {
   const store = await cookies();
   // Over the public HTTPS link (Cloudflare Tunnel sets X-Forwarded-Proto) the
-  // cookie is HTTPS-only; plain http://<server IP>:8080 on the intranet keeps working.
+  // cookie is HTTPS-only; plain http://<server IP>:3000 on the intranet keeps working.
   const https = (await headers()).get('x-forwarded-proto') === 'https';
   store.set(COOKIE, createToken(userId), {
     httpOnly: true,
