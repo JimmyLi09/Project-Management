@@ -8,7 +8,8 @@
 
 ## 1. 局域网部署
 
-- `docker compose up -d --build`，浏览器访问 `http://<服务器IP>:8080`；步骤见根目录 README「局域网部署」。
+- `docker compose up -d --build`，浏览器访问 `http://<服务器IP>:3000`；步骤见根目录 README「局域网部署」。
+  （AV-013 一度把端口改成 8080，2026-09-29 已撤回；`docker-compose.yml` 映射的是 `3000:3000`。）
 - 单容器：Next.js 应用 + Python 制图服务。构建与运行都不依赖 apt：构建用完整版 node 镜像（自带编译 better-sqlite3 的工具链），
   运行用官方 python 精简镜像并拷入 node 可执行文件。
 - 数据在卷 `audax-data`（`/app/data`）：SQLite 库、每日备份、图纸样本库。首次启动创建 pd / bd / sales 三个账号，首次登录必须改密码。
