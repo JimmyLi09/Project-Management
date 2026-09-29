@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "start": "next start",
+    "start": "next start -p 8080",
     "test": "node --experimental-strip-types --test \"src/av/core/__tests__/*.test.ts\"",
     "led:regression": "node --experimental-strip-types scripts/led-regression.ts",
     "led:drawing": "node --experimental-strip-types scripts/led-drawing.ts"
