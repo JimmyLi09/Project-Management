@@ -8,6 +8,7 @@ import type { ProjectAction } from '@/server/actions';
 import type { Identity } from '@/lib/permissions';
 import type { Handoff, StoredDrawing } from '@/av/core/handoff';
 import type { FieldOverrides } from '@/lib/records';
+import type { Focus } from '@/lib/focus';
 import { DEFAULT_POINT_RULES, rulesAt, type PointRuleVersion, type PointRules } from '@/lib/points';
 import { DEFAULT_KPI_RULES, kpiRulesAt, type KpiRuleVersion, type KpiRules } from '@/lib/kpi';
 
@@ -16,6 +17,9 @@ export interface View {
   pid?: string;
   tab?: 'overview' | 'schedule' | 'checklist' | 'jobrecord';
   pkg?: number;
+  /* 0922 变更单:从统计 / 汇报上的某个数字点进来时,带上「那个数字数的是
+     哪一组项目」—— 项目列表照它过滤,并在顶上标出来、可一键清除。 */
+  focus?: Focus;
 }
 
 interface Store {
@@ -29,6 +33,8 @@ interface Store {
   setView: (v: View) => void;
   go: (name: View['name']) => void;
   openProject: (pid: string) => void;
+  /* 0922 变更单:下钻到按某个口径过滤的项目列表 */
+  drillTo: (focus: Focus) => void;
   dispatch: (pid: string, action: ProjectAction) => Promise<boolean>;
   createProject: (input: Record<string, unknown>) => Promise<Project | null>;
   removeProject: (pid: string) => Promise<boolean>;
@@ -196,6 +202,7 @@ export function StoreProvider({ user, children }: { user: User; children: React.
     setView,
     go: (name) => setView({ name }),
     openProject: (pid) => setView({ name: 'project', pid, tab: 'overview', pkg: 0 }),
+    drillTo: (focus) => setView({ name: 'projects', focus }),
     dispatch,
     createProject,
     removeProject,

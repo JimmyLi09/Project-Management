@@ -5,7 +5,8 @@ import { useStore } from '../store';
 import { fmtDate, overdueItems, projectHealth, projStage, staleInfo, todayMid } from '@/lib/project';
 import { canDecide, canEdit } from '@/lib/permissions';
 import { useLang } from '@/lib/i18n';
-import { Avatar, Ell, HM, Icon, Pill } from '../ui';
+import { Avatar, Drill, Ell, HM, Icon, Pill } from '../ui';
+import type { Focus } from '@/lib/focus';
 import type { Project } from '@/lib/types';
 
 const UF: [keyof UFields, string, string][] = [
@@ -19,7 +20,7 @@ const UF: [keyof UFields, string, string][] = [
 type UFields = { done: string; nextNodes: string; risks: string; needDirector: string; clientPending: string; budget: string };
 
 export default function DirectorUpdateView() {
-  const { projects, me, dispatch, openProject } = useStore();
+  const { projects, me, dispatch, openProject, drillTo } = useStore();
   const { lang, t } = useLang();
   const [filter, setFilter] = useState('all');
   const [showExport, setShowExport] = useState(false);
@@ -33,9 +34,12 @@ export default function DirectorUpdateView() {
 
   const list = (filter === 'all' ? projects : projects.filter((p) => (p.owners || []).includes(filter))).filter((p) => !p.archived);
 
-  const pendingDecisions = projects.filter((p) => p.update?.needDirector && p.update.dStatus === 'pending');
-  const staleCount = projects.filter((p) => staleInfo(p.update).cls !== 'stale-ok' && (p.owners || []).length).length;
-  const overdueProjects = projects.filter((p) => overdueItems(p).length).length;
+  /* 0922 变更单:四张卡只数在册项目 —— 点开就是项目列表,而列表默认不显示
+     归档项目;两边口径不一样的话,点开看到的条数会比卡上的数字少。 */
+  const live = useMemo(() => projects.filter((p) => !p.archived), [projects]);
+  const pendingDecisions = live.filter((p) => p.update?.needDirector && p.update.dStatus === 'pending');
+  const staleCount = live.filter((p) => staleInfo(p.update).cls !== 'stale-ok' && (p.owners || []).length).length;
+  const overdueProjects = live.filter((p) => overdueItems(p).length).length;
 
   /* v2.2 §5.2: commercial overdue collections — production done, money not in.
      Reads derived Commercial status so PM delivery is never blamed for late payment. */
@@ -44,13 +48,21 @@ export default function DirectorUpdateView() {
     [projects],
   );
 
+  /* 0922 变更单:四张卡各自点开 = 它数的那一组项目 */
+  const drill = (f: Focus) => () => drillTo(f);
+  const seeList = t('查看这些项目', 'See these projects');
+
   return (
     <>
       <div className="kpi-grid four">
-        <MiniKpi label={t('待决策', 'Awaiting decision')} value={String(pendingDecisions.length)} color={pendingDecisions.length ? 'var(--bronze)' : 'var(--navy900)'} sub={t('需 Director 批复的事项', 'items needing a Director decision')} />
-        <MiniKpi label={t('周报未更新', 'Stale updates')} value={String(staleCount)} color={staleCount ? 'var(--warning)' : 'var(--navy900)'} sub={t('超过 7 天未更新的项目', 'projects not updated for 7+ days')} />
-        <MiniKpi label={t('有逾期的项目', 'Projects overdue')} value={String(overdueProjects)} color={overdueProjects ? 'var(--danger)' : 'var(--navy900)'} sub={t('存在逾期阶段的项目', 'projects with overdue phases')} />
-        <MiniKpi label={t('逾期收款', 'Overdue collections')} value={String(overdueCollections.length)} color={overdueCollections.length ? 'var(--danger)' : 'var(--success)'} sub={t('已交付但逾期未收款 / 收款高风险', 'delivered but payment overdue / high risk')} />
+        <MiniKpi label={t('待决策', 'Awaiting decision')} value={String(pendingDecisions.length)} color={pendingDecisions.length ? 'var(--bronze)' : 'var(--navy900)'} sub={t('需 Director 批复的事项', 'items needing a Director decision')}
+          n={pendingDecisions.length} title={seeList} onDrill={drill({ kind: 'decision' })} />
+        <MiniKpi label={t('周报未更新', 'Stale updates')} value={String(staleCount)} color={staleCount ? 'var(--warning)' : 'var(--navy900)'} sub={t('超过 7 天未更新的项目', 'projects not updated for 7+ days')}
+          n={staleCount} title={seeList} onDrill={drill({ kind: 'stale' })} />
+        <MiniKpi label={t('有逾期的项目', 'Projects overdue')} value={String(overdueProjects)} color={overdueProjects ? 'var(--danger)' : 'var(--navy900)'} sub={t('存在逾期阶段的项目', 'projects with overdue phases')}
+          n={overdueProjects} title={seeList} onDrill={drill({ kind: 'overdue' })} />
+        <MiniKpi label={t('逾期收款', 'Overdue collections')} value={String(overdueCollections.length)} color={overdueCollections.length ? 'var(--danger)' : 'var(--success)'} sub={t('已交付但逾期未收款 / 收款高风险', 'delivered but payment overdue / high risk')}
+          n={overdueCollections.length} title={seeList} onDrill={drill({ kind: 'collections' })} />
       </div>
 
       {overdueCollections.length > 0 && (
@@ -111,11 +123,16 @@ export default function DirectorUpdateView() {
             const pm = (p.owners || [])[0];
             return (
               <div key={p.id} style={{ padding: '18px 22px', borderBottom: '1px solid var(--row-line)' }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10, gap: 10, flexWrap: 'wrap' }}>
+                {/* 0922 变更单:整条汇报都能点进项目 —— 以前只有项目名那几个字可点,
+                    要瞄准。下面那片是可就地编辑的正文,不能一起吃掉点击。 */}
+                <div className="row-hover" data-testid="dupdate-row"
+                  style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10, gap: 10, flexWrap: 'wrap', cursor: 'pointer', borderRadius: 8 }}
+                  title={t('打开这个项目', 'Open this project')}
+                  onClick={() => openProject(p.id)}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
                     {pm ? <Avatar name={pm} size={30} /> : <Avatar name="?" size={30} />}
                     <div style={{ minWidth: 0 }}>
-                      <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--navy900)', cursor: 'pointer' }} onClick={() => openProject(p.id)}>{p.name}</div>
+                      <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--navy900)' }}>{p.name}</div>
                       <div style={{ fontSize: 11.5, color: 'var(--text2)' }}>
                         {pm || t('未指派', 'unassigned')} · <span style={{ color: st.cls === 'stale-ok' ? 'var(--text2)' : st.cls === 'stale-warn' ? 'var(--warning)' : 'var(--danger)' }}>{st.txt}</span>
                       </div>
@@ -268,8 +285,12 @@ function DecisionCard({ pid, name, ask, canAct }: { pid: string; name: string; a
 
   return (
     <div style={{ padding: '16px 22px', borderBottom: '1px solid var(--row-line)' }}>
-      <div style={{ fontSize: 13.5, fontWeight: 600 }}>{ask.split('\n')[0]}</div>
-      <div style={{ fontSize: 12, color: 'var(--text2)', margin: '4px 0 11px', cursor: 'pointer' }} onClick={() => openProject(pid)}>{name}</div>
+      {/* 0922 变更单:待决策这一条也整块可点 —— 以前只有下面那行项目名可点 */}
+      <div className="row-hover" style={{ cursor: 'pointer', borderRadius: 8, margin: '0 -4px 11px', padding: '0 4px' }}
+        title={t('打开这个项目', 'Open this project')} onClick={() => openProject(pid)}>
+        <div style={{ fontSize: 13.5, fontWeight: 600 }}>{ask.split('\n')[0]}</div>
+        <div style={{ fontSize: 12, color: 'var(--text2)', marginTop: 4 }}>{name}</div>
+      </div>
       {canAct ? (
         <>
           <textarea className="in" placeholder={t('批复 / 指示…', 'Decision note…')} value={note} onChange={(e) => setNote(e.target.value)} style={{ marginBottom: 9, minHeight: 40 }} />
@@ -309,11 +330,18 @@ function EditableText({ value, onSave }: { value: string; onSave: (v: string) =>
   );
 }
 
-function MiniKpi({ label, value, sub, color }: { label: string; value: string; sub: string; color?: string }) {
+function MiniKpi({ label, value, sub, color, n, title, onDrill }: {
+  label: string; value: string; sub: string; color?: string;
+  /* 0922 变更单:n = 背后有几个项目,为 0 就不做成可点的(点开是空列表) */
+  n?: number; title?: string; onDrill?: () => void;
+}) {
+  const num = <div className="tnum" style={{ fontSize: 34, fontWeight: 600, color: color || 'var(--navy900)', marginTop: 6, lineHeight: 1 }}>{value}</div>;
   return (
     <div className="kpi" style={{ padding: '20px 22px' }}>
       <div className="kpi-label">{label}</div>
-      <div className="tnum" style={{ fontSize: 34, fontWeight: 600, color: color || 'var(--navy900)', marginTop: 6, lineHeight: 1 }}>{value}</div>
+      {onDrill
+        ? <Drill enabled={(n ?? 0) > 0} title={title} onClick={onDrill} style={{ display: 'block' }}>{num}</Drill>
+        : num}
       <div style={{ fontSize: 12, color: 'var(--text2)', marginTop: 6 }}>{sub}</div>
     </div>
   );

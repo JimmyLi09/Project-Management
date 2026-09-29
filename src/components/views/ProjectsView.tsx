@@ -2,8 +2,9 @@
 
 import React, { useMemo, useState } from 'react';
 import { useStore } from '../store';
-import { fmtDate, isoDate, parseISO, projectHealth, projStage, schedProgress } from '@/lib/project';
+import { fmtDate, isoDate, parseISO, projectHealth, projPoints, projStage, schedProgress } from '@/lib/project';
 import { canCreate, isScopedRole } from '@/lib/permissions';
+import { focusLabel, matchFocus } from '@/lib/focus';
 import { DIFF, SVC, stageIdx, svcColor, svcName } from '@/lib/templates';
 import { diffTerm } from '@/lib/terms';
 import { useLang } from '@/lib/i18n';
@@ -13,7 +14,10 @@ import type { Project } from '@/lib/types';
 type ViewMode = 'cards' | 'compact' | 'list';
 
 export default function ProjectsView({ search = '' }: { search?: string }) {
-  const { projects, me, openProject } = useStore();
+  const { projects, me, openProject, view, setView, rulesFor } = useStore();
+  /* 0922 变更单:从统计 / 汇报某个数字点进来时带的口径。它只是一层预设过滤,
+     上面那排 chip 照样能再收窄。 */
+  const focus = view.name === 'projects' ? view.focus : undefined;
   const { lang, t } = useLang();
   const [typeFilter, setTypeFilter] = useState('all');
   const [pmFilter, setPmFilter] = useState('all');
@@ -43,15 +47,37 @@ export default function ProjectsView({ search = '' }: { search?: string }) {
 
   const list = projects.filter((p) => {
     if (!!p.archived !== showArchived) return false; // archived tab is separate
+    if (focus && !matchFocus(p, focus)) return false;
     if (typeFilter !== 'all' && !p.services.includes(typeFilter)) return false;
     if (pmFilter !== 'all' && !(p.owners || []).includes(pmFilter)) return false;
     const needle = q.trim().toLowerCase();
     if (needle && !(p.name + ' ' + p.client + ' ' + (p.owners || []).join(' ')).toLowerCase().includes(needle)) return false;
     return true;
   });
+  /* 「总积分」那一格点进来,想看的是谁分最多 —— 只有这一种口径自带排序 */
+  if (focus && focus.kind === 'points') {
+    list.sort((a, b) => projPoints(b, rulesFor(b.created)) - projPoints(a, rulesFor(a.created)));
+  }
 
   return (
     <>
+      {/* 0922 变更单:从统计 / 汇报的数字点进来时,顶上标出「你现在看的是哪一组」
+          —— 不然只看到一份变短了的列表,不知道为什么少了一半。✕ 退回全部。 */}
+      {focus && (
+        <div className="panel" data-testid="focus-bar"
+          style={{ padding: '10px 16px', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 10,
+                   fontSize: 12.5, borderColor: 'var(--bronze)' }}>
+          <Icon name="filter" size={14} />
+          <span style={{ color: 'var(--text2)' }}>{t('筛选中', 'Filtered')}</span>
+          <b style={{ color: 'var(--navy900)' }}>{focusLabel(focus, lang)}</b>
+          <span className="badge" style={{ background: 'var(--hover-bg)', color: 'var(--text2)' }}>
+            {t(`${list.length} 个项目`, `${list.length} project${list.length === 1 ? '' : 's'}`)}
+          </span>
+          <div style={{ flex: 1 }} />
+          <button className="btn-line sm" data-testid="focus-clear"
+            onClick={() => setView({ name: 'projects' })}>✕ {t('清除筛选', 'Clear')}</button>
+        </div>
+      )}
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginBottom: 22 }}>
         <div className="searchbox" style={{ background: 'var(--card)', width: 260 }}>
           <Icon name="search" size={16} />
