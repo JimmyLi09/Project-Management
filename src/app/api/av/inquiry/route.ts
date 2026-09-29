@@ -6,6 +6,7 @@ import { newProject } from '@/lib/project';
 import { getInquiry, openInquiry } from '@/server/avdb';
 import { appendAudit, getEffectiveTemplate, getProject, insertProject } from '@/server/db';
 import { currentUser } from '@/server/session';
+import { logZh } from '@/lib/logmsg';
 
 /* 01 立项询价.
    POST { name, client, location, delivery, notes, lines[] } opens a project with
@@ -51,7 +52,7 @@ export async function POST(req: NextRequest) {
     start: new Date().toISOString().slice(0, 10),
     delivery,
   }, getEffectiveTemplate);
-  p.log.unshift({ at: Date.now(), by: user.name, text: '立项询价创建项目' });
+  p.log.unshift({ at: Date.now(), by: user.name, text: logZh('proj.createAv'), k: 'proj.createAv' });
 
   const packs = Object.fromEntries(chosen.map((l) => [l.line, l.pack!])) as Partial<Record<BusinessLine, string>>;
   const inquiry = openInquiry({
@@ -63,9 +64,10 @@ export async function POST(req: NextRequest) {
     createdBy: user.name,
   }, () => insertProject(p));
 
+  const avLines = chosen.map((l) => `${l.label}（${l.pack}）`).join('、');
   appendAudit(p.id, [{
     at: Date.now(), by: user.name,
-    text: `立项询价：${chosen.map((l) => `${l.label}（规则包 ${l.pack}）`).join('、')}`,
+    text: logZh('av.inquiry', { lines: avLines }), k: 'av.inquiry', p: { lines: avLines },
   }]);
   return NextResponse.json({ project: p, inquiry });
 }

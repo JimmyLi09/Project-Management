@@ -10,6 +10,7 @@ import { SVC, type Template } from '@/lib/templates';
 import type { CalendarSchedule, CalendarStage, ChecklistStatus, Project, ReceiptRecord, ScheduleStatus } from '@/lib/types';
 import { cleanReceipt, sortReceipts, syncFromLatest, syncToLatest } from '@/lib/receipts';
 import { applyProjField, projSourceOf } from '@/lib/records';
+import { logZh, type LogParams } from '@/lib/logmsg';
 
 /* Optional context the route supplies so we can rebuild from edited templates
    without importing the DB layer here (keeps this file client-safe for types). */
@@ -119,15 +120,18 @@ export function transferInProject(
       });
     }
   });
-  if (changed) logIt(p, by, `项目转交 Handover: ${from} → ${to}${includeTasks ? '(含任务指派)' : ''}`);
+  if (changed) logIt(p, by, includeTasks ? 'proj.transferTasks' : 'proj.transfer', { from, to });
   return changed;
 }
 
 const svcName = (k: string) => SVC[k]?.label || k;
 
-function logIt(p: Project, by: string, text: string) {
+/* 操作日志 i18n:存 key + 参数,不存渲染好的句子 —— 存句子的话,写的时候是
+   哪种语言,以后就永远是哪种语言。同时把中文那句渲染进 text,导出和老客户端
+   还能读到一句人话。词条表在 lib/logmsg.ts。 */
+function logIt(p: Project, by: string, k: string, params?: LogParams) {
   p.log = p.log || [];
-  p.log.unshift({ at: Date.now(), by, text });
+  p.log.unshift({ at: Date.now(), by, text: logZh(k, params), k, p: params });
   if (p.log.length > 200) p.log.length = 200;
 }
 
@@ -140,7 +144,7 @@ function routeProjSourced(p: Project, u: Identity, key: string, value: unknown):
   if (!src) return false;
   const r = applyProjField(p, src, String(value ?? ''));
   if (!r.ok) throw new ValidationError(r.error);
-  if (r.log) logIt(p, u.name, r.log);
+  if (r.log) logIt(p, u.name, r.log.k, r.log.p);
   return true;
 }
 
@@ -170,7 +174,7 @@ export function applyAction(u: Identity, p: Project, a: ProjectAction, ctx: Acti
       if (!canRowEdit(u, p, r)) throw new PermissionError('无编辑权限');
       const was = r.status;
       r.status = r.status === 'done' ? 'todo' : 'done';
-      logIt(p, u.name, `${svcName(pk.svc)}·${r.task}: ${was}→${r.status}`);
+      logIt(p, u.name, 'sched.statusSvc', { svc: pk.svc, task: r.task, from: was, to: r.status });
       break;
     }
     case 'cycleStatus': {
@@ -179,7 +183,7 @@ export function applyAction(u: Identity, p: Project, a: ProjectAction, ctx: Acti
       const o: ScheduleStatus[] = ['todo', 'wip', 'done', 'block'];
       const was = r.status;
       r.status = o[(o.indexOf(r.status) + 1) % o.length];
-      logIt(p, u.name, `${r.task}: ${was}→${r.status}`);
+      logIt(p, u.name, 'sched.status', { task: r.task, from: was, to: r.status });
       break;
     }
     case 'setRowStatus': {
@@ -187,14 +191,14 @@ export function applyAction(u: Identity, p: Project, a: ProjectAction, ctx: Acti
       if (!canRowEdit(u, p, r)) throw new PermissionError('无编辑权限');
       const was = r.status;
       r.status = a.status;
-      logIt(p, u.name, `${r.task}: ${was}→${r.status}`);
+      logIt(p, u.name, 'sched.status', { task: r.task, from: was, to: r.status });
       break;
     }
     case 'editSched': {
       const { r } = getRow(p, a.pkg, a.idx);
       if (!canEdit(u, p)) throw new PermissionError('无编辑权限');
       (r as any)[a.field] = a.value;
-      if (a.field === 's' || a.field === 'e') logIt(p, u.name, `${r.task} 日期(${a.field})=${a.value || '—'}`);
+      if (a.field === 's' || a.field === 'e') logIt(p, u.name, 'sched.date', { task: r.task, field: a.field, value: a.value });
       break;
     }
     case 'editSchedNum': {
@@ -212,13 +216,13 @@ export function applyAction(u: Identity, p: Project, a: ProjectAction, ctx: Acti
         owner: '', assignee: '', weeks: 1, typical: '—', gate: '', freeze: false,
         status: 'todo', note: '', s: '', e: '',
       });
-      logIt(p, u.name, '新增阶段');
+      logIt(p, u.name, 'sched.addRow');
       break;
     }
     case 'removeRow': {
       if (!canEdit(u, p)) throw new PermissionError('无编辑权限');
       const { pk, r } = getRow(p, a.pkg, a.idx);
-      logIt(p, u.name, `删除阶段: ${r.task}`);
+      logIt(p, u.name, 'sched.removeRow', { task: r.task });
       pk.schedule.splice(a.idx, 1);
       break;
     }
@@ -229,7 +233,7 @@ export function applyAction(u: Identity, p: Project, a: ProjectAction, ctx: Acti
       if (j < 0 || j >= pk.schedule.length) break; // at an edge, no-op
       const arr = pk.schedule;
       [arr[a.idx], arr[j]] = [arr[j], arr[a.idx]];
-      logIt(p, u.name, `调整阶段顺序 Reorder phase`);
+      logIt(p, u.name, 'sched.reorder');
       break;
     }
     case 'reorderRow': {
@@ -242,7 +246,7 @@ export function applyAction(u: Identity, p: Project, a: ProjectAction, ctx: Acti
       const arr = pk.schedule;
       const [moved] = arr.splice(a.from, 1);
       arr.splice(a.to, 0, moved);
-      logIt(p, u.name, `拖动调整阶段顺序 Reorder: ${moved.task}`);
+      logIt(p, u.name, 'sched.reorderDrag', { task: moved.task });
       break;
     }
     case 'setClStatus': {
@@ -252,7 +256,7 @@ export function applyAction(u: Identity, p: Project, a: ProjectAction, ctx: Acti
       it.status = a.value;
       syncToLatest(it, u.name);   // REQ-042: 行上改状态 = 改 Latest 那条
       it.updatedAt = Date.now();
-      logIt(p, u.name, `清单「${it.zh}」: ${was}→${a.value}`);
+      logIt(p, u.name, 'cl.status', { item: it.zh, clFrom: was, clTo: a.value });
       break;
     }
     /* ===== REQ-042: 每个信息项的多条收料记录 =====
@@ -271,7 +275,8 @@ export function applyAction(u: Identity, p: Project, a: ProjectAction, ctx: Acti
       it.receipts = sortReceipts([fresh, ...it.receipts]);
       syncFromLatest(it);
       it.updatedAt = Date.now();
-      logIt(p, u.name, `清单「${it.zh}」新增收料记录${a.rec?.fileName ? `:${String(a.rec.fileName).slice(0, 60)}` : ''}`);
+      logIt(p, u.name, a.rec?.fileName ? 'cl.receiptAddFile' : 'cl.receiptAdd',
+        { item: it.zh, file: a.rec?.fileName ? String(a.rec.fileName).slice(0, 60) : undefined });
       break;
     }
     case 'editReceipt': {
@@ -285,7 +290,7 @@ export function applyAction(u: Identity, p: Project, a: ProjectAction, ctx: Acti
       it.receipts = sortReceipts(list.map((r) => (r.id === a.id ? next : r)));
       syncFromLatest(it);
       it.updatedAt = Date.now();
-      logIt(p, u.name, `清单「${it.zh}」修改了一条收料记录`);
+      logIt(p, u.name, 'cl.receiptEdit', { item: it.zh });
       break;
     }
     case 'removeReceipt': {
@@ -298,7 +303,7 @@ export function applyAction(u: Identity, p: Project, a: ProjectAction, ctx: Acti
       if (it.receipts.length) syncFromLatest(it);
       else { it.status = 'pending'; it.date = ''; it.received = ''; }
       it.updatedAt = Date.now();
-      logIt(p, u.name, `清单「${it.zh}」删除了一条收料记录`);
+      logIt(p, u.name, 'cl.receiptRemove', { item: it.zh });
       break;
     }
     case 'editCl': {
@@ -331,7 +336,7 @@ export function applyAction(u: Identity, p: Project, a: ProjectAction, ctx: Acti
       if (name === p.name) break;
       const was = p.name;
       p.name = name;
-      logIt(p, u.name, `项目更名:「${was}」→「${name}」`);
+      logIt(p, u.name, 'proj.rename', { from: was, to: name });
       break;
     }
     /* REQ-031: 报价单号。非必填、纯文本,不做唯一性校验也不接外部报价系统 —— 
@@ -341,7 +346,7 @@ export function applyAction(u: Identity, p: Project, a: ProjectAction, ctx: Acti
       const v = String(a.value || '').trim().slice(0, 60);
       if (v === (p.quotationNo || '')) break;
       p.quotationNo = v;
-      logIt(p, u.name, `报价号 Quotation No.=${v || '—'}`);
+      logIt(p, u.name, 'proj.quotationNo', { value: v });
       break;
     }
     /* REQ-039: Job Record 顶上那张「同步自项目创建」的表保留只读,但表里每一项
@@ -352,7 +357,7 @@ export function applyAction(u: Identity, p: Project, a: ProjectAction, ctx: Acti
       if (v === (p.client || '')) break;
       const was = p.client;
       p.client = v;
-      logIt(p, u.name, `客户:「${was || '—'}」→「${v || '—'}」`);
+      logIt(p, u.name, 'proj.client', { from: was, to: v });
       break;
     }
     case 'renameGroup': {
@@ -366,7 +371,7 @@ export function applyAction(u: Identity, p: Project, a: ProjectAction, ctx: Acti
       const old = g.group;
       g.group = name;
       if (a.nameEn !== undefined) g.groupEn = String(a.nameEn).slice(0, 120);
-      logIt(p, u.name, `重命名清单分类: ${old} → ${name}`);
+      logIt(p, u.name, 'cl.renameGroup', { from: old, to: name });
       break;
     }
     case 'removeGroup': {
@@ -375,7 +380,7 @@ export function applyAction(u: Identity, p: Project, a: ProjectAction, ctx: Acti
       const pk = p.packages[a.pkg];
       if (!pk || !pk.checklist[a.gi]) throw new ValidationError('无效的分类');
       const [g] = pk.checklist.splice(a.gi, 1);
-      logIt(p, u.name, `删除清单分类: ${g.group}`);
+      logIt(p, u.name, 'cl.removeGroup', { group: g.group });
       break;
     }
     case 'setNoCategories': {
@@ -384,7 +389,7 @@ export function applyAction(u: Identity, p: Project, a: ProjectAction, ctx: Acti
       const pk = p.packages[a.pkg];
       if (!pk) throw new ValidationError('无效的服务包');
       pk.noCategories = !!a.value;
-      logIt(p, u.name, pk.noCategories ? '清单切换为「无固定分类」' : '清单恢复分类模式');
+      logIt(p, u.name, pk.noCategories ? 'cl.flat' : 'cl.grouped');
       break;
     }
     case 'toggleHighlight': {
@@ -454,7 +459,7 @@ export function applyAction(u: Identity, p: Project, a: ProjectAction, ctx: Acti
          service, discarding edits — status/dates/remarks are reset too */
       const fresh = buildPackage(pk.svc, pk.start, tplForSvc?.(pk.svc));
       pk.checklist = fresh.checklist;
-      logIt(p, u.name, `恢复默认信息清单 Reset checklist to default`);
+      logIt(p, u.name, 'cl.reset');
       break;
     }
     case 'attachShot': {
@@ -469,7 +474,7 @@ export function applyAction(u: Identity, p: Project, a: ProjectAction, ctx: Acti
       it.updatedAt = Date.now();
       if (!it.date) it.date = isoDate(new Date());
       if (it.status === 'pending') it.status = 'received';
-      logIt(p, u.name, `上传资料截图: ${it.zh}`);
+      logIt(p, u.name, 'cl.shot', { item: it.zh });
       break;
     }
     case 'removeShot': {
@@ -487,7 +492,7 @@ export function applyAction(u: Identity, p: Project, a: ProjectAction, ctx: Acti
       const pk = p.packages[a.pkg];
       if (!pk) throw new ValidationError('无效的服务包');
       pk[a.field] = a.value;
-      logIt(p, u.name, `${svcName(pk.svc)} ${a.field}=${a.value || '—'}`);
+      logIt(p, u.name, 'pkg.field', { svc: pk.svc, field: a.field, value: a.value });
       break;
     }
     case 'setPkgBuffer': {
@@ -495,7 +500,7 @@ export function applyAction(u: Identity, p: Project, a: ProjectAction, ctx: Acti
       const pk = p.packages[a.pkg];
       if (!pk) throw new ValidationError('无效的服务包');
       pk.buffer = Number(a.value) || 0;
-      logIt(p, u.name, `${svcName(pk.svc)} buffer=${pk.buffer}`);
+      logIt(p, u.name, 'pkg.buffer', { svc: pk.svc, value: pk.buffer });
       break;
     }
     case 'reversePkg': {
@@ -514,7 +519,7 @@ export function applyAction(u: Identity, p: Project, a: ProjectAction, ctx: Acti
       }
       pk.start = startISO;
       fitWindow(pk, startISO, pk.delivery, pk.buffer || 0);
-      logIt(p, u.name, `${svcName(pk.svc)} 倒排:按起始+交付自动生成各阶段日期`);
+      logIt(p, u.name, 'sched.reverse', { svc: pk.svc });
       break;
     }
     case 'reverseSchedule': {
@@ -530,7 +535,7 @@ export function applyAction(u: Identity, p: Project, a: ProjectAction, ctx: Acti
         if (!pk.delivery) pk.delivery = p.delivery;
         fitWindow(pk, pk.start || p.start, pk.delivery || p.delivery, pk.buffer || p.buffer || 0);
       });
-      logIt(p, u.name, '按交付日倒排,各服务阶段日期自动生成');
+      logIt(p, u.name, 'sched.reverseAll');
       break;
     }
     case 'setDelivery': {
@@ -555,12 +560,12 @@ export function applyAction(u: Identity, p: Project, a: ProjectAction, ctx: Acti
       if (!canAssign(u, p)) throw new PermissionError('仅 PD/BD 可制定积分');
       if (a.value == null) {
         p.pointsManual = false;
-        logIt(p, u.name, '积分改回按积分规则自动计算');
+        logIt(p, u.name, 'points.auto');
         break;
       }
       p.points = Number(a.value) || 0;
       p.pointsManual = true;
-      logIt(p, u.name, `积分手动设为 ${p.points}`);
+      logIt(p, u.name, 'points.manual', { value: p.points });
       break;
     }
     /* REQ-038: PM 给一份业务选积分档位。区间档(LED 3–7)再带上选定的分值。
@@ -604,10 +609,10 @@ export function applyAction(u: Identity, p: Project, a: ProjectAction, ctx: Acti
         if (a.syncDelivery) {
           const was = p.delivery;
           p.delivery = last;
-          if (was !== last) logIt(p, u.name, `交付日按日历排期更新:${was || '—'} → ${last}`);
+          if (was !== last) logIt(p, u.name, 'cal.delivery', { from: was, to: last });
         }
       }
-      logIt(p, u.name, `${svcName(pk.svc)} 保存日历排期(第 ${pk.calendar.version} 版,${stages.length} 阶段)`);
+      logIt(p, u.name, 'cal.save', { svc: pk.svc, version: pk.calendar.version, stages: stages.length });
       break;
     }
     case 'saveCalendarArchives': {
@@ -623,10 +628,10 @@ export function applyAction(u: Identity, p: Project, a: ProjectAction, ctx: Acti
       const pk = p.packages[a.pkg];
       if (!pk) throw new ValidationError('无效的业务');
       const id = String(a.id || '').trim().slice(0, 40);
-      if (!id) { delete pk.pointTier; logIt(p, u.name, `${svcName(pk.svc)} 清除积分档位`); break; }
+      if (!id) { delete pk.pointTier; logIt(p, u.name, 'points.tierClear', { svc: pk.svc }); break; }
       const val = a.value == null ? undefined : Number(a.value);
       pk.pointTier = { id, ...(val != null && Number.isFinite(val) ? { value: Math.max(0, Math.min(1000, val)) } : {}) };
-      logIt(p, u.name, `${svcName(pk.svc)} 积分档位 ${id}${val != null ? ` = ${val}` : ''}`);
+      logIt(p, u.name, val != null ? 'points.tierValue' : 'points.tier', { svc: pk.svc, tier: id, value: val });
       break;
     }
     case 'addOwner': {
@@ -635,7 +640,7 @@ export function applyAction(u: Identity, p: Project, a: ProjectAction, ctx: Acti
       if (!nm) throw new ValidationError('名字不能为空');
       p.owners = p.owners || [];
       if (!p.owners.includes(nm)) p.owners.push(nm);
-      logIt(p, u.name, `指派 PM: ${nm}`);
+      logIt(p, u.name, 'owner.add', { name: nm });
       break;
     }
     case 'removeOwner': {
@@ -651,7 +656,7 @@ export function applyAction(u: Identity, p: Project, a: ProjectAction, ctx: Acti
       const was = p.engineer || '';
       if (nm === was) break;
       p.engineer = nm || undefined;
-      logIt(p, u.name, nm ? `指派工程师: ${nm}${was ? `(原 ${was})` : ''}` : `撤下工程师: ${was}`);
+      logIt(p, u.name, nm ? (was ? 'eng.replace' : 'eng.set') : 'eng.clear', { name: nm, was });
       break;
     }
     case 'transferProject': {
@@ -675,7 +680,7 @@ export function applyAction(u: Identity, p: Project, a: ProjectAction, ctx: Acti
       p.update = p.update || ({} as Project['update']);
       if (a.field === 'dStatus') {
         p.update.dStatus = a.value as Project['update']['dStatus'];
-        logIt(p, u.name, `Director 决定: ${a.value}`);
+        logIt(p, u.name, 'wf.decision', { value: a.value });
       } else {
         p.update.dDecision = a.value;
       }
@@ -686,7 +691,7 @@ export function applyAction(u: Identity, p: Project, a: ProjectAction, ctx: Acti
     case 'toggleInvoiced': {
       if (!canCommercial(u, p)) throw new PermissionError('仅 PD/BD/销售可标记开票收尾');
       p.invoiced = !p.invoiced;
-      logIt(p, u.name, p.invoiced ? '标记开票/收尾' : '撤销开票');
+      logIt(p, u.name, p.invoiced ? 'proj.invoiced' : 'proj.uninvoiced');
       break;
     }
     /* ===== v2.2 Version 1A · S2 — Sales → PM handover ===== */
@@ -703,7 +708,7 @@ export function applyAction(u: Identity, p: Project, a: ProjectAction, ctx: Acti
       h.submittedAt = Date.now();
       /* make sure the assigned PM owns the project so it flows to My Tasks */
       if (!(p.owners || []).includes(pm)) p.owners = [...(p.owners || []), pm];
-      logIt(p, u.name, `提交交接给 PM「${pm}」Submit handover`);
+      logIt(p, u.name, 'wf.handoverSubmit', { pm });
       break;
     }
     /* REQ-022: PM 接收之前,Sales 还能改简报或改派 PM。
@@ -725,7 +730,7 @@ export function applyAction(u: Identity, p: Project, a: ProjectAction, ctx: Acti
       /* 新 PM 要能在「我的待办」里看到项目;原 PM 留在成员里不动 ——
          他可能是 PD 另外指派的,这里不该替人做减法。 */
       if (!(p.owners || []).includes(pm)) p.owners = [...(p.owners || []), pm];
-      logIt(p, u.name, was === pm ? '修改交接简报 Edit handover brief' : `交接改派 PM「${was}」→「${pm}」`);
+      logIt(p, u.name, was === pm ? 'wf.handoverEdit' : 'wf.handoverReassign', { from: was, to: pm });
       break;
     }
     case 'acceptHandover': {
@@ -735,7 +740,7 @@ export function applyAction(u: Identity, p: Project, a: ProjectAction, ctx: Acti
       if (!isAssignedPm && !isFull(u)) throw new PermissionError('仅被指派的 PM(或 PD/BD)可接单');
       h.status = 'accepted';
       h.briefingAt = Date.now();
-      logIt(p, u.name, `接受交接,进入生产 Accept handover`);
+      logIt(p, u.name, 'wf.handoverAccept');
       break;
     }
     /* ===== S3 — PM completion package + PD approval ===== */
@@ -750,7 +755,7 @@ export function applyAction(u: Identity, p: Project, a: ProjectAction, ctx: Acti
       cr.submittedBy = u.name;
       cr.submittedAt = Date.now();
       cr.approval = { pdId: '', status: 'pending', note: '', decidedAt: 0 }; // fresh review
-      logIt(p, u.name, `提交完成包 Submit completion package`);
+      logIt(p, u.name, 'wf.completionSubmit');
       break;
     }
     case 'decideCompletion': {
@@ -763,7 +768,7 @@ export function applyAction(u: Identity, p: Project, a: ProjectAction, ctx: Acti
       if (a.decision === 'approved') {
         cr.approval.status = 'approved';
         cr.status = 'approved';
-        logIt(p, u.name, `批准完成包 PD approved`);
+        logIt(p, u.name, 'wf.completionApprove');
       } else {
         /* §10.2 reject / changes → bounce back to production; PM reworks and
            resubmits. Bump the workflow version so the next submit is a new
@@ -771,7 +776,8 @@ export function applyAction(u: Identity, p: Project, a: ProjectAction, ctx: Acti
         cr.approval.status = a.decision;
         cr.status = 'changes_requested';
         p.workflowVersion = (p.workflowVersion || 1) + 1;
-        logIt(p, u.name, `${a.decision === 'rejected' ? '驳回' : '要求修改'}完成包,退回生产 ${a.decision}${a.note ? ' — ' + a.note : ''}`);
+        logIt(p, u.name, a.decision === 'rejected' ? 'wf.completionReject' : 'wf.completionChanges',
+          { note: a.note ? ' — ' + a.note : '' });
       }
       break;
     }
@@ -787,7 +793,7 @@ export function applyAction(u: Identity, p: Project, a: ProjectAction, ctx: Acti
       sv.variationStatus = 'none';
       sv.by = u.name;
       sv.at = Date.now();
-      logIt(p, u.name, `Sales 核对完成${a.finalInvoiceAllowed ? '(允许开票)' : '(暂不开票)'} Sales verified`);
+      logIt(p, u.name, a.finalInvoiceAllowed ? 'wf.salesVerify' : 'wf.salesVerifyHold');
       break;
     }
     case 'raiseVariation': {
@@ -803,11 +809,11 @@ export function applyAction(u: Identity, p: Project, a: ProjectAction, ctx: Acti
         cr.approval.status = 'changes_requested';
         cr.approval.note = `Variation:${a.note || ''}`;
         p.workflowVersion = (p.workflowVersion || 1) + 1;
-        logIt(p, u.name, `Variation(影响报价)→ 退回重走 PD 审批 ${a.note ? '— ' + a.note : ''}`);
+        logIt(p, u.name, 'wf.variationReapprove', { note: a.note ? ' — ' + a.note : '' });
       } else {
         /* 仅修正文字/附件/JD 引用 → 不重审,只记录 */
         sv.variationStatus = 'resolved';
-        logIt(p, u.name, `Variation(不影响报价,仅记录)${a.note ? '— ' + a.note : ''}`);
+        logIt(p, u.name, 'wf.variationNote', { note: a.note ? ' — ' + a.note : '' });
       }
       break;
     }
@@ -815,7 +821,7 @@ export function applyAction(u: Identity, p: Project, a: ProjectAction, ctx: Acti
       if (!canEditFinance(u)) throw new PermissionError('仅 Finance 可编辑开票/收款信息');
       const inv = p.invoiceClose!;
       (inv as any)[a.field] = String(a.value || '').slice(0, 300);
-      logIt(p, u.name, `Finance 改单 ${a.field}=${a.value || '—'}${inv.invoiceStatus === 'issued' ? '(已开票后修改)' : ''}`);
+      logIt(p, u.name, inv.invoiceStatus === 'issued' ? 'fin.editAfterIssue' : 'fin.edit', { field: a.field, value: a.value });
       break;
     }
     case 'setInvoiceStatus': {
@@ -831,7 +837,7 @@ export function applyAction(u: Identity, p: Project, a: ProjectAction, ctx: Acti
       if (from === 'issued' && a.value !== 'issued' && !String(a.reason || '').trim()) throw new ValidationError('修改已开票状态必须填写原因');
       if (a.value === 'issued' && !inv.issuedDate) inv.issuedDate = isoDate(new Date());
       inv.invoiceStatus = a.value;
-      logIt(p, u.name, `开票状态 ${from}→${a.value}${a.reason ? ' — ' + a.reason : ''}`);
+      logIt(p, u.name, 'fin.invoiceStatus', { from, to: a.value, note: a.reason ? ' — ' + a.reason : '' });
       break;
     }
     case 'setPaymentStatus': {
@@ -845,7 +851,7 @@ export function applyAction(u: Identity, p: Project, a: ProjectAction, ctx: Acti
         || (from === a.value);
       if (!ok) throw new ValidationError(`收款状态不能从 ${from} 变为 ${a.value}`);
       inv.paymentStatus = a.value;
-      logIt(p, u.name, `收款状态 ${from}→${a.value}`);
+      logIt(p, u.name, 'fin.paymentStatus', { from, to: a.value });
       break;
     }
     case 'setPaymentRisk': {
@@ -855,7 +861,7 @@ export function applyAction(u: Identity, p: Project, a: ProjectAction, ctx: Acti
       pr.depositStatus = a.depositStatus;
       pr.level = a.level;
       if (a.level === 'none') pr.resolvedAt = Date.now();
-      logIt(p, u.name, `Payment Risk: ${a.level}${a.depositRequired ? ` · 定金 ${a.depositStatus}` : ''}`);
+      logIt(p, u.name, a.depositRequired ? 'fin.riskDeposit' : 'fin.risk', { level: a.level, deposit: a.depositStatus });
       break;
     }
     case 'addContact': {
@@ -917,7 +923,7 @@ export function applyAction(u: Identity, p: Project, a: ProjectAction, ctx: Acti
       if (touchedRec) {
         rec.updatedAt = Date.now();
         pk.record = rec;
-        logIt(p, u.name, `更新资料 Record: ${pk.svc}`);
+        logIt(p, u.name, 'record.update', { svc: pk.svc });
       }
       break;
     }
@@ -951,7 +957,7 @@ export function applyAction(u: Identity, p: Project, a: ProjectAction, ctx: Acti
       }
       rec.updatedAt = Date.now();
       pk.record = rec;
-      logIt(p, u.name, `${a.asNew ? '新增业务' : '新增登记记录'} ${svcName(svc)}${pk.label ? '·' + pk.label : ''}`);
+      logIt(p, u.name, a.asNew ? 'pkg.add' : 'pkg.addRecord', { svc, label: pk.label ? ' · ' + pk.label : '' });
       break;
     }
     /* REQ-026: 删掉一份业务实例。整包连排期、信息清单、资料一起没,
@@ -966,7 +972,7 @@ export function applyAction(u: Identity, p: Project, a: ProjectAction, ctx: Acti
       if (!p.packages.some((x) => x.svc === pk.svc)) {
         p.services = (p.services || []).filter((x) => x !== pk.svc);
       }
-      logIt(p, u.name, `删除业务 ${svcName(pk.svc)}${pk.label ? '·' + pk.label : ''}`);
+      logIt(p, u.name, 'pkg.remove', { svc: pk.svc, label: pk.label ? ' · ' + pk.label : '' });
       break;
     }
     case 'addCustomNode': {
@@ -984,7 +990,7 @@ export function applyAction(u: Identity, p: Project, a: ProjectAction, ctx: Acti
       };
       const at = typeof a.atIdx === 'number' && a.atIdx >= 0 && a.atIdx < pk.schedule.length ? a.atIdx + 1 : pk.schedule.length;
       pk.schedule.splice(at, 0, row);
-      logIt(p, u.name, `新增自定义节点 Custom node: ${name}`);
+      logIt(p, u.name, 'sched.customNode', { name });
       break;
     }
     case 'setSchedStyle': {
@@ -1007,13 +1013,13 @@ export function applyAction(u: Identity, p: Project, a: ProjectAction, ctx: Acti
         status: 'todo', note: '', s: String(a.date || ''), e: String(a.date || ''),
         kind: a.kind,
       });
-      logIt(p, u.name, `${a.kind === 'holiday' ? '新增假期行' : '新增卡点行'}: ${text}`);
+      logIt(p, u.name, a.kind === 'holiday' ? 'sched.holiday' : 'sched.gate', { text });
       break;
     }
     case 'setArchived': {
       if (!canAssign(u, p)) throw new PermissionError('仅 PD/BD 可归档项目');
       p.archived = !!a.value;
-      logIt(p, u.name, p.archived ? '归档项目 Archived' : '取消归档 Unarchived');
+      logIt(p, u.name, p.archived ? 'proj.archive' : 'proj.unarchive');
       break;
     }
     case 'dismissRisk': {
@@ -1022,14 +1028,14 @@ export function applyAction(u: Identity, p: Project, a: ProjectAction, ctx: Acti
       p.dismissedRisks = p.dismissedRisks || [];
       if (!p.dismissedRisks.includes(a.key)) {
         p.dismissedRisks.push(a.key);
-        logIt(p, u.name, `标记风险已处理 Risk dismissed: ${a.key}`);
+        logIt(p, u.name, 'risk.dismiss', { key: a.key });
       }
       break;
     }
     case 'restoreRisk': {
       if (!canEdit(u, p)) throw new PermissionError('无编辑权限');
       p.dismissedRisks = (p.dismissedRisks || []).filter((k) => k !== a.key);
-      logIt(p, u.name, `恢复风险 Risk restored: ${a.key}`);
+      logIt(p, u.name, 'risk.restore', { key: a.key });
       break;
     }
     default:

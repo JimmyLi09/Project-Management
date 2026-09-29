@@ -4,6 +4,7 @@ import { currentUser } from '@/server/session';
 import { canCreate, identityOf, visibleProjects } from '@/lib/permissions';
 import { newProject } from '@/lib/project';
 import { SVC } from '@/lib/templates';
+import { logZh } from '@/lib/logmsg';
 
 export async function GET() {
   const user = await currentUser();
@@ -59,8 +60,9 @@ export async function POST(req: NextRequest) {
       : [],
   }, getEffectiveTemplate); // use PD/BD-edited templates when present
   p.serial = nextProjectSerial(); // REQ-006: auto project NO.
-  p.log.unshift({ at: Date.now(), by: user.name, text: `创建项目 (NO. ${String(p.serial).padStart(3, '0')})` });
+  const no = String(p.serial).padStart(3, '0');
+  p.log.unshift({ at: Date.now(), by: user.name, text: logZh('proj.create', { no }), k: 'proj.create', p: { no } });
   insertProject(p);
-  appendAudit(p.id, [{ at: Date.now(), by: user.name, text: '创建项目 Created' }]);
+  appendAudit(p.id, [{ at: Date.now(), by: user.name, text: logZh('proj.create', { no }), k: 'proj.create', p: { no } }]);
   return NextResponse.json({ project: p });
 }

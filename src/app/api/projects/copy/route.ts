@@ -5,6 +5,7 @@ import { canCreate, canSeeProject, identityOf } from '@/lib/permissions';
 import { emptyUpdate, migrate, uid } from '@/lib/project';
 import { trimPackage } from '@/server/fragments';
 import type { Project } from '@/lib/types';
+import { logZh } from '@/lib/logmsg';
 
 /* REQ-012: POST /api/projects/copy  { sourceId, mode }
    Deep-copies a project, trims it to the requested slice, then resets every
@@ -41,7 +42,8 @@ export async function POST(req: NextRequest) {
   copy.start = '';
   copy.update = emptyUpdate();
   copy.dismissedRisks = [];
-  copy.log = [{ at: now, by: user.name, text: `复制自「${src.name}」(${mode}) · NO. ${String(copy.serial).padStart(3, '0')}` }];
+  const copyP = { from: src.name, mode, no: String(copy.serial).padStart(3, '0') };
+  copy.log = [{ at: now, by: user.name, text: logZh('proj.copy', copyP), k: 'proj.copy', p: copyP }];
   /* reset the whole post-sales workflow (1A) so nothing carries over */
   copy.workflowVersion = 1;
   copy.handover = { status: 'not_started', salesBrief: '', assignedPmId: '', submittedBy: '', submittedAt: 0, briefingAt: 0 };
@@ -55,6 +57,6 @@ export async function POST(req: NextRequest) {
 
   const fresh = migrate(copy); // re-derive statuses / fill any defaults
   insertProject(fresh);
-  appendAudit(fresh.id, [{ at: now, by: user.name, text: `复制项目 Copy (${mode}) ← ${src.name}` }]);
+  appendAudit(fresh.id, [{ at: now, by: user.name, text: logZh('proj.copy', copyP), k: 'proj.copy', p: copyP }]);
   return NextResponse.json({ project: fresh });
 }

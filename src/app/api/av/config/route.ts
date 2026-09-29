@@ -15,6 +15,10 @@ import { getDrawing, getInquiry, saveConfig } from '@/server/avdb';
 import { lineProjectError } from '@/server/avdrawing';
 import { appendAudit, getProject } from '@/server/db';
 import { currentUser } from '@/server/session';
+import { logZh, type LogParams } from '@/lib/logmsg';
+
+/* 一条审计记录的 text / k / p 三件套 —— 写日志的地方都是这个形状 */
+const auditOf = (k: string, p: LogParams) => ({ text: logZh(k, p), k, p });
 
 /* 05 → project (§10 config_result). POST { projectId, line, cfg, drawingId? }.
    The server recomputes with the core rather than trusting a summary from the
@@ -51,7 +55,7 @@ export async function POST(req: NextRequest) {
     }, cfg);
     appendAudit(project!.id, [{
       at: Date.now(), by: user.name,
-      text: `保存光伏方案：${v('kwp').toFixed(2)} kWp · 组件 ${v('n_mod')} 块 · 逆变器 ${v('n_inv')} × ${r.inverter.kw} kW（规则包 ${packVersion}）`,
+      ...auditOf('av.cfgPv', { kwp: v('kwp').toFixed(2), mods: v('n_mod'), inv: `${v('n_inv')} × ${r.inverter.kw} kW`, pack: packVersion }),
     }]);
     return NextResponse.json({ config: saved });
   }
@@ -77,7 +81,7 @@ export async function POST(req: NextRequest) {
     }, cfg);
     appendAudit(project!.id, [{
       at: Date.now(), by: user.name,
-      text: `保存弱电方案：${cfg.elv_area} ㎡ · 端口 ${v('n_port')} · 摄像机 ${v('n_cam')} · 扬声器 ${v('n_spk')}（规则包 ${packVersion}）`,
+      ...auditOf('av.cfgElv', { area: cfg.elv_area, ports: v('n_port'), cams: v('n_cam'), spk: v('n_spk'), pack: packVersion }),
     }]);
     return NextResponse.json({ config: saved });
   }
@@ -101,7 +105,7 @@ export async function POST(req: NextRequest) {
     }, cfg);
     appendAudit(project!.id, [{
       at: Date.now(), by: user.name,
-      text: `保存投影方案：${cfg.prj_image_w}×${cfg.prj_image_h} mm · ${t.n_proj.value} 台 × ${Math.round(t.lm_proj.value)} lm（规则包 ${packVersion}）`,
+      ...auditOf('av.cfgPrj', { size: `${cfg.prj_image_w}×${cfg.prj_image_h}`, n: t.n_proj.value, lm: Math.round(t.lm_proj.value), pack: packVersion }),
     }]);
     return NextResponse.json({ config: saved });
   }
@@ -137,7 +141,7 @@ export async function POST(req: NextRequest) {
   }, cfg);
   appendAudit(project!.id, [{
     at: Date.now(), by: user.name,
-    text: `保存 LED 方案：P${cfg.led_pitch} · ${t.sqm.value.toFixed(2)} ㎡ · 箱体 ${r.layout.cells.length} 只（规则包 ${packVersion}）`,
+    ...auditOf('av.cfgLed', { pitch: cfg.led_pitch, sqm: t.sqm.value.toFixed(2), cabinets: r.layout.cells.length, pack: packVersion }),
   }]);
   return NextResponse.json({ config: saved });
 }

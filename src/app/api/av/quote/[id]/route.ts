@@ -4,6 +4,7 @@ import { canApproveQuote, identityOf } from '@/lib/permissions';
 import { decideQuote, getQuote } from '@/server/avdb';
 import { appendAudit } from '@/server/db';
 import { currentUser } from '@/server/session';
+import { logZh } from '@/lib/logmsg';
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -22,9 +23,11 @@ export async function POST(req: NextRequest, { params }: Params) {
   const status = body.action === 'approve' ? 'approved' : 'rejected';
   if (!decideQuote(quote.id, status, user.name, note)) return NextResponse.json({ error: '该报价已不在待审批状态' }, { status: 409 });
   const t = quoteTotals(quote.sections, quote.discountPct, quote.gstRate, quote.dedup);
+  const dk = status === 'approved' ? 'av.quoteApprove' : 'av.quoteReject';
+  const dP = { no: quoteNo(quote.id), total: t.total.toLocaleString('en-US'), note: note ? `：${note}` : '' };
   appendAudit(quote.projectId, [{
     at: Date.now(), by: user.name,
-    text: `${status === 'approved' ? '批准' : '退回'}报价 ${quoteNo(quote.id)}（含税 S$${t.total.toLocaleString('en-US')}）${note ? `：${note}` : ''}`,
+    text: logZh(dk, dP), k: dk, p: dP,
   }]);
   return NextResponse.json({ quote: getQuote(quote.id) });
 }

@@ -6,6 +6,7 @@ import type { Project, Role, User } from '@/lib/types';
 import { migrate } from '@/lib/project';
 import { getBuiltinTemplate, SVC, type Template } from '@/lib/templates';
 import { applyProjField, projSourceOf } from '@/lib/records';
+import { logZh, type LogParams } from '@/lib/logmsg';
 
 /* On serverless platforms (Vercel) the project directory is read-only and
    ephemeral — keep the demo database in /tmp there. */
@@ -50,7 +51,9 @@ export function getDb(): Database.Database {
       project_id TEXT NOT NULL,
       at INTEGER NOT NULL,
       by TEXT NOT NULL,
-      text TEXT NOT NULL
+      text TEXT NOT NULL,
+      k TEXT,
+      p TEXT
     );
     CREATE INDEX IF NOT EXISTS idx_audit_project ON audit_log(project_id, at DESC);
     /* v2.2 §4.4 [P0-1]: idempotency ledger — one row per (project, action,
@@ -203,6 +206,12 @@ function migrateSchema(d: Database.Database) {
   /* v2.2 §4.2 [P0-3]: optimistic-lock version on projects */
   const pcols = (d.prepare('PRAGMA table_info(projects)').all() as { name: string }[]).map((c) => c.name);
   if (!pcols.includes('version')) d.exec('ALTER TABLE projects ADD COLUMN version INTEGER NOT NULL DEFAULT 0');
+  /* 操作日志 i18n:审计表补两列放词条 key 与参数。已经部署的库里这张表是老
+     结构,CREATE TABLE IF NOT EXISTS 补不上,得单独 ALTER。两列都可空 ——
+     老行保持 NULL,显示时退回它们自己的 text。 */
+  const acols = (d.prepare('PRAGMA table_info(audit_log)').all() as { name: string }[]).map((c) => c.name);
+  if (!acols.includes('k')) d.exec('ALTER TABLE audit_log ADD COLUMN k TEXT');
+  if (!acols.includes('p')) d.exec('ALTER TABLE audit_log ADD COLUMN p TEXT');
   /* REQ-016: simple global key-value settings (e.g. export company notes) */
   d.exec('CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL DEFAULT \'\')');
   /* REQ-012: user-saved schedule/checklist snippets. Named user_templates so it
@@ -723,7 +732,7 @@ export function importRegisterRecords(
         if (!p.services.includes(svc)) p.services.push(svc);
       }
       const rec: Record<string, string | number | undefined> = { ...(pk.record || {}) };
-      const notes: string[] = [];
+      const notes: { k: string; p?: LogParams }[] = [];
       for (const [k, v] of Object.entries(row.patch || {})) {
         if (k === 'updatedAt') continue;
         /* 0922 变更单:与项目同源的那几列,导入时也得落到项目字段上 ——
@@ -739,8 +748,10 @@ export function importRegisterRecords(
       }
       rec.updatedAt = now;
       pk.record = rec;
-      const entries = [{ at: now, by: actor, text: `导入登记记录 Import: ${svc}` },
-        ...notes.map((text) => ({ at: now, by: actor, text }))];
+      const entries = [
+        { at: now, by: actor, text: logZh('record.import', { svc }), k: 'record.import', p: { svc } as LogParams },
+        ...notes.map((n) => ({ at: now, by: actor, text: logZh(n.k, n.p), k: n.k, p: n.p as LogParams })),
+      ];
       p.log = [...entries, ...((p.log as { at: number; by: string; text: string }[]) || [])].slice(0, 200);
       const { updatedAt: _u, version: _v, ...pdata } = p;
       upd.run(JSON.stringify(pdata), now, hit.id);
@@ -754,15 +765,21 @@ export function importRegisterRecords(
 
 /* ---- permanent audit trail (project logs are capped at 200 in-document;
         every entry is also appended here and never rotated) ---- */
-export function appendAudit(projectId: string, entries: { at: number; by: string; text: string }[]) {
+export function appendAudit(projectId: string, entries: { at: number; by: string; text: string; k?: string; p?: LogParams }[]) {
   if (!entries.length) return;
-  const ins = getDb().prepare('INSERT INTO audit_log (project_id, at, by, text) VALUES (?, ?, ?, ?)');
-  for (const e of entries) ins.run(projectId, e.at, e.by, e.text);
+  const ins = getDb().prepare('INSERT INTO audit_log (project_id, at, by, text, k, p) VALUES (?, ?, ?, ?, ?, ?)');
+  for (const e of entries) ins.run(projectId, e.at, e.by, e.text, e.k ?? null, e.p ? JSON.stringify(e.p) : null);
 }
 export function listAudit(projectId: string, limit = 1000) {
-  return getDb()
-    .prepare('SELECT at, by, text FROM audit_log WHERE project_id = ? ORDER BY at DESC LIMIT ?')
-    .all(projectId, limit) as { at: number; by: string; text: string }[];
+  const rows = getDb()
+    .prepare('SELECT at, by, text, k, p FROM audit_log WHERE project_id = ? ORDER BY at DESC LIMIT ?')
+    .all(projectId, limit) as { at: number; by: string; text: string; k: string | null; p: string | null }[];
+  /* 老行的 k / p 是 NULL —— 显示时就退回 text,和写它们的时候一模一样 */
+  return rows.map((r) => ({
+    at: r.at, by: r.by, text: r.text,
+    ...(r.k ? { k: r.k } : {}),
+    ...(r.p ? { p: JSON.parse(r.p) as LogParams } : {}),
+  }));
 }
 
 /* ---- editable production templates (override built-ins; new projects only) ---- */

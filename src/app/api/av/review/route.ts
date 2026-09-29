@@ -4,6 +4,7 @@ import { applyReview, getDrawing, markReviewed, type ReviewChange } from '@/serv
 import { DrawingServiceError, runDrawingCli, SAMPLE_STORE } from '@/server/avdrawing';
 import { appendAudit, getProject } from '@/server/db';
 import { currentUser } from '@/server/session';
+import { logZh } from '@/lib/logmsg';
 
 /* 04 人工校核: POST { id, changes: [{ element, confirmed, corrected }], submit }.
 
@@ -42,7 +43,7 @@ export async function POST(req: NextRequest) {
       const fixed = drawing.extractions.filter((r) => r.corrected !== null).length;
       appendAudit(drawing.project_id, [{
         at: Date.now(), by: user.name,
-        text: `LED 图纸校核完成：${drawing.drawing}（修正 ${fixed} 项，已锁定）`,
+        text: logZh('av.review', { file: drawing.drawing, fixed }), k: 'av.review', p: { file: drawing.drawing, fixed },
       }]);
     }
     return NextResponse.json({ drawing: getDrawing(drawing.id), may_enter_configuration: gate, written: res.written });

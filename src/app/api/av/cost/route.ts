@@ -11,6 +11,7 @@ import { getInquiry, getMarginFloor, latestConfig, latestCostSheet, listPriceIte
 import { lineProjectError } from '@/server/avdrawing';
 import { appendAudit, getProject } from '@/server/db';
 import { currentUser } from '@/server/session';
+import { logZh } from '@/lib/logmsg';
 
 /* 06 成本核算, per business line.
    GET ?project=ID&line=led|projector|elv|pv  the line's latest saved configuration,
@@ -127,9 +128,11 @@ export async function POST(req: NextRequest) {
   }
   const sheet = saveCostSheet({ projectId: project!.id, line, configId: config.id, lines, cost: t.cost, list: t.list }, user.name, !!body.confirm);
   if (body.confirm) {
+    const costP = { line: info.label, cost: t.cost.toLocaleString('en-US'), list: t.list.toLocaleString('en-US'),
+      margin: t.margin === null ? '—' : (t.margin * 100).toFixed(1) + '%' };
     appendAudit(project!.id, [{
       at: Date.now(), by: user.name,
-      text: `${info.label}单线成本确认：成本 S$${t.cost.toLocaleString('en-US')}，售价 S$${t.list.toLocaleString('en-US')}，毛利 ${t.margin === null ? '—' : (t.margin * 100).toFixed(1) + '%'}`,
+      text: logZh('av.cost', costP), k: 'av.cost', p: costP,
     }]);
   }
   return NextResponse.json({ sheet, checks, marginFloor });
