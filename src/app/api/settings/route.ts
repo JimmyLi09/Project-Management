@@ -5,7 +5,9 @@ import { identityOf, isFull } from '@/lib/permissions';
 
 /* REQ-016: global app settings. GET ?key=... (any signed-in user);
    PUT { key, value } (PD/BD only). Keys are whitelisted. */
-const ALLOWED_KEYS = new Set(['exportNotes']);
+/* 0917 收尾:导出说明按语言拆两份 —— exportNotes 是中文那份(键名不变,
+   老数据原地就是它),exportNotesEn 是英文那份。 */
+const ALLOWED_KEYS = new Set(['exportNotes', 'exportNotesEn']);
 
 export async function GET(req: NextRequest) {
   const user = await currentUser();
