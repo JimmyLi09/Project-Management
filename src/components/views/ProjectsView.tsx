@@ -4,7 +4,7 @@ import React, { useMemo, useState } from 'react';
 import { useStore } from '../store';
 import { fmtDate, isoDate, parseISO, projectHealth, projPoints, projStage, schedProgress } from '@/lib/project';
 import { canCreate, isScopedRole } from '@/lib/permissions';
-import { focusLabel, matchFocus } from '@/lib/focus';
+import { focusLabel, focusWantsArchived, matchFocus } from '@/lib/focus';
 import { DIFF, SVC, stageIdx, svcColor, svcName } from '@/lib/templates';
 import { diffTerm } from '@/lib/terms';
 import { useLang } from '@/lib/i18n';
@@ -45,8 +45,11 @@ export default function ProjectsView({ search = '' }: { search?: string }) {
     return [...s];
   }, [projects]);
 
+  /* 「项目总数」那一格点进来时,归档的也在这组里 —— 这时不按归档拆两拨,
+     否则列表条数会比卡上的数字少。其余情况照旧:归档是单独一拨。 */
+  const mixArchived = focusWantsArchived(focus);
   const list = projects.filter((p) => {
-    if (!!p.archived !== showArchived) return false; // archived tab is separate
+    if (!mixArchived && !!p.archived !== showArchived) return false; // archived tab is separate
     if (focus && !matchFocus(p, focus)) return false;
     if (typeFilter !== 'all' && !p.services.includes(typeFilter)) return false;
     if (pmFilter !== 'all' && !(p.owners || []).includes(pmFilter)) return false;
@@ -54,6 +57,7 @@ export default function ProjectsView({ search = '' }: { search?: string }) {
     if (needle && !(p.name + ' ' + p.client + ' ' + (p.owners || []).join(' ')).toLowerCase().includes(needle)) return false;
     return true;
   });
+  const archivedInList = list.filter((p) => p.archived).length;
   /* 「总积分」那一格点进来,想看的是谁分最多 —— 只有这一种口径自带排序 */
   if (focus && focus.kind === 'points') {
     list.sort((a, b) => projPoints(b, rulesFor(b.created)) - projPoints(a, rulesFor(a.created)));
@@ -72,6 +76,8 @@ export default function ProjectsView({ search = '' }: { search?: string }) {
           <b style={{ color: 'var(--navy900)' }}>{focusLabel(focus, lang)}</b>
           <span className="badge" style={{ background: 'var(--hover-bg)', color: 'var(--text2)' }}>
             {t(`${list.length} 个项目`, `${list.length} project${list.length === 1 ? '' : 's'}`)}
+            {mixArchived && archivedInList > 0 &&
+              t(`(其中 ${archivedInList} 个已归档)`, ` (${archivedInList} archived)`)}
           </span>
           <div style={{ flex: 1 }} />
           <button className="btn-line sm" data-testid="focus-clear"
@@ -104,9 +110,12 @@ export default function ProjectsView({ search = '' }: { search?: string }) {
               ))}
             </>
           )}
-          <button className={`chip ${showArchived ? 'active' : ''}`} onClick={() => setShowArchived(!showArchived)} title={t('查看已归档项目', 'View archived projects')}>
-            📦 {t('已归档', 'Archived')}{archivedCount ? ` ${archivedCount}` : ''}
-          </button>
+          {/* 这一组本来就含归档,再给一个「只看归档」的开关只会互相打架 */}
+          {!mixArchived && (
+            <button className={`chip ${showArchived ? 'active' : ''}`} onClick={() => setShowArchived(!showArchived)} title={t('查看已归档项目', 'View archived projects')}>
+              📦 {t('已归档', 'Archived')}{archivedCount ? ` ${archivedCount}` : ''}
+            </button>
+          )}
           {/* R5-1: 查看 — switch how much of each project is shown */}
           <div style={{ display: 'inline-flex', border: '1px solid var(--border)', borderRadius: 8, overflow: 'hidden' }} title={t('查看方式', 'View')}>
             {([['cards', '🔲', t('大卡片', 'Cards')], ['compact', '▦', t('紧凑', 'Compact')], ['list', '≣', t('列表', 'List')]] as [ViewMode, string, string][]).map(([m, ic, lb]) => (
@@ -153,7 +162,7 @@ function CompactCard({ p, onOpen }: { p: Project; onOpen: () => void }) {
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8 }}>
         <div style={{ minWidth: 0 }}>
           <Ell style={{ fontSize: 14, fontWeight: 600, color: 'var(--navy900)' }}>
-            {p.name}
+            {p.archived && <span data-testid="archived-tag" className="badge" style={{ background: 'var(--hover-bg)', color: 'var(--text2)', marginRight: 5 }}>📦 {t('已归档', 'Archived')}</span>}{p.name}
           </Ell>
           <Ell style={{ fontSize: 11.5, color: 'var(--text2)' }}>{p.client || '—'}</Ell>
         </div>
@@ -246,7 +255,7 @@ function ProjectList({ list, onOpen }: { list: Project[]; onOpen: (id: string) =
           <div key={p.id} className="row-hover" style={{ display: 'grid', gridTemplateColumns: cols, gap: 12, alignItems: 'center', padding: '13px 16px', borderBottom: '1px solid var(--row-line)', cursor: 'pointer' }} onClick={() => onOpen(p.id)}>
             <div style={{ minWidth: 0 }}>
               <Ell style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--navy900)' }}>
-                {p.name}
+                {p.archived && <span data-testid="archived-tag" className="badge" style={{ background: 'var(--hover-bg)', color: 'var(--text2)', marginRight: 5 }}>📦 {t('已归档', 'Archived')}</span>}{p.name}
               </Ell>
               <Ell style={{ fontSize: 11.5, color: 'var(--text2)' }}>{p.client || '—'}</Ell>
             </div>
@@ -304,7 +313,7 @@ function ProjectCard({ p, onOpen }: { p: Project; onOpen: () => void }) {
       </div>
       <div style={{ padding: 18, display: 'flex', flexDirection: 'column', gap: 13, flex: 1 }}>
         <div>
-          <div style={{ fontSize: 16, fontWeight: 600, color: 'var(--navy900)' }}>{p.name}</div>
+          <div style={{ fontSize: 16, fontWeight: 600, color: 'var(--navy900)' }}>{p.archived && <span data-testid="archived-tag" className="badge" style={{ background: 'var(--hover-bg)', color: 'var(--text2)', marginRight: 5 }}>📦 {t('已归档', 'Archived')}</span>}{p.name}</div>
           <div style={{ fontSize: 12.5, color: 'var(--text2)', marginTop: 2 }}>{p.client || '—'}</div>
         </div>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>

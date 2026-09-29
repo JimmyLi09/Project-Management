@@ -10,7 +10,10 @@ import { overdueItems, projStage, staleInfo } from './project';
 import { STAGES } from './templates';
 
 export type Focus =
-  | { kind: 'all' }
+  /* withArchived:「项目总数」数的是公司一共接过多少个,归档的也算 —— 点开的
+     列表就得跟着把归档的放进来,否则条数对不上(项目列表平时是不显示归档的)。
+     别的口径都不带它:归档项目不该算作「进行中」「有逾期」。 */
+  | { kind: 'all'; withArchived?: boolean }
   | { kind: 'active' }                                   // 进行中(未到完工 / 开票)
   | { kind: 'overdue' }                                  // 有逾期阶段的项目
   | { kind: 'points' }                                   // 全部,按积分从高到低
@@ -30,6 +33,10 @@ export const UNASSIGNED_PM = '\u0000unassigned';
 export const isUnassignedName = (n: string) => n === UNASSIGNED_PM;
 
 const isActive = (p: Project) => { const s = projStage(p); return s !== 'invoice' && s !== 'complete'; };
+
+/* 这一组该不该把归档项目一起算进来 */
+export const focusWantsArchived = (f: Focus | undefined): boolean =>
+  !!f && f.kind === 'all' && !!f.withArchived;
 
 export function matchFocus(p: Project, f: Focus): boolean {
   switch (f.kind) {
@@ -55,7 +62,9 @@ export function matchFocus(p: Project, f: Focus): boolean {
 export function focusLabel(f: Focus, lang: 'zh' | 'en'): string {
   const zh = lang === 'zh';
   switch (f.kind) {
-    case 'all': return zh ? '全部项目' : 'All projects';
+    case 'all': return f.withArchived
+      ? (zh ? '全部项目 · 含已归档' : 'All projects · incl. archived')
+      : (zh ? '全部项目' : 'All projects');
     case 'points': return zh ? '全部项目 · 按积分排序' : 'All projects · by points';
     case 'active': return zh ? '进行中' : 'Active';
     case 'overdue': return zh ? '有逾期阶段的项目' : 'Projects with overdue phases';
