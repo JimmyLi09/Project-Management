@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { quoteNo, quoteTotals } from '@/av/core/quote';
 import { canApproveQuote, identityOf } from '@/lib/permissions';
 import { decideQuote, getQuote } from '@/server/avdb';
-import { appendAudit } from '@/server/db';
+import { appendAudit, getProject } from '@/server/db';
+import { denyUnlessVisible } from '@/server/avguard';
 import { currentUser } from '@/server/session';
 import { logZh } from '@/lib/logmsg';
 
@@ -16,6 +17,10 @@ export async function POST(req: NextRequest, { params }: Params) {
   if (!canApproveQuote(identityOf(user))) return NextResponse.json({ error: '仅 PD / BD 可审批报价' }, { status: 403 });
   const quote = getQuote(Number((await params).id));
   if (!quote) return NextResponse.json({ error: '报价不存在' }, { status: 404 });
+  /* 审批只有 PD/BD 做得了,他们本来就看全部 —— 这一句现在拦不到任何人,
+     留着是因为审批权一旦放宽,这里就是漏的那一处。 */
+  const denied = denyUnlessVisible(user, getProject(quote.projectId));
+  if (denied) return denied;
   const body = (await req.json().catch(() => ({}))) as { action?: string; note?: unknown };
   const note = String(body.note ?? '').trim();
   if (body.action !== 'approve' && body.action !== 'reject') return NextResponse.json({ error: '无效操作' }, { status: 400 });

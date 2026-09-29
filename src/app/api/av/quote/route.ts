@@ -8,6 +8,7 @@ import { createQuote, getInquiry, getMarginFloor, latestConfig, latestCostSheet,
 import { appendAudit, getProject } from '@/server/db';
 import { currentUser } from '@/server/session';
 import { logZh } from '@/lib/logmsg';
+import { denyUnlessVisible } from '@/server/avguard';
 
 /* 07 报价审批.
    GET ?project=ID   every line the project carries with whether it can be
@@ -32,6 +33,8 @@ export async function GET(req: NextRequest) {
   if (!canViewPrices(me)) return NextResponse.json({ error: '无权查看报价' }, { status: 403 });
   const project = getProject(req.nextUrl.searchParams.get('project') ?? '');
   if (!project) return NextResponse.json({ error: '项目不存在' }, { status: 404 });
+  const denied = denyUnlessVisible(user, project);   // REQ-043
+  if (denied) return denied;
   return NextResponse.json({
     lines: lineRows(project.id, project.packages.map((k) => k.svc)).map((r) => ({
       line: r.line, state: r.state, cost: r.sheet?.cost ?? null, list: r.sheet?.list ?? null,
@@ -49,6 +52,8 @@ export async function POST(req: NextRequest) {
   const body = (await req.json().catch(() => ({}))) as { projectId?: string; lines?: unknown; discountPct?: unknown; reason?: unknown };
   const project = getProject(String(body.projectId || ''));
   if (!project) return NextResponse.json({ error: '项目不存在' }, { status: 404 });
+  const deniedW = denyUnlessVisible(user, project);   // REQ-043
+  if (deniedW) return deniedW;
   if (!canSubmitQuote(identityOf(user), project)) return NextResponse.json({ error: '仅销售、PD / BD 或该项目的 PM 可提交报价' }, { status: 403 });
 
   const asked = new Set(Array.isArray(body.lines) ? body.lines.map(String) : []);

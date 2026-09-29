@@ -16,6 +16,7 @@ import { lineProjectError } from '@/server/avdrawing';
 import { appendAudit, getProject } from '@/server/db';
 import { currentUser } from '@/server/session';
 import { logZh, type LogParams } from '@/lib/logmsg';
+import { denyUnlessVisible } from '@/server/avguard';
 
 /* 一条审计记录的 text / k / p 三件套 —— 写日志的地方都是这个形状 */
 const auditOf = (k: string, p: LogParams) => ({ text: logZh(k, p), k, p });
@@ -30,6 +31,8 @@ export async function POST(req: NextRequest) {
   const body = (await req.json().catch(() => ({}))) as { projectId?: string; line?: string; drawingId?: number | null; cfg?: unknown };
   const line = body.line === 'projector' || body.line === 'elv' || body.line === 'pv' ? body.line : 'led';
   const project = getProject(String(body.projectId || ''));
+  const denied = denyUnlessVisible(user, project);   // REQ-043
+  if (denied) return denied;
   const bad = lineProjectError(project, line, { led: ' LED ', projector: '投影', elv: '弱电', pv: '光伏' }[line]);
   if (bad) return NextResponse.json({ error: bad }, { status: 400 });
   if (!canCostProject(identityOf(user), project)) return NextResponse.json({ error: '仅该项目的 PM 可保存方案' }, { status: 403 });
