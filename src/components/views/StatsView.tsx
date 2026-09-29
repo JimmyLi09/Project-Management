@@ -62,7 +62,12 @@ export default function StatsView() {
   return (
     <>
       <div className="kpi-grid four">
-        <MiniKpi label={t('项目总数', 'Projects')} value={String(live.length)} n={live.length} title={seeList} onDrill={drill({ kind: 'all' })} />
+        {/* 「项目总数」数的是公司一共接过多少个,归档的也算(0929 确认)。下钻
+            带上 withArchived,列表就把归档那几个一起放进来,条数对得上。
+            另外三格仍只数在册 —— 归档项目不该算作「进行中」「有逾期」。 */}
+        <MiniKpi label={t('项目总数', 'Projects')} value={String(projects.length)} n={projects.length}
+          title={t('查看这些项目(含已归档)', 'See these projects (incl. archived)')}
+          onDrill={drill({ kind: 'all', withArchived: true })} />
         <MiniKpi label={t('总积分', 'Total points')} value={String(totalPts)} n={live.length}
           title={t('按积分从高到低看这些项目', 'See these projects, highest points first')} onDrill={drill({ kind: 'points' })} />
         <MiniKpi label={t('进行中', 'Active')} value={String(activeCount)} n={activeCount} title={seeList} onDrill={drill({ kind: 'active' })} />
