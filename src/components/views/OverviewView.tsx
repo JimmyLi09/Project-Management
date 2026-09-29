@@ -3,11 +3,11 @@
 import React, { useMemo, useState } from 'react';
 import { useStore } from '../store';
 import {
-  fmtDate, isMyProject, overdueItems, pendingWorkflowAction, pkgStart, planDates, projCode, projectHealth, projStage,
+  fmtDate, isMyProject, overdueItems, pendingWorkflowAction, pkgStart, pkgSuffix, planDates, projCode, projectHealth, projStage,
   schedProgress, staleInfo, todayMid,
 } from '@/lib/project';
 import { teamLoads } from '@/lib/alloc';
-import { svcColor } from '@/lib/templates';
+import { svcColor, svcName } from '@/lib/templates';
 import { useLang } from '@/lib/i18n';
 import { Avatar, Ell, healthColor, HM, Icon, Pill, ProgressBar } from '../ui';
 import type { Project } from '@/lib/types';
@@ -51,6 +51,41 @@ export default function OverviewView() {
       });
     });
   });
+
+  /* ===== 0922 变更单 · REQ-011:未解决风险重排 =====
+     一行一条风险,项目名当重点。排序按逾期天数从多到少 —— 拖得最久的排最上面;
+     受阻的没有天数可比,统一垫在逾期条目之后(它要的是去解阻,不是赶工期)。 */
+  const riskRows = useMemo(() => {
+    const svc = (p: Project, pi: number) => {
+      const pk = p.packages[pi];
+      const suffix = pkgSuffix(p, pi);
+      return pk ? svcName(pk.svc, lang) + (suffix ? ' ' + suffix : '') : '';
+    };
+    const join = (...xs: string[]) => xs.filter(Boolean).join(' · ');
+    const rows = active.flatMap((p) => [
+      ...overdueItems(p).map((od) => ({
+        pid: p.id, key: `od-${p.id}-${od.pi}-${od.idx}`, color: 'var(--danger)',
+        code: projCode(p), project: p.name,
+        issue: join(svc(p, od.pi), od.row.phase, lang === 'zh' ? od.row.task : od.row.taskEn || od.row.task),
+        days: od.days as number | null,
+      })),
+      ...p.packages.flatMap((pk, pi) => pk.schedule
+        .map((r, i) => ({ r, pi, i }))
+        .filter((x) => x.r.status === 'block')
+        .map((x) => ({
+          pid: p.id, key: `bl-${p.id}-${x.pi}-${x.i}`, color: 'var(--warning)',
+          code: projCode(p), project: p.name,
+          issue: join(svc(p, x.pi), x.r.phase, lang === 'zh' ? x.r.task : x.r.taskEn || x.r.task),
+          days: null as number | null,
+        }))),
+    ]);
+    return rows.sort((a2, b2) => {
+      if (a2.days == null && b2.days == null) return 0;
+      if (a2.days == null) return 1;      // 受阻垫底
+      if (b2.days == null) return -1;
+      return b2.days - a2.days;           // 逾期越久越靠前
+    });
+  }, [active, lang]);
 
   const myTasks = useMemo(() => {
     const out: { title: string; titleEn: string; project: string; due: Date | null; over: boolean; status: string }[] = [];
@@ -260,29 +295,28 @@ export default function OverviewView() {
 
             {drill === 'risks' && (
               <>
-                {active.flatMap((p) => [
-                  ...overdueItems(p).map((od) => ({
-                    pid: p.id, key: `od-${p.id}-${od.pi}-${od.idx}`, color: 'var(--danger)',
-                    title: lang === 'zh' ? od.row.task : od.row.taskEn || od.row.task,
-                    detail: `${projCode(p) ? projCode(p) + ' ' : ''}${p.name} · ${t(`逾期 ${od.days} 天`, `${od.days}d overdue`)}`,
-                  })),
-                  ...p.packages.flatMap((pk, pi) => pk.schedule.map((r, i) => ({ r, pi, i })).filter((x) => x.r.status === 'block').map((x) => ({
-                    pid: p.id, key: `bl-${p.id}-${x.pi}-${x.i}`, color: 'var(--warning)',
-                    title: lang === 'zh' ? x.r.task : x.r.taskEn || x.r.task,
-                    detail: `${projCode(p) ? projCode(p) + ' ' : ''}${p.name} · ${t('受阻', 'Blocked')}`,
-                  }))),
-                ]).map((it) => (
-                  <div key={it.key} className="row-hover" style={{ display: 'flex', alignItems: 'center', gap: 11, padding: '11px 8px', borderTop: '1px solid var(--row-line)', cursor: 'pointer' }}
+                {/* 0922 变更单:项目名靠左加粗当重点,问题(环节 / 阶段)退到第二行,
+                    逾期标签靠右;整条按逾期天数从多到少排,受阻的(没有天数)垫底。
+                    以前主行是任务名、项目名夹在第二行的一串文字里 —— 一屏十几条
+                    全是「工厂验看/审阅」这种通用环节名,扫不出是哪个项目在出事。 */}
+                {riskRows.map((it) => (
+                  <div key={it.key} className="row-hover" data-testid="risk-row"
+                    style={{ display: 'flex', alignItems: 'center', gap: 11, padding: '11px 8px', borderTop: '1px solid var(--row-line)', cursor: 'pointer' }}
                     onClick={() => { setDrill(null); openProject(it.pid); }}>
                     <span style={{ width: 8, height: 8, borderRadius: 4, background: it.color, flexShrink: 0 }} />
                     <div style={{ minWidth: 0, flex: 1 }}>
-                      <Ell style={{ fontSize: 13, fontWeight: 600 }}>{it.title}</Ell>
-                      <div style={{ fontSize: 11.5, color: 'var(--text2)' }}>{it.detail}</div>
+                      <Ell style={{ fontSize: 13.5, fontWeight: 700, color: 'var(--navy900)' }}>
+                        {it.code && <span className="tnum" style={{ color: 'var(--bronze)', marginRight: 5 }}>{it.code}</span>}{it.project}
+                      </Ell>
+                      <Ell style={{ fontSize: 11.5, color: 'var(--text2)' }}>{it.issue}</Ell>
                     </div>
-                    <Icon name="back" size={14} style={{ transform: 'rotate(180deg)', color: 'var(--text2)' }} />
+                    <span className="badge" style={{ background: it.days != null ? '#fbe0e0' : '#fbf0dc', color: it.days != null ? 'var(--danger)' : '#a8690b', flexShrink: 0 }}>
+                      {it.days != null ? t(`逾期 ${it.days} 天`, `${it.days}d overdue`) : t('受阻', 'Blocked')}
+                    </span>
+                    <Icon name="back" size={14} style={{ transform: 'rotate(180deg)', color: 'var(--text2)', flexShrink: 0 }} />
                   </div>
                 ))}
-                {openRisks === 0 && <div style={{ padding: 20, textAlign: 'center', color: 'var(--text2)', fontSize: 13 }}>✓ {t('暂无未解决风险。', 'No open risks.')}</div>}
+                {riskRows.length === 0 && <div style={{ padding: 20, textAlign: 'center', color: 'var(--text2)', fontSize: 13 }}>✓ {t('暂无未解决风险。', 'No open risks.')}</div>}
               </>
             )}
           </div>
