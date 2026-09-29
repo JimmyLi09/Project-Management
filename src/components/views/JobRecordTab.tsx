@@ -8,7 +8,7 @@ import { fmtDate, parseISO, pkgSuffix, projCode } from '@/lib/project';
 import { useLang } from '@/lib/i18n';
 import { Icon } from '../ui';
 import {
-  REGISTERS, baseDefOf, hasRecordDef, statusFamily, statusMeta, defaultStatus, recordVal, isIncomplete, fieldsOf, FIELD_TYPES, formulaText, optionLabel,
+  REGISTERS, baseDefOf, hasRecordDef, statusFamily, statusMeta, defaultStatus, recordVal, fieldVal, isIncomplete, fieldsOf, FIELD_TYPES, formulaText, optionLabel,
   type FieldDef, type FieldType, type RegisterDef,
 } from '@/lib/records';
 import type { Project, ServicePackage } from '@/lib/types';
@@ -287,12 +287,12 @@ function RecordCard({ p, pk, pkgIdx, def: baseDef, canEd, register }: {
 
   const rec = pk.record;
   const status = (rec?.status as string) || defaultStatus(def.kind);
-  const incomplete = isIncomplete(def, rec);
+  const incomplete = isIncomplete(def, rec, undefined, p);
   const fam = statusFamily(def.kind);
 
   function begin() {
     const d: Record<string, string> = { status };
-    def.fields.forEach((f) => { if (f.type !== 'formula') d[f.key] = recordVal(rec, f.key); });
+    def.fields.forEach((f) => { if (f.type !== 'formula') d[f.key] = fieldVal(f, rec, p); });
     setDraft(d);
     setEditing(true);
   }
@@ -385,7 +385,7 @@ function RecordCard({ p, pk, pkgIdx, def: baseDef, canEd, register }: {
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(260px,1fr))', gap: '0 18px', padding: '0 18px' }}>
                 {gfields.map((f) => {
                   const isF = f.type === 'formula';
-                  const val = isF ? formulaText(f, def.fields, rec) : recordVal(rec, f.key);
+                  const val = isF ? formulaText(f, def.fields, rec) : fieldVal(f, rec, p);
                   const missing = !isF && f.required && !val.trim();
                   /* REQ-039: 关键信息粗体 —— 公式算出来的结果本来就是重点,一并加粗 */
                   const key = !!f.highlight || isF;

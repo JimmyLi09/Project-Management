@@ -13,7 +13,7 @@
    columns from the spec — flagged `confirmed: false` — pending PD tweak. */
 
 import { compileFormula, evalFormula, findFormulaCycle } from './formula';
-import type { ServiceRecord } from './types';
+import type { Project, ServiceRecord } from './types';
 export type { ServiceRecord };
 
 export type RegisterKind = 'install' | 'delivery';
@@ -373,11 +373,93 @@ export function optionLabel(f: FieldDef, val: string, lang: 'zh' | 'en'): string
 export const recordVal = (rec: ServiceRecord | undefined, key: string): string =>
   rec && rec[key] != null ? String(rec[key]) : '';
 
+/* ===== 0922 变更单 · REQ-006 / REQ-032:档案里这几栏与项目同源 =====
+   Project detail / Client Contact / Handover Date 以前是登记表自己的一栏,
+   跟项目抬头上的同一条信息各存各的 —— 改了项目名,档案里还是旧的。
+
+   这里做的是真·同源,不是「改完再抄一份过去」:这几个 key 的**存储位置就是
+   项目本身**。读的时候一律读项目(record 里可能还留着老值,读不到它,也不
+   删 —— 删掉就没法回头核对了);写的时候由服务端把它路由到对应的项目字段。
+   双向:在档案里就地改,和在项目抬头改是同一件事。
+
+   Model Maker(模型师)和 比例 1:N 不在此列 —— 前者是 scale model 这块业务
+   自己的工作人员,不是项目工程师;后者项目上没有对应字段。两者仍是档案字段。 */
+export type ProjSource = 'name' | 'clientContact' | 'delivery';
+
+const PROJ_SOURCED: Record<string, ProjSource> = {
+  projectDetail: 'name',
+  clientContact: 'clientContact',
+  handoverDate: 'delivery',
+};
+
+export const projSourceOf = (key: string): ProjSource | undefined => PROJ_SOURCED[key];
+
+/* 项目联系人里哪一条是客户。建项目时播的是「客户 Client」,但这一栏 PD 能
+   自己改字,所以按关键词认而不是全等。 */
+const CLIENT_ROLE = /客户|client/i;
+export const clientContactIdx = (p: Project): number =>
+  (p.contacts || []).findIndex((c) => CLIENT_ROLE.test(c.role || ''));
+
+export function projFieldVal(src: ProjSource, p: Project): string {
+  if (src === 'name') return p.name || '';
+  if (src === 'delivery') return p.delivery || '';
+  const i = clientContactIdx(p);
+  return i >= 0 ? (p.contacts || [])[i].person || '' : '';
+}
+
+/* 读一个格子的值。带上项目就走同源那套;不带(比如还没拿到项目的场合)
+   退回读 record —— 调用点漏传不会炸,只是读到老值。 */
+export const fieldVal = (f: FieldDef, rec: ServiceRecord | undefined, p?: Project): string => {
+  const src = p && projSourceOf(f.key);
+  return src ? projFieldVal(src, p) : recordVal(rec, f.key);
+};
+
+export type ProjFieldResult = { ok: true; log: string | null } | { ok: false; error: string };
+
+/* 把档案里改的那一格写到项目上。服务端的三条写入路径(setRecord /
+   addServicePackage / CSV 导入)都过这里,所以不管从哪个口子进来,落点都一样。
+   返回要写进项目日志的那一行 —— 在档案里改项目名,日志里也该看得出来。 */
+export function applyProjField(p: Project, src: ProjSource, raw: string): ProjFieldResult {
+  const v = String(raw ?? '').trim();
+  if (src === 'name') {
+    const name = v.slice(0, 120);
+    /* 项目名是各处的显示主键,清空等于把项目弄丢 —— 和 REQ-028 一样两层都拦 */
+    if (!name) return { ok: false, error: 'Project detail 就是项目名,不能清空' };
+    if (name === p.name) return { ok: true, log: null };
+    const was = p.name;
+    p.name = name;
+    return { ok: true, log: `项目更名:「${was}」→「${name}」` };
+  }
+  if (src === 'delivery') {
+    const d = v.slice(0, 10);
+    if (d === (p.delivery || '')) return { ok: true, log: null };
+    const was = p.delivery;
+    p.delivery = d;
+    return { ok: true, log: `交付日 Handover Date:「${was || '—'}」→「${d || '—'}」` };
+  }
+  const person = v.slice(0, 200);
+  const i = clientContactIdx(p);
+  if (i < 0) {
+    /* 这个项目还没有客户那一条联系人 —— 建一条,别让填进来的名字没地方放 */
+    if (!person) return { ok: true, log: null };
+    if (!Array.isArray(p.contacts)) p.contacts = [];
+    p.contacts.push({ role: '客户 Client', company: p.client || '', person, phone: '', email: '' });
+    return { ok: true, log: `客户联系人 Client Contact:「—」→「${person}」` };
+  }
+  const c = (p.contacts || [])[i];
+  if (c.person === person) return { ok: true, log: null };
+  const was = c.person;
+  c.person = person;
+  return { ok: true, log: `客户联系人 Client Contact:「${was || '—'}」→「${person || '—'}」` };
+}
+
 /* a required field is blank → the record is "incomplete" (also true when draft) */
-export function isIncomplete(def: RegisterDef, rec: ServiceRecord | undefined, ov?: FieldOverrides): boolean {
+export function isIncomplete(def: RegisterDef, rec: ServiceRecord | undefined, ov?: FieldOverrides, p?: Project): boolean {
   if (!rec) return true;
   if ((rec.status || defaultStatus(def.kind)) === 'draft') return true;
-  return fieldsOf(def, ov).some((f) => f.required && !recordVal(rec, f.key).trim());
+  /* 0922 变更单:同源那几栏要读项目 —— 出厂的必填项里没有它们,但 PD 在
+     「增减字段」里可以把任何一栏设成必填,那时读错地方就会误报「缺资料」。 */
+  return fieldsOf(def, ov).some((f) => f.required && !fieldVal(f, rec, p).trim());
 }
 
 /* delivery records expiring within `days` (default 30) of the watch date, not

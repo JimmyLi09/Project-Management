@@ -5,6 +5,7 @@ import crypto from 'crypto';
 import type { Project, Role, User } from '@/lib/types';
 import { migrate } from '@/lib/project';
 import { getBuiltinTemplate, SVC, type Template } from '@/lib/templates';
+import { applyProjField, projSourceOf } from '@/lib/records';
 
 /* On serverless platforms (Vercel) the project directory is read-only and
    ephemeral — keep the demo database in /tmp there. */
@@ -722,10 +723,25 @@ export function importRegisterRecords(
         if (!p.services.includes(svc)) p.services.push(svc);
       }
       const rec: Record<string, string | number | undefined> = { ...(pk.record || {}) };
-      for (const [k, v] of Object.entries(row.patch || {})) { if (k === 'updatedAt') continue; rec[k] = String(v ?? '').slice(0, 2000); }
+      const notes: string[] = [];
+      for (const [k, v] of Object.entries(row.patch || {})) {
+        if (k === 'updatedAt') continue;
+        /* 0922 变更单:与项目同源的那几列,导入时也得落到项目字段上 ——
+           塞进 record 的话读的时候根本读不到,等于这一列白导。 */
+        const src = projSourceOf(k);
+        if (src) {
+          const r = applyProjField(p, src, String(v ?? ''));
+          if (!r.ok) throw new Error(`第 ${i + 1} 行:${r.error}(导入已全部撤销)`);
+          if (r.log) notes.push(r.log);
+          continue;
+        }
+        rec[k] = String(v ?? '').slice(0, 2000);
+      }
       rec.updatedAt = now;
       pk.record = rec;
-      p.log = [{ at: now, by: actor, text: `导入登记记录 Import: ${svc}` }, ...((p.log as { at: number; by: string; text: string }[]) || [])].slice(0, 200);
+      const entries = [{ at: now, by: actor, text: `导入登记记录 Import: ${svc}` },
+        ...notes.map((text) => ({ at: now, by: actor, text }))];
+      p.log = [...entries, ...((p.log as { at: number; by: string; text: string }[]) || [])].slice(0, 200);
       const { updatedAt: _u, version: _v, ...pdata } = p;
       upd.run(JSON.stringify(pdata), now, hit.id);
       updated++;
