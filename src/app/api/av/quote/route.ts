@@ -7,6 +7,7 @@ import { canApproveQuote, canSubmitQuote, canViewPrices, identityOf } from '@/li
 import { createQuote, getInquiry, getMarginFloor, latestConfig, latestCostSheet, listQuotes } from '@/server/avdb';
 import { appendAudit, getProject } from '@/server/db';
 import { currentUser } from '@/server/session';
+import { logZh } from '@/lib/logmsg';
 
 /* 07 报价审批.
    GET ?project=ID   every line the project carries with whether it can be
@@ -66,11 +67,16 @@ export async function POST(req: NextRequest) {
   if (blocks.length) return NextResponse.json({ error: blocks.map((c) => c.message).join(' ') }, { status: 400 });
 
   const quote = createQuote({ projectId: project.id, sections, dedup, discountPct, gstRate: GST_RATE, marginFloor, reason }, user.name);
-  appendAudit(project.id, [{
-    at: Date.now(), by: user.name,
-    text: `提交报价 ${quoteNo(quote.id)} 待审批：${sections.map((s) => lineInfo(s.line).label).join(' + ')} · 含税 S$${totals.total.toLocaleString('en-US')}`
-      + (totals.shared ? ` · 共用资源去重 −S$${totals.shared.toLocaleString('en-US')}` : '')
-      + ` · 折后毛利 ${totals.margin === null ? '—' : (totals.margin * 100).toFixed(1) + '%'}`,
-  }]);
+  const qP = {
+    no: quoteNo(quote.id),
+    lines: sections.map((s) => lineInfo(s.line).label).join(' + '),
+    total: totals.total.toLocaleString('en-US'),
+    shared: totals.shared ? totals.shared.toLocaleString('en-US') : '',
+    margin: totals.margin === null ? '—' : (totals.margin * 100).toFixed(1) + '%',
+  };
+  /* 有没有共用资源去重是两句不同的话,不是往参数里塞一段中文 —— 塞进去
+     等于这一段永远不会被翻。 */
+  const qk = totals.shared ? 'av.quoteSubmitShared' : 'av.quoteSubmit';
+  appendAudit(project.id, [{ at: Date.now(), by: user.name, text: logZh(qk, qP), k: qk, p: qP }]);
   return NextResponse.json({ quote });
 }

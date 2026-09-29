@@ -16,6 +16,7 @@ import {
 import { DIFF, STAGES, stageIdx, svcColor, svcName } from '@/lib/templates';
 import { contactRoleTerm, diffTerm, fieldGroupTerm } from '@/lib/terms';
 import { useLang } from '@/lib/i18n';
+import { logText, type LogLike } from '@/lib/logmsg';
 import { Avatar, Ell, HM, Icon, Pill, ProgressBar, TM } from '../ui';
 import ScheduleTab from './ScheduleTab';
 import ChecklistTab from './ChecklistTab';
@@ -737,7 +738,7 @@ function OverviewTab({ p, onSchedule }: { p: Project; onSchedule: (pkg: number) 
             <div key={i} style={{ display: 'flex', gap: 11, padding: '8px 0', borderTop: '1px solid var(--row-line2)' }}>
               <Avatar name={e.by} size={24} />
               <div style={{ flex: 1, lineHeight: 1.4, minWidth: 0 }}>
-                <div style={{ fontSize: 12.5 }}><b style={{ fontWeight: 600 }}>{e.by}</b> {e.text}</div>
+                <div style={{ fontSize: 12.5 }}><b style={{ fontWeight: 600 }}>{e.by}</b> {logText(e, lang)}</div>
                 <div className="tnum" style={{ fontSize: 11, color: 'var(--text2)' }}>{fmtDate(new Date(e.at))} {new Date(e.at).toTimeString().slice(0, 5)}</div>
               </div>
             </div>
@@ -1143,8 +1144,8 @@ function Row({ k, v }: { k: string; v: string }) {
 }
 
 function HistoryModal({ pid, onClose }: { pid: string; onClose: () => void }) {
-  const { t } = useLang();
-  const [entries, setEntries] = useState<{ at: number; by: string; text: string }[] | null>(null);
+  const { lang, t } = useLang();
+  const [entries, setEntries] = useState<(LogLike & { at: number; by: string })[] | null>(null);
   React.useEffect(() => {
     fetch(`/api/projects/${pid}/audit`).then((r) => r.ok ? r.json() : { entries: [] }).then((d) => setEntries(d.entries));
   }, [pid]);
@@ -1163,7 +1164,7 @@ function HistoryModal({ pid, onClose }: { pid: string; onClose: () => void }) {
           <div key={i} style={{ display: 'flex', gap: 11, padding: '9px 0', borderTop: '1px solid var(--row-line2)' }}>
             <Avatar name={e.by} size={24} />
             <div style={{ flex: 1, lineHeight: 1.4, minWidth: 0 }}>
-              <div style={{ fontSize: 12.5 }}><b style={{ fontWeight: 600 }}>{e.by}</b> {e.text}</div>
+              <div style={{ fontSize: 12.5 }}><b style={{ fontWeight: 600 }}>{e.by}</b> {logText(e, lang)}</div>
               <div className="tnum" style={{ fontSize: 11, color: 'var(--text2)' }}>{fmtDate(new Date(e.at))} {new Date(e.at).toTimeString().slice(0, 5)}</div>
             </div>
           </div>

@@ -8,6 +8,7 @@ import { getDrawing, insertDrawing } from '@/server/avdb';
 import { DrawingServiceError, ledProjectError, runDrawingCli } from '@/server/avdrawing';
 import { appendAudit, getProject } from '@/server/db';
 import { currentUser } from '@/server/session';
+import { logZh } from '@/lib/logmsg';
 
 /* 03 解析提取: POST multipart { project, file, scale? } -> the stored drawing.
    The upload keeps its original file name, because provenance quotes it
@@ -47,7 +48,8 @@ export async function POST(req: NextRequest) {
     const args = ['ingest', target, ...(scale ? ['--scale', String(scale)] : [])];
     const result = (await runDrawingCli(args)) as unknown as IngestResult;
     const id = insertDrawing(projectId, result, user.name);
-    appendAudit(projectId, [{ at: Date.now(), by: user.name, text: `LED 图纸上传并解析：${result.drawing}（${result.grade} 级）` }]);
+    const ingP = { file: result.drawing, grade: result.grade };
+    appendAudit(projectId, [{ at: Date.now(), by: user.name, text: logZh('av.ingest', ingP), k: 'av.ingest', p: ingP }]);
     return NextResponse.json(getDrawing(id));
   } catch (e) {
     const status = e instanceof DrawingServiceError ? 422 : 500;

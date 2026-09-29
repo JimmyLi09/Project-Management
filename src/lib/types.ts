@@ -235,7 +235,12 @@ export interface DirectorUpdate {
 export interface LogEntry {
   at: number;
   by: string;
+  /* 写入时渲染好的中文那句。老记录只有它;新记录也留着 —— 导出、老客户端、
+     以及将来词条被删的情况都还能读到一句人话。 */
   text: string;
+  /* 操作日志 i18n:词条 key 与参数。老记录没有这两项,显示时原样用 text。 */
+  k?: string;
+  p?: Record<string, string | number | null | undefined>;
 }
 
 export interface Parties {

@@ -460,7 +460,9 @@ export function isOverridden(key: string, rec: ServiceRecord | undefined, d?: Av
   return dv != null && Number(raw) !== dv;
 }
 
-export type ProjFieldResult = { ok: true; log: string | null } | { ok: false; error: string };
+/* 操作日志 i18n:这里也回 key + 参数,不回渲染好的句子 */
+export type ProjFieldLog = { k: string; p?: Record<string, string | number | null | undefined> };
+export type ProjFieldResult = { ok: true; log: ProjFieldLog | null } | { ok: false; error: string };
 
 /* 把档案里改的那一格写到项目上。服务端的三条写入路径(setRecord /
    addServicePackage / CSV 导入)都过这里,所以不管从哪个口子进来,落点都一样。
@@ -474,14 +476,14 @@ export function applyProjField(p: Project, src: ProjSource, raw: string): ProjFi
     if (name === p.name) return { ok: true, log: null };
     const was = p.name;
     p.name = name;
-    return { ok: true, log: `项目更名:「${was}」→「${name}」` };
+    return { ok: true, log: { k: 'proj.rename', p: { from: was, to: name } } };
   }
   if (src === 'delivery') {
     const d = v.slice(0, 10);
     if (d === (p.delivery || '')) return { ok: true, log: null };
     const was = p.delivery;
     p.delivery = d;
-    return { ok: true, log: `交付日 Handover Date:「${was || '—'}」→「${d || '—'}」` };
+    return { ok: true, log: { k: 'proj.delivery', p: { from: was, to: d } } };
   }
   const person = v.slice(0, 200);
   const i = clientContactIdx(p);
@@ -490,13 +492,13 @@ export function applyProjField(p: Project, src: ProjSource, raw: string): ProjFi
     if (!person) return { ok: true, log: null };
     if (!Array.isArray(p.contacts)) p.contacts = [];
     p.contacts.push({ role: '客户 Client', company: p.client || '', person, phone: '', email: '' });
-    return { ok: true, log: `客户联系人 Client Contact:「—」→「${person}」` };
+    return { ok: true, log: { k: 'contact.person', p: { from: '', to: person } } };
   }
   const c = (p.contacts || [])[i];
   if (c.person === person) return { ok: true, log: null };
   const was = c.person;
   c.person = person;
-  return { ok: true, log: `客户联系人 Client Contact:「${was || '—'}」→「${person || '—'}」` };
+  return { ok: true, log: { k: 'contact.person', p: { from: was, to: person } } };
 }
 
 /* a required field is blank → the record is "incomplete" (also true when draft) */
