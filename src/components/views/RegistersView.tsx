@@ -4,12 +4,12 @@ import React, { useMemo, useState } from 'react';
 import { useStore } from '../store';
 import { canAdmin, canEdit, isFull } from '@/lib/permissions';
 import { svcName, svcColor } from '@/lib/templates';
-import { todayMid, fmtDate, projCode , pkgSuffix } from '@/lib/project';
+import { todayMid, fmtDate, pkgSuffix } from '@/lib/project';
 import { useLang } from '@/lib/i18n';
 import { Icon } from '../ui';
 import { FieldEditor } from './JobRecordTab';
 import {
-  REGISTERS, baseDefOf, customRegisterSvcs, statusFamily, statusMeta, defaultStatus, recordVal, fieldsOf, formulaText,
+  REGISTERS, baseDefOf, customRegisterSvcs, statusFamily, statusMeta, defaultStatus, recordVal, fieldVal, projSourceOf, projFieldVal, fieldsOf, formulaText,
   isIncomplete, isExpiring, type RegisterDef, type FieldDef,
 } from '@/lib/records';
 import type { Project, ServicePackage } from '@/lib/types';
@@ -18,9 +18,11 @@ interface Row { p: Project; pi: number; pk: ServicePackage; }
 const PAGE = 20;
 
 /* representative date for Year filter + "expiring" watch */
-function mainDate(def: RegisterDef, pk: ServicePackage): string {
+function mainDate(def: RegisterDef, pk: ServicePackage, p: Project): string {
   const keys = def.kind === 'install' ? ['installation', 'installDate'] : [def.watchDateKey || '', 'completedDate', 'deliveryDate', 'handoverDate'];
-  for (const k of keys) { if (k) { const v = recordVal(pk.record, k); if (v) return v; } }
+  /* 0922 变更单:handoverDate 现在存在项目上,再读 record 只会读到旧值(多半是空)
+     —— 年份筛选和「即将到期」都是按这个日子算的,得走同源那条路。 */
+  for (const k of keys) { if (k) { const src = projSourceOf(k); const v = src ? projFieldVal(src, p) : recordVal(pk.record, k); if (v) return v; } }
   return '';
 }
 
@@ -82,7 +84,7 @@ export default function RegistersView() {
 
   const years = useMemo(() => {
     const s = new Set<string>();
-    all.forEach((r) => { const d = mainDate(def, r.pk); const y = d ? d.slice(0, 4) : String(new Date(r.p.created).getFullYear()); if (y) s.add(y); });
+    all.forEach((r) => { const d = mainDate(def, r.pk, r.p); const y = d ? d.slice(0, 4) : String(new Date(r.p.created).getFullYear()); if (y) s.add(y); });
     return [...s].sort().reverse();
   }, [all, def]);
 
@@ -93,7 +95,7 @@ export default function RegistersView() {
       if (status && st !== status) return false;
       if (pm && !(r.p.owners || []).includes(pm)) return false;
       if (client && (r.p.client || '').trim() !== client) return false;   // REQ-020
-      if (year) { const d = mainDate(def, r.pk); const y = d ? d.slice(0, 4) : String(new Date(r.p.created).getFullYear()); if (y !== year) return false; }
+      if (year) { const d = mainDate(def, r.pk, r.p); const y = d ? d.slice(0, 4) : String(new Date(r.p.created).getFullYear()); if (y !== year) return false; }
       if (ql) {
         const hay = [r.p.name, r.p.client, recordVal(r.pk.record, 'developer'), recordVal(r.pk.record, 'siteAddress'), recordVal(r.pk.record, 'mainCon')].join(' ').toLowerCase();
         if (!hay.includes(ql)) return false;
@@ -113,7 +115,7 @@ export default function RegistersView() {
       if (sort.key === 'status') return String((r.pk.record?.status as string) || defaultStatus(def.kind));
       const key = sort.key.slice(2);
       const f = def.fields.find((x) => x.key === key);
-      const v = f && f.type === 'formula' ? formulaText(f, def.fields, r.pk.record) : recordVal(r.pk.record, key);
+      const v = f && f.type === 'formula' ? formulaText(f, def.fields, r.pk.record) : (f ? fieldVal(f, r.pk.record, r.p) : recordVal(r.pk.record, key));
       /* 空值一律排最后,升降序都是 —— 空格夹在中间最难扫 */
       return v.trim() ? v.toLowerCase() : '\uffff';
     };
@@ -138,7 +140,7 @@ export default function RegistersView() {
     }
     const expiring = all.filter((r) => isExpiring(def, r.pk.record, t0)).length;
     const delivered = all.filter((r) => ((r.pk.record?.status as string) || 'draft') === 'delivered').length;
-    const incomplete = all.filter((r) => isIncomplete(def, r.pk.record)).length;
+    const incomplete = all.filter((r) => isIncomplete(def, r.pk.record, undefined, r.p)).length;
     return [
       [t('总数', 'Total'), all.length, 'var(--navy900)'],
       [t('即将到期', 'Expiring'), expiring, expiring ? 'var(--warning)' : 'var(--navy900)'],
@@ -156,8 +158,8 @@ export default function RegistersView() {
     const head = [t('项目', 'Project'), t('客户', 'Client'), 'PM', t('状态', 'Status'), ...def.fields.map((f) => (lang === 'zh' ? f.zh : f.en))];
     const body = rows.map((r) => {
       const sm = statusMeta(def.kind, (r.pk.record?.status as string) || defaultStatus(def.kind));
-      return [(projCode(r.p) ? projCode(r.p) + ' ' : '') + r.p.name + (pkgSuffix(r.p, r.pi) ? ' ' + pkgSuffix(r.p, r.pi) : ''), r.p.client || '', (r.p.owners || []).join(' / '), lang === 'zh' ? sm[1] : sm[2],
-        ...def.fields.map((f) => (f.type === 'formula' ? formulaText(f, def.fields, r.pk.record) : recordVal(r.pk.record, f.key)).replace(/\n/g, ' '))];
+      return [r.p.name + (pkgSuffix(r.p, r.pi) ? ' ' + pkgSuffix(r.p, r.pi) : ''), r.p.client || '', (r.p.owners || []).join(' / '), lang === 'zh' ? sm[1] : sm[2],
+        ...def.fields.map((f) => (f.type === 'formula' ? formulaText(f, def.fields, r.pk.record) : fieldVal(f, r.pk.record, r.p)).replace(/\n/g, ' '))];
     });
     const csv = [head, ...body].map((r) => r.map(esc).join(',')).join('\r\n');
     const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' });
@@ -270,12 +272,15 @@ export default function RegistersView() {
               {pageRows.map((r) => {
                 const rec = r.pk.record;
                 const sm = statusMeta(def.kind, (rec?.status as string) || defaultStatus(def.kind));
-                const inc = isIncomplete(def, rec);
+                const inc = isIncomplete(def, rec, undefined, r.p);
                 const exp = isExpiring(def, rec, t0);
                 return (
                   <tr key={`${r.p.id}:${r.pi}`} className="row-hover">
                     <td style={{ ...cell, fontWeight: 600, color: 'var(--navy900)', cursor: 'pointer', whiteSpace: 'nowrap' }} onClick={() => openProject(r.p.id)}>
-                      {projCode(r.p) && <span className="tnum" style={{ color: 'var(--bronze)', marginRight: 6 }}>{projCode(r.p)}</span>}{r.p.name}
+                      {/* 0922 变更单:左边那列棕色系统序号去掉 —— 项目列表和详情页
+                          都不显示它(REQ-025/028),只有这里挂着一个 158,看着像另
+                          一套编号。数据仍保留,导出封面页照旧用。 */}
+                      {r.p.name}
                       {/* REQ-026: 同一项目同类多份时,标出这是哪一份 */}
                       {pkgSuffix(r.p, r.pi) && <span style={{ color: 'var(--bronze)', marginLeft: 6, fontWeight: 700 }}>{pkgSuffix(r.p, r.pi)}</span>}
                     </td>
@@ -294,9 +299,9 @@ export default function RegistersView() {
                           <b className="tnum">{formulaText(f, def.fields, rec)}</b>
                         ) : cellEditing === `${r.p.id}:${r.pi}:${f.key}` ? (
                           <CellEditor
-                            f={f} val={recordVal(rec, f.key)} lang={lang}
+                            f={f} val={fieldVal(f, rec, r.p)} lang={lang}
                             onDone={async (v) => {
-                              if (v !== recordVal(rec, f.key)) await dispatch(r.p.id, { type: 'setRecord', pkg: r.pi, patch: { [f.key]: v } });
+                              if (v !== fieldVal(f, rec, r.p)) await dispatch(r.p.id, { type: 'setRecord', pkg: r.pi, patch: { [f.key]: v } });
                               setCellEditing(null);
                             }}
                             onCancel={() => setCellEditing(null)}
@@ -306,7 +311,7 @@ export default function RegistersView() {
                             onClick={() => canEditCells && setCellEditing(`${r.p.id}:${r.pi}:${f.key}`)}
                             title={canEditCells ? t('点击就地编辑', 'Click to edit') : undefined}
                             style={{ cursor: canEditCells ? 'text' : 'default', minHeight: 18 }}>
-                            <CellVal f={f} val={recordVal(rec, f.key)} />
+                            <CellVal f={f} val={fieldVal(f, rec, r.p)} />
                           </div>
                         )}
                       </td>
@@ -562,7 +567,7 @@ function EditModal({ row, def, onClose, onSave }: { row: Row; def: RegisterDef; 
   const rec = row.pk.record;
   const [draft, setDraft] = useState<Record<string, string>>(() => {
     const d: Record<string, string> = { status: (rec?.status as string) || defaultStatus(def.kind) };
-    def.fields.forEach((f) => { d[f.key] = recordVal(rec, f.key); });
+    def.fields.forEach((f) => { d[f.key] = fieldVal(f, rec, row.p); });
     return d;
   });
   const [busy, setBusy] = useState(false);

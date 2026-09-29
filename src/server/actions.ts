@@ -9,6 +9,7 @@ import { buildPackage, deriveStatuses, fitWindow, newId, parseISO, isoDate, tota
 import { SVC, type Template } from '@/lib/templates';
 import type { CalendarSchedule, CalendarStage, ChecklistStatus, Project, ReceiptRecord, ScheduleStatus } from '@/lib/types';
 import { cleanReceipt, sortReceipts, syncFromLatest, syncToLatest } from '@/lib/receipts';
+import { applyProjField, projSourceOf } from '@/lib/records';
 
 /* Optional context the route supplies so we can rebuild from edited templates
    without importing the DB layer here (keeps this file client-safe for types). */
@@ -128,6 +129,19 @@ function logIt(p: Project, by: string, text: string) {
   p.log = p.log || [];
   p.log.unshift({ at: Date.now(), by, text });
   if (p.log.length > 200) p.log.length = 200;
+}
+
+/* 0922 变更单:资料 patch 里如果有与项目同源的 key(Project detail / Client
+   Contact / Handover Date),把它写到项目字段上并记一条日志,返回 true 表示
+   这一格已经处理过、不要再往 record 里塞一份。权限沿用 setRecord 自己的
+   canEdit —— 它比这几个字段各自的动作(canMeta / canEdit)只严不松。 */
+function routeProjSourced(p: Project, u: Identity, key: string, value: unknown): boolean {
+  const src = projSourceOf(key);
+  if (!src) return false;
+  const r = applyProjField(p, src, String(value ?? ''));
+  if (!r.ok) throw new ValidationError(r.error);
+  if (r.log) logIt(p, u.name, r.log);
+  return true;
 }
 
 function getRow(p: Project, pkg: number, idx: number) {
@@ -892,13 +906,19 @@ export function applyAction(u: Identity, p: Project, a: ProjectAction, ctx: Acti
       if (!pk) throw new ValidationError('无效的服务包');
       if (!a.patch || typeof a.patch !== 'object') throw new ValidationError('无效的资料');
       const rec: Record<string, string | number | undefined> = { ...(pk.record || {}) };
+      let touchedRec = false;
       for (const [k, v] of Object.entries(a.patch)) {
         if (k === 'updatedAt') continue; // server-owned
+        /* 0922 变更单:与项目同源的那几栏不进 record,直接落到项目字段上 */
+        if (routeProjSourced(p, u, k, v)) continue;
         rec[k] = String(v ?? '').slice(0, 2000);
+        touchedRec = true;
       }
-      rec.updatedAt = Date.now();
-      pk.record = rec;
-      logIt(p, u.name, `更新资料 Record: ${pk.svc}`);
+      if (touchedRec) {
+        rec.updatedAt = Date.now();
+        pk.record = rec;
+        logIt(p, u.name, `更新资料 Record: ${pk.svc}`);
+      }
       break;
     }
     case 'addServicePackage': {
@@ -924,7 +944,11 @@ export function applyAction(u: Identity, p: Project, a: ProjectAction, ctx: Acti
         if (!p.services.includes(svc)) p.services.push(svc);   // services 是类型清单,仍然去重
       }
       const rec: Record<string, string | number | undefined> = { ...(pk.record || {}) };
-      for (const [k, v] of Object.entries(a.patch || {})) { if (k === 'updatedAt') continue; rec[k] = String(v ?? '').slice(0, 2000); }
+      for (const [k, v] of Object.entries(a.patch || {})) {
+        if (k === 'updatedAt') continue;
+        if (routeProjSourced(p, u, k, v)) continue;   // 0922 变更单:同源那几栏落到项目上
+        rec[k] = String(v ?? '').slice(0, 2000);
+      }
       rec.updatedAt = Date.now();
       pk.record = rec;
       logIt(p, u.name, `${a.asNew ? '新增业务' : '新增登记记录'} ${svcName(svc)}${pk.label ? '·' + pk.label : ''}`);

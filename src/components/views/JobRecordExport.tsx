@@ -6,7 +6,7 @@ import { useLang } from '@/lib/i18n';
 import { svcName } from '@/lib/templates';
 import { fmtDate, parseISO, pkgSuffix, projCode } from '@/lib/project';
 import {
-  registerDef, statusMeta, defaultStatus, recordVal, fieldsOf, formulaText, optionLabel,
+  registerDef, statusMeta, defaultStatus, fieldVal, fieldsOf, formulaText, optionLabel,
   type FieldDef, type RegisterDef,
 } from '@/lib/records';
 import type { Project, ServicePackage } from '@/lib/types';
@@ -35,7 +35,7 @@ export default function JobRecordExport({ p, onClose }: { p: Project; onClose: (
      导出的是算好的结果,不是表达式。 */
   const val = (f: FieldDef, fields: FieldDef[], rec: ServicePackage['record']): string => {
     if (f.type === 'formula') { const v = formulaText(f, fields, rec); return v === '—' ? '' : v; }
-    const raw = recordVal(rec, f.key);
+    const raw = fieldVal(f, rec, p);
     if (!raw) return '';
     if (f.type === 'date') { const d = parseISO(raw); return d ? fmtDate(d) : raw; }
     if (f.type === 'select') return optionLabel(f, raw, lang);
