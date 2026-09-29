@@ -31,7 +31,7 @@ npm run build
 npm start
 ```
 
-看到 `Ready` 字样即启动成功。本机浏览器打开 `http://localhost:8080` 验证。
+看到 `Ready` 字样即启动成功。本机浏览器打开 `http://localhost:3000` 验证。
 
 **初始账号**:`pd` / `bd` / `sales`,密码均为 `audax123`。
 > ⚠️ 安全:本地部署时这三个账号**首次登录会强制要求修改密码**,请立即改掉初始密码。
@@ -46,11 +46,11 @@ npm start
 ## 三、让全公司能访问
 
 1. 查服务器内网 IP:Windows 执行 `ipconfig`(看 IPv4 地址),Mac/Linux 执行 `ifconfig` 或 `ip a`。
-2. 员工浏览器访问:`http://<服务器IP>:8080`,例如 `http://192.168.1.50:8080`。
-3. 打不开时,放行防火墙 8080 端口:
-   - Windows:控制面板 → Windows Defender 防火墙 → 高级设置 → 入站规则 → 新建规则 → 端口 → TCP 8080 → 允许。
+2. 员工浏览器访问:`http://<服务器IP>:3000`,例如 `http://192.168.1.50:3000`。
+3. 打不开时,放行防火墙 3000 端口:
+   - Windows:控制面板 → Windows Defender 防火墙 → 高级设置 → 入站规则 → 新建规则 → 端口 → TCP 3000 → 允许。
    - Mac:系统设置 → 网络 → 防火墙,允许 Node。
-   - Linux:`sudo ufw allow 8080`。
+   - Linux:`sudo ufw allow 3000`。
 
 ## 四、开机自启 / 后台常驻(推荐,一次性)
 
@@ -95,10 +95,10 @@ pm2 save
 | `AUDAX_NO_BACKUP=1` | 关闭内置自动备份 | 不关闭 |
 | `SESSION_SECRET` | 自定义会话密钥 | 自动生成并保存 |
 
-端口固定为 8080(`package.json` 的 `start` 脚本)。确需更改时改那里的 `-p 8080`,并同步防火墙规则。
+端口固定为 3000(`package.json` 的 `start` 脚本)。确需更改时改那里的 `-p 3000`,并同步防火墙规则。
 
 ## 常见问题
 
-- **员工打不开** → 先确认服务器本机 `http://localhost:8080` 正常,再查防火墙(见第三节)。
+- **员工打不开** → 先确认服务器本机 `http://localhost:3000` 正常,再查防火墙(见第三节)。
 - **换机器迁移** → 新机器按第二节装好后,把旧机器的 `data` 文件夹整个拷过来,重启即可,所有数据和账号原样保留。
 - **npm install 报错 better-sqlite3** → 一般是 Node 版本过旧,升级到 Node 20 LTS 后删除 `node_modules` 重装。
