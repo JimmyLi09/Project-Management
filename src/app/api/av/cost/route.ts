@@ -12,6 +12,7 @@ import { lineProjectError } from '@/server/avdrawing';
 import { appendAudit, getProject } from '@/server/db';
 import { currentUser } from '@/server/session';
 import { logZh } from '@/lib/logmsg';
+import { denyUnlessVisible } from '@/server/avguard';
 
 /* 06 成本核算, per business line.
    GET ?project=ID&line=led|projector|elv|pv  the line's latest saved configuration,
@@ -60,6 +61,9 @@ export async function GET(req: NextRequest) {
   const line = lineOf(req.nextUrl.searchParams.get('line'));
   const project = getProject(projectId);
   if (!project) return NextResponse.json({ error: '项目不存在' }, { status: 404 });
+  /* REQ-043:看不见这个项目的人,也不该从这里读到它的成本表 */
+  const denied = denyUnlessVisible(user, project);
+  if (denied) return denied;
 
   const inquiry = getInquiry(projectId);
   const config = latestConfig<AnySummary>(projectId, line);
@@ -103,6 +107,8 @@ export async function POST(req: NextRequest) {
   const project = getProject(String(body.projectId || ''));
   const bad = lineProjectError(project, info.svc!, info.label);
   if (bad) return NextResponse.json({ error: bad }, { status: 400 });
+  const deniedW = denyUnlessVisible(user, project);
+  if (deniedW) return deniedW;
   if (!canCostProject(identityOf(user), project)) return NextResponse.json({ error: '仅该项目的 PM 可核算成本' }, { status: 403 });
 
   const config = latestConfig<AnySummary>(project!.id, line);

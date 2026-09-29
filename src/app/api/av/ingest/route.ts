@@ -9,6 +9,7 @@ import { DrawingServiceError, ledProjectError, runDrawingCli } from '@/server/av
 import { appendAudit, getProject } from '@/server/db';
 import { currentUser } from '@/server/session';
 import { logZh } from '@/lib/logmsg';
+import { denyUnlessVisible } from '@/server/avguard';
 
 /* 03 解析提取: POST multipart { project, file, scale? } -> the stored drawing.
    The upload keeps its original file name, because provenance quotes it
@@ -24,6 +25,8 @@ export async function POST(req: NextRequest) {
   const form = await req.formData().catch(() => null);
   const projectId = String(form?.get('project') ?? '');
   const project = getProject(projectId);
+  const denied = denyUnlessVisible(user, project);   // REQ-043
+  if (denied) return denied;
   const bad = ledProjectError(project);
   if (bad) return NextResponse.json({ error: bad }, { status: 400 });
   if (!canUploadDrawing(identityOf(user), project)) {

@@ -7,6 +7,7 @@ import { getInquiry, openInquiry } from '@/server/avdb';
 import { appendAudit, getEffectiveTemplate, getProject, insertProject } from '@/server/db';
 import { currentUser } from '@/server/session';
 import { logZh } from '@/lib/logmsg';
+import { denyUnlessVisible } from '@/server/avguard';
 
 /* 01 立项询价.
    POST { name, client, location, delivery, notes, lines[] } opens a project with
@@ -18,7 +19,10 @@ export async function GET(req: NextRequest) {
   const user = await currentUser();
   if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
   const projectId = req.nextUrl.searchParams.get('project') ?? '';
-  if (!getProject(projectId)) return NextResponse.json({ error: '项目不存在' }, { status: 404 });
+  const project = getProject(projectId);
+  if (!project) return NextResponse.json({ error: '项目不存在' }, { status: 404 });
+  const denied = denyUnlessVisible(user, project);   // REQ-043
+  if (denied) return denied;
   return NextResponse.json({ inquiry: getInquiry(projectId) });
 }
 
