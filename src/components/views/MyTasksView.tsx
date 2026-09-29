@@ -3,7 +3,7 @@
 import React, { useMemo, useState } from 'react';
 import { useStore } from '../store';
 import {
-  fmtDate, parseISO, pendingWorkflowAction, pkgStart, planDates, projCode, projectHealth,
+  fmtDate, parseISO, pendingWorkflowAction, pkgStart, planDates, projectHealth,
   projStage, schedProgress, todayMid,
 } from '@/lib/project';
 import { canRowEdit } from '@/lib/permissions';
@@ -106,7 +106,7 @@ export default function MyTasksView() {
             <div key={p.id} className="row-hover" style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '11px 20px', borderTop: '1px solid var(--row-line)', cursor: 'pointer' }} onClick={() => openProject(p.id)}>
               <span className="badge" style={{ background: '#fbf0dc', color: '#a8690b', flexShrink: 0 }}>{lang === 'zh' ? label : labelEn}</span>
               <div style={{ minWidth: 0 }}>
-                <Ell style={{ fontSize: 13, fontWeight: 600, color: 'var(--navy900)' }}>{projCode(p) && <span className="tnum" style={{ color: 'var(--bronze)', marginRight: 5 }}>{projCode(p)}</span>}{p.name}</Ell>
+                <Ell style={{ fontSize: 13, fontWeight: 600, color: 'var(--navy900)' }}>{p.name}</Ell>
               </div>
               <div style={{ flex: 1 }} />
               <Icon name="back" size={15} style={{ transform: 'rotate(180deg)', color: 'var(--text2)' }} />
@@ -146,7 +146,7 @@ export default function MyTasksView() {
                     {lang === 'zh' ? x.r.task : x.r.taskEn || x.r.task}
                   </Ell>
                   <Ell style={{ fontSize: 11, color: 'var(--text2)' }}>
-                    {projCode(x.p) && <span className="tnum" style={{ color: 'var(--bronze)', marginRight: 4 }}>{projCode(x.p)}</span>}{x.p.name}{x.p.packages.length > 1 ? ` · ${svcName(x.svc, lang)}` : ''}
+                    {x.p.name}{x.p.packages.length > 1 ? ` · ${svcName(x.svc, lang)}` : ''}
                   </Ell>
                 </div>
                 <div className="tnum" style={{ fontSize: 11.5, color: 'var(--text2)' }}>{x.year}</div>
@@ -196,7 +196,6 @@ function ProjectInfoPanel({ p, onOpen }: { p: Project | null; onOpen: (id: strin
   return (
     <div className="panel" style={{ padding: '16px 18px', position: 'sticky', top: 12 }}>
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 4 }}>
-        {projCode(p) && <span className="tnum" style={{ fontSize: 14, fontWeight: 700, color: 'var(--bronze)' }}>{projCode(p)}</span>}
         <span style={{ fontSize: 15.5, fontWeight: 700, color: 'var(--navy900)' }}>{p.name}</span>
       </div>
       <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap', margin: '8px 0 4px' }}>

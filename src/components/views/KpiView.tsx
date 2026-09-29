@@ -6,7 +6,7 @@ import { useLang } from '@/lib/i18n';
 import { ROLE_LABEL } from '@/lib/permissions';
 import { roleTerm } from '@/lib/terms';
 import { SVC, svcColor } from '@/lib/templates';
-import { fmtDate, parseISO, projCode, projPoints } from '@/lib/project';
+import { fmtDate, parseISO, projPoints } from '@/lib/project';
 import { Avatar, Icon, ProgressBar } from '../ui';
 import type { Role } from '@/lib/types';
 import {
@@ -234,7 +234,7 @@ function Detail({ p, onClose, svc }: { p: PersonKpi; onClose: () => void; svc: s
                 <tr key={pr.id}>
                   <td style={{ ...cell, width: '34%' }}>
                     <button style={{ color: 'var(--info)', textAlign: 'left' }} onClick={() => openProject(pr.id)}>
-                      {projCode(pr) ? projCode(pr) + ' · ' : ''}{pr.name}
+                      {pr.name}
                     </button>
                   </td>
                   <td style={cell}>
