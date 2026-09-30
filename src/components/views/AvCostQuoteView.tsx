@@ -39,7 +39,8 @@ export default function AvCostQuoteView() {
         'The former Costing and Quotation menus, now two tabs on one page.')}
       tabs={tabs}
       active={active}
-      onTab={(k) => setView({ name: 'avcostquote', sub: k })}
+      onTab={(k) => setView({ name: 'avcostquote', sub: k, ...(view.line ? { line: view.line } : {}) })}
+      inFlow
     >
       {active === 'cost' ? <AvCostView /> : <AvQuoteView />}
     </AvShell>

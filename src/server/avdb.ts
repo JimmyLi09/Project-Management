@@ -594,6 +594,11 @@ export function saveConfig<S extends SummaryBase>(c: Omit<SavedConfig<S>, 'id' |
 
 type ConfigRow = { id: number; project_id: string; line: string; pack_version: string; drawing_id: number | null; cfg: string; summary: string; created_by: string; created_at: number };
 
+/* AV-017: 正式版本号 = 这个项目这条线存过几次方案(第 N 次保存就是 vN) */
+export function configCount(projectId: string, line: BusinessLine): number {
+  return (db().prepare('SELECT count(*) AS n FROM av_config WHERE project_id = ? AND line = ?').get(projectId, line) as { n: number }).n;
+}
+
 export function latestConfig<S extends SummaryBase = SummaryBase>(projectId: string, line: BusinessLine): (SavedConfig<S> & { cfg: unknown }) | null {
   const r = db().prepare('SELECT * FROM av_config WHERE project_id = ? AND line = ? ORDER BY id DESC LIMIT 1').get(projectId, line) as ConfigRow | undefined;
   return r ? {

@@ -24,7 +24,7 @@ import { canViewPrices } from '@/lib/permissions';
 import { fmtDate } from '@/lib/project';
 import { useLang } from '@/lib/i18n';
 import { useStore } from '../store';
-import AvSteps from './AvSteps';
+import { useFlowRefresh } from './AvFlow';
 
 type Line = 'led' | 'projector' | 'elv' | 'pv';
 interface Sheet {
@@ -60,9 +60,12 @@ const today = () => new Date().toISOString().slice(0, 10);
 const PRICE_CHECKS = new Set(['COST-PRICE', 'COST-STALE', 'COST-MARGIN']);
 
 export default function AvCostView() {
-  const { me, projects, ledProjectId, setLedProjectId, go } = useStore();
+  const { me, projects, ledProjectId, view, setView, go } = useStore();
   const { t } = useLang();
-  const [line, setLine] = useState<Line>('led');
+  /* AV-017:从 05 某条线「下一步」过来就落在那条线 */
+  const initial = (['led', 'projector', 'elv', 'pv'] as const).find((l) => l === view.line) ?? 'led';
+  const [line, setLine] = useState<Line>(initial);
+  useEffect(() => { if (view.line && view.line !== line && ['led', 'projector', 'elv', 'pv'].includes(view.line)) setLine(view.line as Line); }, [view.line]); // eslint-disable-line react-hooks/exhaustive-deps
   const [state, setState] = useState<CostState | null>(null);
   const [picks, setPicks] = useState<Record<string, number | null>>({});
   const [manual, setManual] = useState<ManualLine[]>([]);
@@ -70,6 +73,14 @@ export default function AvCostView() {
   const [error, setError] = useState('');
   const [msg, setMsg] = useState('');
 
+  const refreshFlow = useFlowRefresh();
+  /* AV-017:顶栏选的项目没有当前这条线,就换到它有的第一条线 */
+  useEffect(() => {
+    const p = projects.find((x) => x.id === ledProjectId);
+    if (!p || view.line) return;
+    const has = (l: Line) => p.packages.some((k) => k.svc === lineInfo(l).svc);
+    if (!has(line)) { const first = (['led', 'projector', 'elv', 'pv'] as Line[]).find(has); if (first) setLine(first); }
+  }, [ledProjectId, projects]); // eslint-disable-line react-hooks/exhaustive-deps
   const svc = lineInfo(line).svc!;
   const lineProjects = useMemo(() => projects.filter((p) => !p.archived && p.packages.some((k) => k.svc === svc)), [projects, svc]);
   const project = lineProjects.find((p) => p.id === ledProjectId);
@@ -120,7 +131,7 @@ export default function AvCostView() {
   }, [state, picks, manual, line]);
 
   if (!canViewPrices(me)) {
-    return <><AvSteps /><div className="panel" style={{ padding: '18px 20px', fontSize: 13, color: 'var(--text2)' }}>{t('当前角色无权查看成本。', 'Your role cannot see costs.')}</div></>;
+    return <><div className="panel" style={{ padding: '18px 20px', fontSize: 13, color: 'var(--text2)' }}>{t('当前角色无权查看成本。', 'Your role cannot see costs.')}</div></>;
   }
 
   async function submit(confirm: boolean) {
@@ -134,6 +145,7 @@ export default function AvCostView() {
     setBusy(false);
     if (!res?.ok || body.error) { setError(body.error || '保存失败'); return; }
     await load();
+    refreshFlow();   // AV-017:确认后步骤条上 07 解锁
     setMsg(confirm ? t('成本已确认。', 'Cost confirmed.') : t('草稿已保存。', 'Draft saved.'));
   }
 
@@ -177,7 +189,6 @@ export default function AvCostView() {
 
   return (
     <>
-      <AvSteps />
       <div style={{ display: 'grid', gap: 20 }}>
         <div className="panel" style={{ padding: 0 }}>
           <div className="panel-head"><span className="panel-title">{t('项目与业务线', 'Project and line')}</span></div>
@@ -192,13 +203,9 @@ export default function AvCostView() {
                   <option value="pv">{t('太阳能光伏（草案）', 'Solar PV (draft)')}</option>
                 </select>
               </div>
-              <div className="field" style={{ marginBottom: 0, flex: '1 1 320px', maxWidth: 520 }}>
-                <label htmlFor="cost-project">{t('项目', 'Project')}</label>
-                <select id="cost-project" value={project ? project.id : ''} onChange={(e) => setLedProjectId(e.target.value)}>
-                  <option value="">{t('— 选择项目 —', '— choose a project —')}</option>
-                  {lineProjects.map((p) => <option key={p.id} value={p.id}>{p.name}{p.client ? ` · ${p.client}` : ''}</option>)}
-                </select>
-              </div>
+              {ledProjectId && !project && (
+                <div style={{ fontSize: 12.5, color: 'var(--text2)', paddingBottom: 8 }}>{t('这个项目没有这条业务线。', 'This project does not carry this line.')}</div>
+              )}
             </div>
             {state?.config && (
               <div style={{ fontSize: 12.5, color: 'var(--text2)', lineHeight: 1.8 }}>
@@ -212,9 +219,9 @@ export default function AvCostView() {
         {project && state && !state.config && (
           <div className="panel" style={{ padding: '16px 18px', fontSize: 13, color: 'var(--text2)', display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
             {t('该项目这条业务线还没有保存的 05 方案。', 'No saved 05 configuration for this line yet.')}
-            <button className="btn-line" onClick={() => go(({ led: 'ledingest', projector: 'prjstudio', elv: 'elvstudio', pv: 'pvstudio' } as const)[line])}>
-              {({ led: t('去 02–04 图纸校核', 'Open 02–04'), projector: t('去 05 投影方案配置', 'Open projection 05'),
-                elv: t('去 05 弱电方案配置', 'Open ELV 05'), pv: t('去 05 光伏方案配置', 'Open solar 05') })[line]}
+            {/* AV-017:原来 LED 这里错指「去 02–04 图纸校核」,没有方案该去的是 05 */}
+            <button className="btn-line" data-testid="cost-go05" onClick={() => setView({ name: 'avconfig', sub: line })}>
+              {t('去 05 方案配置 ›', 'Open 05 configuration ›')}
             </button>
           </div>
         )}

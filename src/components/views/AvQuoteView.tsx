@@ -17,7 +17,7 @@ import { canViewQuotes } from '@/lib/permissions';
 import { fmtDate } from '@/lib/project';
 import { useLang } from '@/lib/i18n';
 import { useStore } from '../store';
-import AvSteps from './AvSteps';
+import { useFlowRefresh } from './AvFlow';
 
 interface LineRow { line: BusinessLine; state: LineState; cost: number | null; list: number | null; shared: SharedRow[] }
 interface Quote {
@@ -33,6 +33,7 @@ const pct = (v: number | null) => (v === null ? '—' : `${(v * 100).toFixed(1)}
 const AV_SVCS = LINES.map((l) => l.svc).filter(Boolean) as string[];
 
 export default function AvQuoteView() {
+  const refreshFlow = useFlowRefresh();
   const { me, projects, ledProjectId, setLedProjectId, go } = useStore();
   const { t } = useLang();
   const [state, setState] = useState<State | null>(null);
@@ -72,7 +73,7 @@ export default function AvQuoteView() {
   }, [state, picked, discount, reason]);
 
   if (!canViewQuotes(me)) {
-    return <><AvSteps /><div className="panel" style={{ padding: '18px 20px', fontSize: 13, color: 'var(--text2)' }}>{t('当前角色无权查看报价。', 'Your role cannot see quotations.')}</div></>;
+    return <><div className="panel" style={{ padding: '18px 20px', fontSize: 13, color: 'var(--text2)' }}>{t('当前角色无权查看报价。', 'Your role cannot see quotations.')}</div></>;
   }
 
   async function post(url: string, data: unknown, done: string) {
@@ -83,6 +84,7 @@ export default function AvQuoteView() {
     if (!res?.ok || body.error) { setError(body.error || '操作失败'); return; }
     await load();
     setMsg(done);
+    refreshFlow();
   }
 
   const STATE: Record<LineState, [string, string, string]> = {
@@ -103,18 +105,12 @@ export default function AvQuoteView() {
 
   return (
     <>
-      <AvSteps />
       <div style={{ display: 'grid', gap: 20 }}>
         <div className="panel" style={{ padding: 0 }}>
           <div className="panel-head"><span className="panel-title">{t('项目', 'Project')}</span></div>
           <div style={{ padding: '14px 18px', display: 'grid', gap: 10 }}>
-            <div className="field" style={{ marginBottom: 0, maxWidth: 520 }}>
-              <label htmlFor="quote-project">{t('项目', 'Project')}</label>
-              <select id="quote-project" value={project ? project.id : ''} onChange={(e) => setLedProjectId(e.target.value)}>
-                <option value="">{t('— 选择项目 —', '— choose a project —')}</option>
-                {avProjects.map((p) => <option key={p.id} value={p.id}>{p.name}{p.client ? ` · ${p.client}` : ''}</option>)}
-              </select>
-            </div>
+            {!project && <div style={{ fontSize: 12.5, color: 'var(--text2)' }}>{t('先在上面「当前项目」里选一个项目。', 'Pick a project in the bar above first.')}</div>}
+            {project && <div style={{ fontSize: 13, fontWeight: 600 }}>{project.name}{project.client ? ` · ${project.client}` : ''}</div>}
             {error && <div style={{ fontSize: 12.5, color: 'var(--danger)' }}>{error}</div>}
             {msg && <div style={{ fontSize: 12.5, color: 'var(--success)' }}>{msg}</div>}
           </div>

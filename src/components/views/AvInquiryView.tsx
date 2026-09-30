@@ -13,7 +13,6 @@ import type { BusinessLine } from '@/av/core/types';
 import { canCreate } from '@/lib/permissions';
 import { useLang } from '@/lib/i18n';
 import { useStore } from '../store';
-import AvSteps from './AvSteps';
 
 export default function AvInquiryView() {
   const { me, refresh, setLedProjectId, setLedIngest, go } = useStore();
@@ -46,7 +45,6 @@ export default function AvInquiryView() {
   if (!canCreate(me)) {
     return (
       <>
-        <AvSteps />
         <div className="panel" style={{ padding: '18px 20px', fontSize: 13, color: 'var(--text2)' }}>
           {t('立项询价由销售、PD 或 BD 发起。你可以在「02–04 图纸 · 解析 · 校核」里处理已立项的项目。',
             'Inquiries are opened by Sales, PD or BD.')}
@@ -57,7 +55,6 @@ export default function AvInquiryView() {
 
   return (
     <form onSubmit={submit}>
-      <AvSteps />
       <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,380px)', gap: 20, alignItems: 'start' }}>
 
         <div className="panel" style={{ padding: 0 }}>

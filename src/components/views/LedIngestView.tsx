@@ -19,8 +19,8 @@ import { useLang } from '@/lib/i18n';
 import type { JudgeSummary, JudgeView } from '@/server/avjudge';
 import { useStore } from '../store';
 import { Icon } from '../ui';
-import AvSteps from './AvSteps';
 import ImageJudgePanel from './ImageJudgePanel';
+import { useFlowRefresh } from './AvFlow';
 
 const ELEMENT_LABEL: Record<DrawingElement, [string, string]> = {
   led_opening_w: ['屏体开口宽', 'Opening width'],
@@ -50,6 +50,7 @@ async function call<T>(url: string, init?: RequestInit): Promise<T> {
 }
 
 export default function LedIngestView() {
+  const refreshFlow = useFlowRefresh();
   const { me, projects, ledProjectId, setLedProjectId, ledIngest, setLedIngest, setLedHandoff, go } = useStore();
   const { t, lang } = useLang();
   const [file, setFile] = useState<File | null>(null);
@@ -86,6 +87,7 @@ export default function LedIngestView() {
       ]);
       setList(d.drawings);
       setJudges(j.judges);
+      refreshFlow();
     } catch (e) { setError((e as Error).message); }
   }, [ledProjectId]);
 
@@ -191,7 +193,6 @@ export default function LedIngestView() {
 
   return (
     <>
-    <AvSteps />
     <div style={{ display: 'grid', gap: 20 }}>
 
       {/* ── 项目与图纸清单 ─────────────────────────────────────── */}
@@ -201,15 +202,15 @@ export default function LedIngestView() {
           <span style={{ fontSize: 11, color: 'var(--text2)' }}>{t('仅列出含 LED 服务包的项目', 'Projects with an LED service package')}</span>
         </div>
         <div style={{ padding: '16px 18px', display: 'grid', gap: 14 }}>
-          <div className="field" style={{ marginBottom: 0, maxWidth: 520 }}>
-            <label htmlFor="led-project">{t('项目', 'Project')}</label>
-            <select id="led-project" value={ledProjectId} onChange={(e) => pickProject(e.target.value)}>
-              <option value="">{t('— 选择项目 —', '— choose a project —')}</option>
-              {ledProjects.map((p) => (
-                <option key={p.id} value={p.id}>{p.name}{p.client ? ` · ${p.client}` : ''}</option>
-              ))}
-            </select>
-          </div>
+          {ledProjectId && !project && (
+            <p style={{ fontSize: 13, color: 'var(--text2)' }} data-testid="ingest-no-led">
+              {t('这个项目没有 LED 服务包，不用图纸校核；可以直接点下面的「下一步」去 05 方案配置。',
+                'This project has no LED package, so there is no drawing review — go straight to 05 with Next below.')}
+            </p>
+          )}
+          {!ledProjectId && (
+            <p style={{ fontSize: 13, color: 'var(--text2)' }}>{t('先在上面「当前项目」里选一个项目。', 'Pick a project in the bar above first.')}</p>
+          )}
           {project && (
             <div style={{ fontSize: 12, color: 'var(--text2)' }}>
               {boundPack
