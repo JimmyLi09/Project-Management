@@ -13,7 +13,8 @@ import { projectLines } from '@/av/core/lines';
 import type { BusinessLine } from '@/av/core/types';
 import { canViewPrices, canViewQuotes, type Identity } from '@/lib/permissions';
 import type { Project } from '@/lib/types';
-import { configCount, getInquiry, latestConfig, latestCostSheet, listDrawings, listQuotes } from './avdb';
+import { configCount, getDraft, getInquiry, latestConfig, latestCostSheet, listDrawings, listQuotes } from './avdb';
+import { listUploads } from './avupload';
 import { listJudges } from './avjudge';
 import { listAudit } from './db';
 
@@ -59,6 +60,9 @@ export function projectFlow(p: Project, me: Identity): ProjectFlow | null {
   const submitted = quotes.some((q) => q.status === 'submitted');
   const pendingDrawings = drawings.filter((d) => d.pending > 0 || (!d.reviewedAt && d.pending === 0)).length;
   const openJudges = judges.filter((j) => !j.drawingId).length;
+  /* AV-016:解析失败但原件留着的,也算这一步没完 */
+  const failedUploads = listUploads(p.id).filter((u) => u.status === 'failed').length;
+  const drafts = keys.filter((l) => !!getDraft(p.id, l));
 
   /* 工作台的阶段,口径与 0929 完全一致 */
   const pendingDrawing = drawings.some((d) => d.pending > 0);
@@ -76,12 +80,15 @@ export function projectFlow(p: Project, me: Identity): ProjectFlow | null {
   const hasLed = keys.includes('led');
   const reviewed = drawings.filter((d) => d.reviewedAt > 0).length;
   const s2 = !hasLed ? st('na', '本项目不用', 'Not needed')
+    : failedUploads > 0 && pendingDrawings + openJudges === 0
+      ? st('pending', `${failedUploads} 份解析失败，原件已留档`, `${failedUploads} failed to parse (kept)`)
     : pendingDrawings + openJudges > 0
       ? st('pending', `还有 ${pendingDrawings + openJudges} 张待确认`, `${pendingDrawings + openJudges} to confirm`)
       : reviewed > 0 ? st('done', '已完成', 'Done')
         : st('todo', '待做 · 也可直接去 05 手填', 'To do · or fill in 05 by hand');
 
   const s5 = !keys.length ? st('todo', '待做', 'To do')
+    : drafts.length > 0 ? st('draft', '草稿 · 未保存正式版', 'Draft · not saved as a version')
     : configured.length === keys.length ? st('done', '正式版本已保存', 'Saved')
       : configured.length > 0 ? st('draft', `${keys.length} 条线已存 ${configured.length} 条`, `${configured.length} of ${keys.length} lines saved`)
         : st('todo', '待做 · 未保存正式版', 'To do · not saved');

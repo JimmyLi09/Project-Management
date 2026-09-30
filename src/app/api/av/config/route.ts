@@ -11,7 +11,7 @@ import { LATEST_PV_PACK } from '@/av/core/pv/rulepack';
 import { LATEST_LED_PACK } from '@/av/core/rulepack';
 import type { LedConfig } from '@/av/core/types';
 import { canCostProject, identityOf } from '@/lib/permissions';
-import { configCount, getDrawing, getInquiry, latestConfig, saveConfig } from '@/server/avdb';
+import { clearDraft, configCount, getDraft, getDrawing, getInquiry, latestConfig, saveConfig } from '@/server/avdb';
 import { lineProjectError } from '@/server/avdrawing';
 import { appendAudit, getProject } from '@/server/db';
 import { currentUser } from '@/server/session';
@@ -38,6 +38,7 @@ export async function GET(req: NextRequest) {
     config: c && { id: c.id, drawingId: c.drawingId, packVersion: c.packVersion, cfg: c.cfg, createdBy: c.createdBy, createdAt: c.createdAt },
     version: configCount(project.id, line),
     canSave: canCostProject(identityOf(user), project),
+    draft: getDraft(project.id, line),   // AV-016 ②
   });
 }
 
@@ -80,7 +81,8 @@ export async function POST(req: NextRequest) {
       at: Date.now(), by: user.name,
       ...auditOf('av.cfgPv', { kwp: v('kwp').toFixed(2), mods: v('n_mod'), inv: `${v('n_inv')} × ${r.inverter.kw} kW`, pack: packVersion }),
     }]);
-    return NextResponse.json({ config: saved, version: configCount(project!.id, line) });
+    clearDraft(project!.id, line);
+  return NextResponse.json({ config: saved, version: configCount(project!.id, line) });
   }
 
   if (line === 'elv') {
@@ -106,7 +108,8 @@ export async function POST(req: NextRequest) {
       at: Date.now(), by: user.name,
       ...auditOf('av.cfgElv', { area: cfg.elv_area, ports: v('n_port'), cams: v('n_cam'), spk: v('n_spk'), pack: packVersion }),
     }]);
-    return NextResponse.json({ config: saved, version: configCount(project!.id, line) });
+    clearDraft(project!.id, line);
+  return NextResponse.json({ config: saved, version: configCount(project!.id, line) });
   }
 
   if (line === 'projector') {
@@ -130,7 +133,8 @@ export async function POST(req: NextRequest) {
       at: Date.now(), by: user.name,
       ...auditOf('av.cfgPrj', { size: `${cfg.prj_image_w}×${cfg.prj_image_h}`, n: t.n_proj.value, lm: Math.round(t.lm_proj.value), pack: packVersion }),
     }]);
-    return NextResponse.json({ config: saved, version: configCount(project!.id, line) });
+    clearDraft(project!.id, line);
+  return NextResponse.json({ config: saved, version: configCount(project!.id, line) });
   }
 
   const packVersion = inquiry?.packs.led ?? LATEST_LED_PACK;
@@ -171,5 +175,6 @@ export async function POST(req: NextRequest) {
     at: Date.now(), by: user.name,
     ...auditOf('av.cfgLed', { pitch: cfg.led_pitch, sqm: t.sqm.value.toFixed(2), cabinets: r.layout.cells.length, pack: packVersion }),
   }]);
+  clearDraft(project!.id, line);
   return NextResponse.json({ config: saved, version: configCount(project!.id, line) });
 }

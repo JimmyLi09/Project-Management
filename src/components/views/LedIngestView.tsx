@@ -17,6 +17,7 @@ import { canReviewDrawing, canUploadDrawing } from '@/lib/permissions';
 import { fmtDate } from '@/lib/project';
 import { useLang } from '@/lib/i18n';
 import type { JudgeSummary, JudgeView } from '@/server/avjudge';
+import type { UploadSummary } from '@/server/avupload';
 import { useStore } from '../store';
 import { Icon } from '../ui';
 import ImageJudgePanel from './ImageJudgePanel';
@@ -65,6 +66,9 @@ export default function LedIngestView() {
   /* AV-015: pictures and scans are judged, not parsed */
   const [judge, setJudge] = useState<JudgeView | null>(null);
   const [judges, setJudges] = useState<JudgeSummary[]>([]);
+  /* AV-016 ①:上传过的原件(含解析失败的),以及失败那几份的重新解析比例尺 */
+  const [uploads, setUploads] = useState<UploadSummary[]>([]);
+  const [rescale, setRescale] = useState<Record<number, string>>({});
 
   /* Spec 01: LED drawings belong to a project carrying an LED service package. */
   const ledProjects = useMemo(
@@ -78,15 +82,17 @@ export default function LedIngestView() {
   const isPdf = !!file && file.name.toLowerCase().endsWith('.pdf');
 
   const refreshList = useCallback(async () => {
-    if (!ledProjectId) { setList([]); setJudges([]); return; }
+    if (!ledProjectId) { setList([]); setJudges([]); setUploads([]); return; }
     try {
       const q = encodeURIComponent(ledProjectId);
       const [d, j] = await Promise.all([
         call<{ drawings: DrawingSummary[] }>(`/api/av/drawings?project=${q}`),
         call<{ judges: JudgeSummary[] }>(`/api/av/judge?project=${q}`).catch(() => ({ judges: [] as JudgeSummary[] })),
       ]);
+      const u = await call<{ uploads: UploadSummary[] }>(`/api/av/uploads?project=${q}`).catch(() => ({ uploads: [] as UploadSummary[] }));
       setList(d.drawings);
       setJudges(j.judges);
+      setUploads(u.uploads);
       refreshFlow();
     } catch (e) { setError((e as Error).message); }
   }, [ledProjectId]);
@@ -138,10 +144,34 @@ export default function LedIngestView() {
       const res = await call<StoredDrawing | { judge: JudgeView }>('/api/av/ingest', { method: 'POST', body: form });
       if ('judge' in res) { setLedIngest(null); setJudge(res.judge); }
       else { setJudge(null); setLedIngest(res); }
-      refreshList();
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) {
+      setError(t(`${(e as Error).message}（原件已留档，可以在「项目图纸」里重新解析或下载）`,
+        `${(e as Error).message} (the file is archived — re-parse or download it under Project drawings)`));
+    }
+    refreshList();
     setBusy(false);
   }
+
+  /* AV-016 ①:对留档的原件再解析一次 */
+  async function reparse(u: UploadSummary) {
+    setBusy(true); setError('');
+    try {
+      const sc = (rescale[u.id] ?? '').trim();
+      const res = await call<StoredDrawing | { judge: JudgeView }>(`/api/av/uploads/${u.id}/reparse`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(sc ? { scale: sc } : {}),
+      });
+      if ('judge' in res) { setLedIngest(null); setJudge(res.judge); }
+      else { setJudge(null); setLedIngest(res); }
+    } catch (e) { setError((e as Error).message); }
+    refreshList();
+    setBusy(false);
+  }
+  const failed = uploads.filter((u) => u.status === 'failed');
+  const originalOf = (k: 'drawingId' | 'judgeId', id: number) => uploads.find((u) => u[k] === id);
+  const origLink = (u?: UploadSummary) => u && (
+    <a href={`/api/av/uploads/${u.id}/file`} style={{ fontSize: 12, color: 'var(--navy700)', textDecoration: 'underline', marginRight: 10 }}
+      data-testid={`upload-file-${u.id}`}>{t('原件', 'Original')}</a>
+  );
 
   /* Save one confirm / undo straight away; the server returns the stored drawing. */
   async function save(r: IngestRecord, confirmed: boolean, corrected: number | null) {
@@ -225,11 +255,27 @@ export default function LedIngestView() {
           )}
         </div>
         {project && (
-          drawingRows.length || judges.length ? (
+          drawingRows.length || judges.length || failed.length ? (
             <div style={{ overflowX: 'auto' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, minWidth: 720 }}>
                 <tbody>
                   <tr>{[t('图纸', 'Drawing'), t('等级', 'Grade'), t('上传', 'Uploaded'), t('校核', 'Review'), ''].map((h, i) => <th key={i} style={th}>{h}</th>)}</tr>
+                  {failed.map((u) => (
+                    <tr key={`u${u.id}`} data-testid={`upload-failed-${u.id}`} style={{ background: 'var(--danger-bg, #FDF0EC)' }}>
+                      <td style={td}>{u.fileName}</td>
+                      <td style={td}><span style={{ ...chip, background: 'var(--hover-bg)', color: 'var(--text2)' }}>{t('留档', 'Kept')}</span></td>
+                      <td style={{ ...td, color: 'var(--text2)' }}>{u.uploadedBy} · {fmtDate(new Date(u.uploadedAt))}</td>
+                      <td style={{ ...td, color: 'var(--danger)', fontSize: 12.5 }}>{t('解析失败：', 'Parsing failed: ')}{u.error}</td>
+                      <td style={{ ...td, textAlign: 'right', whiteSpace: 'nowrap' }}>
+                        {origLink(u)}
+                        {mayUpload && u.fileName.toLowerCase().endsWith('.pdf') && (
+                          <input className="in sm" style={{ width: 80, marginRight: 6 }} placeholder={t('比例 50', 'scale 50')} value={rescale[u.id] ?? ''}
+                            onChange={(e) => setRescale({ ...rescale, [u.id]: e.target.value })} aria-label={t('比例尺', 'Scale')} />
+                        )}
+                        {mayUpload && <button className="btn-line" disabled={busy} onClick={() => reparse(u)} data-testid={`upload-reparse-${u.id}`}>{t('重新解析', 'Re-parse')}</button>}
+                      </td>
+                    </tr>
+                  ))}
                   {judges.map((j) => (
                     <tr key={`j${j.id}`} style={{ background: judge?.id === j.id ? 'var(--hover-bg)' : undefined }} data-testid={`judge-list-${j.id}`}>
                       <td style={td}>{j.fileName}</td>
@@ -243,6 +289,7 @@ export default function LedIngestView() {
                             : <span style={{ color: 'var(--warning)' }}>{j.engine === 'vision' ? t('待确认', 'To confirm') : t('待手填', 'To fill in')}</span>}
                       </td>
                       <td style={{ ...td, textAlign: 'right', whiteSpace: 'nowrap' }}>
+                        {origLink(originalOf('judgeId', j.id))}
                         <button className="btn-line" onClick={() => openJudge(j.id)}>{j.drawingId ? t('查看', 'View') : t('打开', 'Open')}</button>
                       </td>
                     </tr>
@@ -258,6 +305,7 @@ export default function LedIngestView() {
                           : <span style={{ color: 'var(--warning)' }}>{d.pending ? t(`待确认 ${d.pending} 项`, `${d.pending} pending`) : t('待提交', 'Ready to submit')}</span>}
                       </td>
                       <td style={{ ...td, textAlign: 'right', whiteSpace: 'nowrap' }}>
+                        {origLink(originalOf('drawingId', d.id))}
                         <button className="btn-line" onClick={() => open(d.id)}>{d.reviewedAt ? t('查看', 'View') : t('打开校核', 'Review')}</button>
                       </td>
                     </tr>

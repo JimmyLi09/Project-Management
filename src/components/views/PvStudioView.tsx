@@ -18,7 +18,7 @@ import { canCostProject } from '@/lib/permissions';
 import { useLang } from '@/lib/i18n';
 import { useStore } from '../store';
 import { useFlowGuard, useFlowRefresh } from './AvFlow';
-import { sameConfig, useSavedConfig } from './useSavedConfig';
+import { sameConfig, useAutoDraft, useSavedConfig } from './useSavedConfig';
 import { Field, TraceChain, Two } from './LedStudioView';
 
 const SEVERITY: Record<Severity, { bg: string; fg: string; zh: string }> = {
@@ -57,13 +57,25 @@ export default function PvStudioView() {
   const stored = useSavedConfig<PvConfig>(project?.id, 'pv');
   const refreshFlow = useFlowRefresh();
   const initFor = useRef('');
+  const [ready, setReady] = useState(false);
+  useEffect(() => { setReady(false); }, [project?.id]);
   useEffect(() => {
     if (!project || !stored.loaded || initFor.current === project.id) return;
     initFor.current = project.id;
-    setCfg(stored.cfg ?? DEFAULT);
-  }, [project, stored.loaded, stored.cfg]);
+    /* AV-016 ②:没存成正式版本的草稿优先 */
+    setCfg(stored.draft?.cfg ?? stored.cfg ?? DEFAULT);
+    setReady(true);
+  }, [project, stored.loaded, stored.cfg, stored.draft]);
+  const dirty = !stored.cfg || !sameConfig(cfg, stored.cfg);
+  const { draftState, resetDraft } = useAutoDraft({
+    projectId: project?.id, line: 'pv', payload: cfg, drawingId: null,
+    enabled: !!project && canCostProject(me, project), dirty, hadDraft: !!stored.draft, ready,
+  });
+  useEffect(() => { if (draftState?.at) refreshFlow(); }, [draftState?.at]); // eslint-disable-line react-hooks/exhaustive-deps
+  const draftNote = draftState?.at ? t(`✓ 草稿已自动保存 · ${new Date(draftState.at).toTimeString().slice(0, 5)}`, `✓ Draft saved · ${new Date(draftState.at).toTimeString().slice(0, 5)}`)
+    : stored.draft && ready ? t(`已载入草稿（${stored.draft.updatedBy}），还没存成正式版本`, `Loaded a draft (${stored.draft.updatedBy}), not saved yet`) : '';
   useFlowGuard(project && stored.loaded ? {
-    line: 'pv', dirty: !stored.cfg || !sameConfig(cfg, stored.cfg), canSave: canCostProject(me, project),
+    line: 'pv', dirty, canSave: canCostProject(me, project),
     nextVersion: stored.version + 1, blocked: result.ok ? null : t('方案有阻断项，不能保存', 'Blocking findings — cannot save'), save,
   } : null);
   const drawing = useMemo(() => buildPvDrawing(result, { project: project?.name ?? t('光伏方案', 'Solar PV') }), [result, project, t]);
@@ -82,7 +94,7 @@ export default function PvStudioView() {
     const body = res ? await res.json().catch(() => ({})) : { error: '网络错误' };
     const ok = !!res?.ok && !body.error;
     setSaved(ok ? 'ok' : `✕ ${body.error || '保存失败'}`);
-    if (ok) { stored.reload(); refreshFlow(); }
+    if (ok) { stored.reload(); resetDraft(); refreshFlow(); }
     return ok;
   }
 
@@ -145,6 +157,7 @@ export default function PvStudioView() {
                 {saved === 'ok' && <span style={{ color: 'var(--success)' }}>{t('已保存。', 'Saved. ')}
                   <button style={{ textDecoration: 'underline', color: 'var(--navy700)', fontSize: 12 }} onClick={() => setView({ name: 'avcostquote', sub: 'cost', line: 'pv' })}>{t('去 06 成本核算', 'Open 06')}</button></span>}
                 {saved.startsWith('✕') && <span style={{ color: 'var(--danger)' }}>{saved}</span>}
+                {draftNote && <span style={{ color: 'var(--success)', fontSize: 12 }} data-testid="studio-draft">{draftNote}</span>}
               </div>
             )}
             <div style={{ fontSize: 11, lineHeight: 1.8, color: 'var(--text2)', borderTop: '1px solid var(--row-line)', paddingTop: 10 }}>

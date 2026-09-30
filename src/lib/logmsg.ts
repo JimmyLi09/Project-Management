@@ -198,6 +198,7 @@ export const LOG_MSG: Record<string, [string, string]> = {
   'av.inquiry': ['立项询价:{lines}', 'AV inquiry opened: {lines}'],
   'av.ingest': ['LED 图纸上传并解析:{file}({grade} 级)', 'LED drawing uploaded and parsed: {file} (grade {grade})'],
   'av.review': ['LED 图纸校核完成:{file}(修正 {fixed} 项,已锁定)', 'LED drawing review done: {file} ({fixed} corrections, locked)'],
+  'av.uploadFail': ['图纸已留档,解析失败:{file}({err})', 'Drawing archived, parsing failed: {file} ({err})'],
   /* AV-015 图片智能判读 */
   'av.judgeUpload': ['上传图片做智能判读:{file}', 'Picture uploaded for recognition: {file}'],
   'av.judgeResult': ['图片判读:{file} · {jk} · 宽 {w} × 高 {h} mm · {eng}', 'Picture read: {file} · {jk} · {w} × {h} mm · {eng}'],

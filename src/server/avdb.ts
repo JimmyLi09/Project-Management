@@ -479,6 +479,8 @@ export function deleteProjectDrawings(projectId: string): void {
   d.transaction(() => {
     d.prepare('DELETE FROM av_inquiry WHERE project_id = ?').run(projectId);
     d.prepare('DELETE FROM av_config WHERE project_id = ?').run(projectId);
+    draftTable();
+    d.prepare('DELETE FROM av_config_draft WHERE project_id = ?').run(projectId);
     d.prepare('DELETE FROM av_cost_sheet WHERE project_id = ?').run(projectId);
     d.prepare('DELETE FROM av_quote WHERE project_id = ?').run(projectId);
     d.prepare('DELETE FROM av_extraction WHERE drawing_id IN (SELECT id FROM av_drawing WHERE project_id = ?)').run(projectId);
@@ -593,6 +595,40 @@ export function saveConfig<S extends SummaryBase>(c: Omit<SavedConfig<S>, 'id' |
 }
 
 type ConfigRow = { id: number; project_id: string; line: string; pack_version: string; drawing_id: number | null; cfg: string; summary: string; created_by: string; created_at: number };
+
+/* ===== AV-016 ② · 05 的自动草稿 =====
+   每个项目每条业务线一份,谁改都存在同一份里(最后一次写的为准,记着是谁、几点)。
+   存成正式版本(av_config 新一行)时草稿清掉。草稿不进 06:成本只按正式版本算。 */
+function draftTable() {
+  db().exec(`CREATE TABLE IF NOT EXISTS av_config_draft (
+    project_id TEXT NOT NULL,
+    line TEXT NOT NULL,
+    cfg TEXT NOT NULL,
+    drawing_id INTEGER,
+    updated_by TEXT NOT NULL,
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY (project_id, line)
+  )`);
+}
+export interface ConfigDraft { cfg: unknown; drawingId: number | null; updatedBy: string; updatedAt: number }
+export function getDraft(projectId: string, line: BusinessLine): ConfigDraft | null {
+  draftTable();
+  const r = db().prepare('SELECT * FROM av_config_draft WHERE project_id = ? AND line = ?').get(projectId, line) as
+    { cfg: string; drawing_id: number | null; updated_by: string; updated_at: number } | undefined;
+  return r ? { cfg: JSON.parse(r.cfg), drawingId: r.drawing_id, updatedBy: r.updated_by, updatedAt: r.updated_at } : null;
+}
+export function saveDraft(projectId: string, line: BusinessLine, cfg: unknown, drawingId: number | null, by: string): ConfigDraft {
+  draftTable();
+  const now = Date.now();
+  db().prepare(`INSERT INTO av_config_draft (project_id, line, cfg, drawing_id, updated_by, updated_at) VALUES (?, ?, ?, ?, ?, ?)
+    ON CONFLICT(project_id, line) DO UPDATE SET cfg = excluded.cfg, drawing_id = excluded.drawing_id, updated_by = excluded.updated_by, updated_at = excluded.updated_at`)
+    .run(projectId, line, JSON.stringify(cfg), drawingId, by, now);
+  return { cfg, drawingId, updatedBy: by, updatedAt: now };
+}
+export function clearDraft(projectId: string, line: BusinessLine): void {
+  draftTable();
+  db().prepare('DELETE FROM av_config_draft WHERE project_id = ? AND line = ?').run(projectId, line);
+}
 
 /* AV-017: 正式版本号 = 这个项目这条线存过几次方案(第 N 次保存就是 vN) */
 export function configCount(projectId: string, line: BusinessLine): number {
