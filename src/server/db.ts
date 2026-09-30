@@ -773,6 +773,11 @@ export function appendAudit(projectId: string, entries: { at: number; by: string
   const ins = getDb().prepare('INSERT INTO audit_log (project_id, at, by, text, k, p) VALUES (?, ?, ?, ?, ?, ?)');
   for (const e of entries) ins.run(projectId, e.at, e.by, e.text, e.k ?? null, e.p ? JSON.stringify(e.p) : null);
 }
+/* AV-017 步骤条 / 工作台的「最近更新」:这个项目最后一条 AV 日志,一次查到 */
+export function lastAvAudit(projectId: string): { at: number; by: string } | null {
+  return (getDb().prepare("SELECT at, by FROM audit_log WHERE project_id = ? AND k LIKE 'av.%' ORDER BY at DESC LIMIT 1")
+    .get(projectId) as { at: number; by: string } | undefined) ?? null;
+}
 export function listAudit(projectId: string, limit = 1000) {
   const rows = getDb()
     .prepare('SELECT at, by, text, k, p FROM audit_log WHERE project_id = ? ORDER BY at DESC LIMIT ?')

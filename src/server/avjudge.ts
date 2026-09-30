@@ -138,7 +138,8 @@ function finish(id: number, o: Outcome, ms: number, by: string) {
   db().prepare(`UPDATE av_judge SET status = 'done', phase = '', engine = ?, model = ?, fallback = ?, detail = ?, result = ?,
     review = ?, ms = ? WHERE id = ?`)
     .run(o.engine, o.model, o.fallback ?? '', o.detail, JSON.stringify(o.result), JSON.stringify(emptyReview()), ms, id);
-  const row = getRow(id)!;
+  const row = getRow(id);
+  if (!row) return;   // 识别期间项目被删了:没有可写的地方,也别让队列断掉
   const w = itemOf(o.result, 'led_opening_w')?.value;
   const h = itemOf(o.result, 'led_opening_h')?.value;
   const p = { file: row.file_name, jk: o.result.kind ?? 'none', w: w ?? '', h: h ?? '', eng: o.engine };
@@ -169,6 +170,10 @@ function enqueue(id: number, page: number, by: string) {
     } catch (e) {
       finish(id, await fallbackChain(file, 'vision_failed', (e as Error).message), Date.now() - started, by);
     } finally { Q.live.delete(id); }
+  }).catch((e) => {
+    /* 一张图出了意外也不能让后面排队的全部卡住:队列永远保持 resolved */
+    console.warn(`[AV-015] 识别任务 ${id} 意外中止：${(e as Error).message}`);
+    Q.live.delete(id);
   });
 }
 
@@ -187,6 +192,20 @@ export async function startJudge(a: { projectId: string; fileName: string; file:
   const { lastInsertRowid } = db().prepare(`INSERT INTO av_judge (project_id, file_name, status, phase, created_by, created_at)
     VALUES (?, ?, 'running', 'queued', ?, ?)`).run(a.projectId, a.fileName, a.by, Date.now());
   const id = Number(lastInsertRowid);
+  /* 从这一刻起到入队 / 兜底写完之前,这一行都在处理中 —— 别让同时打开它的人把它当成
+     「服务器重启丢下的」去 heal(那会重复跑一遍 OCR、再写一次结果) */
+  Q.live.add(id);
+  try {
+    return await startJudgeBody(id, a);
+  } finally {
+    if (!queued.has(id)) Q.live.delete(id);
+    queued.delete(id);
+  }
+}
+
+const queued = new Set<number>();
+
+async function startJudgeBody(id: number, a: { projectId: string; fileName: string; file: string; ext: string; by: string }): Promise<number> {
   const up = { file: a.fileName };
   appendAudit(a.projectId, [{ at: Date.now(), by: a.by, text: logZh('av.judgeUpload', up), k: 'av.judgeUpload', p: up }]);
   let stored: { pages: string[]; total: number };
@@ -203,6 +222,7 @@ export async function startJudge(a: { projectId: string; fileName: string; file:
     finish(id, o, 0, a.by);
     return id;
   }
+  queued.add(id);
   enqueue(id, 1, a.by);
   return id;
 }
@@ -403,14 +423,18 @@ export async function handoff(id: number, by: string): Promise<number> {
   const readable = review.intent === 'site';   // a reference picture's sizes are not ours
   const extractions: IngestRecord[] = (Object.keys(final) as DrawingElement[]).map((el) => {
     const it = itemOf(result, el);
-    const read = readable || (el !== 'led_opening_w' && el !== 'led_opening_h') ? it?.value ?? null : null;
+    const readRaw = readable || (el !== 'led_opening_w' && el !== 'led_opening_h') ? it?.value ?? null : null;
+    /* 人把读数清空了(读错了)且最后也没填别的值:这一项就是空的,不能把模型的读数当成
+       「已人工确认」的值带进 05(applyReview 表达不了「改成空」) */
+    const cleared = typeof readRaw === 'number' && final[el].v === null;
+    const read = cleared ? null : readRaw;
     return {
       drawing: row.file_name, element: el, value: typeof read === 'number' ? read : null, unit: it?.unit ?? (el.endsWith('_h') || el === 'led_opening_w' ? 'mm' : 'm'),
       prov: {
         source: `来自图片 · 已人工确认 · ${it?.source || (it?.raw ? `读自「${it.raw}」` : '人工填写')}`,
         method: typeof read === 'number' ? METHOD[engine] : 'manual',
         confidence: typeof read === 'number' ? it!.confidence : 0, rule: null,
-        note: [final[el].note, it?.estimated ? '估算值' : null].filter(Boolean).join('；') || null,
+        note: [final[el].note, it?.estimated ? '估算值' : null, cleared ? `人工清空（原读数 ${readRaw}）` : null].filter(Boolean).join('；') || null,
       },
       confirmed: false, corrected: null, corrected_by: '', corrected_at: '', needs_review: true,
     };

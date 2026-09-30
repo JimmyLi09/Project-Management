@@ -86,9 +86,11 @@ export type ParseOutcome =
   | { kind: 'failed'; error: string; status: number; uploadId: number };
 
 /* 解析一份留档(首次上传和「重新解析」都走这里)。失败不抛:记下原因,原件留着 */
-export async function parseUpload(id: number, scale: number | null, by: string, admin: boolean): Promise<ParseOutcome> {
+export async function parseUpload(id: number, scale: number | null, by: string, admin: boolean, retry = false): Promise<ParseOutcome> {
   const r = getRow(id);
   if (!r) return { kind: 'failed', error: '留档不存在', status: 404, uploadId: id };
+  /* 重新解析只给失败的那几份:已经解析出图纸 / 图片判读的再跑一遍会多出一份重复的 */
+  if (retry && r.status !== 'failed') return { kind: 'failed', error: r.status === 'parsing' ? '正在解析，请稍候' : '这份已经解析过了', status: 409, uploadId: id };
   const target = path.join(fileDir(id), r.file_name);
   const ext = path.extname(r.file_name).toLowerCase();
   db().prepare("UPDATE av_upload SET status = 'parsing', error = '' WHERE id = ?").run(id);
@@ -113,6 +115,15 @@ export async function parseUpload(id: number, scale: number | null, by: string, 
     appendAudit(r.project_id, [{ at: Date.now(), by, text: logZh('av.uploadFail', p), k: 'av.uploadFail', p }]);
     return { kind: 'failed', error, status: e instanceof DrawingServiceError ? 422 : 500, uploadId: id };
   }
+}
+
+/* 移除一份解析失败的留档(原件一并删掉)。解析成功的不能从这里删:图纸还在用它 */
+export async function removeFailedUpload(id: number): Promise<boolean> {
+  const r = getRow(id);
+  if (!r || r.status !== 'failed') return false;
+  db().prepare('DELETE FROM av_upload WHERE id = ?').run(id);
+  await rm(fileDir(id), { recursive: true, force: true });
+  return true;
 }
 
 export async function deleteProjectUploads(projectId: string): Promise<void> {

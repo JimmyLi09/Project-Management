@@ -273,6 +273,13 @@ export default function LedIngestView() {
                             onChange={(e) => setRescale({ ...rescale, [u.id]: e.target.value })} aria-label={t('比例尺', 'Scale')} />
                         )}
                         {mayUpload && <button className="btn-line" disabled={busy} onClick={() => reparse(u)} data-testid={`upload-reparse-${u.id}`}>{t('重新解析', 'Re-parse')}</button>}
+                        {mayUpload && <button style={{ marginLeft: 8, fontSize: 12, color: 'var(--text2)', textDecoration: 'underline' }} disabled={busy}
+                          data-testid={`upload-remove-${u.id}`}
+                          onClick={async () => {
+                            if (!window.confirm(t(`移除「${u.fileName}」这份留档？原件会一起删掉。`, `Remove "${u.fileName}" and its original?`))) return;
+                            await fetch(`/api/av/uploads/${u.id}`, { method: 'DELETE' }).catch(() => null);
+                            refreshList();
+                          }}>{t('移除', 'Remove')}</button>}
                       </td>
                     </tr>
                   ))}

@@ -21,7 +21,7 @@ export async function POST(req: NextRequest, { params }: Params) {
   const body = (await req.json().catch(() => ({}))) as { scale?: number | string };
   const scale = body.scale === undefined || body.scale === '' ? null : Number(body.scale);
   if (scale !== null && !(scale > 0)) return NextResponse.json({ error: '比例尺须为正数，如 1:50 填 50' }, { status: 400 });
-  const out = await parseUpload(id, scale, user.name, isFull(identityOf(user)));
+  const out = await parseUpload(id, scale, user.name, isFull(identityOf(user)), true);
   if (out.kind === 'judge') return NextResponse.json({ judge: out.judge, uploadId: id });
   if (out.kind === 'drawing') return NextResponse.json({ ...out.drawing, uploadId: id });
   return NextResponse.json({ error: out.error, uploadId: id, archived: true }, { status: out.status });
