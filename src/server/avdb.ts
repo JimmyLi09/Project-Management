@@ -1017,6 +1017,22 @@ export function editCase(
   return { row, changes };
 }
 
+/** 同一项目的其它屏(AV-014 §7「同步到本项目其它屏」)。
+ *  「同一项目」按页面上看到的项目名 + 客户认(有效值,去首尾空白、不分大小写)——
+ *  不用 case_key:它是按原始导入值算的,谁改过项目名就对不上了,而人判断
+ *  「这是不是同一个项目」看的是页面上那个名字。 */
+export function caseSiblings(caseKey: string): CaseRow[] {
+  const me = getCase(caseKey);
+  if (!me) return [];
+  const rows = db().prepare(`${EFF_VIEW} SELECT * FROM w
+    WHERE lower(trim(name)) = lower(trim(?)) AND lower(trim(IFNULL(client, ''))) = lower(trim(?)) AND caseKey <> ?
+    ORDER BY id`).all(me.name, me.client ?? '', caseKey) as CaseDbRow[];
+  return rows.map(toCaseRow);
+}
+
+/** 同步时一并带过去的字段:只有交付与保修。尺寸、面积这些每块屏各不相同。 */
+export const CASE_SYNC_FIELDS = ['handover', 'warrantyMonths'] as const;
+
 export function getCase(caseKey: string): CaseRow | null {
   const r = db().prepare(`${EFF_VIEW} SELECT * FROM w WHERE caseKey = ?`).get(caseKey) as CaseDbRow | undefined;
   return r ? toCaseRow(r) : null;
