@@ -7,7 +7,7 @@
    screen can compute, save and cost, but never export a formal deliverable
    (PV-TYPE-01). */
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 
 import { computePv, type PvConfig } from '@/av/core/pv/compute';
 import { buildPvDrawing } from '@/av/core/pv/drawing';
@@ -17,7 +17,8 @@ import type { Severity, TraceNode } from '@/av/core/types';
 import { canCostProject } from '@/lib/permissions';
 import { useLang } from '@/lib/i18n';
 import { useStore } from '../store';
-import AvSteps from './AvSteps';
+import { useFlowGuard, useFlowRefresh } from './AvFlow';
+import { sameConfig, useSavedConfig } from './useSavedConfig';
 import { Field, TraceChain, Two } from './LedStudioView';
 
 const SEVERITY: Record<Severity, { bg: string; fg: string; zh: string }> = {
@@ -31,7 +32,7 @@ const DEFAULT: PvConfig = {
 };
 
 export default function PvStudioView() {
-  const { me, projects, ledProjectId, setLedProjectId, go } = useStore();
+  const { me, projects, ledProjectId, setView } = useStore();
   const { t } = useLang();
   const [cfg, setCfg] = useState<PvConfig>(DEFAULT);
   const [open, setOpen] = useState<string | null>(null);
@@ -51,21 +52,38 @@ export default function PvStudioView() {
   }, [project]);
 
   const result = useMemo(() => computePv(cfg, packVersion), [cfg, packVersion]);
+
+  /* AV-017:05 打开时载入这条线的正式版本;外框的「下一步」据此判断要不要弹窗保存 */
+  const stored = useSavedConfig<PvConfig>(project?.id, 'pv');
+  const refreshFlow = useFlowRefresh();
+  const initFor = useRef('');
+  useEffect(() => {
+    if (!project || !stored.loaded || initFor.current === project.id) return;
+    initFor.current = project.id;
+    setCfg(stored.cfg ?? DEFAULT);
+  }, [project, stored.loaded, stored.cfg]);
+  useFlowGuard(project && stored.loaded ? {
+    line: 'pv', dirty: !stored.cfg || !sameConfig(cfg, stored.cfg), canSave: canCostProject(me, project),
+    nextVersion: stored.version + 1, blocked: result.ok ? null : t('方案有阻断项，不能保存', 'Blocking findings — cannot save'), save,
+  } : null);
   const drawing = useMemo(() => buildPvDrawing(result, { project: project?.name ?? t('光伏方案', 'Solar PV') }), [result, project, t]);
   const svg = useMemo(() => (drawing ? toSvg(drawing) : ''), [drawing]);
   const set = <K extends keyof PvConfig>(k: K, v: PvConfig[K]) => setCfg((c) => ({ ...c, [k]: v }));
   const num = (k: keyof PvConfig, opt = false) => (e: React.ChangeEvent<HTMLInputElement>) =>
     set(k, (opt && e.target.value === '' ? undefined : Number(e.target.value)) as never);
 
-  async function save() {
-    if (!project) return;
+  async function save(): Promise<boolean> {
+    if (!project) return false;
     setSaved('');
     const res = await fetch('/api/av/config', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ projectId: project.id, line: 'pv', cfg }),
     }).catch(() => null);
     const body = res ? await res.json().catch(() => ({})) : { error: '网络错误' };
-    setSaved(!res?.ok || body.error ? `✕ ${body.error || '保存失败'}` : 'ok');
+    const ok = !!res?.ok && !body.error;
+    setSaved(ok ? 'ok' : `✕ ${body.error || '保存失败'}`);
+    if (ok) { stored.reload(); refreshFlow(); }
+    return ok;
   }
 
   const tr = result.trace;
@@ -85,7 +103,6 @@ export default function PvStudioView() {
 
   return (
     <>
-      <AvSteps />
       <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,330px) minmax(0,1fr)', gap: 20, alignItems: 'start' }}>
         <div className="panel" style={{ padding: 0 }}>
           <div className="panel-head"><span className="panel-title">{t('光伏词条', 'Solar PV fields')}</span></div>
@@ -94,10 +111,7 @@ export default function PvStudioView() {
               {t(`规则包 ${packVersion}：${pack.note}`, `Rule pack ${packVersion} is a draft.`)}
             </div>
             <Field label={t('项目（含光伏服务包）', 'Project')}>
-              <select value={project ? project.id : ''} onChange={(e) => setLedProjectId(e.target.value)}>
-                <option value="">{t('— 仅试算，不关联项目 —', '— scratch, no project —')}</option>
-                {pvProjects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-              </select>
+              <div style={{ fontSize: 13, fontWeight: 600, padding: '6px 0' }}>{project ? project.name : <span style={{ fontWeight: 400, color: 'var(--text2)' }}>{t('顶栏还没选项目，或这个项目没有这条业务线：只能试算，不能保存', 'No project picked above, or it lacks this line: scratch only')}</span>}</div>
               {project && <div style={{ fontSize: 11, color: 'var(--text2)', marginTop: 4 }}>
                 {bound ? t(`立项绑定 ${bound}，锁定`, `bound ${bound}`) : t('未经 01 立项，按最新规则包', 'latest pack')}
               </div>}
@@ -129,7 +143,7 @@ export default function PvStudioView() {
                   {t('保存方案到项目', 'Save to project')}
                 </button>
                 {saved === 'ok' && <span style={{ color: 'var(--success)' }}>{t('已保存。', 'Saved. ')}
-                  <button style={{ textDecoration: 'underline', color: 'var(--navy700)', fontSize: 12 }} onClick={() => go('avcost')}>{t('去 06 成本核算', 'Open 06')}</button></span>}
+                  <button style={{ textDecoration: 'underline', color: 'var(--navy700)', fontSize: 12 }} onClick={() => setView({ name: 'avcostquote', sub: 'cost', line: 'pv' })}>{t('去 06 成本核算', 'Open 06')}</button></span>}
                 {saved.startsWith('✕') && <span style={{ color: 'var(--danger)' }}>{saved}</span>}
               </div>
             )}

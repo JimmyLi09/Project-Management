@@ -2,9 +2,8 @@ import { NextResponse } from 'next/server';
 import { listProjects } from '@/server/db';
 import { currentUser } from '@/server/session';
 import { canViewPrices, identityOf, visibleProjects } from '@/lib/permissions';
-import { projectLines } from '@/av/core/lines';
-import type { BusinessLine } from '@/av/core/types';
-import { getInquiry, latestConfig, latestCostSheet, listDrawings, listPriceItems, listQuotes } from '@/server/avdb';
+import { listPriceItems } from '@/server/avdb';
+import { projectFlow } from '@/server/avflow';
 
 /* ===== 0929 AV 工作台 =====
    AV 的每个接口都是「按项目取一份」。工作台要的是横着看一眼:几个项目卡在
@@ -14,56 +13,30 @@ import { getInquiry, latestConfig, latestCostSheet, listDrawings, listPriceItems
    REQ-043 的可见性同样适用:PM / Engineer 只看得见自己的项目,这里的数字也
    只该数他看得见的那些,所以先过 visibleProjects。 */
 
-type Stage = 'intake' | 'review' | 'config' | 'costing' | 'quoting' | 'done';
-
-const COSTED: BusinessLine[] = ['led', 'projector', 'elv', 'pv'];
-
 export async function GET() {
   const user = await currentUser();
   if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
   const me = identityOf(user);
   const money = canViewPrices(me);
 
+  /* AV-017:阶段判定抽到 server/avflow.ts,步骤条和工作台用同一个函数 */
   const rows = visibleProjects(me, listProjects())
     .filter((p) => !p.archived)
     .map((p) => {
-      const inquiry = getInquiry(p.id);
-      const lines = projectLines(p.packages.map((k) => k.svc), inquiry?.lines);
-      if (!lines.length && !inquiry) return null;   // 不是 AV 项目
-
-      const keys = lines.map((l) => l.line).filter((l) => COSTED.includes(l));
-      const drawings = listDrawings(p.id);
-      const quotes = listQuotes(p.id);
-      const configured = keys.filter((l) => !!latestConfig(p.id, l));
-      /* 成本表只有看得到价格的人能数;看不到的人这一步一律当「还没到」,
-         他在界面上本来也点不进成本那一页。 */
-      const costed = money ? keys.filter((l) => !!latestCostSheet(p.id, l)) : [];
-
-      const approved = quotes.some((q) => q.status === 'approved');
-      const submitted = quotes.some((q) => q.status === 'submitted');
-      const pendingDrawing = drawings.some((d) => d.pending > 0);
-
-      const stage: Stage =
-        approved ? 'done'
-        : submitted ? 'quoting'
-        : keys.length > 0 && costed.length === keys.length ? 'quoting'
-        : keys.length > 0 && configured.length === keys.length ? (money ? 'costing' : 'config')
-        : pendingDrawing ? 'review'
-        : drawings.length > 0 || configured.length > 0 ? 'config'
-        : 'intake';
-
+      const f = projectFlow(p, me);
+      if (!f) return null;   // 不是 AV 项目
       return {
         id: p.id,
         name: p.name,
         client: p.client || '',
         delivery: p.delivery || '',
-        lines: lines.map((l) => ({ line: l.line, label: l.label, en: l.en })),
-        stage,
-        drawings: drawings.length,
-        pendingDrawings: drawings.filter((d) => d.pending > 0).length,
-        configured: configured.length,
-        costed: costed.length,
-        total: keys.length,
+        lines: f.lines,
+        stage: f.stage,
+        drawings: f.counts.drawings,
+        pendingDrawings: f.counts.pendingDrawings,
+        configured: f.counts.configured,
+        costed: f.counts.costed,
+        total: f.counts.total,
       };
     })
     .filter((r): r is NonNullable<typeof r> => !!r);

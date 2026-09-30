@@ -24,7 +24,66 @@ export interface View {
      两档、资料库的两档)。放在 view 上而不是各页自己的 state —— 从工作台
      「去报价 ›」这种链接要能直接落到指定标签上。 */
   sub?: string;
+  /* AV-017:06 成本核算落在哪条业务线(从 05 某条线「下一步」过来时带上) */
+  line?: string;
 }
+
+/* ===== AV-017 · 网址同步 =====
+   切页只改 state 不改网址的话,浏览器后退直接离开平台、刷新回总览。现在每次
+   切页把「视图 + 标签 + 业务线 + 项目」写进网址(pushState),后退 / 前进由
+   popstate 还原,刷新时从网址读回来。全站都走这一条,不只 AV。 */
+
+/* 老的单页入口(0929 合并前的独立菜单)一律落到合并页的对应标签上,
+   这样步骤条、顶栏、后退都只有一套。 */
+const LEGACY: Partial<Record<View['name'], View>> = {
+  ledstudio: { name: 'avconfig', sub: 'led' },
+  prjstudio: { name: 'avconfig', sub: 'projector' },
+  elvstudio: { name: 'avconfig', sub: 'elv' },
+  pvstudio: { name: 'avconfig', sub: 'pv' },
+  avcost: { name: 'avcostquote', sub: 'cost' },
+  avquote: { name: 'avcostquote', sub: 'quote' },
+  avcases: { name: 'avlibrary', sub: 'cases' },
+  avprices: { name: 'avlibrary', sub: 'prices' },
+};
+export const normalizeView = (v: View): View => {
+  const l = LEGACY[v.name];
+  return l ? { ...l, ...(v.line ? { line: v.line } : {}) } : v;
+};
+
+/* 进入这些页面时网址带上当前 AV 项目 */
+export const AV_FLOW_VIEWS: View['name'][] = ['avinquiry', 'ledingest', 'avconfig', 'avcostquote'];
+const VIEW_NAMES = new Set<string>(['overview', 'projects', 'team', 'mytasks', 'dupdate', 'stats', 'contacts', 'finance', 'registers', 'avhome', 'avconfig', 'avcostquote', 'avlibrary', 'avinquiry', 'ledingest', 'ledstudio', 'prjstudio', 'elvstudio', 'pvstudio', 'avcost', 'avquote', 'avcases', 'avprices', 'users', 'templates', 'rules', 'knowledge', 'training', 'kpi', 'project']);
+
+export function viewToQuery(v: View, avProject: string): string {
+  const q = new URLSearchParams();
+  q.set('v', v.name);
+  if (v.sub) q.set('s', v.sub);
+  if (v.line) q.set('line', v.line);
+  if (v.pid) q.set('pid', v.pid);
+  if (v.tab) q.set('tab', v.tab);
+  if (typeof v.pkg === 'number' && v.pkg) q.set('pkg', String(v.pkg));
+  if (v.focus) q.set('f', JSON.stringify(v.focus));
+  if (avProject && AV_FLOW_VIEWS.includes(v.name)) q.set('p', avProject);
+  return '?' + q.toString();
+}
+
+export function queryToView(search: string): { view: View; p: string } | null {
+  const q = new URLSearchParams(search);
+  const name = q.get('v');
+  if (!name || !VIEW_NAMES.has(name)) return null;
+  const v: View = { name: name as View['name'] };
+  if (q.get('s')) v.sub = q.get('s')!;
+  if (q.get('line')) v.line = q.get('line')!;
+  if (q.get('pid')) v.pid = q.get('pid')!;
+  const tab = q.get('tab');
+  if (tab === 'overview' || tab === 'schedule' || tab === 'checklist' || tab === 'jobrecord') v.tab = tab;
+  if (q.get('pkg')) v.pkg = Number(q.get('pkg')) || 0;
+  if (v.name === 'project' && v.pkg === undefined) v.pkg = 0;
+  try { if (q.get('f')) v.focus = JSON.parse(q.get('f')!) as Focus; } catch { /* 坏了就不带 */ }
+  return { view: normalizeView(v), p: q.get('p') ?? '' };
+}
+
+const AV_PROJECT_KEY = 'audax.avProject';
 
 interface Store {
   user: User;
@@ -36,6 +95,9 @@ interface Store {
   setToast: (s: string) => void;
   setView: (v: View) => void;
   go: (name: View['name']) => void;
+  /* AV-017:页面里的「‹ 后退」。平台里有上一页就退回去,没有就是 false */
+  canBack: boolean;
+  back: () => void;
   openProject: (pid: string) => void;
   /* 0922 变更单:下钻到按某个口径过滤的项目列表 */
   drillTo: (focus: Focus) => void;
@@ -84,9 +146,66 @@ export function StoreProvider({ user, children }: { user: User; children: React.
   const [avDerived, setAvDerived] = useState<Record<string, AvDerived>>({});
   const [pointRuleVersions, setPointRuleVersions] = useState<PointRuleVersion[]>([]);
   const [kpiRuleVersions, setKpiRuleVersions] = useState<KpiRuleVersion[]>([]);
-  const [view, setView] = useState<View>({ name: 'overview' });
+  const [view, setViewState] = useState<View>({ name: 'overview' });
+  /* history.state.i:这是平台里第几页(0 = 进平台的第一页),「‹ 后退」据此判断 */
+  const [histIdx, setHistIdx] = useState(0);
   const [toast, setToast] = useState('');
-  const [ledProjectId, setLedProjectId] = useState('');
+  const [ledProjectId, setLedProjectIdState] = useState('');
+  const avProjectRef = useRef('');
+  const viewRef = useRef<View>({ name: 'overview' });
+  const idxRef = useRef(0);
+
+  const setView = useCallback((raw: View) => {
+    const v = normalizeView(raw);
+    const url = viewToQuery(v, avProjectRef.current);
+    viewRef.current = v;
+    setViewState(v);
+    try {
+      if (url === location.search) return;
+      idxRef.current += 1;
+      history.pushState({ audax: 1, i: idxRef.current }, '', url);
+      setHistIdx(idxRef.current);
+    } catch { /* 沙箱里不让改历史:照常切页 */ }
+  }, []);
+
+  /* 换项目不算一次「翻页」:替换当前网址,不往历史里塞一条 */
+  const setLedProjectId = useCallback((id: string) => {
+    avProjectRef.current = id;
+    setLedProjectIdState(id);
+    try {
+      if (id) localStorage.setItem(AV_PROJECT_KEY, id);
+      history.replaceState(history.state, '', viewToQuery(viewRef.current, id));
+    } catch { /* ignore */ }
+  }, []);
+
+  /* 首屏:从网址读回停在哪(刷新停在原处);没有就留在总览。项目取网址里的,
+     没有就取「上次在做的 AV 项目」。挂载后再读 —— 服务端渲染时没有 location。 */
+  useEffect(() => {
+    let p = '';
+    try { p = localStorage.getItem(AV_PROJECT_KEY) || ''; } catch { /* ignore */ }
+    const parsed = queryToView(location.search);
+    if (parsed?.p) p = parsed.p;
+    if (p) { avProjectRef.current = p; setLedProjectIdState(p); }
+    const v = parsed?.view ?? { name: 'overview' as const };
+    viewRef.current = v;
+    setViewState(v);
+    const i = typeof history.state?.i === 'number' ? history.state.i : 0;
+    idxRef.current = i;
+    setHistIdx(i);
+    try { history.replaceState({ audax: 1, i }, '', viewToQuery(v, p)); } catch { /* ignore */ }
+    const onPop = () => {
+      const got = queryToView(location.search);
+      const nv = got?.view ?? { name: 'overview' as const };
+      viewRef.current = nv;
+      setViewState(nv);
+      if (got?.p) { avProjectRef.current = got.p; setLedProjectIdState(got.p); }
+      const ni = typeof history.state?.i === 'number' ? history.state.i : 0;
+      idxRef.current = ni;
+      setHistIdx(ni);
+    };
+    window.addEventListener('popstate', onPop);
+    return () => window.removeEventListener('popstate', onPop);
+  }, []);
   const [ledIngest, setLedIngest] = useState<StoredDrawing | null>(null);
   const [ledHandoff, setLedHandoff] = useState<Handoff | null>(null);
   /* latest known version per project (updated synchronously on every write) and
@@ -217,6 +336,8 @@ export function StoreProvider({ user, children }: { user: User; children: React.
     setToast,
     setView,
     go: (name) => setView({ name }),
+    canBack: histIdx > 0,
+    back: () => { try { history.back(); } catch { /* ignore */ } },
     openProject: (pid) => setView({ name: 'project', pid, tab: 'overview', pkg: 0 }),
     drillTo: (focus) => setView({ name: 'projects', focus }),
     dispatch,
@@ -241,7 +362,7 @@ export function StoreProvider({ user, children }: { user: User; children: React.
     kpiRuleVersions,
     kpiRules: kpiRuleVersions.length ? kpiRulesAt(kpiRuleVersions, Date.now()) : DEFAULT_KPI_RULES,
     refreshKpiRules,
-  }), [user, projects, users, view, toast, dispatch, createProject, removeProject, refresh, refreshUsers, recordFields, refreshRecordFields, avDerived, refreshAvDerived, pointRuleVersions, refreshPointRules, kpiRuleVersions, refreshKpiRules, ledProjectId, ledIngest, ledHandoff]);
+  }), [user, projects, users, view, histIdx, setView, setLedProjectId, toast, dispatch, createProject, removeProject, refresh, refreshUsers, recordFields, refreshRecordFields, avDerived, refreshAvDerived, pointRuleVersions, refreshPointRules, kpiRuleVersions, refreshKpiRules, ledProjectId, ledIngest, ledHandoff]);
 
   return <Ctx.Provider value={store}>{children}</Ctx.Provider>;
 }

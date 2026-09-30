@@ -25,8 +25,11 @@ export interface AvTab {
 }
 
 export default function AvShell({
-  view, crumb, title, subtitle, tabs, active, onTab, right, children,
+  view, crumb, title, subtitle, tabs, active, onTab, right, children, inFlow,
 }: {
+  /* AV-017:在流程外框里(05、06、07)时,面包屑与标题交给外框的顶栏和页头,
+     这里只留页内标签 —— 标签在步骤条下方 */
+  inFlow?: boolean;
   view: View['name'];
   crumb: string;
   title: string;
@@ -42,6 +45,7 @@ export default function AvShell({
 
   return (
     <div className="av-mod">
+      {!inFlow && <>
       <nav className="av-crumb" aria-label={t('位置', 'Breadcrumb')}>
         <button onClick={() => setView({ name: 'avhome' })}>{t('AV 方案成本', 'AV Platform')}</button>
         <span aria-hidden="true">›</span>
@@ -55,6 +59,7 @@ export default function AvShell({
         </div>
         {right}
       </div>
+      </>}
 
       {tabs && tabs.length > 0 && (
         <div className="av-tabs" role="tablist" aria-label={title}>

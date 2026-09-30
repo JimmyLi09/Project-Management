@@ -14,6 +14,7 @@ import { LINES, projectLines } from '@/av/core/lines';
 import { useLang } from '@/lib/i18n';
 import { useStore } from '../store';
 import AvShell, { type AvTab } from './AvShell';
+import { rememberLine } from './AvFlow';
 import LedStudioView from './LedStudioView';
 import PrjStudioView from './PrjStudioView';
 import ElvStudioView from './ElvStudioView';
@@ -28,7 +29,7 @@ const PANES: Record<string, React.ComponentType> = {
 
 export default function AvConfigView() {
   const { view, setView, projects, ledProjectId } = useStore();
-  const { lang, t } = useLang();
+  const { t } = useLang();
 
   const project = projects.find((p) => p.id === ledProjectId);
   /* 这个项目勾了哪几条线。勾了的可点,没勾的置灰但仍显示 —— 藏掉的话
@@ -49,9 +50,14 @@ export default function AvConfigView() {
 
   /* 当前标签:view.sub 说了算;它指向一条没勾的线(换了项目)就退回第一条能点的 */
   const first = tabs.find((x) => !x.disabled)?.key || 'led';
-  const wanted = view.sub || 'led';
+  /* AV-017:没指定就落在这个项目上次的业务线 */
+  let remembered: string | undefined;
+  try { remembered = project ? localStorage.getItem(`audax.avLine.${project.id}`) || undefined : undefined; } catch { /* ignore */ }
+  const wanted = view.sub || remembered || 'led';
   const active = tabs.some((x) => x.key === wanted && !x.disabled) ? wanted : first;
   const Pane = PANES[active] || LedStudioView;
+  /* 落在哪条线就记下来,下次从步骤条 / 侧栏进 05 还落在这里 */
+  React.useEffect(() => { if (project) rememberLine(project.id, active); }, [project, active]);
 
   return (
     <AvShell
@@ -65,12 +71,8 @@ export default function AvConfigView() {
             'Switch business lines in-page instead of four separate menus. Lines this project did not select are greyed out.')}
       tabs={tabs}
       active={active}
-      onTab={(k) => setView({ name: 'avconfig', sub: k })}
-      right={
-        <button className="btn-line sm" onClick={() => setView({ name: 'avcostquote', sub: 'cost' })}>
-          {lang === 'zh' ? '合并总览 ›' : 'Combined total ›'}
-        </button>
-      }
+      onTab={(k) => { if (project) rememberLine(project.id, k); setView({ name: 'avconfig', sub: k }); }}
+      inFlow
     >
       <Pane />
     </AvShell>

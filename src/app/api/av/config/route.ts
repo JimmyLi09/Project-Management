@@ -11,7 +11,7 @@ import { LATEST_PV_PACK } from '@/av/core/pv/rulepack';
 import { LATEST_LED_PACK } from '@/av/core/rulepack';
 import type { LedConfig } from '@/av/core/types';
 import { canCostProject, identityOf } from '@/lib/permissions';
-import { getDrawing, getInquiry, saveConfig } from '@/server/avdb';
+import { configCount, getDrawing, getInquiry, latestConfig, saveConfig } from '@/server/avdb';
 import { lineProjectError } from '@/server/avdrawing';
 import { appendAudit, getProject } from '@/server/db';
 import { currentUser } from '@/server/session';
@@ -20,6 +20,26 @@ import { denyUnlessVisible } from '@/server/avguard';
 
 /* 一条审计记录的 text / k / p 三件套 —— 写日志的地方都是这个形状 */
 const auditOf = (k: string, p: LogParams) => ({ text: logZh(k, p), k, p });
+
+const lineOf = (v: unknown) => (v === 'projector' || v === 'elv' || v === 'pv' ? v : 'led');
+
+/* AV-017: GET ?project=&line= — 这条线最新的正式版本(含参数)和版本号,05 打开时载入。
+   方案参数本身不含价格,看得见项目的人都能读。 */
+export async function GET(req: NextRequest) {
+  const user = await currentUser();
+  if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
+  const project = getProject(req.nextUrl.searchParams.get('project') ?? '');
+  if (!project) return NextResponse.json({ error: '项目不存在' }, { status: 404 });
+  const denied = denyUnlessVisible(user, project);
+  if (denied) return denied;
+  const line = lineOf(req.nextUrl.searchParams.get('line'));
+  const c = latestConfig(project.id, line);
+  return NextResponse.json({
+    config: c && { id: c.id, drawingId: c.drawingId, packVersion: c.packVersion, cfg: c.cfg, createdBy: c.createdBy, createdAt: c.createdAt },
+    version: configCount(project.id, line),
+    canSave: canCostProject(identityOf(user), project),
+  });
+}
 
 /* 05 → project (§10 config_result). POST { projectId, line, cfg, drawingId? }.
    The server recomputes with the core rather than trusting a summary from the
@@ -60,7 +80,7 @@ export async function POST(req: NextRequest) {
       at: Date.now(), by: user.name,
       ...auditOf('av.cfgPv', { kwp: v('kwp').toFixed(2), mods: v('n_mod'), inv: `${v('n_inv')} × ${r.inverter.kw} kW`, pack: packVersion }),
     }]);
-    return NextResponse.json({ config: saved });
+    return NextResponse.json({ config: saved, version: configCount(project!.id, line) });
   }
 
   if (line === 'elv') {
@@ -86,7 +106,7 @@ export async function POST(req: NextRequest) {
       at: Date.now(), by: user.name,
       ...auditOf('av.cfgElv', { area: cfg.elv_area, ports: v('n_port'), cams: v('n_cam'), spk: v('n_spk'), pack: packVersion }),
     }]);
-    return NextResponse.json({ config: saved });
+    return NextResponse.json({ config: saved, version: configCount(project!.id, line) });
   }
 
   if (line === 'projector') {
@@ -110,7 +130,7 @@ export async function POST(req: NextRequest) {
       at: Date.now(), by: user.name,
       ...auditOf('av.cfgPrj', { size: `${cfg.prj_image_w}×${cfg.prj_image_h}`, n: t.n_proj.value, lm: Math.round(t.lm_proj.value), pack: packVersion }),
     }]);
-    return NextResponse.json({ config: saved });
+    return NextResponse.json({ config: saved, version: configCount(project!.id, line) });
   }
 
   const packVersion = inquiry?.packs.led ?? LATEST_LED_PACK;
@@ -151,5 +171,5 @@ export async function POST(req: NextRequest) {
     at: Date.now(), by: user.name,
     ...auditOf('av.cfgLed', { pitch: cfg.led_pitch, sqm: t.sqm.value.toFixed(2), cabinets: r.layout.cells.length, pack: packVersion }),
   }]);
-  return NextResponse.json({ config: saved });
+  return NextResponse.json({ config: saved, version: configCount(project!.id, line) });
 }

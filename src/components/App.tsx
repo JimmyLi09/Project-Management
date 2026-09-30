@@ -38,6 +38,7 @@ import KnowledgeView from './views/KnowledgeView';
 import TrainingView from './views/TrainingView';
 import KpiView from './views/KpiView';
 import ProjectDetail from './views/ProjectDetail';
+import AvFlow, { stepOf } from './views/AvFlow';
 
 export default function App({ user }: { user: User }) {
   return (
@@ -56,6 +57,13 @@ const PAGE_META: Record<string, { title: [string, string]; sub: [string, string]
   stats: { title: ['统计报表', 'Reports'], sub: ['项目统计 · 按 PM 的项目数与积分', 'Projects and points by PM'] },
   contacts: { title: ['通讯录', 'Contacts'], sub: ['所有客户、总包与联系人 · 可导出', 'All clients, contractors and contacts · exportable'] },
   registers: { title: ['项目档案', 'Registers'], sub: ['按业务类型的跨项目登记表 · 7 类 · 可筛选导出', 'Cross-project registers by business type · 7 tables · filter & export'] },
+  /* AV-017:四个合并页原来没有这几行,顶部标题一直显示「总览」 */
+  avhome: { title: ['AV 工作台', 'AV Workbench'], sub: ['进行中的 AV 项目与各自卡在哪一步', 'Live AV projects and where each one stands'] },
+  avconfig: { title: ['方案配置', 'Configuration'], sub: ['05 · 业务线在页内切换', '05 · Switch business lines in-page'] },
+  avcostquote: { title: ['成本与报价 · 成本核算', 'Cost & quotation · Costing'], sub: ['06 · 单线成本 · 项目合并汇总', '06 · Line cost · project summary'] },
+  avcostquote_quote: { title: ['成本与报价 · 报价审批', 'Cost & quotation · Quotation'], sub: ['07 · 合并报价 · PD / BD 审批', '07 · Quotation · PD / BD approval'] },
+  avlibrary: { title: ['资料库 · 历史案例', 'Library · Past projects'], sub: ['LED 历史项目检索 · 保修与交付', 'Past LED projects · warranty and handover'] },
+  avlibrary_prices: { title: ['资料库 · 价格库', 'Library · Price library'], sub: ['可编辑价格表 · 改价留痕', 'Editable prices · change history'] },
   avinquiry: { title: ['AV 立项询价', 'AV Inquiry'], sub: ['01 · 项目信息 · 业务线勾选 · 绑定规则包', '01 · Project, business lines and rule packs'] },
   prjstudio: { title: ['投影方案配置', 'Projection Configuration'], sub: ['05 · 投影 · 草案规则包 prj@0.1-draft', '05 · Projection · draft rule pack'] },
   elvstudio: { title: ['弱电方案配置', 'ELV Configuration'], sub: ['05 · 弱电 · 草案规则包 elv@0.1-draft', '05 · ELV · draft rule pack'] },
@@ -109,7 +117,11 @@ function Shell() {
   }
 
   const isProject = view.name === 'project';
-  const meta = PAGE_META[view.name] || PAGE_META.overview;
+  /* 合并页的标题随标签变(成本核算 / 报价审批、历史案例 / 价格库) */
+  const meta = (view.name === 'avcostquote' && view.sub === 'quote' && PAGE_META.avcostquote_quote)
+    || (view.name === 'avlibrary' && view.sub === 'prices' && PAGE_META.avlibrary_prices)
+    || PAGE_META[view.name] || PAGE_META.overview;
+  const inFlow = !!stepOf(view);
   const project = isProject ? projects.find((p) => p.id === view.pid) : undefined;
 
   const navItem = (name: typeof view.name, icon: string, label: string, badge?: number) => (
@@ -126,7 +138,7 @@ function Shell() {
      开合的状态记在浏览器里,不跟着刷新丢。 */
   const AV_VIEWS: View['name'][] = [
     'avhome', 'avinquiry', 'ledingest', 'avconfig', 'avcostquote', 'avlibrary',
-    /* 老的单页入口仍然渲染得出来(工作台的「下一步」和 AvSteps 会跳过去),
+    /* 老的单页入口(store 里已统一落到合并页上,见 normalizeView),
        所以也算在「人在 AV 模块里」之内 */
     'ledstudio', 'prjstudio', 'elvstudio', 'pvstudio', 'avcost', 'avquote', 'avcases', 'avprices',
   ];
@@ -341,11 +353,15 @@ function Shell() {
             {view.name === 'contacts' && <ContactsView />}
             {view.name === 'registers' && <RegistersView />}
             {view.name === 'avhome' && <AvHomeView />}
-            {view.name === 'avconfig' && <AvConfigView />}
-            {view.name === 'avcostquote' && <AvCostQuoteView />}
+            {inFlow && (
+              <AvFlow>
+                {view.name === 'avconfig' && <AvConfigView />}
+                {view.name === 'avcostquote' && <AvCostQuoteView />}
+                {view.name === 'avinquiry' && <AvInquiryView />}
+                {view.name === 'ledingest' && <LedIngestView />}
+              </AvFlow>
+            )}
             {view.name === 'avlibrary' && <AvLibraryView />}
-            {view.name === 'avinquiry' && <AvInquiryView />}
-            {view.name === 'ledingest' && <LedIngestView />}
             {view.name === 'ledstudio' && <LedStudioView />}
             {view.name === 'prjstudio' && <PrjStudioView />}
             {view.name === 'elvstudio' && <ElvStudioView />}

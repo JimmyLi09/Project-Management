@@ -7,20 +7,21 @@
    Nothing is computed here. Every number on this screen comes from
    src/av/core, which is framework-free and separately tested. */
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 
 import { bomCsv } from '@/av/core/bom';
 import { compute } from '@/av/core/compute';
 import { assertExportable, buildDrawing } from '@/av/core/drawing';
 import { getRulePack, LATEST_LED_PACK, listRulePacks } from '@/av/core/rulepack';
 import { toSvg } from '@/av/core/svg';
-import type { DrawingElement, Handoff } from '@/av/core/handoff';
+import { toHandoff, type DrawingElement, type DrawingSummary, type Handoff, type StoredDrawing } from '@/av/core/handoff';
 import type { LedConfig, ScreenType, Severity, Size, TraceNode } from '@/av/core/types';
 import { canCostProject, canExportLed } from '@/lib/permissions';
 import { useLang } from '@/lib/i18n';
 import { useStore } from '../store';
 import { Icon } from '../ui';
-import AvSteps from './AvSteps';
+import { useFlowGuard, useFlowRefresh } from './AvFlow';
+import { sameConfig, useSavedConfig } from './useSavedConfig';
 
 const SEVERITY: Record<Severity, { bg: string; fg: string; zh: string; en: string }> = {
   block: { bg: 'var(--danger-bg, #FDF0EC)', fg: 'var(--danger)', zh: '阻断', en: 'Blocking' },
@@ -47,8 +48,9 @@ const parseLib = (s: string): Size[] =>
 const fmtLib = (lib: Size[]) => lib.map((s) => `${s[0]}x${s[1]}`).join(', ');
 
 export default function LedStudioView() {
-  const { me, projects, ledHandoff, setLedHandoff, setLedProjectId, go } = useStore();
+  const { me, projects, ledProjectId, ledHandoff, setLedHandoff, setView, go } = useStore();
   const { t, lang } = useLang();
+  const refreshFlow = useFlowRefresh();
 
   const [packVersion, setPackVersion] = useState(LATEST_LED_PACK);
   const [cfg, setCfg] = useState<LedConfig>(() => defaultConfig(LATEST_LED_PACK, 'in_fixed'));
@@ -57,35 +59,100 @@ export default function LedStudioView() {
   /* Values handed over by 04 人工校核, with their provenance (§9). Those fields
      are read-only here: the drawing, not this form, is their source. */
   const [fromDrawing, setFromDrawing] = useState<Handoff | null>(null);
+  /* AV-017:这一屏的数据是怎么来的 —— 载入了正式版本 / 从 04 自动带入 / 04 刚提交带过来 */
+  const [origin, setOrigin] = useState<'' | 'saved' | 'auto' | 'explicit'>('');
 
+  /* AV-017:项目取流程顶栏的那一个(带 LED 服务包的才算) */
+  const project = projects.find((p) => p.id === ledProjectId && !p.archived && p.packages.some((k) => k.svc === 'led'));
+  const saved = useSavedConfig<LedConfig>(project?.id, 'led');
+  const maySave = !!project && canCostProject(me, project);
+
+  /* 这个项目最新一张已校核的图纸:05 没有正式版本时自动带入它 */
+  const [reviewed, setReviewed] = useState<{ loaded: boolean; d: DrawingSummary | null }>({ loaded: false, d: null });
   useEffect(() => {
-    if (!ledHandoff) return;
+    setReviewed({ loaded: false, d: null });
+    if (!project) return;
+    let live = true;
+    fetch(`/api/av/drawings?project=${encodeURIComponent(project.id)}`).then((r) => r.json())
+      .then((b) => { if (live) setReviewed({ loaded: true, d: ((b.drawings ?? []) as DrawingSummary[]).find((x) => x.reviewedAt > 0) ?? null }); })
+      .catch(() => { if (live) setReviewed({ loaded: true, d: null }); });
+    return () => { live = false; };
+  }, [project?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const apply = (h: Handoff) => {
     /* AV-015: a picture also settles the pitch (kernel's choice under LED-VD-01), maintenance and the curve */
     setCfg((prev) => {
       const { led_curve: _drop, ...rest } = prev;
-      return { ...rest, ...ledHandoff.fields, ...(ledHandoff.extra ?? {}) };
+      return { ...rest, ...h.fields, ...(h.extra ?? {}) };
     });
-    if (ledHandoff.packVersion) setPackVersion(ledHandoff.packVersion);
-    setFromDrawing(ledHandoff);
+    if (h.packVersion) setPackVersion(h.packVersion);
+    setFromDrawing(h);
+  };
+
+  async function loadDrawing(id: number): Promise<Handoff | null> {
+    if (!project) return null;
+    const d = await fetch(`/api/av/drawings/${id}`).then((r) => (r.ok ? r.json() : null)).catch(() => null) as StoredDrawing | null;
+    if (!d) return null;
+    const inq = await fetch(`/api/av/inquiry?project=${encodeURIComponent(project.id)}`).then((r) => r.json()).catch(() => ({}));
+    return { ...toHandoff(d, project.name, inq?.inquiry?.packs?.led ?? undefined), projectId: d.project_id, drawingId: d.id };
+  }
+  async function carryFrom(id: number) {
+    const h = await loadDrawing(id);
+    if (h) { apply(h); setOrigin('auto'); }
+  }
+
+  /* 04 刚提交 / 图片判读刚确认:明确带过来的值优先 */
+  const explicit = useRef(false);
+  useEffect(() => {
+    if (!ledHandoff) return;
+    explicit.current = true;
+    apply(ledHandoff);
+    setOrigin('explicit');
     setLedHandoff(null);
-  }, [ledHandoff, setLedHandoff]);
+  }, [ledHandoff, setLedHandoff]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  /* 打开 05 / 换项目:有正式版本就载入它;没有就从 04 最新校核结果自动带入;都没有就出厂默认 */
+  const initFor = useRef('');
+  useEffect(() => {
+    if (!project || !saved.loaded || !reviewed.loaded || initFor.current === project.id) return;
+    initFor.current = project.id;
+    if (explicit.current) { explicit.current = false; return; }
+    (async () => {
+      if (saved.cfg) {
+        const c = saved.cfg;
+        setCfg(c);
+        if (saved.packVersion) setPackVersion(saved.packVersion);
+        setLibText(fmtLib(c.led_cab_lib ?? getRulePack(saved.packVersion ?? LATEST_LED_PACK).profiles[c.led_screen_type].cabLib));
+        setFromDrawing(saved.drawingId ? await loadDrawing(saved.drawingId) : null);
+        setOrigin('saved');
+      } else if (reviewed.d) {
+        await carryFrom(reviewed.d.id);
+      } else {
+        setCfg(defaultConfig(LATEST_LED_PACK, 'in_fixed'));
+        setFromDrawing(null);
+        setOrigin('');
+      }
+    })();
+  }, [project, saved.loaded, reviewed.loaded]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const locked = (k: DrawingElement) => !!fromDrawing && k in fromDrawing.fields;
 
-  /* §10 config_result — save this configuration against the project the
-     drawing belongs to; the server recomputes it with the same core. */
-  const project = fromDrawing?.projectId ? projects.find((p) => p.id === fromDrawing.projectId) : undefined;
-  const maySave = !!project && canCostProject(me, project);
-  const [saved, setSaved] = useState('');
-  async function saveToProject() {
-    if (!project) return;
+  /* §10 config_result — save this configuration against the project; the
+     server recomputes it with the same core. Returns whether it saved (the
+     flow frame's 05 → 06 「下一步」 waits on it). */
+  const [savedMsg, setSaved] = useState('');
+  async function saveToProject(): Promise<boolean> {
+    if (!project) return false;
     setSaved('');
     const res = await fetch('/api/av/config', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ projectId: project.id, drawingId: fromDrawing?.drawingId ?? null, cfg: { ...cfg, led_cab_lib: lib.length ? lib : undefined } }),
+      body: JSON.stringify({ projectId: project.id, drawingId: fromDrawing?.drawingId ?? null, cfg: payload }),
     }).catch(() => null);
     const body = res ? await res.json().catch(() => ({})) : { error: t('网络错误', 'Network error') };
-    setSaved(!res?.ok || body.error ? `✕ ${body.error || t('保存失败', 'Save failed')}` : 'ok');
+    const ok = !!res?.ok && !body.error;
+    setSaved(ok ? `ok:${body.version}` : `✕ ${body.error || t('保存失败', 'Save failed')}`);
+    if (ok) { saved.reload(); refreshFlow(); }
+    return ok;
   }
 
   const pack = getRulePack(packVersion);
@@ -93,10 +160,27 @@ export default function LedStudioView() {
   const lib = useMemo(() => parseLib(libText), [libText]);
   const [modW, modH] = cfg.led_mod ?? [profile.modW, profile.modH];
 
+  const payload = useMemo(() => ({ ...cfg, led_cab_lib: lib.length ? lib : undefined }), [cfg, lib]);
   const result = useMemo(
-    () => compute({ ...cfg, led_cab_lib: lib.length ? lib : undefined }, packVersion, fromDrawing?.prov),
-    [cfg, lib, packVersion, fromDrawing],
+    () => compute(payload, packVersion, fromDrawing?.prov),
+    [payload, packVersion, fromDrawing],
   );
+  /* AV-017:和最新正式版本比,改没改 —— 05 的「下一步」据此决定要不要弹窗保存 */
+  /* 箱体库等于参数组默认值时,存没存这一项都一样(演示数据、老方案就没存) */
+  const canon = (c: LedConfig) => {
+    const def = getRulePack(packVersion).profiles[c.led_screen_type]?.cabLib;
+    const lib2 = c.led_cab_lib;
+    return { ...c, led_cab_lib: !lib2 || (def && sameConfig(lib2, def)) ? undefined : lib2 };
+  };
+  const dirty = !saved.cfg || !sameConfig(canon(payload), canon(saved.cfg));
+  useFlowGuard(project && saved.loaded ? {
+    line: 'led', dirty, canSave: maySave, nextVersion: saved.version + 1,
+    blocked: result.layout ? null : t('排布无解，不能保存：先按右边的阻断提示调整屏体尺寸或箱体库', 'No layout — fix the blocking findings before saving'),
+    save: saveToProject,
+  } : null);
+  const srcLabel = fromDrawing?.notes ? t('来自图片 · 已人工确认', 'From picture · confirmed') : t('来自图纸 · 04 已确认', 'From drawing · 04 confirmed');
+  const src = (k: DrawingElement) => locked(k) && <span style={{ display: 'block', fontSize: 11, color: 'var(--success)', marginTop: 3 }} data-testid={`led-src-${k}`}>{srcLabel}</span>;
+  const newerDrawing = !!reviewed.d && !!fromDrawing?.drawingId && reviewed.d.id !== fromDrawing.drawingId && origin === 'saved';
   const drawing = useMemo(
     () => buildDrawing(result, { project: fromDrawing?.project ?? fromDrawing?.drawing ?? t('方案配置', 'Configuration') }),
     [result, t, fromDrawing],
@@ -170,7 +254,6 @@ export default function LedStudioView() {
 
   return (
     <>
-    <AvSteps />
     <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,330px) minmax(0,1fr)', gap: 20, alignItems: 'start' }}>
 
       {/* ── 参数 ─────────────────────────────────────────────── */}
@@ -178,40 +261,62 @@ export default function LedStudioView() {
         <div className="panel-head"><span className="panel-title">{t('LED 词条', 'LED fields')}</span></div>
         <div style={{ padding: '16px 18px', display: 'grid', gap: 12 }}>
 
-          {fromDrawing ? (
-            <div style={{ fontSize: 12, lineHeight: 1.7, padding: '9px 11px', borderRadius: 6, background: 'var(--hover-bg)' }}>
-              {fromDrawing.notes ? t('已载入图片判读结果（来自图片 · 已人工确认）：', 'Loaded from a picture (confirmed by hand): ') : t('已载入校核结果：', 'Loaded from review: ')}
-              {fromDrawing.project && <><strong>{fromDrawing.project}</strong> · </>}<strong>{fromDrawing.drawing}</strong>
-              {t('。图纸带入字段只读。', '. Drawing fields are read-only.')}{' '}
-              <button style={{ fontSize: 12, textDecoration: 'underline', color: 'var(--text2)' }}
-                onClick={() => setFromDrawing(null)}>{t('改为手动输入', 'Switch to manual')}</button>
-              {!!fromDrawing.notes?.length && (
-                <div style={{ marginTop: 8, display: 'grid', gap: 4, color: 'var(--warning)' }} data-testid="led-image-notes">
-                  {fromDrawing.notes.map((n) => <div key={n}>· {n}</div>)}
-                </div>
-              )}
-              {maySave && (
-                <div style={{ marginTop: 8, display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-                  <button className="btn-navy" disabled={!result.layout} onClick={saveToProject}
-                    style={!result.layout ? { opacity: 0.45, cursor: 'not-allowed' } : undefined}>
-                    {t('保存方案到项目', 'Save to project')}
-                  </button>
-                  {saved === 'ok' && (
-                    <span style={{ color: 'var(--success)' }}>
-                      {t('已保存。', 'Saved. ')}
-                      <button style={{ textDecoration: 'underline', color: 'var(--navy700)', fontSize: 12 }}
-                        onClick={() => { setLedProjectId(project!.id); go('avcost'); }}>{t('去 06 成本核算', 'Open 06 costing')}</button>
-                    </span>
-                  )}
-                  {saved.startsWith('✕') && <span style={{ color: 'var(--danger)' }}>{saved}</span>}
-                </div>
-              )}
-            </div>
-          ) : (
-            <button className="btn-line" style={{ justifySelf: 'start' }} onClick={() => go('ledingest')}>
-              {t('从图纸导入（03 / 04）', 'Import from drawing (03 / 04)')}
-            </button>
-          )}
+          <div style={{ fontSize: 12, lineHeight: 1.7, padding: '9px 11px', borderRadius: 6, background: 'var(--hover-bg)', display: 'grid', gap: 6 }} data-testid="led-origin">
+            {!project ? (
+              <span style={{ color: 'var(--text2)' }}>{t('顶栏还没选带 LED 的项目：可以试算，不能保存。', 'No LED project picked above: scratch only, cannot save.')}</span>
+            ) : fromDrawing ? (
+              <span>
+                {origin === 'auto'
+                  ? t('已从 04 校核结果自动带入（不用再点「从图纸导入」）：', 'Carried in from the 04 review automatically: ')
+                  : fromDrawing.notes ? t('已载入图片判读结果（来自图片 · 已人工确认）：', 'Loaded from a picture (confirmed by hand): ')
+                    : t('已载入校核结果：', 'Loaded from review: ')}
+                <strong>{fromDrawing.drawing}</strong>{t('。图纸带入字段只读。', '. Drawing fields are read-only.')}{' '}
+                <button style={{ fontSize: 12, textDecoration: 'underline', color: 'var(--text2)' }}
+                  onClick={() => setFromDrawing(null)}>{t('改为手动输入', 'Switch to manual')}</button>
+              </span>
+            ) : origin === 'saved' ? (
+              <span>{t(`已载入正式版本 v${saved.version}（手动输入）。`, `Loaded saved version v${saved.version} (manual entry).`)}</span>
+            ) : (
+              <span style={{ color: 'var(--text2)' }}>{t('手动输入。', 'Manual entry.')}</span>
+            )}
+            {project && origin === 'saved' && fromDrawing && <span>{t(`已载入正式版本 v${saved.version}。`, `Loaded saved version v${saved.version}.`)}</span>}
+            {newerDrawing && (
+              <span style={{ color: 'var(--warning)' }} data-testid="led-newer-drawing">
+                {t('图纸校核有更新，是否重新带入？', 'The drawing review has changed — carry it in again?')}{' '}
+                <button style={{ textDecoration: 'underline', color: 'var(--navy700)', fontSize: 12 }} onClick={() => carryFrom(reviewed.d!.id)}>{t('重新带入', 'Carry in')}</button>
+              </span>
+            )}
+            {project && (
+              <span style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                {reviewed.d
+                  ? <button style={{ fontSize: 12, textDecoration: 'underline', color: 'var(--navy700)' }} data-testid="led-recarry"
+                      onClick={() => carryFrom(reviewed.d!.id)}>{t('重新从图纸带入', 'Carry in from the drawing again')}</button>
+                  : <button style={{ fontSize: 12, textDecoration: 'underline', color: 'var(--navy700)' }}
+                      onClick={() => go('ledingest')}>{t('去 02–04 上传图纸', 'Upload a drawing in 02–04')}</button>}
+              </span>
+            )}
+            {!!fromDrawing?.notes?.length && (
+              <div style={{ display: 'grid', gap: 4, color: 'var(--warning)' }} data-testid="led-image-notes">
+                {fromDrawing.notes.map((n) => <div key={n}>· {n}</div>)}
+              </div>
+            )}
+            {maySave && (
+              <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+                <button className="btn-navy sm" disabled={!result.layout} onClick={saveToProject}
+                  style={!result.layout ? { opacity: 0.45, cursor: 'not-allowed' } : undefined}>
+                  {t('保存方案到项目', 'Save to project')}
+                </button>
+                {savedMsg.startsWith('ok') && (
+                  <span style={{ color: 'var(--success)' }}>
+                    {t(`已保存为正式版本 v${savedMsg.slice(3)}。`, `Saved as v${savedMsg.slice(3)}. `)}
+                    <button style={{ textDecoration: 'underline', color: 'var(--navy700)', fontSize: 12 }}
+                      onClick={() => setView({ name: 'avcostquote', sub: 'cost', line: 'led' })}>{t('去 06 成本核算', 'Open 06 costing')}</button>
+                  </span>
+                )}
+                {savedMsg.startsWith('✕') && <span style={{ color: 'var(--danger)' }}>{savedMsg}</span>}
+              </div>
+            )}
+          </div>
 
           <Field label={t('规则包', 'Rule pack')}>
             <select value={packVersion} onChange={(e) => setPackVersion(e.target.value)} disabled={!!fromDrawing?.packVersion}>
@@ -242,9 +347,11 @@ export default function LedStudioView() {
           <Two>
             <Field label={t('屏体开口宽 mm', 'Opening W mm')}>
               <input type="number" value={cfg.led_opening_w} readOnly={locked('led_opening_w')} onChange={(e) => set('led_opening_w', +e.target.value)} />
+              {src('led_opening_w')}
             </Field>
             <Field label={t('屏体开口高 mm', 'Opening H mm')}>
               <input type="number" value={cfg.led_opening_h} readOnly={locked('led_opening_h')} onChange={(e) => set('led_opening_h', +e.target.value)} />
+              {src('led_opening_h')}
             </Field>
             <Field label={t('模组宽 mm', 'Module W mm')}>
               <input type="number" value={modW} onChange={(e) => set('led_mod', [+e.target.value, modH])} />
@@ -313,18 +420,22 @@ export default function LedStudioView() {
             <Field label={t('安装标高 mm', 'Mount height mm')}>
               <input type="number" value={cfg.led_mount_h ?? ''} placeholder="—" readOnly={locked('led_mount_h')}
                 onChange={(e) => set('led_mount_h', e.target.value === '' ? undefined : +e.target.value)} />
+              {src('led_mount_h')}
             </Field>
             <Field label={t('最近观看距离 m', 'Min viewing dist m')}>
               <input type="number" step="0.1" value={cfg.led_view_min ?? ''} placeholder={fromDrawing?.pending?.includes('led_view_min') ? t('待补', 'to fill') : '—'} readOnly={locked('led_view_min')}
                 onChange={(e) => set('led_view_min', e.target.value === '' ? undefined : +e.target.value)} />
+              {src('led_view_min')}
             </Field>
             <Field label={t('控制室距离 m', 'Control room m')}>
               <input type="number" step="0.1" value={cfg.led_ctrl_dist ?? ''} placeholder={fromDrawing?.pending?.includes('led_ctrl_dist') ? t('待补', 'to fill') : '—'} readOnly={locked('led_ctrl_dist')}
                 onChange={(e) => set('led_ctrl_dist', e.target.value === '' ? undefined : +e.target.value)} />
+              {src('led_ctrl_dist')}
             </Field>
             <Field label={t('强电井距离 m', 'Power riser m')}>
               <input type="number" step="0.1" value={cfg.led_pwr_dist ?? ''} placeholder={fromDrawing?.pending?.includes('led_pwr_dist') ? t('待补', 'to fill') : '—'} readOnly={locked('led_pwr_dist')}
                 onChange={(e) => set('led_pwr_dist', e.target.value === '' ? undefined : +e.target.value)} />
+              {src('led_pwr_dist')}
             </Field>
           </Two>
 
