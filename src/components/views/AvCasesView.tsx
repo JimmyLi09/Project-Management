@@ -23,7 +23,25 @@ import { useLang } from '@/lib/i18n';
 import { useStore } from '../store';
 
 type Library = { count: number; importedBy: string; importedAt: number };
-type Facets = { years: { year: string; n: number }[]; clients: { client: string; n: number }[] };
+type Facets = { years: { year: string; n: number }[]; clients: { client: string; n: number }[]; warranty: Record<string, number> };
+/* 「筛选」浮层里的条件(年份、客户;AV-014 §7 又加了保修状态与交付日期范围) */
+type PopFilter = { years: string[]; clients: string[]; warranty: string[]; hFrom: string; hTo: string };
+const EMPTY_PF: PopFilter = { years: [], clients: [], warranty: [], hFrom: '', hTo: '' };
+/* 保修状态的顺序与叫法 —— 与表格里的标签同一套三档,外加「未填」 */
+const WARRANTY_OPTS = [
+  { k: 'ok', zh: '在保', en: 'Under warranty' },
+  { k: 'soon', zh: '30 天内到期', en: 'Expires within 30 days' },
+  { k: 'expired', zh: '已过保', en: 'Expired' },
+  { k: 'none', zh: '未填', en: 'Not set' },
+] as const;
+/** 别的页面(「我的待办」的保修提醒)跳进来时带的预设筛选,见 presetCaseFilter */
+export const CASE_PRESET_KEY = 'audax.avcases.preset';
+export function presetCaseFilter(p: Partial<PopFilter>, sort?: { k: string; dir: 'asc' | 'desc' }): void {
+  try {
+    sessionStorage.setItem(CASE_PRESET_KEY, JSON.stringify(p));
+    if (sort) localStorage.setItem(SORT_STORE, JSON.stringify(sort));
+  } catch { /* 存不上就只是跳过去不带筛选 */ }
+}
 type LogRow = { at: number; by: string; k: string; p: Record<string, unknown> };
 type Sibling = { caseKey: string; widthMm: number | null; heightMm: number | null; handover: string | null; warrantyMonths: number };
 type Preview = {
@@ -102,13 +120,12 @@ export default function AvCasesView() {
   const { t, lang } = useLang();
   const [filter, setFilter] = useState(EMPTY);
   const [applied, setApplied] = useState(EMPTY);
-  const [years, setYears] = useState<string[]>([]);
-  const [clients, setClients] = useState<string[]>([]);
+  const [pf, setPf] = useState<PopFilter>(EMPTY_PF);
   const [sort, setSort] = useState<{ k: SortKey; dir: 'asc' | 'desc' }>({ k: 'sqm', dir: 'desc' });
   const [cases, setCases] = useState<CaseRow[]>([]);
   const [total, setTotal] = useState(0);
   const [library, setLibrary] = useState<Library | null>(null);
-  const [facets, setFacets] = useState<Facets>({ years: [], clients: [] });
+  const [facets, setFacets] = useState<Facets>({ years: [], clients: [], warranty: {} });
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState('');
   const [error, setError] = useState('');
@@ -122,7 +139,7 @@ export default function AvCasesView() {
   const [siblings, setSiblings] = useState<Sibling[]>([]);
   const [syncProject, setSyncProject] = useState(false);
   const [popOpen, setPopOpen] = useState(false);
-  const [draft, setDraft] = useState<{ years: string[]; clients: string[] }>({ years: [], clients: [] });
+  const [draft, setDraft] = useState<PopFilter>(EMPTY_PF);
   const [clientQ, setClientQ] = useState('');
   const [pending, setPending] = useState<{ file: File; preview: Preview } | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -136,6 +153,16 @@ export default function AvCasesView() {
       if (SORTS.some((x) => x.k === s.k) && (s.dir === 'asc' || s.dir === 'desc')) setSort({ k: s.k as SortKey, dir: s.dir });
     } catch { /* 隐私模式下读不到,用默认顺序就好 */ }
   }, []);
+  /* 从别的页面带着筛选条件跳进来(「我的待办」里点保修提醒)。读一次就删,
+     之后自己点进来的还是干净的列表。 */
+  useEffect(() => {
+    try {
+      const raw = sessionStorage.getItem(CASE_PRESET_KEY);
+      if (!raw) return;
+      sessionStorage.removeItem(CASE_PRESET_KEY);
+      setPf({ ...EMPTY_PF, ...(JSON.parse(raw) as Partial<PopFilter>) });
+    } catch { /* 读不到就按默认列表 */ }
+  }, []);
   const setSortSaved = (s: { k: SortKey; dir: 'asc' | 'desc' }) => {
     setSort(s);
     try { localStorage.setItem(SORT_STORE, JSON.stringify(s)); } catch { /* 存不上不影响使用 */ }
@@ -144,13 +171,16 @@ export default function AvCasesView() {
   const load = useCallback(async () => {
     try {
       const qs = new URLSearchParams(Object.entries(applied).filter(([, v]) => v.trim()));
-      if (years.length) qs.set('years', years.join(','));
-      if (clients.length) qs.set('clients', clients.join(','));
+      if (pf.years.length) qs.set('years', pf.years.join(','));
+      if (pf.clients.length) qs.set('clients', pf.clients.join(','));
+      if (pf.warranty.length) qs.set('warranty', pf.warranty.join(','));
+      if (pf.hFrom) qs.set('handoverFrom', pf.hFrom);
+      if (pf.hTo) qs.set('handoverTo', pf.hTo);
       qs.set('sort', sort.k); qs.set('dir', sort.dir);
       const r = await call<{ cases: CaseRow[]; total: number; library: Library; facets: Facets }>(`/api/av/cases?${qs}`);
       setCases(r.cases); setTotal(r.total); setLibrary(r.library); setFacets(r.facets);
     } catch (e) { setError((e as Error).message); }
-  }, [applied, years, clients, sort]);
+  }, [applied, pf, sort]);
   useEffect(() => { if (canViewPrices(me)) load(); }, [load, me]);
 
   if (!canViewPrices(me)) {
@@ -263,8 +293,16 @@ export default function AvCasesView() {
   };
 
   const chips = [
-    ...years.map((y) => ({ key: `y${y}`, label: `${t('年份', 'Year')}：${y === 'none' ? t('未填', 'blank') : y}`, rm: () => setYears(years.filter((x) => x !== y)) })),
-    ...clients.map((c) => ({ key: `c${c}`, label: `${t('客户', 'Client')}：${c}`, rm: () => setClients(clients.filter((x) => x !== c)) })),
+    ...pf.years.map((y) => ({ key: `y${y}`, label: `${t('年份', 'Year')}：${y === 'none' ? t('未填', 'blank') : y}`, rm: () => setPf({ ...pf, years: pf.years.filter((x) => x !== y) }) })),
+    ...pf.clients.map((c) => ({ key: `c${c}`, label: `${t('客户', 'Client')}：${c}`, rm: () => setPf({ ...pf, clients: pf.clients.filter((x) => x !== c) }) })),
+    ...pf.warranty.map((w) => {
+      const o = WARRANTY_OPTS.find((x) => x.k === w);
+      return { key: `w${w}`, label: `${t('保修', 'Warranty')}：${o ? t(o.zh, o.en) : w}`, rm: () => setPf({ ...pf, warranty: pf.warranty.filter((x) => x !== w) }) };
+    }),
+    ...(pf.hFrom || pf.hTo ? [{
+      key: 'h', rm: () => setPf({ ...pf, hFrom: '', hTo: '' }),
+      label: `Handover：${pf.hFrom ? fmtDate(parseISO(pf.hFrom)) : '…'} – ${pf.hTo ? fmtDate(parseISO(pf.hTo)) : '…'}`,
+    }] : []),
   ];
 
   return (
@@ -311,10 +349,10 @@ export default function AvCasesView() {
           {input('sqmMin', t('面积 ≥ (㎡)', 'Area ≥ (㎡)'), 100)}
           {input('sqmMax', t('面积 ≤ (㎡)', 'Area ≤ (㎡)'), 100)}
           <button className="btn-navy" onClick={() => setApplied(filter)}>{t('检索', 'Search')}</button>
-          <button className="btn-line" onClick={() => { setFilter(EMPTY); setApplied(EMPTY); setYears([]); setClients([]); }}>{t('清空', 'Clear')}</button>
+          <button className="btn-line" onClick={() => { setFilter(EMPTY); setApplied(EMPTY); setPf(EMPTY_PF); }}>{t('清空', 'Clear')}</button>
           <div style={{ position: 'relative' }}>
             <button className="btn-line" aria-expanded={popOpen}
-              onClick={() => { setDraft({ years, clients }); setClientQ(''); setPopOpen(!popOpen); }}>
+              onClick={() => { setDraft(pf); setClientQ(''); setPopOpen(!popOpen); }}>
               {t('筛选', 'Filter')}{chips.length ? ` · ${chips.length}` : ''}
             </button>
             {popOpen && (
@@ -336,6 +374,27 @@ export default function AvCasesView() {
                   })}
                   {!facets.years.length && <span style={{ fontSize: 12, color: 'var(--text2)' }}>{t('案例库为空', 'Library is empty')}</span>}
                 </div>
+                <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 6 }}>{t('保修状态', 'Warranty')}</div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 12 }}>
+                  {WARRANTY_OPTS.map((o) => {
+                    const on = draft.warranty.includes(o.k);
+                    return (
+                      <button key={o.k} className={on ? 'btn-navy' : 'btn-line'} style={{ padding: '3px 10px', fontSize: 12, borderRadius: 14 }}
+                        data-warranty={o.k}
+                        onClick={() => setDraft({ ...draft, warranty: on ? draft.warranty.filter((x) => x !== o.k) : [...draft.warranty, o.k] })}>
+                        {t(o.zh, o.en)} ({facets.warranty[o.k] ?? 0})
+                      </button>
+                    );
+                  })}
+                </div>
+                <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 6 }}>{t('交付日期（Handover date）', 'Handover date')}</div>
+                <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 12, fontSize: 12 }}>
+                  <input type="date" aria-label={t('交付日期从', 'Handover from')} value={draft.hFrom}
+                    onChange={(e) => setDraft({ ...draft, hFrom: e.target.value })} style={{ flex: 1 }} />
+                  <span>–</span>
+                  <input type="date" aria-label={t('交付日期到', 'Handover to')} value={draft.hTo}
+                    onChange={(e) => setDraft({ ...draft, hTo: e.target.value })} style={{ flex: 1 }} />
+                </div>
                 <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 6 }}>{t('客户', 'Client')}
                   {draft.clients.length ? <span style={{ fontWeight: 400, color: 'var(--text2)' }}> · {t('已选', 'selected')} {draft.clients.length}</span> : null}</div>
                 <input type="search" value={clientQ} onChange={(e) => setClientQ(e.target.value)} placeholder={t('搜索客户…', 'Search clients…')}
@@ -351,8 +410,12 @@ export default function AvCasesView() {
                   ))}
                 </div>
                 <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 12 }}>
-                  <button className="btn-line" onClick={() => setDraft({ years: [], clients: [] })}>{t('重置', 'Reset')}</button>
-                  <button className="btn-navy" onClick={() => { setYears(draft.years); setClients(draft.clients); setPopOpen(false); }}>{t('应用', 'Apply')}</button>
+                  <button className="btn-line" onClick={() => setDraft(EMPTY_PF)}>{t('重置', 'Reset')}</button>
+                  <button className="btn-navy" onClick={() => {
+                    /* 起止填反了就对调,别让人对着空表猜哪里错了 */
+                    const d = draft.hFrom && draft.hTo && draft.hFrom > draft.hTo ? { ...draft, hFrom: draft.hTo, hTo: draft.hFrom } : draft;
+                    setPf(d); setPopOpen(false);
+                  }}>{t('应用', 'Apply')}</button>
                 </div>
               </div>
             )}
@@ -369,7 +432,7 @@ export default function AvCasesView() {
               </span>
             ))}
             <button className="btn-line" style={{ padding: '2px 9px', fontSize: 12 }}
-              onClick={() => { setYears([]); setClients([]); }}>{t('清除全部筛选', 'Clear all filters')}</button>
+              onClick={() => setPf(EMPTY_PF)}>{t('清除全部筛选', 'Clear all filters')}</button>
           </div>
         )}
 
