@@ -25,6 +25,7 @@ import { useStore } from '../store';
 type Library = { count: number; importedBy: string; importedAt: number };
 type Facets = { years: { year: string; n: number }[]; clients: { client: string; n: number }[] };
 type LogRow = { at: number; by: string; k: string; p: Record<string, unknown> };
+type Sibling = { caseKey: string; widthMm: number | null; heightMm: number | null; handover: string | null; warrantyMonths: number };
 type Preview = {
   added: number; updated: number; manualFields: number; manualScreens: number;
   handoverKept: number; removed: number; keptMissing: number;
@@ -117,6 +118,9 @@ export default function AvCasesView() {
   /* 这次保存要把哪些字段退回统计表的值(§3.4 之外的一处补充,见 editCase) */
   const [revert, setRevert] = useState<string[]>([]);
   const [log, setLog] = useState<LogRow[]>([]);
+  /* 同项目的其它屏,与「同步交付日期 / 保修期」勾选(AV-014 §7) */
+  const [siblings, setSiblings] = useState<Sibling[]>([]);
+  const [syncProject, setSyncProject] = useState(false);
   const [popOpen, setPopOpen] = useState(false);
   const [draft, setDraft] = useState<{ years: string[]; clients: string[] }>({ years: [], clients: [] });
   const [clientQ, setClientQ] = useState('');
@@ -194,22 +198,27 @@ export default function AvCasesView() {
     setForm(f);
     setRevert([]);
     setLog([]);
+    setSiblings([]); setSyncProject(false);
     try {
-      const r = await call<{ log: LogRow[] }>(`/api/av/cases?caseKey=${encodeURIComponent(c.caseKey)}`);
+      const r = await call<{ log: LogRow[]; siblings?: Sibling[] }>(`/api/av/cases?caseKey=${encodeURIComponent(c.caseKey)}`);
       setLog(r.log ?? []);
+      setSiblings(r.siblings ?? []);
     } catch { /* 修改记录读不到不该挡住编辑 */ }
   }
   async function save() {
     if (!editing) return;
     setBusy(true); setError('');
     try {
-      const r = await call<{ case: CaseRow; changes: { field: string }[] }>('/api/av/cases', {
+      const r = await call<{ case: CaseRow; changes: { field: string }[]; synced: number }>('/api/av/cases', {
         method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ caseKey: editing.caseKey, fields: form, revert }),
+        body: JSON.stringify({ caseKey: editing.caseKey, fields: form, revert, syncProject: syncProject && siblings.length > 0 }),
       });
-      setMsg(r.changes.length
+      const base = r.changes.length
         ? t(`已保存 ${r.changes.length} 处修改。`, `Saved ${r.changes.length} change(s).`)
-        : t('没有改动。', 'Nothing changed.'));
+        : t('这块屏没有改动。', 'Nothing changed on this screen.');
+      setMsg(r.synced
+        ? base + t(` 交付日期与保修期已同步到本项目其它 ${r.synced} 块屏。`, ` Handover and warranty synced to ${r.synced} other screen(s) of this project.`)
+        : base);
       setEditing(null);
       await load();
     } catch (e) { setError((e as Error).message); }
@@ -526,6 +535,23 @@ export default function AvCasesView() {
                   </div>
                 );
               })}
+              {siblings.length > 0 && (
+                <label style={{ gridColumn: '1/-1', display: 'flex', gap: 8, alignItems: 'flex-start', fontSize: 12.5, cursor: 'pointer' }}>
+                  <input type="checkbox" checked={syncProject} onChange={(e) => setSyncProject(e.target.checked)}
+                    style={{ marginTop: 2 }} data-testid="case-sync" />
+                  <span>
+                    {t(`把交付日期与保修期同步到本项目其它 ${siblings.length} 块屏`,
+                      `Also apply the handover date and warranty to the other ${siblings.length} screen(s) of this project`)}
+                    <span style={{ display: 'block', color: 'var(--text2)', fontSize: 11.5 }}>
+                      {siblings.map((s) => {
+                        const size = s.widthMm && s.heightMm ? `${n(s.widthMm, 0)} × ${n(s.heightMm, 0)}` : t('尺寸未填', 'no size');
+                        const now = s.handover ? fmtDate(parseISO(s.handover)) : t('未填', 'not set');
+                        return `${size}（${t('现在', 'now')} ${now} · ${s.warrantyMonths} ${t('个月', 'mo')}）`;
+                      }).join('；')}
+                    </span>
+                  </span>
+                </label>
+              )}
               <div style={{ gridColumn: '1/-1', background: 'var(--hover-bg)', borderRadius: 7, padding: '8px 10px', fontSize: 12.5 }}>
                 {liveExpire
                   ? <>Expire Warranty（{t('自动', 'computed')}）= {fmtDate(parseISO(form.handover))} + {liveExpire.months} {t('个月', 'months')} = <b>{fmtDate(liveExpire.date)}</b>

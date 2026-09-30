@@ -5,8 +5,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { canEditPrices, canViewPrices, identityOf } from '@/lib/permissions';
 import { logZh } from '@/lib/logmsg';
 import {
-  appendCaseLog, applyImport, caseFacets, caseLibraryInfo, caseLog, editCase,
-  searchCases, CASE_FIELD_KEYS, type CaseFilter, type HistCase,
+  appendCaseLog, applyImport, caseFacets, caseLibraryInfo, caseLog, caseSiblings, editCase,
+  searchCases, CASE_FIELD_KEYS, type CaseFilter, type CaseRow, type HistCase,
 } from '@/server/avdb';
 import { DrawingServiceError, readCaseWorkbook } from '@/server/avdrawing';
 import { currentUser } from '@/server/session';
@@ -15,7 +15,8 @@ import { currentUser } from '@/server/session';
    GET   ?q=&status=&pitchMin=&pitchMax=&sqmMin=&sqmMax=&years=&clients=&sort=&dir=
          检索;排序与年份 / 客户筛选都在服务端做(列表有 500 条上限,前端
          排序只排得到前 500 条)。?caseKey= 额外带上那块屏的修改记录。
-   PATCH { caseKey, fields }      逐块屏改 —— PD / BD only
+   PATCH { caseKey, fields, revert?, syncProject? }   逐块屏改 —— PD / BD only
+         syncProject = 把这块屏的交付日期与保修期同步到同一项目的其它屏
    POST  multipart { file, dryRun? }
          导入统计表。dryRun=1 只出预览不写库(AV-014 §4 的两步导入)。
          人工改过的字段与手填的交付日期 / 保修期一律保留 —— PD / BD only
@@ -45,7 +46,7 @@ export async function GET(req: NextRequest) {
     ...found,
     library: caseLibraryInfo(),
     facets: caseFacets(),
-    ...(key ? { log: caseLog(key) } : {}),
+    ...(key ? { log: caseLog(key), siblings: caseSiblings(key).map(brief) } : {}),
   });
 }
 
@@ -56,7 +57,7 @@ export async function PATCH(req: NextRequest) {
   if (!canEditPrices(identityOf(user))) return NextResponse.json({ error: '仅 PD / BD 可编辑历史案例' }, { status: 403 });
 
   const body = (await req.json().catch(() => null)) as
-    { caseKey?: string; fields?: Record<string, unknown>; revert?: unknown } | null;
+    { caseKey?: string; fields?: Record<string, unknown>; revert?: unknown; syncProject?: unknown } | null;
   const caseKey = body?.caseKey?.trim();
   if (!caseKey || !body?.fields) return NextResponse.json({ error: '缺少 caseKey 或 fields' }, { status: 400 });
   /* 恢复成统计表的值:白名单之外的一律忽略 */
@@ -83,6 +84,10 @@ export async function PATCH(req: NextRequest) {
     if (!Number.isInteger(m) || m < 0 || m > 600) return NextResponse.json({ error: '保修期应为 0–600 的整数月' }, { status: 400 });
   }
 
+  /* 同项目的其它屏要在改之前找:这次保存要是连项目名也改了,改完再按新名字
+     找就找不到原来那几块了。 */
+  const siblings = body.syncProject === true ? caseSiblings(caseKey) : [];
+
   const r = editCase(caseKey, fields, user.name, revert);
   if (!r) return NextResponse.json({ error: '这块屏不在案例库里' }, { status: 404 });
 
@@ -98,7 +103,26 @@ export async function PATCH(req: NextRequest) {
     };
     appendCaseLog(caseKey, user.name, k, { ...p, text: logZh(k, p) });
   }
-  return NextResponse.json({ case: r.row, changes: r.changes, log: caseLog(caseKey) });
+
+  /* 同步到同项目其它屏(AV-014 §7):带过去的是这块屏**保存后**的交付日期与
+     保修期 —— 所以就算这次只改了面积、顺手勾了同步,其它屏也会对齐到这块屏。
+     每块屏各走一遍 editCase:与原始值一样的不落人工值,各自留一条修改记录。 */
+  let synced = 0;
+  for (const sib of siblings) {
+    const sf = { handover: r.row.handover ?? '', warrantyMonths: String(r.row.warrantyMonths) };
+    const sr = editCase(sib.caseKey, sf, user.name);
+    if (!sr || !sr.changes.length) continue;
+    synced += 1;
+    const [first, ...rest] = sr.changes;
+    const k = rest.length ? 'av.caseSyncMore' : 'av.caseSync';
+    const p = {
+      screen: sr.row.name, cf: first.field, fv: first.from, tv: first.to,
+      ...(rest.length ? { more: rest.length } : {}),
+      changes: JSON.stringify(sr.changes),
+    };
+    appendCaseLog(sib.caseKey, user.name, k, { ...p, text: logZh(k, p) });
+  }
+  return NextResponse.json({ case: r.row, changes: r.changes, synced, log: caseLog(caseKey) });
 }
 
 export async function POST(req: NextRequest) {
@@ -127,3 +151,8 @@ export async function POST(req: NextRequest) {
     await rm(dir, { recursive: true, force: true });
   }
 }
+
+/* 编辑弹窗里列同项目其它屏用:够认出是哪块就行 */
+const brief = (c: CaseRow) => ({
+  caseKey: c.caseKey, widthMm: c.widthMm, heightMm: c.heightMm, handover: c.handover, warrantyMonths: c.warrantyMonths,
+});
