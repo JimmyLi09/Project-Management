@@ -22,6 +22,7 @@
    其余槽位原样填(人名、项目名、日期、数字)。 */
 
 import { SVC } from './templates';
+import { caseFieldTerm, caseStatusTerm } from './terms';
 import type { Lang } from './i18n';
 
 export type LogParams = Record<string, string | number | null | undefined>;
@@ -66,6 +67,13 @@ const TRANSLATED: Record<string, (v: string, lang: Lang) => string> = {
   cl: (v, l) => enumTerm(CL_STATUS, v, l),
   clFrom: (v, l) => enumTerm(CL_STATUS, v, l),
   clTo: (v, l) => enumTerm(CL_STATUS, v, l),
+  /* AV-014:改的是哪个字段(cf),以及状态字段的两个取值。fv / tv 里放的多半是
+     数字或自由文本,CASE_STATUS_TERMS 认不出来的原样填。
+     槽位名别用 field —— sched.date / pkg.field / fin.edit 早就在用 {field},
+     注册成翻译槽会把那几条老日志一起误翻(业务字段叫 name 的会变成「项目名」)。 */
+  cf: caseFieldTerm,
+  fv: caseStatusTerm,
+  tv: caseStatusTerm,
 };
 
 /* ---- 词条表 ---- */
@@ -184,6 +192,11 @@ export const LOG_MSG: Record<string, [string, string]> = {
     'Quotation {no} submitted: {lines} · incl. GST S${total} · shared-resource saving −S${shared} · margin after discount {margin}'],
   'av.quoteApprove': ['批准报价 {no}(含税 S${total}){note}', 'Quotation {no} approved (incl. GST S${total}){note}'],
   'av.quoteReject': ['退回报价 {no}(含税 S${total}){note}', 'Quotation {no} rejected (incl. GST S${total}){note}'],
+  /* AV-014 历史案例人工修改。一次保存写一条:显示第一处改动,多的用 {more}
+     带过;完整的改前→改后存在参数 changes 里(模板不引用它,所以不渲染)。 */
+  'av.caseEdit': ['历史案例「{screen}」:{cf} {fv} → {tv}', 'Past case "{screen}": {cf} {fv} → {tv}'],
+  'av.caseEditMore': ['历史案例「{screen}」:{cf} {fv} → {tv},另 {more} 处',
+    'Past case "{screen}": {cf} {fv} → {tv}, and {more} more'],
 
   /* 风险 */
   'risk.dismiss': ['标记风险已处理:{key}', 'Risk dismissed: {key}'],
