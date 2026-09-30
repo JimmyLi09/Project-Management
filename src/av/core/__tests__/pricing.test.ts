@@ -89,3 +89,22 @@ test('方案有阻断项（如待校准参数组）时成本表不得确认', ()
   const c = checkSheet(lines, blocked, [...ITEMS, cable(906, '线', 1, 2)], 0.18, '2026-09-25');
   assert.ok(c.some((x) => x.code === 'COST-CFG' && x.severity === 'block' && /LED-TYPE-01/.test(x.message)));
 });
+
+test('06 显示屏条目的点间距必须等于 05 方案的点间距（改了点间距后不能沿用上一版的条目）', async () => {
+  const { ledChecks, pitchFits } = await import('../pricing.ts');
+  assert.equal(pitchFits('P2', 2), true);
+  assert.equal(pitchFits('P2', 2.5), false);
+  assert.equal(pitchFits('P1.875', 1.875), true);
+  assert.equal(pitchFits('3.91-7.81mm', 5), true, '区间型号');
+  assert.equal(pitchFits('3.91-7.81mm', 2.5), false);
+  assert.equal(pitchFits('', 2), null);
+  const item = (id: number, pitch: string) => ({ id, line: 'led' as const, category: 'hard_smd', categoryLabel: 'SMD', model: '', pitch, moduleSize: '', cabinetSize: '',
+    unit: '㎡', costPrice: 1, listPrice: 2, currency: 'SGD', source: '', validUntil: '', active: true, updatedBy: '', updatedAt: 0 });
+  const cfg = { id: 1, projectId: 'p', line: 'led' as const, packVersion: 'led@1.0', drawingId: null, createdBy: '', createdAt: 0,
+    summary: { sqm: 1, pitch: 2.5, screenType: 'in_fixed', mods: 1, cabinets: 1, nPowerCable: 1, nDataCable: 1, powerCableSpec: '3*2.5', exportable: true, blocking: [] } };
+  const lines = [{ key: 'display', name: 'LED', qty: 1, unit: '㎡', qtySource: 'F1', itemId: 1, itemLabel: '', unitCost: 1, unitList: 2 }];
+  const c = ledChecks(lines, cfg, [item(1, 'P2')]);
+  assert.equal(c[0]?.code, 'LED-COST-PITCH');
+  assert.equal(c[0]?.severity, 'block');
+  assert.deepEqual(ledChecks(lines, cfg, [item(1, 'P2.5')]), []);
+});

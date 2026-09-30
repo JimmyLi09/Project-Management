@@ -245,6 +245,27 @@ export function buildPrjLines(cfg: SavedConfig<PrjSummary>, picks: PrjPicks, man
   ];
 }
 
+/* The display item must be the pitch 05 designed. 06 keeps the last sheet's
+   picks, so after 05 saves a new version (P2 → P2.5) the old P2 item would
+   otherwise price the new screen without anyone noticing. A range item
+   ("3.91-7.81mm") fits any pitch inside the range. */
+export function pitchFits(label: string, pitch: number): boolean | null {
+  const nums = (label.match(/\d+(?:\.\d+)?/g) ?? []).map(Number);
+  if (!nums.length) return null;
+  if (nums.length >= 2 && /[-–~]/.test(label)) return pitch >= Math.min(nums[0], nums[1]) - 1e-3 && pitch <= Math.max(nums[0], nums[1]) + 1e-3;
+  return Math.abs(nums[0] - pitch) < 1e-3;
+}
+
+export function ledChecks(lines: CostLine[], cfg: SavedConfig<LedSummary>, items: PriceItem[]): CostCheck[] {
+  const l = lines.find((x) => x.key === 'display');
+  const it = l?.itemId == null ? undefined : items.find((i) => i.id === l.itemId);
+  if (!it) return [];
+  const fits = pitchFits(it.pitch, cfg.summary.pitch);
+  if (fits === null) return [{ code: 'LED-COST-PITCH', severity: 'warn', message: `「${itemLabel(it)}」没写点间距，无法核对是否就是方案的 P${cfg.summary.pitch}。` }];
+  return fits ? [] : [{ code: 'LED-COST-PITCH', severity: 'block',
+    message: `所选显示屏条目是 ${it.pitch}，05 方案是 P${cfg.summary.pitch}：请换成 P${cfg.summary.pitch} 的条目（05 改过点间距后，成本表沿用了上一版的选择）。` }];
+}
+
 /* The chosen projector must reach the brightness P6 asks for. */
 export function prjChecks(lines: CostLine[], cfg: SavedConfig<PrjSummary>, items: PriceItem[]): CostCheck[] {
   const line = lines.find((l) => l.key === 'projector');
