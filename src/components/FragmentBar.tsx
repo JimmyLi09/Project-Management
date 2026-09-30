@@ -3,7 +3,6 @@
 import React, { useEffect, useState } from 'react';
 import { useStore } from './store';
 import { canDeleteTemplate, canSaveTemplate } from '@/lib/permissions';
-import { projCode } from '@/lib/project';
 import { useLang } from '@/lib/i18n';
 import { Icon } from './ui';
 import { freshChecklist, freshSchedule } from '@/server/fragments';
@@ -375,7 +374,9 @@ function ImportPicker({ others, lang, t, busy, onPick }: {
       <select className="in sm" value={sel} onChange={(e) => setSel(e.target.value)} style={{ minWidth: 240 }}>
         <option value="">{t('— 选择来源项目 —', '— select source project —')}</option>
         {others.map((o) => (
-          <option key={o.id} value={o.id}>{projCode(o) ? `${projCode(o)} · ` : ''}{o.name}</option>
+          /* 项目编号不再上屏(REQ-025/028 → #47 → 这里收尾)。原来编号在这里兼着
+             区分同名项目,拿掉后用客户接上 —— 同一个名字多半客户不同。 */
+          <option key={o.id} value={o.id}>{o.name}{o.client ? ` · ${o.client}` : ''}</option>
         ))}
       </select>
       <button className="btn-navy sm" disabled={!sel || busy}

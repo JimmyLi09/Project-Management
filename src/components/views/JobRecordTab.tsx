@@ -4,7 +4,7 @@ import React, { useMemo, useState } from 'react';
 import { useStore } from '../store';
 import { canAdmin, canDelete, canEdit } from '@/lib/permissions';
 import { SVC, svcName, svcColor } from '@/lib/templates';
-import { fmtDate, parseISO, pkgSuffix, projCode } from '@/lib/project';
+import { fmtDate, parseISO, pkgSuffix } from '@/lib/project';
 import { useLang } from '@/lib/i18n';
 import { Icon } from '../ui';
 import {
@@ -97,7 +97,6 @@ export default function JobRecordTab({ p }: { p: Project }) {
         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
           <tbody>
             {([
-              [t('项目编号', 'Project no.'), projCode(p) || '—'],
               [t('项目名称', 'Project name'), p.name],
               [t('客户', 'Client'), p.client || '—'],
               [t('报价号', 'Quotation no.'), p.quotationNo || '—'],
