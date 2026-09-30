@@ -85,3 +85,38 @@ export function seedDemo(d: Database.Database) {
   p4.packages[0].schedule[0].status = 'wip';
   put(p4);
 }
+
+/* ===== AV-014 历史案例的示例屏 =====
+   演示模式跑在 Vercel 上,那里没有 Python,导入不了统计表 —— 案例库空着的话,
+   历史案例这一页排序、筛选、编辑、保修列一样都验不了。用 0929 原型里的示例屏
+   预置(原型取自统计表截图 + 几条进行中项目),交付日期与保修期也照原型。
+
+   只有一处不照抄:170-South Beach 的交付日期按「今天往前推」算,让它始终停在
+   「N 天后到期」那一档 —— 写死日期的话过几周就滑进「已过保」,预览上就再也
+   看不到琥珀色那一档了。
+
+   内网服务器不开演示模式,不会有这批数据。 */
+export interface DemoCase {
+  sheet: 'ongoing' | 'completed';
+  refNo: string | null; year: number | null; name: string; client: string; address: string;
+  w: number; h: number; sqm: number; pitch: number; product: string; modules: number | null; kw: number | null;
+  pc: string | null; dc: string | null; remarks: string | null;
+  handover: string | null; warrantyMonths: number;
+}
+
+export const DEMO_CASES: DemoCase[] = [
+  { sheet: 'completed', refNo: '066', year: null, name: '8SW Sales Gallery', client: 'Perennial', address: '1.279519, 103.855736', w: 43320, h: 3200, sqm: 138.6, pitch: 2.5, product: 'P2.5', modules: null, kw: 70, pc: '33', dc: '66', remarks: 'P2.5 箱体屏(960*800)定制', handover: '2025-03-18', warrantyMonths: 24 },
+  { sheet: 'completed', refNo: '2023-152', year: 2023, name: 'Malaysia TRX Curve Wall LED', client: 'Gucci', address: 'TRX, KL, Malaysia', w: 22114, h: 4846, sqm: 107.2, pitch: 1.86, product: 'P1.86 (320*160mm)', modules: 2170, kw: 60, pc: '13A x 18 sets', dc: '45', remarks: 'P1.86 (640*480mm)箱体屏。定制屏', handover: '2023-11-20', warrantyMonths: 24 },
+  { sheet: 'completed', refNo: '066', year: null, name: '8SW Sales Gallery', client: 'Perennial', address: '1.279519, 103.855736', w: 33280, h: 3200, sqm: 106.5, pitch: 2.5, product: 'P2.5', modules: null, kw: 55, pc: '26', dc: '42', remarks: 'P2.5 箱体屏(640*640)', handover: '2025-03-18', warrantyMonths: 24 },
+  { sheet: 'completed', refNo: '066', year: null, name: '8SW Sales Gallery', client: 'Perennial', address: '1.279519, 103.855736', w: 20000, h: 4000, sqm: 80, pitch: 2.5, product: 'P2.5', modules: null, kw: 50, pc: '21', dc: '34', remarks: 'P2.5 箱体屏(960*800)定制', handover: '2025-03-18', warrantyMonths: 24 },
+  { sheet: 'completed', refNo: '191', year: null, name: 'The M', client: 'WingTai', address: 'Selegie Road Lamp Post 11, opposite Sunshine Plaza, 189652', w: 9600, h: 4800, sqm: 72, pitch: 3, product: 'P3', modules: 1250, kw: null, pc: '13A x 20 sets', dc: '16+4', remarks: 'Wall LED', handover: null, warrantyMonths: 12 },
+  { sheet: 'completed', refNo: null, year: 2024, name: '112-Marina View Showflat', client: 'IOI', address: '21 Park St, Singapore 018925', w: 12800, h: 4960, sqm: 63.49, pitch: 2.5, product: 'P2.5 Curve Wall', modules: 1240, kw: 29, pc: '11', dc: '24', remarks: '320*160mm Modules 640*480mm Cabinet', handover: '2024-10-08', warrantyMonths: 12 },
+  { sheet: 'completed', refNo: null, year: 2025, name: '170-South Beach LED', client: 'E3 Design Pte Ltd', address: '38 Beach Rd, Singapore 189767', w: 9920, h: 5920, sqm: 58.73, pitch: 2.5, product: 'P2.5 GOB LED Screen', modules: 1147, kw: 26.43, pc: '18', dc: '18', remarks: '320*160mm Modules 640*480mm Cabinet', handover: iso(-345), warrantyMonths: 12 },
+  { sheet: 'completed', refNo: null, year: 2024, name: '095-GMC', client: 'Perennials', address: 'Beside Skywaters Residences Sales Gallery', w: 14080, h: 4160, sqm: 58.57, pitch: 2.5, product: 'P2.5 Straight Wall', modules: 1144, kw: 26.36, pc: '23', dc: '27', remarks: '320*160mm Modules 640*480mm Cabinet', handover: '2024-06-15', warrantyMonths: 24 },
+  { sheet: 'completed', refNo: null, year: 2025, name: '206-South Beach Outdoor LED', client: 'CBRE', address: '38 Beach Rd, Singapore 189767', w: 7680, h: 6240, sqm: 47.92, pitch: 10, product: 'P10 室外金线模组', modules: 936, kw: 23.96, pc: null, dc: null, remarks: '320*160mm Modules 640*480mm Cabinet', handover: '2025-12-05', warrantyMonths: 24 },
+  { sheet: 'completed', refNo: '2022-088', year: 2022, name: 'Dior Pop-up', client: 'Dior', address: 'ION Orchard', w: 4800, h: 2700, sqm: 12.96, pitch: 1.9, product: 'P1.9', modules: 162, kw: 5.8, pc: '3', dc: '4', remarks: 'Rental', handover: '2022-05-01', warrantyMonths: 12 },
+  { sheet: 'ongoing', refNo: null, year: 2026, name: '131-Guoco Lentor LED', client: 'GuocoLand', address: 'Lentor Central', w: 5760, h: 2880, sqm: 16.59, pitch: 1.86, product: 'P1.86', modules: 216, kw: 7.5, pc: '4', dc: '5', remarks: null, handover: null, warrantyMonths: 12 },
+  { sheet: 'ongoing', refNo: null, year: 2026, name: '021-Nafa LED', client: 'QXY Resources Pte Ltd', address: 'NAFA Campus 3', w: 6400, h: 3600, sqm: 23.04, pitch: 2.5, product: 'P2.5', modules: 288, kw: 10.4, pc: '5', dc: '5', remarks: null, handover: null, warrantyMonths: 12 },
+  { sheet: 'ongoing', refNo: null, year: 2026, name: '128-C&K T1 LED', client: 'Charles & Keith Pte Ltd', address: 'Changi Airport T1', w: 3840, h: 2160, sqm: 8.29, pitch: 1.25, product: 'P1.25 COB', modules: null, kw: 3.9, pc: '2', dc: '3', remarks: null, handover: null, warrantyMonths: 12 },
+  { sheet: 'ongoing', refNo: null, year: 2026, name: '144-Chuan Grove LED', client: 'Singholding', address: 'Chuan Grove', w: 2560, h: 1440, sqm: 3.69, pitch: 1.56, product: 'P1.56 COB', modules: 48, kw: 1.66, pc: '2', dc: '2', remarks: null, handover: null, warrantyMonths: 12 },
+];

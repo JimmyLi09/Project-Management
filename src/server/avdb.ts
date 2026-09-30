@@ -9,6 +9,7 @@
    record of what was confirmed, by whom, never moves under anyone's feet. */
 
 import { getDb } from './db';
+import { DEMO_CASES, shouldSeedDemo } from './demo';
 import type { DrawingElement, DrawingSummary, IngestRecord, IngestResult, StoredDrawing } from '@/av/core/handoff';
 import type { CostLine, PriceItem, SavedConfig, SummaryBase } from '@/av/core/pricing';
 import type { QuoteSection } from '@/av/core/quote';
@@ -215,6 +216,9 @@ function db() {
        重算会把重复屏的序号排乱,和人工修改对不上。 */
     const keyed = d.prepare("SELECT count(*) AS n, SUM(case_key <> '') AS k FROM av_case").get() as { n: number; k: number | null };
     if (keyed.n > 0 && !keyed.k) backfillCaseKeys(d);
+    /* 演示模式(Vercel 预览)没有 Python,导入不了统计表,案例库空着就什么都验
+       不了 —— 放一批示例屏。库里已经有屏就不动。内网服务器不开演示模式。 */
+    else if (keyed.n === 0 && shouldSeedDemo()) seedDemoCases(d);
     ready = true;
   }
   return d;
@@ -836,6 +840,33 @@ function keysFor(cases: Pick<HistCase, 'name' | 'client' | 'widthMm' | 'heightMm
     seen.set(base, n);
     return n === 1 ? base : `${base}#${n}`;
   });
+}
+
+/** 演示模式的示例屏(数据在 demo.ts)。直接用传进来的连接写 —— 这时还在
+ *  db() 的初始化里,调 db() 会重入。交付日期 / 非默认保修期走 av_case_edit,
+ *  和真人填的一模一样,所以页面上会标「已人工修改」,那是如实的。 */
+function seedDemoCases(d: ReturnType<typeof getDb>): void {
+  const rows = DEMO_CASES.map((c) => ({
+    sourceSheet: c.sheet === 'ongoing' ? 'LED ongoing project' : 'LED completed project',
+    status: c.sheet, refNo: c.refNo, year: c.year, name: c.name, client: c.client, address: c.address,
+    widthMm: c.w, heightMm: c.h, sqm: c.sqm, pitch: c.pitch, modules: c.modules, kw: c.kw,
+    powerCable: c.pc, dataCable: c.dc, product: c.product, remarks: c.remarks,
+  }));
+  const keys = keysFor(rows);
+  const at = Date.now();
+  const ins = d.prepare(`INSERT INTO av_case (case_key, missing, source_sheet, status, ref_no, year, name, client, address,
+    width_mm, height_mm, sqm, pitch, modules, kw, power_cable, data_cable, product, remarks, imported_by, imported_at)
+    VALUES (@caseKey, 0, @sourceSheet, @status, @refNo, @year, @name, @client, @address,
+    @widthMm, @heightMm, @sqm, @pitch, @modules, @kw, @powerCable, @dataCable, @product, @remarks, '演示数据', @at)`);
+  const edit = d.prepare('INSERT INTO av_case_edit (case_key, field, value, edited_by, edited_at) VALUES (?, ?, ?, ?, ?)');
+  d.transaction(() => {
+    rows.forEach((r, i) => {
+      ins.run({ ...r, caseKey: keys[i], at });
+      const c = DEMO_CASES[i];
+      if (c.handover) edit.run(keys[i], 'handover', c.handover, '演示数据', at);
+      if (c.warrantyMonths !== DEFAULT_WARRANTY_MONTHS) edit.run(keys[i], 'warrantyMonths', String(c.warrantyMonths), '演示数据', at);
+    });
+  })();
 }
 
 /** AV-012 时代导入的行没有 case_key,补算一次。 */
