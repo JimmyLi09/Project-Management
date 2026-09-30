@@ -41,6 +41,7 @@ export async function GET(req: NextRequest) {
     years: list(p.get('years')), clients: list(p.get('clients')),
     warranty: list(p.get('warranty')),
     handoverFrom: p.get('handoverFrom') || undefined, handoverTo: p.get('handoverTo') || undefined,
+    contacted: p.get('contacted') || undefined,
   };
   const dir = p.get('dir');
   const found = searchCases(f, p.get('sort') || 'sqm', dir === 'asc' || dir === 'desc' ? dir : undefined);

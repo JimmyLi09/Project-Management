@@ -204,6 +204,16 @@ function db() {
       );
       CREATE INDEX IF NOT EXISTS idx_av_case_edit_log ON av_case_edit_log(case_key, at DESC);
       CREATE INDEX IF NOT EXISTS idx_av_case_key ON av_case(case_key);
+      /* 保修到期提醒的「已联系」(AV-014 §7 第 1 条的后续)。挂在「哪块屏 + 哪个
+         到期日」上:交付日期或保修期一改、到期日变了,这条就对不上,下一轮到期会
+         重新提醒 —— 不会因为去年联系过就永远不提醒。 */
+      CREATE TABLE IF NOT EXISTS av_case_remind (
+        case_key TEXT NOT NULL,
+        expire TEXT NOT NULL,
+        by TEXT NOT NULL,
+        at INTEGER NOT NULL,
+        PRIMARY KEY (case_key, expire)
+      );
     `);
     /* AV-012 时代导入的行没有 case_key —— 按同一套规则补算一次,补完它们
        才认得出自己,以后重新导入不会被当成新屏。
@@ -658,6 +668,9 @@ export interface CaseRow extends HistCase {
   /** 年份列显示的值:统计表年份,没有就取交付年份(§3.3) */
   effYear: number | null;
   manualFields: string[];           // 人工改过哪些字段
+  /** 这一次到期已经有人联系过客户(谁、何时);到期日变了就回到 null */
+  contactedBy: string | null;
+  contactedAt: number | null;
 }
 
 type FieldType = 'text' | 'int' | 'real';
@@ -716,7 +729,7 @@ const EFF_VIEW = `
       IFNULL(e.manualCount, 0) AS manualCount, e.manualList
     FROM av_case c LEFT JOIN e ON e.case_key = c.case_key
   ),
-  w AS (
+  w0 AS (
     SELECT v.*,
       /* SQLite 的月加法会把溢出的日子进位(1 月 31 日 + 1 个月 = 3 月 3 日),
          与前端 Date.setMonth 一致 —— 两边算出来的到期日不会打架。 */
@@ -725,6 +738,11 @@ const EFF_VIEW = `
       CASE WHEN year IS NOT NULL THEN year
            WHEN handover IS NOT NULL AND handover <> '' THEN CAST(strftime('%Y', handover) AS INTEGER) END AS effYear
     FROM v
+  ),
+  /* 这一次到期有没有人标过「已联系」—— 按当前到期日对,到期日变了就对不上 */
+  w AS (
+    SELECT w0.*, r.by AS contactedBy, r.at AS contactedAt
+    FROM w0 LEFT JOIN av_case_remind r ON r.case_key = w0.caseKey AND r.expire = w0.expire
   )`;
 
 export interface CaseFilter {
@@ -742,6 +760,8 @@ export interface CaseFilter {
   /** 交付日期范围,YYYY-MM-DD,含两端 */
   handoverFrom?: string;
   handoverTo?: string;
+  /** '0' = 这次到期还没人联系过,'1' = 已联系(「我的待办」提醒用) */
+  contacted?: string;
 }
 
 /** 「快到期」的窗口:距今 0–30 天(含两端),与页面上的琥珀色标签同一口径。 */
@@ -830,6 +850,8 @@ export function searchCases(
   const isDate = (v?: string) => !!v && /^\d{4}-\d{2}-\d{2}$/.test(v);
   if (isDate(f.handoverFrom)) { where.push('handover >= ?'); args.push(f.handoverFrom!); }
   if (isDate(f.handoverTo)) { where.push('handover <= ?'); args.push(f.handoverTo!); }
+  if (f.contacted === '0') where.push('contactedAt IS NULL');
+  if (f.contacted === '1') where.push('contactedAt IS NOT NULL');
 
   const s = SORTS[sortKey] ?? SORTS.sqm;
   const d = (dir === 'asc' || dir === 'desc') ? dir : s.def;
@@ -987,6 +1009,7 @@ export function applyImport(
       d.prepare('DELETE FROM av_case WHERE case_key = ?').run(k);
       d.prepare('DELETE FROM av_case_edit WHERE case_key = ?').run(k);
       d.prepare('DELETE FROM av_case_edit_log WHERE case_key = ?').run(k);
+      d.prepare('DELETE FROM av_case_remind WHERE case_key = ?').run(k);
     }
     /* 有人工修改但不在新表里的 → 留着,打上标记供人判断 */
     for (const k of keptMissing) d.prepare('UPDATE av_case SET missing = 1 WHERE case_key = ?').run(k);
@@ -1077,6 +1100,20 @@ export function caseSiblings(caseKey: string): CaseRow[] {
 
 /** 同步时一并带过去的字段:只有交付与保修。尺寸、面积这些每块屏各不相同。 */
 export const CASE_SYNC_FIELDS = ['handover', 'warrantyMonths'] as const;
+
+/** 标 / 撤「已联系」,都针对这块屏**当前的**到期日。没有到期日(没填交付
+ *  日期)的屏无从谈起,返回 null。 */
+export function setContacted(caseKey: string, contacted: boolean, by: string): CaseRow | null {
+  const row = getCase(caseKey);
+  if (!row || !row.expire) return null;
+  if (contacted) {
+    db().prepare(`INSERT INTO av_case_remind (case_key, expire, by, at) VALUES (?, ?, ?, ?)
+      ON CONFLICT(case_key, expire) DO UPDATE SET by = excluded.by, at = excluded.at`).run(caseKey, row.expire, by, Date.now());
+  } else {
+    db().prepare('DELETE FROM av_case_remind WHERE case_key = ? AND expire = ?').run(caseKey, row.expire);
+  }
+  return getCase(caseKey);
+}
 
 export function getCase(caseKey: string): CaseRow | null {
   const r = db().prepare(`${EFF_VIEW} SELECT * FROM w WHERE caseKey = ?`).get(caseKey) as CaseDbRow | undefined;

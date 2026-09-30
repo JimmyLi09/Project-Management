@@ -76,13 +76,26 @@ export default function MyTasksView() {
      「30 天内到期」筛选同一个(服务端同一段 SQL)。读不到就不显示,不挡待办。 */
   const [expiring, setExpiring] = useState<CaseRow[]>([]);
   const [expiringTotal, setExpiringTotal] = useState(0);
-  useEffect(() => {
+  /* 这一轮已经联系过客户的,收起来放一行,可展开撤销 */
+  const [contacted, setContacted] = useState<CaseRow[]>([]);
+  const [showContacted, setShowContacted] = useState(false);
+  const loadExpiring = React.useCallback(() => {
     if (!canEditPrices(me)) return;
-    fetch('/api/av/cases?warranty=soon&sort=expire&dir=asc')
-      .then((r) => (r.ok ? r.json() : null))
-      .then((b) => { if (b?.cases) { setExpiring(b.cases); setExpiringTotal(b.total); } })
-      .catch(() => {});
+    const get = (c: string) => fetch(`/api/av/cases?warranty=soon&contacted=${c}&sort=expire&dir=asc`)
+      .then((r) => (r.ok ? r.json() : null)).catch(() => null);
+    Promise.all([get('0'), get('1')]).then(([a, b]) => {
+      if (a?.cases) { setExpiring(a.cases); setExpiringTotal(a.total); }
+      if (b?.cases) setContacted(b.cases);
+    });
   }, [me]);
+  useEffect(() => { loadExpiring(); }, [loadExpiring]);
+  const markContacted = async (c: CaseRow, on: boolean) => {
+    const r = await fetch('/api/av/cases/remind', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ caseKey: c.caseKey, contacted: on }),
+    }).catch(() => null);
+    if (r?.ok) loadExpiring();
+  };
   const daysLeft = (iso: string | null) => {
     const d = parseISO(iso);
     return d ? Math.round((d.getTime() - t0.getTime()) / 86_400_000) : null;
@@ -138,7 +151,7 @@ export default function MyTasksView() {
         </div>
       )}
 
-      {expiring.length > 0 && (
+      {(expiring.length > 0 || contacted.length > 0) && (
         <div className="panel clip" style={{ marginBottom: 18, borderColor: 'var(--warning)' }} data-testid="warranty-remind">
           <div className="panel-head" style={{ background: '#fdf6e9' }}>
             <span className="panel-title"><Icon name="alert" style={{ color: 'var(--warning)' }} />
@@ -149,6 +162,11 @@ export default function MyTasksView() {
               {t('在历史案例里看全部', 'Open in past projects')}
             </button>
           </div>
+          {expiring.length === 0 && (
+            <div style={{ padding: '11px 20px', borderTop: '1px solid var(--row-line)', fontSize: 12.5, color: 'var(--success)' }}>
+              {t('30 天内到期的屏都已联系过。', 'Every screen expiring within 30 days has been followed up.')}
+            </div>
+          )}
           {expiring.slice(0, 6).map((c) => {
             const d = daysLeft(c.expire);
             return (
@@ -165,10 +183,33 @@ export default function MyTasksView() {
                     {` · ${t('到期', 'expires')} ${fmtDate(parseISO(c.expire))}`}
                   </div>
                 </div>
+                <button className="btn-line" style={{ padding: '3px 10px', fontSize: 12, flexShrink: 0 }} data-testid="mark-contacted"
+                  title={t('联系过客户后点这里,这一轮到期就不再提醒', 'Click once the client has been contacted; no more reminders for this expiry')}
+                  onClick={(e) => { e.stopPropagation(); markContacted(c, true); }}>
+                  {t('已联系', 'Contacted')}
+                </button>
                 <Icon name="back" size={15} style={{ transform: 'rotate(180deg)', color: 'var(--text2)' }} />
               </div>
             );
           })}
+          {contacted.length > 0 && (
+            <div style={{ borderTop: '1px solid var(--row-line)', padding: '8px 20px', fontSize: 12 }}>
+              <button onClick={() => setShowContacted(!showContacted)} data-testid="toggle-contacted"
+                style={{ border: 0, background: 'none', color: 'var(--text2)', cursor: 'pointer', font: 'inherit', padding: 0 }}>
+                {showContacted ? '▾ ' : '▸ '}{t(`另有 ${contacted.length} 块本轮已联系`, `${contacted.length} more already contacted`)}
+              </button>
+              {showContacted && contacted.map((c) => (
+                <div key={c.caseKey} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '6px 0 0 14px', color: 'var(--text2)' }}>
+                  <span style={{ flex: 1, minWidth: 0 }}>
+                    {c.name} · {t('到期', 'expires')} {fmtDate(parseISO(c.expire))} · {c.contactedBy} {c.contactedAt ? fmtDate(new Date(c.contactedAt)) : ''}
+                  </span>
+                  <button className="btn-line" style={{ padding: '1px 8px', fontSize: 11.5 }} onClick={() => markContacted(c, false)}>
+                    {t('撤销', 'Undo')}
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
 
