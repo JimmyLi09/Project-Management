@@ -131,10 +131,16 @@ function Shell() {
     'ledstudio', 'prjstudio', 'elvstudio', 'pvstudio', 'avcost', 'avquote', 'avcases', 'avprices',
   ];
   const inAv = AV_VIEWS.includes(view.name);
-  const [avOpen, setAvOpen] = useState(() => {
-    if (typeof window === 'undefined') return false;
-    return localStorage.getItem('audax.avNavOpen') === '1';
-  });
+  /* 首屏一律按「收起」渲染,挂载后再读本地记的展开状态。
+     不能在 useState 的初始化函数里读 localStorage:服务端没有它,算出来是收起;
+     客户端首屏读到「展开」就多渲染一串子菜单 —— 两边 HTML 对不上,React 报
+     #418 水合失败,整棵树退回客户端重画一遍。只要谁展开过一次 AV 分组,之后每次
+     打开页面都会中招。与 lib/i18n.tsx 读语言偏好是同一个做法。 */
+  const [avOpen, setAvOpen] = useState(false);
+  useEffect(() => {
+    try { if (localStorage.getItem('audax.avNavOpen') === '1') setAvOpen(true); }
+    catch { /* 隐私模式 / 禁用存储:按收起走 */ }
+  }, []);
   const toggleAv = () => {
     const next = !(avOpen || inAv);
     setAvOpen(next);
