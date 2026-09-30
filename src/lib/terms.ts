@@ -44,6 +44,35 @@ export const ROLE_TERMS: Record<string, Term> = {
 };
 export const roleTerm = (role: string, lang: Lang): string => pick(ROLE_TERMS[role], lang, role);
 
+/* ---- AV-014 历史案例的字段名(编辑抽屉的标签、表头、操作日志共用一份)---- */
+export const CASE_FIELD_TERMS: Record<string, Term> = {
+  name: ['项目名', 'Project'],
+  client: ['客户', 'Client'],
+  year: ['年份', 'Year'],
+  address: ['地址', 'Address'],
+  status: ['状态', 'Status'],
+  refNo: ['表内编号', 'Sheet ref.'],
+  widthMm: ['长 (mm)', 'Width (mm)'],
+  heightMm: ['高 (mm)', 'Height (mm)'],
+  sqm: ['面积 ㎡', 'Area ㎡'],
+  pitch: ['点间距 (mm)', 'Pitch (mm)'],
+  product: ['型号', 'Model'],
+  modules: ['模组', 'Modules'],
+  kw: ['功耗 kW', 'Power kW'],
+  powerCable: ['电源线', 'Power cables'],
+  dataCable: ['数据线', 'Data cables'],
+  remarks: ['备注', 'Remarks'],
+  handover: ['Handover date', 'Handover date'],
+  warrantyMonths: ['保修期（月）', 'Warranty (months)'],
+};
+export const caseFieldTerm = (k: string, lang: Lang): string => pick(CASE_FIELD_TERMS[k], lang, k);
+
+export const CASE_STATUS_TERMS: Record<string, Term> = {
+  ongoing: ['进行中', 'Ongoing'],
+  completed: ['已完成', 'Completed'],
+};
+export const caseStatusTerm = (v: string, lang: Lang): string => pick(CASE_STATUS_TERMS[v], lang, v);
+
 /* ---- 项目难度(templates.DIFF 的显示名)---- */
 export const DIFF_TERMS: Record<string, Term> = {
   easy: ['简单', 'Easy'],

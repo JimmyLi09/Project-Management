@@ -171,6 +171,50 @@ function db() {
     /* quotations saved before cross-line savings existed */
     const qcols = (d.prepare('PRAGMA table_info(av_quote)').all() as { name: string }[]).map((c) => c.name);
     if (!qcols.includes('dedup')) d.exec("ALTER TABLE av_quote ADD COLUMN dedup TEXT NOT NULL DEFAULT '[]'");
+
+    /* ===== AV-014 · 人工修改与跨导入的身份 =====
+       av_case 仍然只存统计表导入的原始值 —— 导入逻辑不变,人看到的值是
+       「原始值叠加人工值」。人工值单独放 av_case_edit,所以重新导入整张表
+       也冲不掉它。Handover date / 保修期没有统计表来源,同样放这张表。
+
+       case_key 是一块屏跨多次导入的身份,由**原始导入值**算(见 caseKeyOf)。
+       missing = 统计表里已经没有它了,但有人工修改所以留着。 */
+    const ccols = (d.prepare('PRAGMA table_info(av_case)').all() as { name: string }[]).map((c) => c.name);
+    if (!ccols.includes('case_key')) d.exec("ALTER TABLE av_case ADD COLUMN case_key TEXT NOT NULL DEFAULT ''");
+    if (!ccols.includes('missing')) d.exec('ALTER TABLE av_case ADD COLUMN missing INTEGER NOT NULL DEFAULT 0');
+    d.exec(`
+      CREATE TABLE IF NOT EXISTS av_case_edit (
+        case_key TEXT NOT NULL,
+        field TEXT NOT NULL,
+        value TEXT NOT NULL,      /* '' = 人工清空,与「没改过」区分开 */
+        edited_by TEXT NOT NULL,
+        edited_at INTEGER NOT NULL,
+        PRIMARY KEY (case_key, field)
+      );
+      /* 改前 → 改后。公司级数据不挂项目,所以不走 audit_log,自带一张,
+         与价格库的 av_price_history 同一路子。k + p 供 i18n 渲染。 */
+      CREATE TABLE IF NOT EXISTS av_case_edit_log (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        case_key TEXT NOT NULL,
+        at INTEGER NOT NULL,
+        by TEXT NOT NULL,
+        k TEXT NOT NULL,
+        p TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_av_case_edit_log ON av_case_edit_log(case_key, at DESC);
+      CREATE INDEX IF NOT EXISTS idx_av_case_key ON av_case(case_key);
+    `);
+    /* AV-012 时代导入的行没有 case_key —— 按同一套规则补算一次,补完它们
+       才认得出自己,以后重新导入不会被当成新屏。
+
+       判断条件是「有行、但一行都没有 key」,而不是「这次启动刚加了这一列」:
+       要是加完列、补算之前进程挂了,下次启动列已经在了,按后一种判断就再也
+       不补 —— 所有行 key 都是空串,编辑一块屏会同时改到所有屏。补算本身在
+       一个事务里,要么全补上要么一行没动,所以「一行都没 key」恰好就是遗留
+       状态。已经有 key 的库绝不重算:重新导入后保留下来的旧行与新行 id 交错,
+       重算会把重复屏的序号排乱,和人工修改对不上。 */
+    const keyed = d.prepare("SELECT count(*) AS n, SUM(case_key <> '') AS k FROM av_case").get() as { n: number; k: number | null };
+    if (keyed.n > 0 && !keyed.k) backfillCaseKeys(d);
     ready = true;
   }
   return d;
@@ -563,10 +607,20 @@ export function decideQuote(id: number, status: 'approved' | 'rejected', by: str
     .run(status, by, Date.now(), note, id).changes === 1;
 }
 
-/* ===== 历史案例 (ported from avcost-phase1, 2026-09-28) =====
-   The company's "All the Project Links" workbook is the record; the library is
-   a searchable copy of its two LED sheets. Each import replaces the whole copy,
-   so re-importing the updated workbook never leaves stale or duplicate rows. */
+/* ===== 历史案例 (ported from avcost-phase1, 2026-09-28; AV-014 2026-09-29) =====
+   公司的《All the Project Links》统计表是正本,案例库是它两张 LED 工作表的
+   可检索副本。
+
+   AV-014 之后多了一层:人可以在平台上直接改。原始导入值仍然只存在 av_case
+   (导入逻辑不变),人工值另放 av_case_edit —— 所以「重新导入整张表」冲不掉
+   人改过的东西。页面看到的 = 原始值叠加人工值,下面统一叫**有效值**。
+
+   排序和筛选都按有效值算,而且都在 SQL 里做:列表有 500 条上限,前端排序
+   只排得到前 500 条,那是错的。 */
+
+/** 保修期默认 12 个月(AV-014 §3.3)。等于默认值时不写 av_case_edit ——
+ *  不然每块屏都挂一条「人工修改」,「已人工修改 · N 项」就没意义了。 */
+export const DEFAULT_WARRANTY_MONTHS = 12;
 
 export interface HistCase {
   id: number;
@@ -589,6 +643,86 @@ export interface HistCase {
   remarks: string | null;
 }
 
+/** 页面拿到的一块屏:有效值 + AV-014 新增的几样。 */
+export interface CaseRow extends HistCase {
+  caseKey: string;
+  /** 统计表里已经没有它了,但有人工修改所以留着(AV-014 §4) */
+  missing: boolean;
+  handover: string | null;          // YYYY-MM-DD,手填
+  warrantyMonths: number;           // 默认 12
+  expire: string | null;            // = handover + warrantyMonths,自动算
+  /** 年份列显示的值:统计表年份,没有就取交付年份(§3.3) */
+  effYear: number | null;
+  manualFields: string[];           // 人工改过哪些字段
+}
+
+type FieldType = 'text' | 'int' | 'real';
+interface CaseField { key: string; col: string | null; type: FieldType }
+
+/* 可编辑字段。col = null 表示统计表里没有这一项(交付日期、保修期),
+   它们只可能来自人工填写。 */
+const CASE_FIELDS: CaseField[] = [
+  { key: 'name', col: 'name', type: 'text' },
+  { key: 'client', col: 'client', type: 'text' },
+  { key: 'year', col: 'year', type: 'int' },
+  { key: 'address', col: 'address', type: 'text' },
+  { key: 'status', col: 'status', type: 'text' },
+  { key: 'refNo', col: 'ref_no', type: 'text' },
+  { key: 'widthMm', col: 'width_mm', type: 'real' },
+  { key: 'heightMm', col: 'height_mm', type: 'real' },
+  { key: 'sqm', col: 'sqm', type: 'real' },
+  { key: 'pitch', col: 'pitch', type: 'real' },
+  { key: 'product', col: 'product', type: 'text' },
+  { key: 'modules', col: 'modules', type: 'int' },
+  { key: 'kw', col: 'kw', type: 'real' },
+  { key: 'powerCable', col: 'power_cable', type: 'text' },
+  { key: 'dataCable', col: 'data_cable', type: 'text' },
+  { key: 'remarks', col: 'remarks', type: 'text' },
+  { key: 'handover', col: null, type: 'text' },
+  { key: 'warrantyMonths', col: null, type: 'int' },
+];
+export const CASE_FIELD_KEYS = CASE_FIELDS.map((f) => f.key);
+const FIELD_BY_KEY = new Map(CASE_FIELDS.map((f) => [f.key, f]));
+
+/* ---- 有效值视图 ----
+   e 把 av_case_edit 竖表转成每块屏一行;v 逐字段叠加;w 再算依赖叠加结果的
+   两样(到期日、年份口径)—— SQLite 不让在同一个 SELECT 里引用自己的别名,
+   所以分了一层。 */
+const editExpr = (f: CaseField) => {
+  const e = `e."${f.key}"`;
+  const cast = f.type === 'text' ? e : `CAST(${e} AS ${f.type === 'int' ? 'INTEGER' : 'REAL'})`;
+  if (!f.col) {
+    const dflt = f.key === 'warrantyMonths' ? String(DEFAULT_WARRANTY_MONTHS) : 'NULL';
+    return `CASE WHEN ${e} IS NULL OR ${e} = '' THEN ${dflt} ELSE ${cast} END AS "${f.key}"`;
+  }
+  /* value = '' 是「人工清空」,与「没改过」(NULL)必须分得开 */
+  return `CASE WHEN ${e} IS NULL THEN c.${f.col} WHEN ${e} = '' THEN NULL ELSE ${cast} END AS "${f.key}"`;
+};
+
+const EFF_VIEW = `
+  WITH e AS (
+    SELECT case_key,
+      ${CASE_FIELDS.map((f) => `MAX(CASE WHEN field = '${f.key}' THEN value END) AS "${f.key}"`).join(',\n      ')},
+      count(*) AS manualCount, group_concat(field) AS manualList
+    FROM av_case_edit GROUP BY case_key
+  ),
+  v AS (
+    SELECT c.id, c.case_key AS caseKey, c.missing, c.source_sheet AS sourceSheet,
+      ${CASE_FIELDS.map(editExpr).join(',\n      ')},
+      IFNULL(e.manualCount, 0) AS manualCount, e.manualList
+    FROM av_case c LEFT JOIN e ON e.case_key = c.case_key
+  ),
+  w AS (
+    SELECT v.*,
+      /* SQLite 的月加法会把溢出的日子进位(1 月 31 日 + 1 个月 = 3 月 3 日),
+         与前端 Date.setMonth 一致 —— 两边算出来的到期日不会打架。 */
+      CASE WHEN handover IS NOT NULL AND handover <> ''
+           THEN date(handover, '+' || warrantyMonths || ' months') END AS expire,
+      CASE WHEN year IS NOT NULL THEN year
+           WHEN handover IS NOT NULL AND handover <> '' THEN CAST(strftime('%Y', handover) AS INTEGER) END AS effYear
+    FROM v
+  )`;
+
 export interface CaseFilter {
   q?: string;
   status?: string;
@@ -596,35 +730,45 @@ export interface CaseFilter {
   pitchMax?: number;
   sqmMin?: number;
   sqmMax?: number;
+  /** 年份多选,'none' = 未填年份(§3.2) */
+  years?: string[];
+  clients?: string[];
 }
 
-const CASE_COLS = `id, source_sheet AS sourceSheet, status, ref_no AS refNo, year, name, client, address,
-  width_mm AS widthMm, height_mm AS heightMm, sqm, pitch, modules, kw, power_cable AS powerCable,
-  data_cable AS dataCable, product, remarks`;
+/* 排序白名单。前端传来的列名绝不拼进 ORDER BY —— 只认这张表里的 key。 */
+const SORTS: Record<string, { expr: string; def: 'asc' | 'desc' }> = {
+  sqm: { expr: 'sqm', def: 'desc' },
+  year: { expr: 'effYear', def: 'desc' },
+  handover: { expr: 'handover', def: 'desc' },
+  expire: { expr: 'expire', def: 'asc' },
+  name: { expr: 'lower(name)', def: 'asc' },
+  client: { expr: 'lower(client)', def: 'asc' },
+  pitch: { expr: 'pitch', def: 'asc' },
+  kw: { expr: 'kw', def: 'desc' },
+};
+export const CASE_SORT_KEYS = Object.keys(SORTS);
+export const caseSortDefaultDir = (k: string): 'asc' | 'desc' => SORTS[k]?.def ?? 'desc';
 
-export function replaceCases(cases: Omit<HistCase, 'id'>[], by: string): number {
-  const d = db();
-  const ins = d.prepare(`INSERT INTO av_case (source_sheet, status, ref_no, year, name, client, address, width_mm, height_mm,
-    sqm, pitch, modules, kw, power_cable, data_cable, product, remarks, imported_by, imported_at)
-    VALUES (@sourceSheet, @status, @refNo, @year, @name, @client, @address, @widthMm, @heightMm,
-    @sqm, @pitch, @modules, @kw, @powerCable, @dataCable, @product, @remarks, @by, @at)`);
-  const at = Date.now();
-  d.transaction(() => {
-    d.prepare('DELETE FROM av_case').run();
-    for (const c of cases) ins.run({ ...c, by, at });
-  })();
-  return cases.length;
-}
+type CaseDbRow = Omit<CaseRow, 'missing' | 'manualFields'> & { missing: number; manualList: string | null };
 
-/* Keyword over name / client / address / product / ref no. / remarks, plus
-   pitch and area ranges; largest screens first, as in the original. */
-export function searchCases(f: CaseFilter, limit = 500): { cases: HistCase[]; total: number } {
+const toCaseRow = (r: CaseDbRow): CaseRow => ({
+  ...r,
+  missing: !!r.missing,
+  manualFields: r.manualList ? r.manualList.split(',') : [],
+});
+
+export function searchCases(
+  f: CaseFilter,
+  sortKey = 'sqm',
+  dir?: 'asc' | 'desc',
+  limit = 500,
+): { cases: CaseRow[]; total: number } {
   const where: string[] = [];
   const args: (string | number)[] = [];
   const q = f.q?.trim();
   if (q) {
     where.push(`(name || ' ' || IFNULL(client,'') || ' ' || IFNULL(address,'') || ' ' || IFNULL(product,'') || ' ' ||
-      IFNULL(ref_no,'') || ' ' || IFNULL(remarks,'')) LIKE ? ESCAPE '\\'`);
+      IFNULL(refNo,'') || ' ' || IFNULL(remarks,'')) LIKE ? ESCAPE '\\'`);
     args.push(`%${q.replace(/[\\%_]/g, (c) => '\\' + c)}%`);
   }
   if (f.status) { where.push('status = ?'); args.push(f.status); }
@@ -632,11 +776,230 @@ export function searchCases(f: CaseFilter, limit = 500): { cases: HistCase[]; to
     if (lo !== undefined) { where.push(`${col} >= ?`); args.push(lo); }
     if (hi !== undefined) { where.push(`${col} <= ?`); args.push(hi); }
   }
-  const sql = `FROM av_case ${where.length ? 'WHERE ' + where.join(' AND ') : ''}`;
+  /* 同一类里多选是 OR,类与类之间是 AND(§3.2) */
+  if (f.years?.length) {
+    const ys = f.years.filter((y) => y === 'none' || /^\d{4}$/.test(y));
+    if (ys.length) {
+      const nums = ys.filter((y) => y !== 'none');
+      const parts: string[] = [];
+      if (nums.length) { parts.push(`effYear IN (${nums.map(() => '?').join(',')})`); args.push(...nums.map(Number)); }
+      if (ys.includes('none')) parts.push('effYear IS NULL');
+      where.push(`(${parts.join(' OR ')})`);
+    }
+  }
+  if (f.clients?.length) {
+    where.push(`client IN (${f.clients.map(() => '?').join(',')})`);
+    args.push(...f.clients);
+  }
+
+  const s = SORTS[sortKey] ?? SORTS.sqm;
+  const d = (dir === 'asc' || dir === 'desc') ? dir : s.def;
+  /* 空值永远排最后,不论升降序(§3.1);同值按导入顺序稳定排。 */
+  const order = `${s.expr} IS NULL, ${s.expr} ${d === 'asc' ? 'ASC' : 'DESC'}, id`;
+  const cond = where.length ? 'WHERE ' + where.join(' AND ') : '';
+  const conn = db();
+  const total = (conn.prepare(`${EFF_VIEW} SELECT count(*) AS n FROM w ${cond}`).get(...args) as { n: number }).n;
+  const rows = conn.prepare(`${EFF_VIEW} SELECT * FROM w ${cond} ORDER BY ${order} LIMIT ?`)
+    .all(...args, limit) as CaseDbRow[];
+  return { cases: rows.map(toCaseRow), total };
+}
+
+/** 「筛选」浮层的选项:整个库里出现过的年份与客户,各带块屏数(§3.2)。
+ *  口径与年份列显示值一致 —— 用的是同一个 effYear。 */
+export function caseFacets(): { years: { year: string; n: number }[]; clients: { client: string; n: number }[] } {
+  const conn = db();
+  const years = conn.prepare(`${EFF_VIEW}
+    SELECT IFNULL(CAST(effYear AS TEXT), 'none') AS year, count(*) AS n FROM w
+    GROUP BY effYear ORDER BY effYear IS NULL, effYear DESC`).all() as { year: string; n: number }[];
+  const clients = conn.prepare(`${EFF_VIEW}
+    SELECT client, count(*) AS n FROM w WHERE client IS NOT NULL AND client <> ''
+    GROUP BY client ORDER BY lower(client)`).all() as { client: string; n: number }[];
+  return { years, clients };
+}
+
+/* ---- case_key:一块屏跨多次导入的身份(§4) ----
+   用**原始导入值**算,不用编辑后的值 —— 否则谁改了项目名,下次导入就对不
+   上了。不含工作表 / 状态:项目从「进行中」表挪到「已完成」表,人工修改要
+   跟着走。 */
+const norm = (s: string | null | undefined) => (s ?? '').trim().replace(/\s+/g, ' ').toLowerCase();
+const mm = (v: number | null | undefined) => (v == null ? '' : String(Math.round(v)));
+
+export const caseKeyOf = (c: Pick<HistCase, 'name' | 'client' | 'widthMm' | 'heightMm'>) =>
+  [norm(c.name), norm(c.client), mm(c.widthMm), mm(c.heightMm)].join('|');
+
+/** 同一次导入里完全相同的多块屏(8SW 那种)加出现序号区分。 */
+function keysFor(cases: Pick<HistCase, 'name' | 'client' | 'widthMm' | 'heightMm'>[]): string[] {
+  const seen = new Map<string, number>();
+  return cases.map((c) => {
+    const base = caseKeyOf(c);
+    const n = (seen.get(base) ?? 0) + 1;
+    seen.set(base, n);
+    return n === 1 ? base : `${base}#${n}`;
+  });
+}
+
+/** AV-012 时代导入的行没有 case_key,补算一次。 */
+function backfillCaseKeys(d: ReturnType<typeof getDb>): void {
+  const rows = d.prepare('SELECT id, name, client, width_mm AS widthMm, height_mm AS heightMm FROM av_case ORDER BY id')
+    .all() as { id: number; name: string; client: string | null; widthMm: number | null; heightMm: number | null }[];
+  if (!rows.length) return;
+  const keys = keysFor(rows);
+  const up = d.prepare('UPDATE av_case SET case_key = ? WHERE id = ?');
+  d.transaction(() => { rows.forEach((r, i) => up.run(keys[i], r.id)); })();
+}
+
+/* ---- 重新导入(§4)----
+   两步:先 dry-run 出预览,确认后才写。统计表是正本,但人改过的字段和手填
+   的交付日期 / 保修期一律保留。 */
+export interface ImportPreview {
+  added: number;
+  updated: number;
+  manualFields: number;      // 会保留的人工字段数
+  manualScreens: number;     // 涉及几块屏
+  handoverKept: number;      // 保留了手填交付日期的屏
+  removed: number;           // 统计表里没有了、也没人改过 → 移除
+  keptMissing: number;       // 统计表里没有了、但有人工修改 → 保留并标记
+}
+
+const val = (v: unknown): string => (v == null ? '' : String(v));
+/** 人工值与原始值是否已经一样了 —— 数值按数比,文本按串比。 */
+function sameAsRaw(f: CaseField, edit: string, raw: unknown): boolean {
+  if (f.type === 'text') return edit === val(raw);
+  if (edit === '') return raw == null;
+  const a = Number(edit);
+  return Number.isFinite(a) && raw != null && a === Number(raw);
+}
+
+export function applyImport(
+  incoming: Omit<HistCase, 'id'>[],
+  by: string,
+  opts: { dryRun?: boolean } = {},
+): ImportPreview {
   const d = db();
-  const total = (d.prepare(`SELECT count(*) AS n ${sql}`).get(...args) as { n: number }).n;
-  const cases = d.prepare(`SELECT ${CASE_COLS} ${sql} ORDER BY sqm IS NULL, sqm DESC, id LIMIT ?`).all(...args, limit) as HistCase[];
-  return { cases, total };
+  const keys = keysFor(incoming);
+  const incomingKeys = new Set(keys);
+  const existing = new Set((d.prepare('SELECT DISTINCT case_key FROM av_case').all() as { case_key: string }[]).map((r) => r.case_key));
+  const editedKeys = new Set((d.prepare('SELECT DISTINCT case_key FROM av_case_edit').all() as { case_key: string }[]).map((r) => r.case_key));
+
+  const gone = [...existing].filter((k) => !incomingKeys.has(k));
+  const keptMissing = gone.filter((k) => editedKeys.has(k));
+  const removed = gone.filter((k) => !editedKeys.has(k));
+  /* 留下来的屏(新导入的 + 标记保留的)身上有多少人工字段会被保住 */
+  const survivors = new Set([...incomingKeys, ...keptMissing]);
+  const edits = d.prepare('SELECT case_key, field FROM av_case_edit').all() as { case_key: string; field: string }[];
+  const kept = edits.filter((e) => survivors.has(e.case_key));
+
+  const preview: ImportPreview = {
+    added: keys.filter((k) => !existing.has(k)).length,
+    updated: keys.filter((k) => existing.has(k)).length,
+    manualFields: kept.length,
+    manualScreens: new Set(kept.map((e) => e.case_key)).size,
+    handoverKept: kept.filter((e) => e.field === 'handover').length,
+    removed: removed.length,
+    keptMissing: keptMissing.length,
+  };
+  if (opts.dryRun) return preview;
+
+  const ins = d.prepare(`INSERT INTO av_case (case_key, missing, source_sheet, status, ref_no, year, name, client, address,
+    width_mm, height_mm, sqm, pitch, modules, kw, power_cable, data_cable, product, remarks, imported_by, imported_at)
+    VALUES (@caseKey, 0, @sourceSheet, @status, @refNo, @year, @name, @client, @address,
+    @widthMm, @heightMm, @sqm, @pitch, @modules, @kw, @powerCable, @dataCable, @product, @remarks, @by, @at)`);
+  const at = Date.now();
+  d.transaction(() => {
+    /* 没人改过又不在新表里的 → 连行带记录一起走 */
+    for (const k of removed) {
+      d.prepare('DELETE FROM av_case WHERE case_key = ?').run(k);
+      d.prepare('DELETE FROM av_case_edit WHERE case_key = ?').run(k);
+      d.prepare('DELETE FROM av_case_edit_log WHERE case_key = ?').run(k);
+    }
+    /* 有人工修改但不在新表里的 → 留着,打上标记供人判断 */
+    for (const k of keptMissing) d.prepare('UPDATE av_case SET missing = 1 WHERE case_key = ?').run(k);
+    /* 新表里的:原始行整条换掉(人工值不在这张表里,冲不掉) */
+    for (const k of incomingKeys) d.prepare('DELETE FROM av_case WHERE case_key = ?').run(k);
+    incoming.forEach((c, i) => ins.run({ ...c, caseKey: keys[i], by, at }));
+
+    /* 新统计表的值已经和人工值一样了 → 清掉那条人工标记(§4),
+       不然页面会一直挂着「已人工修改」,而其实没差别了。 */
+    const raws = d.prepare('SELECT case_key, ' + CASE_FIELDS.filter((f) => f.col).map((f) => `${f.col} AS "${f.key}"`).join(', ')
+      + ' FROM av_case').all() as Record<string, unknown>[];
+    const rawBy = new Map(raws.map((r) => [String(r.case_key), r]));
+    for (const e of d.prepare('SELECT case_key, field, value FROM av_case_edit').all() as { case_key: string; field: string; value: string }[]) {
+      const f = FIELD_BY_KEY.get(e.field);
+      const raw = rawBy.get(e.case_key);
+      if (!f || !f.col || !raw) continue;
+      if (sameAsRaw(f, e.value, raw[f.key])) {
+        d.prepare('DELETE FROM av_case_edit WHERE case_key = ? AND field = ?').run(e.case_key, e.field);
+      }
+    }
+  })();
+  return preview;
+}
+
+/* ---- 逐块屏编辑(§3.4)---- */
+export interface CaseEditResult { row: CaseRow; changes: { field: string; from: string; to: string }[] }
+
+const show = (v: unknown): string => (v == null || v === '' ? '' : String(v));
+
+/** 写人工值。与原始值相同的字段不写(或删掉已有的那条),这样
+ *  「已人工修改」只标真正跟统计表不一样的地方。
+ *
+ *  revert 列出的字段直接把人工值删掉,回去跟着统计表走 —— 没有这条的话,
+ *  改错一个数字就只能凭记忆把统计表里那个数原样打回来(空字符串是「人工
+ *  清空」,不等于「不改了」)。 */
+export function editCase(
+  caseKey: string,
+  fields: Record<string, string>,
+  by: string,
+  revert: string[] = [],
+): CaseEditResult | null {
+  const d = db();
+  const before = getCase(caseKey);
+  if (!before) return null;
+  const raw = d.prepare(`SELECT ${CASE_FIELDS.filter((f) => f.col).map((f) => `${f.col} AS "${f.key}"`).join(', ')}
+    FROM av_case WHERE case_key = ?`).get(caseKey) as Record<string, unknown> | undefined;
+  if (!raw) return null;
+
+  const at = Date.now();
+  d.transaction(() => {
+    for (const key of revert) {
+      if (FIELD_BY_KEY.has(key)) d.prepare('DELETE FROM av_case_edit WHERE case_key = ? AND field = ?').run(caseKey, key);
+    }
+    for (const [key, v] of Object.entries(fields)) {
+      if (revert.includes(key)) continue;          // 刚恢复的字段别又被表单里的旧值写回去
+      const f = FIELD_BY_KEY.get(key);
+      if (!f) continue;                       // 不认的字段一律忽略
+      const value = v.trim();
+      const isDefault = !f.col
+        ? (f.key === 'warrantyMonths' ? Number(value) === DEFAULT_WARRANTY_MONTHS : value === '')
+        : sameAsRaw(f, value, raw[f.key]);
+      if (isDefault) d.prepare('DELETE FROM av_case_edit WHERE case_key = ? AND field = ?').run(caseKey, key);
+      else d.prepare(`INSERT INTO av_case_edit (case_key, field, value, edited_by, edited_at) VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT(case_key, field) DO UPDATE SET value = excluded.value, edited_by = excluded.edited_by, edited_at = excluded.edited_at`)
+        .run(caseKey, key, value, by, at);
+    }
+  })();
+
+  const row = getCase(caseKey)!;
+  const changes = CASE_FIELDS
+    .map((f) => ({ field: f.key, from: show((before as unknown as Record<string, unknown>)[f.key]), to: show((row as unknown as Record<string, unknown>)[f.key]) }))
+    .filter((c) => c.from !== c.to);
+  return { row, changes };
+}
+
+export function getCase(caseKey: string): CaseRow | null {
+  const r = db().prepare(`${EFF_VIEW} SELECT * FROM w WHERE caseKey = ?`).get(caseKey) as CaseDbRow | undefined;
+  return r ? toCaseRow(r) : null;
+}
+
+export function appendCaseLog(caseKey: string, by: string, k: string, p: Record<string, unknown>): void {
+  db().prepare('INSERT INTO av_case_edit_log (case_key, at, by, k, p) VALUES (?, ?, ?, ?, ?)')
+    .run(caseKey, Date.now(), by, k, JSON.stringify(p));
+}
+
+export function caseLog(caseKey: string, limit = 20): { at: number; by: string; k: string; p: Record<string, unknown> }[] {
+  return (db().prepare('SELECT at, by, k, p FROM av_case_edit_log WHERE case_key = ? ORDER BY at DESC, id DESC LIMIT ?')
+    .all(caseKey, limit) as { at: number; by: string; k: string; p: string }[])
+    .map((r) => ({ ...r, p: JSON.parse(r.p) as Record<string, unknown> }));
 }
 
 export function caseLibraryInfo(): { count: number; importedBy: string; importedAt: number } {
