@@ -13,7 +13,7 @@ import { lineInfo, LINES } from '@/av/core/lines';
 import { quoteChecks, quoteNo, quoteTotals, type LineState, type QuoteSection } from '@/av/core/quote';
 import type { BusinessLine } from '@/av/core/types';
 import { dedupe, XLINE_PACK, type Deduction, type SharedRow } from '@/av/core/xline';
-import { canViewPrices } from '@/lib/permissions';
+import { canViewQuotes } from '@/lib/permissions';
 import { fmtDate } from '@/lib/project';
 import { useLang } from '@/lib/i18n';
 import { useStore } from '../store';
@@ -25,7 +25,8 @@ interface Quote {
   status: 'submitted' | 'approved' | 'rejected' | 'superseded';
   submittedBy: string; submittedAt: number; decidedBy: string; decidedAt: number; decisionNote: string;
 }
-interface State { lines: LineRow[]; quotes: Quote[]; marginFloor: number; gstRate: number; canSubmit: boolean; canApprove: boolean }
+/* marginFloor 与各处的 cost:看不到成本的人(Sales)回包里是 null —— 字段级隔离,2026-09-30 */
+interface State { lines: LineRow[]; quotes: Quote[]; marginFloor: number | null; gstRate: number; canSubmit: boolean; canApprove: boolean; priceView: 'full' | 'list' | 'none' }
 
 const money = (v: number) => `S$ ${v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const pct = (v: number | null) => (v === null ? '—' : `${(v * 100).toFixed(1)}%`);
@@ -65,10 +66,12 @@ export default function AvQuoteView() {
     const dedup = dedupe(chosen.flatMap((l) => l.shared));
     const d = Number(discount);
     const totals = quoteTotals(sections, d, state.gstRate, dedup);
-    return { totals, dedup, checks: quoteChecks(sections, d, totals, state.marginFloor, reason, dedup) };
+    const all = quoteChecks(sections, d, totals, state.marginFloor ?? 0, reason, dedup);
+    /* 09-30:Sales 看不到毛利,低于下限也不提示 —— 审批人那边照样标红 */
+    return { totals, dedup, checks: state.priceView === 'full' ? all : all.filter((c) => c.code !== 'QUOTE-MARGIN') };
   }, [state, picked, discount, reason]);
 
-  if (!canViewPrices(me)) {
+  if (!canViewQuotes(me)) {
     return <><AvSteps /><div className="panel" style={{ padding: '18px 20px', fontSize: 13, color: 'var(--text2)' }}>{t('当前角色无权查看报价。', 'Your role cannot see quotations.')}</div></>;
   }
 
@@ -95,7 +98,8 @@ export default function AvQuoteView() {
     superseded: ['已被新版本取代', 'Superseded', 'var(--text2)'],
   };
   const blocks = preview?.checks.filter((c) => c.severity === 'block') ?? [];
-  const below = !!preview && preview.totals.margin !== null && preview.totals.margin < state!.marginFloor;
+  const showCost = state?.priceView === 'full';
+  const below = showCost && !!preview && preview.totals.margin !== null && preview.totals.margin < (state!.marginFloor ?? 0);
 
   return (
     <>
@@ -125,7 +129,7 @@ export default function AvQuoteView() {
             <div style={{ overflowX: 'auto' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, minWidth: 640 }}>
                 <tbody>
-                  <tr>{['', t('业务线', 'Line'), t('状态', 'Status'), t('成本', 'Cost'), t('售价', 'Sell'), t('毛利率', 'Margin')].map((h, i) => <th key={i} style={i >= 3 ? { ...th, textAlign: 'right' } : th}>{h}</th>)}</tr>
+                  <tr>{['', t('业务线', 'Line'), t('状态', 'Status'), ...(showCost ? [t('成本', 'Cost')] : []), t('售价', 'Sell'), ...(showCost ? [t('毛利率', 'Margin')] : [])].map((h, i) => <th key={i} style={i >= 3 ? { ...th, textAlign: 'right' } : th}>{h}</th>)}</tr>
                   {state.lines.map((l) => {
                     const ok = l.state === 'confirmed';
                     const [zh, en, color] = STATE[l.state];
@@ -142,9 +146,9 @@ export default function AvQuoteView() {
                             <button style={{ marginLeft: 8, fontSize: 12, textDecoration: 'underline', color: 'var(--navy700)' }} onClick={() => go('avcost')}>{t('去 06', 'Open 06')}</button>
                           )}
                         </td>
-                        <td style={{ ...td, textAlign: 'right' }} className="tnum">{l.cost === null ? '—' : money(l.cost)}</td>
+                        {showCost && <td style={{ ...td, textAlign: 'right' }} className="tnum">{l.cost === null ? '—' : money(l.cost)}</td>}
                         <td style={{ ...td, textAlign: 'right' }} className="tnum">{l.list === null ? '—' : money(l.list)}</td>
-                        <td style={{ ...td, textAlign: 'right' }} className="tnum">{pct(l.cost !== null && l.list ? (l.list - l.cost) / l.list : null)}</td>
+                        {showCost && <td style={{ ...td, textAlign: 'right' }} className="tnum">{pct(l.cost !== null && l.list ? (l.list - l.cost) / l.list : null)}</td>}
                       </tr>
                     );
                   })}
@@ -159,7 +163,7 @@ export default function AvQuoteView() {
                 </div>
                 {below && (
                   <div className="field" style={{ marginBottom: 0 }}>
-                    <label htmlFor="quote-reason">{t(`折后毛利低于公司下限 ${(state.marginFloor * 100).toFixed(0)}%，请填写理由`, 'Reason for margin below floor')}</label>
+                    <label htmlFor="quote-reason">{t(`折后毛利低于公司下限 ${((state.marginFloor ?? 0) * 100).toFixed(0)}%，请填写理由`, 'Reason for margin below floor')}</label>
                     <textarea id="quote-reason" rows={3} value={reason} onChange={(e) => setReason(e.target.value)} />
                   </div>
                 )}
@@ -195,8 +199,10 @@ export default function AvQuoteView() {
                     [t('不含税小计', 'Subtotal excl. GST'), money(preview.totals.subtotal)],
                     [`GST ${Math.round(state.gstRate * 100)}%`, money(preview.totals.gst)],
                     [t('含税总计', 'Total incl. GST'), money(preview.totals.total)],
-                    [t('成本', 'Cost'), money(preview.totals.cost)],
-                    [t('折后毛利率', 'Margin after discount'), pct(preview.totals.margin)],
+                    ...(showCost ? [
+                      [t('成本', 'Cost'), money(preview.totals.cost)],
+                      [t('折后毛利率', 'Margin after discount'), pct(preview.totals.margin)],
+                    ] as const : []),
                   ] as const).map(([k, v], i) => (
                     <tr key={k} style={i === 5 ? { fontWeight: 700 } : undefined}>
                       <td style={{ ...td, color: i >= 6 ? 'var(--text2)' : undefined }}>{k}</td>
@@ -218,7 +224,7 @@ export default function AvQuoteView() {
               <div style={{ overflowX: 'auto' }}>
                 <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, minWidth: 760 }}>
                   <tbody>
-                    <tr>{[t('编号', 'No.'), t('业务线', 'Lines'), t('含税总计', 'Total'), t('折后毛利', 'Margin'), t('提交', 'Submitted'), t('状态', 'Status'), ''].map((h, i) => <th key={i} style={i === 2 || i === 3 ? { ...th, textAlign: 'right' } : th}>{h}</th>)}</tr>
+                    <tr>{[t('编号', 'No.'), t('业务线', 'Lines'), t('含税总计', 'Total'), ...(showCost ? [t('折后毛利', 'Margin')] : []), t('提交', 'Submitted'), t('状态', 'Status'), ''].map((h, i) => <th key={i} style={i === 2 || (showCost && i === 3) ? { ...th, textAlign: 'right' } : th}>{h}</th>)}</tr>
                     {state.quotes.map((q) => {
                       const tt = quoteTotals(q.sections, q.discountPct, q.gstRate, q.dedup);
                       const [zh, en, color] = STATUS[q.status];
@@ -230,7 +236,15 @@ export default function AvQuoteView() {
                             {q.discountPct > 0 && <div style={{ fontSize: 11.5, color: 'var(--text2)' }}>{t('折扣', 'discount')} {q.discountPct}%</div>}
                           </td>
                           <td style={{ ...td, textAlign: 'right' }} className="tnum">{money(tt.total)}</td>
-                          <td style={{ ...td, textAlign: 'right', color: tt.margin !== null && tt.margin < q.marginFloor ? 'var(--danger)' : undefined }} className="tnum">{pct(tt.margin)}</td>
+                          {showCost && (
+                            <td style={{ ...td, textAlign: 'right', color: tt.margin !== null && tt.margin < q.marginFloor ? 'var(--danger)' : undefined }} className="tnum">
+                              {pct(tt.margin)}
+                              {/* Sales 提交时不再被提示,低于下限的就靠审批这一眼 */}
+                              {tt.margin !== null && tt.margin < q.marginFloor && (
+                                <div style={{ fontSize: 11, fontWeight: 700 }} data-testid="below-floor">{t(`低于下限 ${Math.round(q.marginFloor * 100)}%`, `below ${Math.round(q.marginFloor * 100)}% floor`)}</div>
+                              )}
+                            </td>
+                          )}
                           <td style={td}>{q.submittedBy}<div style={{ fontSize: 11.5, color: 'var(--text2)' }}>{fmtDate(new Date(q.submittedAt))}</div></td>
                           <td style={td}>
                             <span style={{ color, fontWeight: 600 }}>{t(zh, en)}</span>

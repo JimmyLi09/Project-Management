@@ -1,5 +1,7 @@
 import { redirect } from 'next/navigation';
-import { canSeeProject, canViewPrices, identityOf } from '@/lib/permissions';
+import { canSeeProject, canViewQuotes, identityOf, priceView } from '@/lib/permissions';
+import { redactQuote } from '@/server/avredact';
+import type { Quote } from '@/server/avdb';
 import { getQuote } from '@/server/avdb';
 import { getProject } from '@/server/db';
 import { currentUser } from '@/server/session';
@@ -21,13 +23,16 @@ export default async function QuotePage({ params }: { params: Promise<{ id: stri
   if (!quote || !project) {
     return <main style={{ padding: 40, fontSize: 14 }}>报价不存在。</main>;
   }
-  if (!canViewPrices(me) || !canSeeProject(me, project)) {
+  /* 字段级隔离:报价就是售价,PM 不看售价 —— 这一页也进不来 */
+  if (!canViewQuotes(me) || !canSeeProject(me, project)) {
     return <main style={{ padding: 40, fontSize: 14 }}>当前角色无权查看这份报价。</main>;
   }
   return (
     <>
       <style>{'body { background: #E9E7E2; }'}</style>
-      <QuoteDocument quote={quote} project={project} actions={<PrintButton />} />
+      {/* 给客户的报价单本来就不印成本;这里再把成本从对象里拿掉,免得随组件
+          属性序列化进页面 */}
+      <QuoteDocument quote={redactQuote(quote, priceView(me)) as unknown as Quote} project={project} actions={<PrintButton />} />
     </>
   );
 }

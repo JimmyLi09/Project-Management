@@ -6,7 +6,8 @@ import {
 } from '@/av/core/pricing';
 import type { BusinessLine } from '@/av/core/types';
 import { dedupe, isSharedTag, sharedRows } from '@/av/core/xline';
-import { canCostProject, canViewPrices, identityOf } from '@/lib/permissions';
+import { canConfirmCost, canCostProject, canViewPrices, identityOf, priceView } from '@/lib/permissions';
+import { redactChecks, redactDedup, redactItem, redactSheet } from '@/server/avredact';
 import { getInquiry, getMarginFloor, latestConfig, latestCostSheet, listPriceItems, saveCostSheet } from '@/server/avdb';
 import { lineProjectError } from '@/server/avdrawing';
 import { appendAudit, getProject } from '@/server/db';
@@ -90,11 +91,22 @@ export async function GET(req: NextRequest) {
 
   const dedup = dedupe(summary.flatMap((r) => { const s = sheets.get(r.line); return s ? sharedRows(r.line, s.lines) : []; }));
 
+  /* 字段级隔离:按人拿掉单价、合计、毛利与下限(server/avredact.ts) */
+  const me = identityOf(user);
+  const v = priceView(me);
   return NextResponse.json({
-    line, inquiry, config, sheet, items, marginFloor, summary, dedup,
+    line, inquiry, config,
+    sheet: sheet && redactSheet(sheet, v),
+    items: items.map((it) => redactItem(it, v)),
+    marginFloor: v === 'full' ? marginFloor : null,
+    summary: summary.map((r) => ({ ...r, sheet: r.sheet && {
+      ...r.sheet, cost: v === 'full' ? r.sheet.cost : null, list: v === 'none' ? null : r.sheet.list } })),
+    dedup: dedup.map((d) => redactDedup(d, v)),
     sheetOutdated: !!(sheet && config && sheet.configId !== config.id),
-    checks: current ? checkSheet(sheet.lines, config, items, marginFloor, today(), extra) : [],
-    canEdit: canCostProject(identityOf(user), project),
+    checks: redactChecks(current ? checkSheet(sheet.lines, config, items, marginFloor, today(), extra) : [], v),
+    canEdit: canCostProject(me, project),
+    canConfirm: canConfirmCost(me),
+    priceView: v,
   });
 }
 
@@ -110,6 +122,9 @@ export async function POST(req: NextRequest) {
   const deniedW = denyUnlessVisible(user, project);
   if (deniedW) return deniedW;
   if (!canCostProject(identityOf(user), project)) return NextResponse.json({ error: '仅该项目的 PM 可核算成本' }, { status: 403 });
+  /* 确认成本要看着毛利才确认得了 —— PM 看不到成本以后,确认改由 PD / BD 做 */
+  if (body.confirm && !canConfirmCost(identityOf(user))) return NextResponse.json({ error: '确认成本由 PD / BD 进行' }, { status: 403 });
+  const v = priceView(identityOf(user));
 
   const config = latestConfig<AnySummary>(project!.id, line);
   if (!config) return NextResponse.json({ error: `该项目还没有保存的${info.label}方案` }, { status: 400 });
@@ -130,7 +145,7 @@ export async function POST(req: NextRequest) {
   const checks = checkSheet(lines, config, items, marginFloor, today(), extra);
   const blocks = checks.filter((c) => c.severity === 'block');
   if (body.confirm && blocks.length) {
-    return NextResponse.json({ error: `不能确认：${blocks.map((c) => c.message).join(' ')}`, checks }, { status: 400 });
+    return NextResponse.json({ error: `不能确认：${blocks.map((c) => c.message).join(' ')}`, checks: redactChecks(checks, v) }, { status: 400 });
   }
   const sheet = saveCostSheet({ projectId: project!.id, line, configId: config.id, lines, cost: t.cost, list: t.list }, user.name, !!body.confirm);
   if (body.confirm) {
@@ -141,5 +156,5 @@ export async function POST(req: NextRequest) {
       text: logZh('av.cost', costP), k: 'av.cost', p: costP,
     }]);
   }
-  return NextResponse.json({ sheet, checks, marginFloor });
+  return NextResponse.json({ sheet: redactSheet(sheet, v), checks: redactChecks(checks, v), marginFloor: v === 'full' ? marginFloor : null });
 }

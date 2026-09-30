@@ -12,6 +12,7 @@
 import React from 'react';
 
 import { useLang } from '@/lib/i18n';
+import { canViewQuotes } from '@/lib/permissions';
 import { useStore } from '../store';
 import AvShell, { type AvTab } from './AvShell';
 import AvCostView from './AvCostView';
@@ -21,9 +22,11 @@ export default function AvCostQuoteView() {
   const { view, setView } = useStore();
   const { t } = useLang();
 
+  const { me } = useStore();
+  /* 字段级隔离(2026-09-30):报价就是售价,PM 不看售价,报价这一档不给 */
   const tabs: AvTab[] = [
     { key: 'cost', zh: '成本核算', en: 'Costing' },
-    { key: 'quote', zh: '报价审批', en: 'Quotation' },
+    ...(canViewQuotes(me) ? [{ key: 'quote', zh: '报价审批', en: 'Quotation' }] : []),
   ];
   const active = tabs.some((x) => x.key === view.sub) ? (view.sub as string) : 'cost';
 

@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import seed from '@/av/seed/led-price-2026-04.json';
 import type { BusinessLine } from '@/av/core/types';
-import { canEditPrices, canViewPrices, identityOf } from '@/lib/permissions';
+import { canEditPrices, canViewPrices, identityOf, priceView } from '@/lib/permissions';
+import { redactItem } from '@/server/avredact';
 import { createPriceItem, importPriceItems, listPriceItems, type PriceInput } from '@/server/avdb';
 import { normalise, validate } from '@/server/avprice';
 import { currentUser } from '@/server/session';
@@ -16,7 +17,8 @@ export async function GET(req: NextRequest) {
   if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
   if (!canViewPrices(identityOf(user))) return NextResponse.json({ error: '无权查看价格库' }, { status: 403 });
   const line = req.nextUrl.searchParams.get('line') as BusinessLine | null;
-  return NextResponse.json({ items: listPriceItems(line ?? undefined) });
+  const v = priceView(identityOf(user));
+  return NextResponse.json({ items: listPriceItems(line ?? undefined).map((it) => redactItem(it, v)), priceView: v });
 }
 
 export async function POST(req: NextRequest) {

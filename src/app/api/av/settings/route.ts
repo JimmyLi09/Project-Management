@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { canEditPrices, canViewPrices, identityOf } from '@/lib/permissions';
+import { canEditPrices, canSeeCost, canViewPrices, identityOf } from '@/lib/permissions';
 import { getMarginFloor, setMarginFloor } from '@/server/avdb';
 import { currentUser } from '@/server/session';
 
@@ -8,7 +8,8 @@ export async function GET() {
   const user = await currentUser();
   if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
   if (!canViewPrices(identityOf(user))) return NextResponse.json({ error: '无权查看' }, { status: 403 });
-  return NextResponse.json({ marginFloor: getMarginFloor() });
+  /* 公司毛利下限本身就是成本口径的数:看不到成本的人也不给 */
+  return NextResponse.json({ marginFloor: canSeeCost(identityOf(user)) ? getMarginFloor() : null });
 }
 
 export async function PUT(req: NextRequest) {

@@ -9,7 +9,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 
 import type { PriceItem } from '@/av/core/pricing';
-import { canEditPrices, canViewPrices } from '@/lib/permissions';
+import { canEditPrices, canViewPrices, type PriceView } from '@/lib/permissions';
 import { fmtDate } from '@/lib/project';
 import { useLang } from '@/lib/i18n';
 import { useStore } from '../store';
@@ -34,6 +34,10 @@ export default function AvPricesView() {
   const [line, setLine] = useState<'led' | 'projector' | 'elv' | 'pv'>('led');
   const [items, setItems] = useState<PriceItem[]>([]);
   const [floor, setFloor] = useState<number | null>(null);
+  /* 字段级隔离(2026-09-30):服务端已按人拿掉价格,这里只决定画哪几列 */
+  const [pv, setPv] = useState<PriceView>('none');
+  const showCost = pv === 'full';
+  const showList = pv !== 'none';
   const [floorDraft, setFloorDraft] = useState('');
   const [cat, setCat] = useState('');
   const [editing, setEditing] = useState<number | null>(null);
@@ -45,10 +49,11 @@ export default function AvPricesView() {
 
   const load = useCallback(async () => {
     try {
-      setItems((await call<{ items: PriceItem[] }>(`/api/av/prices?line=${line}`)).items);
-      const f = (await call<{ marginFloor: number }>('/api/av/settings')).marginFloor;
+      const r = await call<{ items: PriceItem[]; priceView: PriceView }>(`/api/av/prices?line=${line}`);
+      setItems(r.items); setPv(r.priceView);
+      const f = (await call<{ marginFloor: number | null }>('/api/av/settings')).marginFloor;
       setFloor(f);
-      setFloorDraft(String(Math.round(f * 1000) / 10));
+      setFloorDraft(f === null ? '' : String(Math.round(f * 1000) / 10));
     } catch (e) { setError((e as Error).message); }
   }, [line]);
   useEffect(() => { if (canViewPrices(me)) load(); }, [load, me]);
@@ -120,7 +125,7 @@ export default function AvPricesView() {
 
   return (
     <div style={{ display: 'grid', gap: 20 }}>
-      <div className="panel" style={{ padding: 0 }}>
+      {showCost && <div className="panel" style={{ padding: 0 }}>
         <div className="panel-head">
           <span className="panel-title">{t('公司参数', 'Company parameters')}</span>
         </div>
@@ -134,7 +139,7 @@ export default function AvPricesView() {
             {t('成本核算的「提交前检查」用它判断毛利是否达标。默认 18% 取自 06 原型。', 'Used by the pre-submit check in 06. Default 18% from the prototype.')}
           </p>
         </div>
-      </div>
+      </div>}
 
       <div className="panel clip" style={{ padding: 0 }}>
         <div className="panel-head">
@@ -156,7 +161,12 @@ export default function AvPricesView() {
 
         <div style={{ padding: '12px 18px', display: 'grid', gap: 10 }}>
           <p style={{ fontSize: 12, color: 'var(--text2)', lineHeight: 1.7 }}>
-            {line === 'led'
+            {!showCost
+              /* 字段级隔离(2026-09-30):成本价怎么来的是给维护价格库的人看的 */
+              ? (showList
+                ? t('这里列出物料的型号、规格与售价。成本价只对 PD / BD / 财务可见。', 'Models, specs and sell prices. Cost prices are visible to PD / BD / Finance only.')
+                : t('这里列出可选物料的型号与规格。价格只对 PD / BD / 财务 / 销售可见。', 'Available models and specs. Prices are visible to PD / BD / Finance / Sales only.'))
+              : line === 'led'
               ? t('成本价取 PDF 的 Partner Price，售价取 MSRP；价格会变，可随时修改，每次改价都留有历史。价格留空表示待定价，成本表会拦住未定价的条目。线材、控制系统、钢结构、安装人工等不在 PDF 中，需要逐条添加。',
                 'Cost = Partner Price, sell = MSRP. Every price change is kept in history. Blank prices block costing.')
               : line === 'pv'
@@ -192,7 +202,8 @@ export default function AvPricesView() {
               <tbody>
                 <tr>
                   {[t('类别', 'Category'), t('型号', 'Model'), line === 'projector' ? t('规格 / 亮度', 'Spec / lumens') : line === 'led' ? t('点间距', 'Pitch') : t('规格 / 功率', 'Spec / power'), t('模组尺寸', 'Module'), t('箱体 / 产品尺寸', 'Cabinet / product'),
-                    t('单位', 'Unit'), t('成本价 Partner', 'Cost (Partner)'), t('售价 MSRP', 'Sell (MSRP)'), t('有效期至', 'Valid until'), t('更新', 'Updated'), ''].map((h, i) => <th key={i} style={th}>{h}</th>)}
+                    t('单位', 'Unit'), ...(showCost ? [t('成本价 Partner', 'Cost (Partner)')] : []), ...(showList ? [t('售价 MSRP', 'Sell (MSRP)')] : []),
+                    t('有效期至', 'Valid until'), t('更新', 'Updated'), ''].map((h, i) => <th key={i} style={th}>{h}</th>)}
                 </tr>
                 {adding && editRow('new')}
                 {shown.map((i) => editing === i.id ? editRow(`e${i.id}`) : (
@@ -204,8 +215,8 @@ export default function AvPricesView() {
                       <td style={td}>{i.moduleSize || '—'}</td>
                       <td style={td}>{i.cabinetSize || '—'}</td>
                       <td style={td}>{i.unit}</td>
-                      <td style={{ ...td, textAlign: 'right' }} className="tnum">{i.costPrice === null ? <span style={{ color: 'var(--warning)' }}>{t('待定价', 'tbd')}</span> : money(i.costPrice)}</td>
-                      <td style={{ ...td, textAlign: 'right' }} className="tnum">{i.listPrice === null ? <span style={{ color: 'var(--warning)' }}>{t('待定价', 'tbd')}</span> : money(i.listPrice)}</td>
+                      {showCost && <td style={{ ...td, textAlign: 'right' }} className="tnum">{i.costPrice === null ? <span style={{ color: 'var(--warning)' }}>{t('待定价', 'tbd')}</span> : money(i.costPrice)}</td>}
+                      {showList && <td style={{ ...td, textAlign: 'right' }} className="tnum">{i.listPrice === null ? <span style={{ color: 'var(--warning)' }}>{t('待定价', 'tbd')}</span> : money(i.listPrice)}</td>}
                       <td style={td}>{i.validUntil || '—'}</td>
                       <td style={{ ...td, color: 'var(--text2)', whiteSpace: 'nowrap' }}>{i.updatedBy} · {fmtDate(new Date(i.updatedAt))}</td>
                       <td style={{ ...td, whiteSpace: 'nowrap', textAlign: 'right' }}>
@@ -220,7 +231,10 @@ export default function AvPricesView() {
                       <tr><td colSpan={11} style={{ ...td, background: 'var(--hover-bg)', fontSize: 12 }}>
                         {history.rows.map((h, k) => (
                           <div key={k} className="tnum">
-                            {fmtDate(new Date(h.changed_at))} · {h.changed_by} · {t('成本', 'cost')} {money(h.cost_price)} · {t('售价', 'sell')} {money(h.list_price)}{h.valid_until ? ` · ${t('有效期至', 'until')} ${h.valid_until}` : ''}
+                            {fmtDate(new Date(h.changed_at))} · {h.changed_by}
+                            {showCost && <> · {t('成本', 'cost')} {money(h.cost_price)}</>}
+                            {showList && <> · {t('售价', 'sell')} {money(h.list_price)}</>}
+                            {h.valid_until ? ` · ${t('有效期至', 'until')} ${h.valid_until}` : ''}
                           </div>
                         ))}
                         <div style={{ color: 'var(--text2)', marginTop: 4 }}>{i.source}</div>

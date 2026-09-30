@@ -94,10 +94,31 @@ export const canViewPrices = (u: Identity) => u.role !== 'member' && u.role !== 
 export const canEditPrices = (u: Identity) => isFull(u);
 export const canCostProject = (u: Identity, p?: Project) => canReviewDrawing(u, p);
 
+/* ===== 字段级隔离(2026-09-30 定)=====
+   「能进价格库 / 成本与报价」不等于「看得到每一个数」。这一层管的是数:
+
+     PD / BD / 财务   成本价、售价、毛利全看
+     Sales            只看售价与报价金额;成本价、毛利、公司毛利下限一概不看
+     PM               连售价也不看 —— 只看方案和数量。成本单照旧由 PM 挑物料、
+                      定数量、保存,但页面上没有任何单价和金额;确认成本改由
+                      PD / BD 做(要看着毛利才确认得了)
+
+   服务端按这里把字段拿掉再回给前端(server/avredact.ts),前端藏列只是
+   跟着走 —— 前端藏起来而接口照样回数,等于没隔离。 */
+export type PriceView = 'full' | 'list' | 'none';
+export const priceView = (u: Identity): PriceView =>
+  isFull(u) || u.role === 'finance' ? 'full' : u.role === 'sales' ? 'list' : 'none';
+export const canSeeCost = (u: Identity) => priceView(u) === 'full';
+export const canSeeListPrice = (u: Identity) => priceView(u) !== 'none';
+/** 确认成本单:得看得见毛利才谈得上确认,所以只给 PD / BD。 */
+export const canConfirmCost = (u: Identity) => isFull(u);
+
 /* 07 报价审批 (2026-09-26): sales or the project's PM put a quotation together
    and submit it; every quotation needs PD / BD approval before it goes out. */
-export const canSubmitQuote = (u: Identity, p?: Project) =>
-  isFull(u) || u.role === 'sales' || (u.role === 'pm' && (!p || canEdit(u, p)));
+/* 2026-09-30 字段级隔离:报价就是售价,PM 不看售价,所以 PM 不再发起报价。 */
+export const canSubmitQuote = (u: Identity, _p?: Project) => isFull(u) || u.role === 'sales';
+/** 报价页 / 报价接口 / 打印页:看得到售价的人才进得去。 */
+export const canViewQuotes = (u: Identity) => canSeeListPrice(u);
 export const canApproveQuote = (u: Identity) => isFull(u);
 
 /* ===== REQ-022: who sees which part of the post-sales workflow =====
