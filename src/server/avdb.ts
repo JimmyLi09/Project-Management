@@ -737,7 +737,31 @@ export interface CaseFilter {
   /** 年份多选,'none' = 未填年份(§3.2) */
   years?: string[];
   clients?: string[];
+  /** 保修状态多选(§7 第 3 条):ok 在保 / soon 30 天内到期 / expired 已过保 / none 未填 */
+  warranty?: string[];
+  /** 交付日期范围,YYYY-MM-DD,含两端 */
+  handoverFrom?: string;
+  handoverTo?: string;
 }
+
+/** 「快到期」的窗口:距今 0–30 天(含两端),与页面上的琥珀色标签同一口径。 */
+export const WARRANTY_SOON_DAYS = 30;
+
+/** 服务器本地的「今天」。保修状态按它算 —— 内网服务器在新加坡,和同事看到的
+ *  日子是同一天;不用 SQLite 的 date('now'),那是 UTC,早上八点前会差一天。 */
+export function localToday(now = new Date()): string {
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${now.getFullYear()}-${p(now.getMonth() + 1)}-${p(now.getDate())}`;
+}
+
+/* 保修状态 → SQL 条件。? 依次是 today(、today)。 */
+const WARRANTY_SQL: Record<string, { sql: string; n: number }> = {
+  expired: { sql: 'expire < ?', n: 1 },
+  soon: { sql: `(expire >= ? AND expire <= date(?, '+${WARRANTY_SOON_DAYS} days'))`, n: 2 },
+  ok: { sql: `expire > date(?, '+${WARRANTY_SOON_DAYS} days')`, n: 1 },
+  none: { sql: 'expire IS NULL', n: 0 },
+};
+export const WARRANTY_STATES = Object.keys(WARRANTY_SQL);
 
 /* 排序白名单。前端传来的列名绝不拼进 ORDER BY —— 只认这张表里的 key。 */
 const SORTS: Record<string, { expr: string; def: 'asc' | 'desc' }> = {
@@ -795,6 +819,17 @@ export function searchCases(
     where.push(`client IN (${f.clients.map(() => '?').join(',')})`);
     args.push(...f.clients);
   }
+  if (f.warranty?.length) {
+    const today = localToday();
+    const parts = f.warranty.filter((w) => WARRANTY_SQL[w]).map((w) => {
+      for (let i = 0; i < WARRANTY_SQL[w].n; i++) args.push(today);
+      return WARRANTY_SQL[w].sql;
+    });
+    if (parts.length) where.push(`(${parts.join(' OR ')})`);
+  }
+  const isDate = (v?: string) => !!v && /^\d{4}-\d{2}-\d{2}$/.test(v);
+  if (isDate(f.handoverFrom)) { where.push('handover >= ?'); args.push(f.handoverFrom!); }
+  if (isDate(f.handoverTo)) { where.push('handover <= ?'); args.push(f.handoverTo!); }
 
   const s = SORTS[sortKey] ?? SORTS.sqm;
   const d = (dir === 'asc' || dir === 'desc') ? dir : s.def;
@@ -810,7 +845,10 @@ export function searchCases(
 
 /** 「筛选」浮层的选项:整个库里出现过的年份与客户,各带块屏数(§3.2)。
  *  口径与年份列显示值一致 —— 用的是同一个 effYear。 */
-export function caseFacets(): { years: { year: string; n: number }[]; clients: { client: string; n: number }[] } {
+export function caseFacets(): {
+  years: { year: string; n: number }[]; clients: { client: string; n: number }[];
+  warranty: Record<string, number>;
+} {
   const conn = db();
   const years = conn.prepare(`${EFF_VIEW}
     SELECT IFNULL(CAST(effYear AS TEXT), 'none') AS year, count(*) AS n FROM w
@@ -818,7 +856,14 @@ export function caseFacets(): { years: { year: string; n: number }[]; clients: {
   const clients = conn.prepare(`${EFF_VIEW}
     SELECT client, count(*) AS n FROM w WHERE client IS NOT NULL AND client <> ''
     GROUP BY client ORDER BY lower(client)`).all() as { client: string; n: number }[];
-  return { years, clients };
+  /* 各保修状态的块屏数 —— 筛选浮层上的数字,也是「我的待办」里提醒的来源 */
+  const today = localToday();
+  const warranty: Record<string, number> = {};
+  for (const [k, w] of Object.entries(WARRANTY_SQL)) {
+    warranty[k] = (conn.prepare(`${EFF_VIEW} SELECT count(*) AS n FROM w WHERE ${w.sql}`)
+      .get(...Array(w.n).fill(today)) as { n: number }).n;
+  }
+  return { years, clients, warranty };
 }
 
 /* ---- case_key:一块屏跨多次导入的身份(§4) ----

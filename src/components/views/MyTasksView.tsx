@@ -1,12 +1,14 @@
 'use client';
 
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useStore } from '../store';
 import {
   fmtDate, parseISO, pendingWorkflowAction, pkgStart, planDates, projectHealth,
   projStage, schedProgress, todayMid,
 } from '@/lib/project';
-import { canRowEdit } from '@/lib/permissions';
+import { canEditPrices, canRowEdit } from '@/lib/permissions';
+import type { CaseRow } from '@/server/avdb';
+import { presetCaseFilter } from './AvCasesView';
 import { STAGES, stageColor, stageIdx, svcName } from '@/lib/templates';
 import { useLang } from '@/lib/i18n';
 import { Avatar, Ell, HM, Icon, Pill, TM } from '../ui';
@@ -17,7 +19,7 @@ interface Item { p: Project; r: ScheduleRow; i: number; pi: number; svc: string;
 const GRID = '24px 1fr 52px 96px 92px 32px';
 
 export default function MyTasksView() {
-  const { projects, me, dispatch, openProject } = useStore();
+  const { projects, me, dispatch, openProject, setView } = useStore();
   const { lang, t } = useLang();
   const [filter, setFilter] = useState<'all' | 'overdue' | 'wip'>('all');
   const [year, setYear] = useState('');
@@ -69,6 +71,27 @@ export default function MyTasksView() {
 
   const selP = sel ? projects.find((p) => p.id === sel) || null : null;
 
+  /* AV-014 §7:保修 30 天内到期的屏 —— 提醒 BD 联系客户续保 / 售后回访。
+     给能编辑历史案例的人(PD / BD)看;数据来自案例库,口径与那一页的
+     「30 天内到期」筛选同一个(服务端同一段 SQL)。读不到就不显示,不挡待办。 */
+  const [expiring, setExpiring] = useState<CaseRow[]>([]);
+  const [expiringTotal, setExpiringTotal] = useState(0);
+  useEffect(() => {
+    if (!canEditPrices(me)) return;
+    fetch('/api/av/cases?warranty=soon&sort=expire&dir=asc')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((b) => { if (b?.cases) { setExpiring(b.cases); setExpiringTotal(b.total); } })
+      .catch(() => {});
+  }, [me]);
+  const daysLeft = (iso: string | null) => {
+    const d = parseISO(iso);
+    return d ? Math.round((d.getTime() - t0.getTime()) / 86_400_000) : null;
+  };
+  const openExpiring = () => {
+    presetCaseFilter({ warranty: ['soon'] }, { k: 'expire', dir: 'asc' });
+    setView({ name: 'avlibrary', sub: 'cases' });
+  };
+
   return (
     <>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2,minmax(0,220px)) 1fr', gap: 20, marginBottom: 20, alignItems: 'center' }}>
@@ -112,6 +135,40 @@ export default function MyTasksView() {
               <Icon name="back" size={15} style={{ transform: 'rotate(180deg)', color: 'var(--text2)' }} />
             </div>
           ))}
+        </div>
+      )}
+
+      {expiring.length > 0 && (
+        <div className="panel clip" style={{ marginBottom: 18, borderColor: 'var(--warning)' }} data-testid="warranty-remind">
+          <div className="panel-head" style={{ background: '#fdf6e9' }}>
+            <span className="panel-title"><Icon name="alert" style={{ color: 'var(--warning)' }} />
+              {t('保修即将到期 · 联系客户续保 / 回访', 'Warranty expiring soon · contact the client')}
+              <span className="badge" style={{ background: 'var(--warning)', color: '#fff', marginLeft: 6 }}>{expiringTotal}</span>
+            </span>
+            <button className="btn-line" style={{ padding: '3px 10px', fontSize: 12 }} onClick={openExpiring}>
+              {t('在历史案例里看全部', 'Open in past projects')}
+            </button>
+          </div>
+          {expiring.slice(0, 6).map((c) => {
+            const d = daysLeft(c.expire);
+            return (
+              <div key={c.caseKey} className="row-hover" style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '11px 20px', borderTop: '1px solid var(--row-line)', cursor: 'pointer' }}
+                onClick={openExpiring}>
+                <span className="badge" style={{ background: '#fdf0da', color: 'var(--warning)', flexShrink: 0 }}>
+                  {d === 0 ? t('今天到期', 'expires today') : t(`${d} 天后到期`, `in ${d}d`)}
+                </span>
+                <div style={{ minWidth: 0, flex: 1 }}>
+                  <Ell style={{ fontSize: 13, fontWeight: 600, color: 'var(--navy900)' }}>{c.name}</Ell>
+                  <div style={{ fontSize: 11.5, color: 'var(--text2)' }}>
+                    {c.client || '—'}
+                    {c.widthMm && c.heightMm ? ` · ${Math.round(c.widthMm)} × ${Math.round(c.heightMm)} mm` : ''}
+                    {` · ${t('到期', 'expires')} ${fmtDate(parseISO(c.expire))}`}
+                  </div>
+                </div>
+                <Icon name="back" size={15} style={{ transform: 'rotate(180deg)', color: 'var(--text2)' }} />
+              </div>
+            );
+          })}
         </div>
       )}
 

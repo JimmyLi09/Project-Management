@@ -13,6 +13,7 @@ import { currentUser } from '@/server/session';
 
 /* 历史案例检索与编辑(AV-012 + AV-014).
    GET   ?q=&status=&pitchMin=&pitchMax=&sqmMin=&sqmMax=&years=&clients=&sort=&dir=
+         &warranty=ok,soon,expired,none&handoverFrom=&handoverTo=   (AV-014 §7)
          检索;排序与年份 / 客户筛选都在服务端做(列表有 500 条上限,前端
          排序只排得到前 500 条)。?caseKey= 额外带上那块屏的修改记录。
    PATCH { caseKey, fields, revert?, syncProject? }   逐块屏改 —— PD / BD only
@@ -38,6 +39,8 @@ export async function GET(req: NextRequest) {
     q: p.get('q') ?? undefined, status: p.get('status') || undefined,
     pitchMin: num('pitchMin'), pitchMax: num('pitchMax'), sqmMin: num('sqmMin'), sqmMax: num('sqmMax'),
     years: list(p.get('years')), clients: list(p.get('clients')),
+    warranty: list(p.get('warranty')),
+    handoverFrom: p.get('handoverFrom') || undefined, handoverTo: p.get('handoverTo') || undefined,
   };
   const dir = p.get('dir');
   const found = searchCases(f, p.get('sort') || 'sqm', dir === 'asc' || dir === 'desc' ? dir : undefined);
