@@ -538,7 +538,12 @@ export default function AvCasesView() {
                     </td>
                     <td style={{ ...td, whiteSpace: 'nowrap' }}>
                       {c.expire ? <>{fmtDate(parseISO(c.expire))}
-                        {w && <div><span className="badge" style={w.tag}>{t(w.zh, w.en)}</span></div>}</>
+                        {w && <div><span className="badge" style={w.tag}>{t(w.zh, w.en)}</span></div>}
+                        {c.contactedBy && (
+                          <div style={{ color: 'var(--text2)', fontSize: 11.5 }} title={t('这一轮到期已联系过客户', 'Client contacted for this expiry')}>
+                            {t('已联系', 'Contacted')} · {c.contactedBy}{c.contactedAt ? ` · ${fmtDate(new Date(c.contactedAt))}` : ''}
+                          </div>
+                        )}</>
                         : <span style={{ color: 'var(--text2)' }}>—</span>}
                     </td>
                     <td style={{ ...td, color: 'var(--text2)', minWidth: 160, maxWidth: 280 }}>{c.remarks || ''}</td>

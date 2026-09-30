@@ -197,6 +197,9 @@ export const LOG_MSG: Record<string, [string, string]> = {
   'av.caseEdit': ['历史案例「{screen}」:{cf} {fv} → {tv}', 'Past case "{screen}": {cf} {fv} → {tv}'],
   'av.caseEditMore': ['历史案例「{screen}」:{cf} {fv} → {tv},另 {more} 处',
     'Past case "{screen}": {cf} {fv} → {tv}, and {more} more'],
+  /* 保修到期提醒上点「已联系」/ 撤销。{due} 是那一次的到期日 */
+  'av.caseContacted': ['历史案例「{screen}」:保修 {due} 到期,已联系客户', 'Past case "{screen}": warranty expiring {due}, client contacted'],
+  'av.caseContactUndo': ['历史案例「{screen}」:撤销「已联系」(保修 {due} 到期)', 'Past case "{screen}": "contacted" withdrawn (warranty expiring {due})'],
   /* 由同项目另一块屏的编辑带过来的(「同步到本项目其它屏」) */
   'av.caseSync': ['历史案例「{screen}」:{cf} {fv} → {tv}(随同项目其它屏同步)',
     'Past case "{screen}": {cf} {fv} → {tv} (synced from another screen of the project)'],
