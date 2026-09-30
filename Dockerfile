@@ -14,11 +14,14 @@ FROM python:3.11-slim-bookworm
 WORKDIR /app
 COPY --from=node:22-bookworm-slim /usr/local/bin/node /usr/local/bin/node
 COPY services/drawing/requirements.txt services/drawing/requirements-ocr.txt services/drawing/
-# 需要处理 C 级扫描件时：docker compose build --build-arg WITH_OCR=1（体积大，首次运行会下载 OCR 权重）
+# 文字识别 OCR（AV-015 的第二道兜底，可选）：docker compose build --build-arg WITH_OCR=1
+# 放独立的 .venv-ocr —— paddleocr 2.9.1 要 numpy<2，和制图服务的 numpy 2.x 冲突。
+# 本机视觉模型（Ollama）不在容器里：装在宿主机上，「规则设置 › 识别服务」的服务地址填宿主机的内网 IP。
 ARG WITH_OCR=0
 RUN python -m venv services/drawing/.venv \
  && services/drawing/.venv/bin/pip install --no-cache-dir -r services/drawing/requirements.txt \
- && if [ "$WITH_OCR" = "1" ]; then services/drawing/.venv/bin/pip install --no-cache-dir -r services/drawing/requirements-ocr.txt; fi
+ && if [ "$WITH_OCR" = "1" ]; then python -m venv services/drawing/.venv-ocr \
+      && services/drawing/.venv-ocr/bin/pip install --no-cache-dir -r services/drawing/requirements-ocr.txt; fi
 COPY services/drawing/avdrawing services/drawing/avdrawing
 COPY --from=build /app/package.json /app/next.config.mjs ./
 COPY --from=build /app/node_modules ./node_modules

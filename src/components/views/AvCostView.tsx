@@ -47,7 +47,7 @@ interface CostState {
 }
 
 const AUTO_KEYS: Record<Line, string[]> = {
-  led: ['display', 'power_cable', 'data_cable'],
+  led: ['display', 'power_cable', 'data_cable', 'curve'],
   projector: ['projector', 'screen', 'signal_cable', 'mount', 'blend'],
   elv: ['outlet', 'ap', 'cam', 'door', 'switch', 'patch', 'cable', 'spk', 'amp', 'nvr', 'hdd', 'rack'],
   pv: ['module', 'inverter', 'mount', 'dc_cable', 'ac_cable', 'connector', 'acdb', 'monitor'],

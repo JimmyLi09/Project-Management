@@ -10,6 +10,7 @@ import {
   type PointRule, type PointRules, type PointTier,
 } from '@/lib/points';
 import KpiRulesTab from './KpiRulesTab';
+import VisionSettingsTab from './VisionSettingsTab';
 
 /* ===== REQ-038: 规则设置 · 积分规则 =====
    出厂值来自《项目积分算法》,但这里改的那一版才是准的。
@@ -18,14 +19,15 @@ import KpiRulesTab from './KpiRulesTab';
    REQ-037 的 KPI 规则是本页第二个标签页。 */
 export default function RulesView() {
   const { t } = useLang();
-  const [tab, setTab] = useState<'points' | 'kpi'>('points');
+  const [tab, setTab] = useState<'points' | 'kpi' | 'vision'>('points');
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
       <div className="detail-tabs" style={{ borderTop: 'none' }}>
         <button className={`detail-tab${tab === 'points' ? ' active' : ''}`} onClick={() => setTab('points')}>{t('积分规则', 'Points rules')}</button>
         <button className={`detail-tab${tab === 'kpi' ? ' active' : ''}`} onClick={() => setTab('kpi')}>{t('KPI 规则', 'KPI rules')}</button>
+        <button className={`detail-tab${tab === 'vision' ? ' active' : ''}`} onClick={() => setTab('vision')} data-testid="rules-tab-vision">{t('识别服务', 'Recognition')}</button>
       </div>
-      {tab === 'points' ? <PointRulesTab /> : <KpiRulesTab />}
+      {tab === 'points' ? <PointRulesTab /> : tab === 'kpi' ? <KpiRulesTab /> : <VisionSettingsTab />}
     </div>
   );
 }

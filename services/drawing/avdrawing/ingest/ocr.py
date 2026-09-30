@@ -34,6 +34,10 @@ class TextBox:
     box: tuple[float, float, float, float]  # x0, y0, x1, y1 in pixels
 
 
+class OcrUnavailable(RuntimeError):
+    """The optional OCR install is missing."""
+
+
 class OcrBackend(Protocol):
     def read(self, image: Path) -> list[TextBox]:
         """Text boxes found in the image, in reading order."""
@@ -50,9 +54,10 @@ class PaddleOcrBackend:
         try:
             from paddleocr import PaddleOCR
         except ImportError as exc:  # pragma: no cover - depends on the optional install
-            raise RuntimeError(
-                "PaddleOCR 未安装。执行 pip install -r requirements-ocr.txt 后重试。"
-            ) from exc
+            # AV-015 §5: this message reaches a colleague's screen, so it says
+            # what happened in plain words; the install steps live in the
+            # runbook (上线操作单) and the admin status page, not here.
+            raise OcrUnavailable("文字识别（OCR）组件没有安装，扫描件请手填，或联系管理员。") from exc
         self._engine = PaddleOCR(use_angle_cls=use_angle_cls, lang=lang, show_log=False)
 
     def read(self, image: Path) -> list[TextBox]:  # pragma: no cover - needs the optional install

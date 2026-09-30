@@ -10,12 +10,18 @@ import { appendAudit, getProject } from '@/server/db';
 import { currentUser } from '@/server/session';
 import { logZh } from '@/lib/logmsg';
 import { denyUnlessVisible } from '@/server/avguard';
+import { getJudgeView, IMAGE_EXT, startJudge } from '@/server/avjudge';
+import { isFull } from '@/lib/permissions';
 
 /* 03 解析提取: POST multipart { project, file, scale? } -> the stored drawing.
    The upload keeps its original file name, because provenance quotes it
-   ("01_平面图.dxf / A-LED-DISPLAY / (0, 1200)", §9). */
+   ("01_平面图.dxf / A-LED-DISPLAY / (0, 1200)", §9).
 
-const ALLOWED = new Set(['.dxf', '.pdf', '.png', '.jpg', '.jpeg', '.tif', '.tiff']);
+   AV-015: pictures and scanned PDFs do not go through the drawing readers;
+   they become an image judgement ({ judge }) that the local vision model reads
+   in the background. DXF and vector PDF are unchanged. */
+
+const ALLOWED = new Set(['.dxf', '.pdf', ...IMAGE_EXT]);
 const MAX_BYTES = 50 * 1024 * 1024;
 
 export async function POST(req: NextRequest) {
@@ -48,6 +54,11 @@ export async function POST(req: NextRequest) {
   try {
     const target = path.join(dir, name);
     await writeFile(target, Buffer.from(await file.arrayBuffer()));
+    const scanned = ext === '.pdf' && ((await runDrawingCli(['grade', target])) as { grade: string }).grade === 'C';
+    if (IMAGE_EXT.has(ext) || scanned) {
+      const id = await startJudge({ projectId, fileName: name, file: target, ext, by: user.name });
+      return NextResponse.json({ judge: await getJudgeView(id, isFull(identityOf(user))) });
+    }
     const args = ['ingest', target, ...(scale ? ['--scale', String(scale)] : [])];
     const result = (await runDrawingCli(args)) as unknown as IngestResult;
     const id = insertDrawing(projectId, result, user.name);

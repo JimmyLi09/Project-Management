@@ -123,9 +123,13 @@ export async function POST(req: NextRequest) {
     if (!drawing.reviewed_at) return NextResponse.json({ error: '图纸尚未通过校核' }, { status: 400 });
     const h = toHandoff(drawing);
     cfg = { ...cfg, ...h.fields };
+    /* AV-015: the curve comes only from a reviewed picture, never from the form */
+    if (drawing.extra?.curve) cfg.led_curve = drawing.extra.curve;
+    else delete cfg.led_curve;
     prov = h.prov;
     drawingId = drawing.id;
   }
+  if (!drawingId) delete cfg.led_curve;
   let r;
   try { r = compute(cfg, packVersion, prov); }
   catch (e) { return NextResponse.json({ error: e instanceof Error ? e.message : '方案参数无效' }, { status: 400 }); }
@@ -140,6 +144,7 @@ export async function POST(req: NextRequest) {
       cabinets: r.layout.cells.length, nPowerCable: t.n_power_cable.value, nDataCable: t.n_data_cable.value,
       powerCableSpec: cfg.led_power_cable, exportable: r.exportable,
       blocking: r.findings.filter((f) => f.severity === 'block').map((f) => f.code),
+      ...(cfg.led_curve ? { curve: cfg.led_curve } : {}),
     },
   }, cfg);
   appendAudit(project!.id, [{

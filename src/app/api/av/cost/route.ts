@@ -50,7 +50,7 @@ function price(line: BusinessLine, config: SavedConfig<AnySummary>, picks: Recor
     const lines = buildPrjLines(cfg, p, manual, items);
     return { items, lines, extra: prjChecks(lines, cfg, items) };
   }
-  const p: Picks = { display: num(picks.display), power_cable: num(picks.power_cable), data_cable: num(picks.data_cable) };
+  const p: Picks = { display: num(picks.display), power_cable: num(picks.power_cable), data_cable: num(picks.data_cable), curve: num(picks.curve) };
   return { items, lines: buildLedLines(config as SavedConfig<LedSummary>, p, manual, items), extra: [] };
 }
 

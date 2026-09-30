@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 # Audax 项目协作台 — 一键更新 (Mac / Linux)
 # 用法: 在项目目录里执行  bash scripts/update.sh
+#       要一并装「文字识别 OCR」(可选,AV-015 的第二道兜底): bash scripts/update.sh --with-ocr
 set -e
 cd "$(dirname "$0")/.."
+[ "${1:-}" = "--with-ocr" ] && WITH_OCR=1
 
 echo "==> 更新前快照 Snapshotting the database first…"
 # 更新前先给数据库留一份带时间戳的快照,和每日自动备份分开存,
@@ -53,6 +55,23 @@ else
   echo "⚠ 未找到 python3(建议 3.11)。AV 的图纸解析 / DXF / 方案书 / 案例导入需要它,装好后重新运行本脚本"
 fi
 
+# AV-015: OCR 放独立的 .venv-ocr(paddleocr 2.9.1 要 numpy<2,和制图服务冲突)。默认不装。
+if [ "${WITH_OCR:-0}" = "1" ]; then
+  echo "==> 文字识别 OCR（可选，独立虚拟环境 services/drawing/.venv-ocr）…"
+  OCV=services/drawing/.venv-ocr
+  [ -x "$OCV/bin/python" ] || python3 -m venv "$OCV" || true
+  if [ -x "$OCV/bin/python" ]; then
+    "$OCV/bin/python" -m pip install -q -r services/drawing/requirements-ocr.txt \
+      && echo "✓ 文字识别已就绪" \
+      || echo "⚠ 文字识别安装失败，不影响其它功能：图片识别仍可用本机视觉模型或手填"
+    # 第一次运行要下载识别权重，这里先跑一张
+    (cd services/drawing && .venv-ocr/bin/python -m avdrawing.ingest.ocrcli tests/fixtures/vision/arc_photo_0930.jpg >/dev/null 2>&1) \
+      && echo "✓ 文字识别权重已下载" || echo "⚠ 文字识别权重暂未下载成功，首次使用时会再试"
+  else
+    echo "⚠ 未找到 python3，跳过文字识别"
+  fi
+fi
+
 echo "==> 重启服务 Restarting…"
 if command -v pm2 >/dev/null 2>&1; then
   pm2 restart audax 2>/dev/null || pm2 start npm --name audax -- start
@@ -61,4 +80,6 @@ if command -v pm2 >/dev/null 2>&1; then
 else
   echo "⚠ 未安装 pm2。请手动重启: 停掉旧的 npm start,再执行 npm start"
 fi
+# AV-015: 更新完查一次识别服务(本机 Ollama),只打印,不影响更新结果
+node scripts/vision-check.mjs || true
 echo "✓ 更新完成 Update done."

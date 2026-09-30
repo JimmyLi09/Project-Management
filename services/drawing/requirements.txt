@@ -4,8 +4,6 @@
 ezdxf==1.4.4
 # Grade B: vector PDF parsing
 pymupdf==1.28.2
-# Grade C: drawing vision recognition (only used when ANTHROPIC_API_KEY is set)
-anthropic==1.8.0
 # Technical proposal (Word)
 python-docx==1.1.2
 # Case library: read the company project spreadsheet (xlsx)

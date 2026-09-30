@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from avdrawing.ingest import grade, pipeline, semantic, vision, write_back_samples
+from avdrawing.ingest import grade, pipeline, semantic, write_back_samples
 from avdrawing.ingest.models import LED_ELEMENTS
 from avdrawing.ingest.ocr import TextBox
 from avdrawing.ingest.pdf_reader import Calibration
@@ -226,83 +226,6 @@ def test_summary_line_reports_the_gate(dxf_drawing: Path) -> None:
     assert "可进入 05" in pipeline.summarise(result)
 
 
-# ------------------------------------------------- 图例视觉识别 (§14)
-
-class FakeBlock:
-    type = "text"
-
-    def __init__(self, text: str) -> None:
-        self.text = text
-
-
-class FakeResponse:
-    def __init__(self, text: str, stop_reason: str = "end_turn") -> None:
-        self.content = [FakeBlock(text)]
-        self.stop_reason = stop_reason
-        self.stop_details = None
-
-
-class FakeMessages:
-    def __init__(self, response: FakeResponse) -> None:
-        self._response = response
-        self.seen: dict = {}
-
-    def create(self, **kwargs):
-        self.seen = kwargs
-        return self._response
-
-
-class FakeClient:
-    def __init__(self, response: FakeResponse) -> None:
-        self.messages = FakeMessages(response)
-
-
-@pytest.fixture
-def legend_image(tmp_path: Path) -> Path:
-    import pymupdf
-    pix = pymupdf.Pixmap(pymupdf.csRGB, pymupdf.IRect(0, 0, 80, 40))
-    pix.clear_with(255)
-    path = tmp_path / "legend.png"
-    pix.save(path)
-    return path
-
-
-def test_legend_recognition_request_shape(legend_image: Path) -> None:
-    payload = json.dumps({"entries": [
-        {"symbol": "LED-01", "meaning": "LED 显示屏", "category": "screen",
-         "confidence": 0.94, "note": ""},
-    ]})
-    client = FakeClient(FakeResponse(payload))
-    entries = vision.recognise_legend(legend_image, client=client)
-
-    assert [e.symbol for e in entries] == ["LED-01"]
-    assert entries[0].category == "screen" and entries[0].confidence == 0.94
-
-    sent = client.messages.seen
-    assert sent["model"] == "claude-sonnet-5"          # §14 names Sonnet for this step
-    assert sent["thinking"] == {"type": "adaptive"}
-    assert sent["output_config"]["format"]["type"] == "json_schema"
-    image_block = sent["messages"][0]["content"][0]
-    assert image_block["source"]["media_type"] == "image/png"
-    assert image_block["source"]["type"] == "base64"
-    # §1 — the model is never asked to compute a quantity.
-    assert "不要计算数量" in sent["system"]
-
-
-def test_legend_recognition_surfaces_refusal_and_truncation(legend_image: Path) -> None:
-    with pytest.raises(RuntimeError, match="被拒绝"):
-        vision.recognise_legend(legend_image, client=FakeClient(FakeResponse("{}", "refusal")))
-    with pytest.raises(RuntimeError, match="被截断"):
-        vision.recognise_legend(legend_image, client=FakeClient(FakeResponse("{}", "max_tokens")))
-
-
-def test_legend_recognition_rejects_unsupported_images(tmp_path: Path) -> None:
-    bad = tmp_path / "legend.bmp"
-    bad.write_bytes(b"\x00")
-    with pytest.raises(ValueError, match="unsupported image type"):
-        vision.recognise_legend(bad, client=FakeClient(FakeResponse("{}")))
-
-
 # ------------------------------------------------ CLI (the web app's entry)
 
 def _cli(args: list[str], stdin: str | None = None) -> tuple[int, dict]:
@@ -331,9 +254,37 @@ def test_cli_reports_errors_as_json(pdf_drawing: Path) -> None:
     assert code == 0 and out["grade"] == "B"
 
 
-def test_cli_scan_without_paddle_says_how_to_install(scan_drawing: Path) -> None:
+def test_cli_scan_without_paddle_speaks_plainly(scan_drawing: Path) -> None:
+    # AV-015 §5: no install command may reach a colleague's screen.
     code, out = _cli(["ingest", str(scan_drawing)])
-    assert code == 2 and "requirements-ocr.txt" in out["error"]
+    assert code == 2 and "文字识别" in out["error"]
+    assert "pip" not in out["error"] and "requirements" not in out["error"]
+
+
+def test_cli_grade_and_raster(scan_drawing: Path, pdf_drawing: Path, tmp_path: Path) -> None:
+    # AV-015 §4.1: a scanned PDF goes to image judgement page by page; a vector PDF stays B.
+    code, out = _cli(["grade", str(pdf_drawing)])
+    assert code == 0 and out["grade"] == "B"
+    code, out = _cli(["grade", str(scan_drawing)])
+    assert code == 0 and out["grade"] == "C"
+    code, out = _cli(["raster", str(scan_drawing), str(tmp_path), "--max-pages", "3"])
+    assert code == 0 and out["total"] == 1 and len(out["pages"]) == 1
+    page = Path(out["pages"][0])
+    assert page.exists() and page.suffix == ".png"
+    import pymupdf
+    pix = pymupdf.Pixmap(str(page))
+    assert max(pix.width, pix.height) <= 1600
+
+
+def test_ocr_cli_speaks_plainly_without_paddle(tmp_path: Path) -> None:
+    import subprocess, sys
+    img = tmp_path / "x.png"
+    img.write_bytes(b"not really a png")
+    proc = subprocess.run([sys.executable, "-m", "avdrawing.ingest.ocrcli", str(img)],
+                          capture_output=True, text=True, cwd=Path(__file__).parent.parent)
+    out = json.loads(proc.stdout)
+    assert proc.returncode == 2 and out["code"] == "ocr_missing"
+    assert "pip" not in out["error"]
 
 
 def test_cli_writeback_round_trips_the_reviewed_json(dxf_drawing: Path, tmp_path: Path) -> None:

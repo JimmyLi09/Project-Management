@@ -60,7 +60,11 @@ export default function LedStudioView() {
 
   useEffect(() => {
     if (!ledHandoff) return;
-    setCfg((prev) => ({ ...prev, ...ledHandoff.fields }));
+    /* AV-015: a picture also settles the pitch (kernel's choice under LED-VD-01), maintenance and the curve */
+    setCfg((prev) => {
+      const { led_curve: _drop, ...rest } = prev;
+      return { ...rest, ...ledHandoff.fields, ...(ledHandoff.extra ?? {}) };
+    });
     if (ledHandoff.packVersion) setPackVersion(ledHandoff.packVersion);
     setFromDrawing(ledHandoff);
     setLedHandoff(null);
@@ -176,11 +180,16 @@ export default function LedStudioView() {
 
           {fromDrawing ? (
             <div style={{ fontSize: 12, lineHeight: 1.7, padding: '9px 11px', borderRadius: 6, background: 'var(--hover-bg)' }}>
-              {t('已载入校核结果：', 'Loaded from review: ')}
+              {fromDrawing.notes ? t('已载入图片判读结果（来自图片 · 已人工确认）：', 'Loaded from a picture (confirmed by hand): ') : t('已载入校核结果：', 'Loaded from review: ')}
               {fromDrawing.project && <><strong>{fromDrawing.project}</strong> · </>}<strong>{fromDrawing.drawing}</strong>
               {t('。图纸带入字段只读。', '. Drawing fields are read-only.')}{' '}
               <button style={{ fontSize: 12, textDecoration: 'underline', color: 'var(--text2)' }}
                 onClick={() => setFromDrawing(null)}>{t('改为手动输入', 'Switch to manual')}</button>
+              {!!fromDrawing.notes?.length && (
+                <div style={{ marginTop: 8, display: 'grid', gap: 4, color: 'var(--warning)' }} data-testid="led-image-notes">
+                  {fromDrawing.notes.map((n) => <div key={n}>· {n}</div>)}
+                </div>
+              )}
               {maySave && (
                 <div style={{ marginTop: 8, display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
                   <button className="btn-navy" disabled={!result.layout} onClick={saveToProject}
@@ -306,15 +315,15 @@ export default function LedStudioView() {
                 onChange={(e) => set('led_mount_h', e.target.value === '' ? undefined : +e.target.value)} />
             </Field>
             <Field label={t('最近观看距离 m', 'Min viewing dist m')}>
-              <input type="number" step="0.1" value={cfg.led_view_min ?? ''} placeholder="—" readOnly={locked('led_view_min')}
+              <input type="number" step="0.1" value={cfg.led_view_min ?? ''} placeholder={fromDrawing?.pending?.includes('led_view_min') ? t('待补', 'to fill') : '—'} readOnly={locked('led_view_min')}
                 onChange={(e) => set('led_view_min', e.target.value === '' ? undefined : +e.target.value)} />
             </Field>
             <Field label={t('控制室距离 m', 'Control room m')}>
-              <input type="number" step="0.1" value={cfg.led_ctrl_dist ?? ''} placeholder="—" readOnly={locked('led_ctrl_dist')}
+              <input type="number" step="0.1" value={cfg.led_ctrl_dist ?? ''} placeholder={fromDrawing?.pending?.includes('led_ctrl_dist') ? t('待补', 'to fill') : '—'} readOnly={locked('led_ctrl_dist')}
                 onChange={(e) => set('led_ctrl_dist', e.target.value === '' ? undefined : +e.target.value)} />
             </Field>
             <Field label={t('强电井距离 m', 'Power riser m')}>
-              <input type="number" step="0.1" value={cfg.led_pwr_dist ?? ''} placeholder="—" readOnly={locked('led_pwr_dist')}
+              <input type="number" step="0.1" value={cfg.led_pwr_dist ?? ''} placeholder={fromDrawing?.pending?.includes('led_pwr_dist') ? t('待补', 'to fill') : '—'} readOnly={locked('led_pwr_dist')}
                 onChange={(e) => set('led_pwr_dist', e.target.value === '' ? undefined : +e.target.value)} />
             </Field>
           </Two>
