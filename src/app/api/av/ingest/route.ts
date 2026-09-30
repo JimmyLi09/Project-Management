@@ -1,16 +1,12 @@
-import { mkdtemp, rm, writeFile } from 'fs/promises';
-import os from 'os';
 import path from 'path';
 import { NextRequest, NextResponse } from 'next/server';
-import type { IngestResult } from '@/av/core/handoff';
 import { canUploadDrawing, identityOf } from '@/lib/permissions';
-import { getDrawing, insertDrawing } from '@/server/avdb';
-import { DrawingServiceError, ledProjectError, runDrawingCli } from '@/server/avdrawing';
-import { appendAudit, getProject } from '@/server/db';
+import { ledProjectError } from '@/server/avdrawing';
+import { getProject } from '@/server/db';
 import { currentUser } from '@/server/session';
-import { logZh } from '@/lib/logmsg';
 import { denyUnlessVisible } from '@/server/avguard';
-import { getJudgeView, IMAGE_EXT, startJudge } from '@/server/avjudge';
+import { IMAGE_EXT } from '@/server/avjudge';
+import { archiveUpload, parseUpload } from '@/server/avupload';
 import { isFull } from '@/lib/permissions';
 
 /* 03 解析提取: POST multipart { project, file, scale? } -> the stored drawing.
@@ -50,25 +46,10 @@ export async function POST(req: NextRequest) {
   const scale = typeof scaleRaw === 'string' && scaleRaw.trim() ? Number(scaleRaw) : null;
   if (scale !== null && !(scale > 0)) return NextResponse.json({ error: '比例尺须为正数，如 1:50 填 50' }, { status: 400 });
 
-  const dir = await mkdtemp(path.join(os.tmpdir(), 'av-ingest-'));
-  try {
-    const target = path.join(dir, name);
-    await writeFile(target, Buffer.from(await file.arrayBuffer()));
-    const scanned = ext === '.pdf' && ((await runDrawingCli(['grade', target])) as { grade: string }).grade === 'C';
-    if (IMAGE_EXT.has(ext) || scanned) {
-      const id = await startJudge({ projectId, fileName: name, file: target, ext, by: user.name });
-      return NextResponse.json({ judge: await getJudgeView(id, isFull(identityOf(user))) });
-    }
-    const args = ['ingest', target, ...(scale ? ['--scale', String(scale)] : [])];
-    const result = (await runDrawingCli(args)) as unknown as IngestResult;
-    const id = insertDrawing(projectId, result, user.name);
-    const ingP = { file: result.drawing, grade: result.grade };
-    appendAudit(projectId, [{ at: Date.now(), by: user.name, text: logZh('av.ingest', ingP), k: 'av.ingest', p: ingP }]);
-    return NextResponse.json(getDrawing(id));
-  } catch (e) {
-    const status = e instanceof DrawingServiceError ? 422 : 500;
-    return NextResponse.json({ error: e instanceof Error ? e.message : '解析失败' }, { status });
-  } finally {
-    await rm(dir, { recursive: true, force: true });
-  }
+  /* AV-016 ①:先留档再解析 —— 解析失败原件也在,可以重新解析、下载 */
+  const uploadId = await archiveUpload(projectId, name, Buffer.from(await file.arrayBuffer()), user.name);
+  const out = await parseUpload(uploadId, scale, user.name, isFull(identityOf(user)));
+  if (out.kind === 'judge') return NextResponse.json({ judge: out.judge, uploadId });
+  if (out.kind === 'drawing') return NextResponse.json({ ...out.drawing, uploadId });
+  return NextResponse.json({ error: out.error, uploadId, archived: true }, { status: out.status });
 }

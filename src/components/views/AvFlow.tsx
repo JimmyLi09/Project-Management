@@ -239,8 +239,8 @@ export default function AvFlow({ children }: { children: React.ReactNode }) {
           <div className="modal" style={{ maxWidth: 440 }} data-testid="flow-save-modal">
             <h2>{t('保存方案并进入成本核算？', 'Save the design and go to costing?')}</h2>
             <div className="msub">
-              {t(`当前方案将保存为正式版本 v${guard.nextVersion}，06 成本核算按 v${guard.nextVersion} 计算。`,
-                `The current design will be saved as version v${guard.nextVersion}; 06 costs it from v${guard.nextVersion}.`)}
+              {t(`当前方案（含自动保存的草稿改动）将保存为正式版本 v${guard.nextVersion}，06 成本核算按 v${guard.nextVersion} 计算。`,
+                `The current design (including auto-saved draft changes) will be saved as version v${guard.nextVersion}; 06 costs it from v${guard.nextVersion}.`)}
             </div>
             <div className="modal-actions">
               <button className="btn-line" disabled={busy} onClick={() => setAsking(false)} data-testid="flow-save-no">{t('再改改', 'Keep editing')}</button>

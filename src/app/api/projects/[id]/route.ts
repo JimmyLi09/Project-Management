@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { deleteProjectDrawings } from '@/server/avdb';
 import { deleteProjectJudges } from '@/server/avjudge';
+import { deleteProjectUploads } from '@/server/avupload';
 import { appendAudit, commitWorkflowAction, deleteProject, getEffectiveTemplate, getProject, saveProject, saveProjectCAS } from '@/server/db';
 import { currentUser } from '@/server/session';
 import { canDelete, canSeeProject, identityOf, isFull } from '@/lib/permissions';
@@ -104,5 +105,6 @@ export async function DELETE(_req: NextRequest, { params }: Params) {
   deleteProject(id);
   deleteProjectDrawings(id);
   await deleteProjectJudges(id);
+  await deleteProjectUploads(id);
   return NextResponse.json({ ok: true });
 }

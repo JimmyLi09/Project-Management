@@ -18,10 +18,12 @@ import { toHandoff, type DrawingElement, type DrawingSummary, type Handoff, type
 import type { LedConfig, ScreenType, Severity, Size, TraceNode } from '@/av/core/types';
 import { canCostProject, canExportLed } from '@/lib/permissions';
 import { useLang } from '@/lib/i18n';
+import { fmtDate } from '@/lib/project';
+const fmtDateTime = (ms: number) => { const d = new Date(ms); return `${fmtDate(d)} ${d.toTimeString().slice(0, 5)}`; };
 import { useStore } from '../store';
 import { Icon } from '../ui';
 import { useFlowGuard, useFlowRefresh } from './AvFlow';
-import { sameConfig, useSavedConfig } from './useSavedConfig';
+import { sameConfig, useAutoDraft, useSavedConfig } from './useSavedConfig';
 
 const SEVERITY: Record<Severity, { bg: string; fg: string; zh: string; en: string }> = {
   block: { bg: 'var(--danger-bg, #FDF0EC)', fg: 'var(--danger)', zh: '阻断', en: 'Blocking' },
@@ -60,7 +62,9 @@ export default function LedStudioView() {
      are read-only here: the drawing, not this form, is their source. */
   const [fromDrawing, setFromDrawing] = useState<Handoff | null>(null);
   /* AV-017:这一屏的数据是怎么来的 —— 载入了正式版本 / 从 04 自动带入 / 04 刚提交带过来 */
-  const [origin, setOrigin] = useState<'' | 'saved' | 'auto' | 'explicit'>('');
+  const [origin, setOrigin] = useState<'' | 'saved' | 'auto' | 'explicit' | 'draft'>('');
+  /* AV-016 ②:这个项目的正式版本 / 草稿已经载入完(之后的改动才算人改的,才自动存草稿) */
+  const [ready, setReady] = useState(false);
 
   /* AV-017:项目取流程顶栏的那一个(带 LED 服务包的才算) */
   const project = projects.find((p) => p.id === ledProjectId && !p.archived && p.packages.some((k) => k.svc === 'led'));
@@ -113,12 +117,21 @@ export default function LedStudioView() {
 
   /* 打开 05 / 换项目:有正式版本就载入它;没有就从 04 最新校核结果自动带入;都没有就出厂默认 */
   const initFor = useRef('');
+  useEffect(() => { setReady(false); }, [project?.id]);
   useEffect(() => {
     if (!project || !saved.loaded || !reviewed.loaded || initFor.current === project.id) return;
     initFor.current = project.id;
-    if (explicit.current) { explicit.current = false; return; }
+    if (explicit.current) { explicit.current = false; setReady(true); return; }
     (async () => {
-      if (saved.cfg) {
+      if (saved.draft) {
+        /* AV-016 ②:上次没存成正式版本的草稿优先 */
+        const c = saved.draft.cfg;
+        setCfg(c);
+        if (saved.packVersion) setPackVersion(saved.packVersion);
+        setLibText(fmtLib(c.led_cab_lib ?? getRulePack(saved.packVersion ?? LATEST_LED_PACK).profiles[c.led_screen_type].cabLib));
+        setFromDrawing(saved.draft.drawingId ? await loadDrawing(saved.draft.drawingId) : null);
+        setOrigin('draft');
+      } else if (saved.cfg) {
         const c = saved.cfg;
         setCfg(c);
         if (saved.packVersion) setPackVersion(saved.packVersion);
@@ -132,6 +145,7 @@ export default function LedStudioView() {
         setFromDrawing(null);
         setOrigin('');
       }
+      setReady(true);
     })();
   }, [project, saved.loaded, reviewed.loaded]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -151,7 +165,7 @@ export default function LedStudioView() {
     const body = res ? await res.json().catch(() => ({})) : { error: t('网络错误', 'Network error') };
     const ok = !!res?.ok && !body.error;
     setSaved(ok ? `ok:${body.version}` : `✕ ${body.error || t('保存失败', 'Save failed')}`);
-    if (ok) { saved.reload(); refreshFlow(); }
+    if (ok) { saved.reload(); resetDraft(); refreshFlow(); }
     return ok;
   }
 
@@ -178,6 +192,31 @@ export default function LedStudioView() {
     blocked: result.layout ? null : t('排布无解，不能保存：先按右边的阻断提示调整屏体尺寸或箱体库', 'No layout — fix the blocking findings before saving'),
     save: saveToProject,
   } : null);
+  const { draftState, resetDraft } = useAutoDraft({
+    projectId: project?.id, line: 'led', payload, drawingId: fromDrawing?.drawingId ?? null,
+    enabled: maySave, dirty, hadDraft: !!saved.draft, ready,
+  });
+  useEffect(() => { if (draftState?.at) refreshFlow(); }, [draftState?.at]); // eslint-disable-line react-hooks/exhaustive-deps
+  async function discardDraft() {
+    if (!project || !saved.cfg) return;
+    await fetch(`/api/av/config/draft?project=${encodeURIComponent(project.id)}&line=led`, { method: 'DELETE' }).catch(() => null);
+    const c = saved.cfg;
+    setReady(false);
+    setCfg(c);
+    setLibText(fmtLib(c.led_cab_lib ?? getRulePack(saved.packVersion ?? LATEST_LED_PACK).profiles[c.led_screen_type].cabLib));
+    setFromDrawing(saved.drawingId ? await loadDrawing(saved.drawingId) : null);
+    setOrigin('saved');
+    resetDraft();
+    saved.reload();
+    refreshFlow();
+    setReady(true);
+  }
+  const hhmm = (ms: number) => new Date(ms).toTimeString().slice(0, 5);
+  const draftLine = draftState?.at
+    ? t(`✓ 草稿已自动保存 · ${hhmm(draftState.at)}`, `✓ Draft saved automatically · ${hhmm(draftState.at)}`)
+    : origin === 'draft' && saved.draft
+      ? t(`已载入草稿（${saved.draft.updatedBy} · ${fmtDateTime(saved.draft.updatedAt)}），还没存成正式版本`, `Loaded a draft (${saved.draft.updatedBy} · ${fmtDateTime(saved.draft.updatedAt)}), not saved as a version yet`)
+      : '';
   const srcLabel = fromDrawing?.notes ? t('来自图片 · 已人工确认', 'From picture · confirmed') : t('来自图纸 · 04 已确认', 'From drawing · 04 confirmed');
   const src = (k: DrawingElement) => locked(k) && <span style={{ display: 'block', fontSize: 11, color: 'var(--success)', marginTop: 3 }} data-testid={`led-src-${k}`}>{srcLabel}</span>;
   const newerDrawing = !!reviewed.d && !!fromDrawing?.drawingId && reviewed.d.id !== fromDrawing.drawingId && origin === 'saved';
@@ -279,6 +318,16 @@ export default function LedStudioView() {
             ) : (
               <span style={{ color: 'var(--text2)' }}>{t('手动输入。', 'Manual entry.')}</span>
             )}
+            {draftLine && (
+              <span style={{ color: 'var(--success)' }} data-testid="led-draft">
+                {draftLine}
+                {saved.cfg && (saved.draft || draftState) && (
+                  <button style={{ marginLeft: 8, fontSize: 12, textDecoration: 'underline', color: 'var(--text2)' }} onClick={discardDraft}
+                    data-testid="led-draft-discard">{t(`丢弃草稿，回到正式版本 v${saved.version}`, `Discard the draft, back to v${saved.version}`)}</button>
+                )}
+              </span>
+            )}
+            {draftState?.error && <span style={{ color: 'var(--danger)' }}>{draftState.error}</span>}
             {project && origin === 'saved' && fromDrawing && <span>{t(`已载入正式版本 v${saved.version}。`, `Loaded saved version v${saved.version}.`)}</span>}
             {newerDrawing && (
               <span style={{ color: 'var(--warning)' }} data-testid="led-newer-drawing">
