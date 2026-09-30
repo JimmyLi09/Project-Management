@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { canEditPrices, canViewPrices, identityOf } from '@/lib/permissions';
+import { canEditPrices, canViewPrices, identityOf, priceView } from '@/lib/permissions';
+import { redactHistory } from '@/server/avredact';
 import { listPriceItems, priceHistory, updatePriceItem } from '@/server/avdb';
 import { currentUser } from '@/server/session';
 import { normalise, validate } from '@/server/avprice';
@@ -11,7 +12,8 @@ export async function GET(_req: NextRequest, { params }: Params) {
   const user = await currentUser();
   if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
   if (!canViewPrices(identityOf(user))) return NextResponse.json({ error: '无权查看价格库' }, { status: 403 });
-  return NextResponse.json({ history: priceHistory(Number((await params).id)) });
+  const v = priceView(identityOf(user));
+  return NextResponse.json({ history: priceHistory(Number((await params).id)).map((h) => redactHistory(h, v)) });
 }
 
 export async function PATCH(req: NextRequest, { params }: Params) {

@@ -31,14 +31,17 @@ interface Sheet {
   id: number; configId: number; lines: CostLine[]; cost: number; list: number;
   status: 'draft' | 'confirmed'; createdBy: string; createdAt: number; confirmedBy: string; confirmedAt: number;
 }
-interface SummaryRow { line: BusinessLine; pack: string | null; sheet: { cost: number; list: number; status: string } | null; outdated: boolean; draftPack: boolean }
+interface SummaryRow { line: BusinessLine; pack: string | null; sheet: { cost: number | null; list: number | null; status: string } | null; outdated: boolean; draftPack: boolean }
 interface CostState {
   config: SavedConfig<LedSummary | PrjSummary | ElvSummary | PvSummary> | null;
   sheet: Sheet | null;
   items: PriceItem[];
-  marginFloor: number;
+  marginFloor: number | null;
   sheetOutdated: boolean;
   canEdit: boolean;
+  /* 字段级隔离(2026-09-30):服务端已按人拿掉了数,这里只决定哪几列画出来 */
+  canConfirm: boolean;
+  priceView: 'full' | 'list' | 'none';
   summary: SummaryRow[];
   dedup: Deduction[];
 }
@@ -52,6 +55,9 @@ const AUTO_KEYS: Record<Line, string[]> = {
 const money = (v: number) => `S$ ${v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const pct = (v: number | null) => (v === null ? '—' : `${(v * 100).toFixed(1)}%`);
 const today = () => new Date().toISOString().slice(0, 10);
+/* 看不到成本价的人,浏览器这边算不出这几条 —— 成本价在回包里是 null,
+   照算会给每一行都报「缺少成本价」。确认时服务端拿真价再查一遍,漏不掉。 */
+const PRICE_CHECKS = new Set(['COST-PRICE', 'COST-STALE', 'COST-MARGIN']);
 
 export default function AvCostView() {
   const { me, projects, ledProjectId, setLedProjectId, go } = useStore();
@@ -109,7 +115,8 @@ export default function AvCostView() {
     } else {
       lines = buildLedLines(state.config as SavedConfig<LedSummary>, picks as unknown as Picks, manual, state.items);
     }
-    return { lines, totals: totals(lines), checks: checkSheet(lines, state.config, state.items, state.marginFloor, today(), extra) };
+    const all = checkSheet(lines, state.config, state.items, state.marginFloor ?? 0, today(), extra);
+    return { lines, totals: totals(lines), checks: state.priceView === 'full' ? all : all.filter((c) => !PRICE_CHECKS.has(c.code)) };
   }, [state, picks, manual, line]);
 
   if (!canViewPrices(me)) {
@@ -131,6 +138,8 @@ export default function AvCostView() {
   }
 
   const editable = !!state?.canEdit;
+  const showCost = state?.priceView === 'full';
+  const showList = state?.priceView === 'full' || state?.priceView === 'list';
   const blocks = preview?.checks.filter((c) => c.severity === 'block') ?? [];
   const options = (l: CostLine) => {
     const items = state!.items.filter((i) => i.active || i.id === l.itemId);
@@ -242,8 +251,9 @@ export default function AvCostView() {
             <div style={{ overflowX: 'auto' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, minWidth: 1080 }}>
                 <tbody>
-                  <tr>{[t('项目', 'Item'), t('数量', 'Qty'), t('依据', 'Basis'), t('价格库条目', 'Price item'), t('成本单价', 'Unit cost'),
-                    t('售价单价', 'Unit sell'), t('成本小计', 'Cost'), t('售价小计', 'Sell'), ''].map((h, i) => <th key={i} style={th}>{h}</th>)}</tr>
+                  <tr>{[t('项目', 'Item'), t('数量', 'Qty'), t('依据', 'Basis'), t('价格库条目', 'Price item'),
+                    ...(showCost ? [t('成本单价', 'Unit cost')] : []), ...(showList ? [t('售价单价', 'Unit sell')] : []),
+                    ...(showCost ? [t('成本小计', 'Cost')] : []), ...(showList ? [t('售价小计', 'Sell')] : []), ''].map((h, i) => <th key={i} style={th}>{h}</th>)}</tr>
                   {preview.lines.map((l) => (
                     <tr key={l.key}>
                       <td style={td}>
@@ -278,14 +288,14 @@ export default function AvCostView() {
                           <select className="in sm" style={{ width: 320 }} value={l.itemId ?? ''} aria-label={t('价格库条目', 'Price item')}
                             onChange={(e) => setPick(l.key, e.target.value ? Number(e.target.value) : null)}>
                             <option value="">{t('— 选择 —', '— choose —')}</option>
-                            {options(l).map((i) => <option key={i.id} value={i.id}>{itemLabel(i)} · {i.unit}{i.costPrice === null ? t('（待定价）', ' (tbd)') : ''}</option>)}
+                            {options(l).map((i) => <option key={i.id} value={i.id}>{itemLabel(i)} · {i.unit}{(showCost ? i.costPrice === null : showList && i.listPrice === null) ? t('（待定价）', ' (tbd)') : ''}</option>)}
                           </select>
                         ) : (l.itemLabel || '—')}
                       </td>
-                      <td style={{ ...td, textAlign: 'right' }} className="tnum">{l.unitCost === null ? '—' : l.unitCost.toLocaleString('en-US')}</td>
-                      <td style={{ ...td, textAlign: 'right' }} className="tnum">{l.unitList === null ? '—' : l.unitList.toLocaleString('en-US')}</td>
-                      <td style={{ ...td, textAlign: 'right' }} className="tnum">{l.unitCost === null ? '—' : money(l.unitCost * l.qty)}</td>
-                      <td style={{ ...td, textAlign: 'right' }} className="tnum">{l.unitList === null ? '—' : money(l.unitList * l.qty)}</td>
+                      {showCost && <td style={{ ...td, textAlign: 'right' }} className="tnum">{l.unitCost === null ? '—' : l.unitCost.toLocaleString('en-US')}</td>}
+                      {showList && <td style={{ ...td, textAlign: 'right' }} className="tnum">{l.unitList === null ? '—' : l.unitList.toLocaleString('en-US')}</td>}
+                      {showCost && <td style={{ ...td, textAlign: 'right' }} className="tnum">{l.unitCost === null ? '—' : money(l.unitCost * l.qty)}</td>}
+                      {showList && <td style={{ ...td, textAlign: 'right' }} className="tnum">{l.unitList === null ? '—' : money(l.unitList * l.qty)}</td>}
                       <td style={{ ...td, textAlign: 'right' }}>
                         {l.qtySource === '人工' && editable && (
                           <button style={{ fontSize: 12, color: 'var(--text2)', textDecoration: 'underline' }}
@@ -294,12 +304,14 @@ export default function AvCostView() {
                       </td>
                     </tr>
                   ))}
-                  <tr style={{ background: 'var(--hover-bg)', fontWeight: 700 }}>
-                    <td style={td} colSpan={6}>{t('单线合计', 'Line total')} · {t('毛利率', 'margin')} {pct(preview.totals.margin)}</td>
-                    <td style={{ ...td, textAlign: 'right' }} className="tnum">{money(preview.totals.cost)}</td>
-                    <td style={{ ...td, textAlign: 'right' }} className="tnum">{money(preview.totals.list)}</td>
-                    <td style={td} />
-                  </tr>
+                  {showList && (
+                    <tr style={{ background: 'var(--hover-bg)', fontWeight: 700 }}>
+                      <td style={td} colSpan={showCost ? 6 : 5}>{t('单线合计', 'Line total')}{showCost && <> · {t('毛利率', 'margin')} {pct(preview.totals.margin)}</>}</td>
+                      {showCost && <td style={{ ...td, textAlign: 'right' }} className="tnum">{money(preview.totals.cost)}</td>}
+                      <td style={{ ...td, textAlign: 'right' }} className="tnum">{money(preview.totals.list)}</td>
+                      <td style={td} />
+                    </tr>
+                  )}
                 </tbody>
               </table>
             </div>
@@ -316,9 +328,16 @@ export default function AvCostView() {
               {msg && <div style={{ fontSize: 12.5, color: 'var(--success)' }}>{msg}</div>}
               {editable ? (
                 <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
-                  <button className="btn-line" disabled={busy} onClick={() => submit(false)}>{t('保存草稿', 'Save draft')}</button>
-                  <button className="btn-navy" disabled={busy || blocks.length > 0} onClick={() => submit(true)}
-                    style={busy || blocks.length ? { opacity: 0.45, cursor: 'not-allowed' } : undefined}>{t('确认成本', 'Confirm cost')}</button>
+                  {!state.canConfirm && (
+                    <span style={{ fontSize: 12, color: 'var(--text2)', alignSelf: 'center', marginRight: 'auto' }}>
+                      {t('选好物料、数量后保存；确认成本由 PD / BD 进行。', 'Pick items and quantities, then save; PD / BD confirm the cost.')}
+                    </span>
+                  )}
+                  <button className="btn-line" disabled={busy} onClick={() => submit(false)}>{state.canConfirm ? t('保存草稿', 'Save draft') : t('保存', 'Save')}</button>
+                  {state.canConfirm && (
+                    <button className="btn-navy" disabled={busy || blocks.length > 0} onClick={() => submit(true)}
+                      style={busy || blocks.length ? { opacity: 0.45, cursor: 'not-allowed' } : undefined}>{t('确认成本', 'Confirm cost')}</button>
+                  )}
                 </div>
               ) : (
                 <div style={{ fontSize: 12, color: 'var(--text2)' }}>{t('成本核算由该项目的 PM 完成。', 'Costing is done by the project PM.')}</div>
@@ -333,17 +352,18 @@ export default function AvCostView() {
             <div style={{ overflowX: 'auto' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, minWidth: 760 }}>
                 <tbody>
-                  <tr>{[t('业务线', 'Line'), t('规则包', 'Rule pack'), t('成本', 'Cost'), t('售价', 'Sell'), t('毛利率', 'Margin'), t('状态', 'Status')].map((h) => <th key={h} style={th}>{h}</th>)}</tr>
+                  <tr>{[t('业务线', 'Line'), t('规则包', 'Rule pack'), ...(showCost ? [t('成本', 'Cost')] : []), ...(showList ? [t('售价', 'Sell')] : []),
+                    ...(showCost ? [t('毛利率', 'Margin')] : []), t('状态', 'Status')].map((h) => <th key={h} style={th}>{h}</th>)}</tr>
                   {state.summary.map((r) => {
                     const l = LINES.find((x) => x.line === r.line)!;
-                    const m = r.sheet && r.sheet.list > 0 ? (r.sheet.list - r.sheet.cost) / r.sheet.list : null;
+                    const m = r.sheet && r.sheet.list !== null && r.sheet.cost !== null && r.sheet.list > 0 ? (r.sheet.list - r.sheet.cost) / r.sheet.list : null;
                     return (
                       <tr key={r.line}>
                         <td style={{ ...td, fontWeight: 600 }}>{t(l.label, l.en)}</td>
                         <td style={{ ...td, color: 'var(--text2)' }}>{r.pack ?? t('未发布', 'none')}{l.draft ? t(' · 草案', ' · draft') : ''}</td>
-                        <td style={{ ...td, textAlign: 'right' }} className="tnum">{r.sheet ? money(r.sheet.cost) : '—'}</td>
-                        <td style={{ ...td, textAlign: 'right' }} className="tnum">{r.sheet ? money(r.sheet.list) : '—'}</td>
-                        <td style={{ ...td, textAlign: 'right' }} className="tnum">{pct(m)}</td>
+                        {showCost && <td style={{ ...td, textAlign: 'right' }} className="tnum">{r.sheet && r.sheet.cost !== null ? money(r.sheet.cost) : '—'}</td>}
+                        {showList && <td style={{ ...td, textAlign: 'right' }} className="tnum">{r.sheet && r.sheet.list !== null ? money(r.sheet.list) : '—'}</td>}
+                        {showCost && <td style={{ ...td, textAlign: 'right' }} className="tnum">{pct(m)}</td>}
                         <td style={td}>
                           {!r.sheet ? <span style={{ color: 'var(--text2)' }}>{r.pack ? t('未核算', 'not costed') : t('规则包未发布', 'no rule pack')}</span>
                             : r.outdated ? <span style={{ color: 'var(--warning)' }}>{t('需重算', 'Recalculate')}</span>
@@ -353,27 +373,27 @@ export default function AvCostView() {
                       </tr>
                     );
                   })}
-                  {state.dedup.length > 0 && (
+                  {state.dedup.length > 0 && showList && (
                     <tr style={{ color: 'var(--success)' }}>
                       <td style={td} colSpan={2}>{t('共用资源去重', 'Shared resources')}
                         <span style={{ color: 'var(--text2)', fontSize: 12 }}> · {XLINE_PACK.version}{XLINE_PACK.calibrated ? '' : t(' · 草案', ' · draft')}</span></td>
-                      <td style={{ ...td, textAlign: 'right' }} className="tnum">− {money(dedupTotals(state.dedup).cost)}</td>
+                      {showCost && <td style={{ ...td, textAlign: 'right' }} className="tnum">− {money(dedupTotals(state.dedup).cost)}</td>}
                       <td style={{ ...td, textAlign: 'right' }} className="tnum">− {money(dedupTotals(state.dedup).list)}</td>
-                      <td style={td} colSpan={2}>{state.dedup.map((d) => d.label).join(' / ')}</td>
+                      <td style={td} colSpan={showCost ? 2 : 1}>{state.dedup.map((d) => d.label).join(' / ')}</td>
                     </tr>
                   )}
-                  {(() => {
+                  {showList && (() => {
                     const rows = state.summary.filter((r) => r.sheet);
                     const saved = dedupTotals(state.dedup);
-                    const cost = rows.reduce((a, r) => a + r.sheet!.cost, 0) - saved.cost;
-                    const list = rows.reduce((a, r) => a + r.sheet!.list, 0) - saved.list;
+                    const cost = rows.reduce((a, r) => a + (r.sheet!.cost ?? 0), 0) - saved.cost;
+                    const list = rows.reduce((a, r) => a + (r.sheet!.list ?? 0), 0) - saved.list;
                     const allFinal = rows.length > 0 && rows.length === state.summary.length && rows.every((r) => r.sheet!.status === 'confirmed' && !r.outdated);
                     return (
                       <tr style={{ fontWeight: 700, borderTop: '2px solid var(--text)', background: 'var(--hover-bg)' }}>
                         <td style={td} colSpan={2}>{t('项目合计', 'Project total')}{!allFinal && rows.length > 0 && <span style={{ fontWeight: 400, color: 'var(--warning)', fontSize: 12 }}> · {t('含草稿，仅供参考', 'includes drafts')}</span>}</td>
-                        <td style={{ ...td, textAlign: 'right' }} className="tnum">{rows.length ? money(cost) : '—'}</td>
+                        {showCost && <td style={{ ...td, textAlign: 'right' }} className="tnum">{rows.length ? money(cost) : '—'}</td>}
                         <td style={{ ...td, textAlign: 'right' }} className="tnum">{rows.length ? money(list) : '—'}</td>
-                        <td style={{ ...td, textAlign: 'right' }} className="tnum">{pct(list > 0 ? (list - cost) / list : null)}</td>
+                        {showCost && <td style={{ ...td, textAlign: 'right' }} className="tnum">{pct(list > 0 ? (list - cost) / list : null)}</td>}
                         <td style={td} />
                       </tr>
                     );
@@ -391,7 +411,7 @@ export default function AvCostView() {
                       {d.items.map((i) => `${lineInfo(i.line).label}「${i.name}」`).join('、')} {t(`按 ${Math.round(d.rate * 100)}% 扣减`, `reduced ${Math.round(d.rate * 100)}%`)}
                       <div style={{ fontSize: 11.5, color: 'var(--text2)' }}>{XLINE_PACK.rules[d.tag].basis}</div>
                     </span>
-                    <span className="tnum" style={{ whiteSpace: 'nowrap' }}>− {money(d.list)}</span>
+                    {showList && <span className="tnum" style={{ whiteSpace: 'nowrap' }}>− {money(d.list)}</span>}
                   </div>
                 ))}
               </div>

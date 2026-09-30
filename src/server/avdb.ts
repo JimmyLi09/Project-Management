@@ -8,10 +8,17 @@
    reviewed_at and locks the drawing: a later change means a new upload, so the
    record of what was confirmed, by whom, never moves under anyone's feet. */
 
-import { getDb } from './db';
 import { DEMO_CASES, shouldSeedDemo } from './demo';
+import { appendAudit, getDb, listProjects } from './db';
+import DEMO_PRICE_SEED from '@/av/seed/led-price-2026-04.json';
+import { compute } from '@/av/core/compute';
+import { buildLedLines, displayCandidates, totals } from '@/av/core/pricing';
+import { GST_RATE, quoteNo, quoteTotals, toSection } from '@/av/core/quote';
+import { LATEST_LED_PACK } from '@/av/core/rulepack';
+import type { LedConfig } from '@/av/core/types';
+import { logZh } from '@/lib/logmsg';
 import type { DrawingElement, DrawingSummary, IngestRecord, IngestResult, StoredDrawing } from '@/av/core/handoff';
-import type { CostLine, PriceItem, SavedConfig, SummaryBase } from '@/av/core/pricing';
+import type { CostLine, LedSummary, PriceItem, SavedConfig, SummaryBase } from '@/av/core/pricing';
 import type { QuoteSection } from '@/av/core/quote';
 import type { Deduction } from '@/av/core/xline';
 import type { BusinessLine } from '@/av/core/types';
@@ -230,8 +237,74 @@ function db() {
        不了 —— 放一批示例屏。库里已经有屏就不动。内网服务器不开演示模式。 */
     else if (keyed.n === 0 && shouldSeedDemo()) seedDemoCases(d);
     ready = true;
+    /* 放在 ready 之后:下面用的是普通的存取函数,它们会调 db(),这时不能再进初始化 */
+    if (shouldSeedDemo()) seedDemoAv(d);
   }
   return d;
+}
+
+/* ===== 演示模式的 AV 成本单与报价(2026-09-30,字段级隔离验收用)=====
+   预览上要验「PD 看得到成本、Sales 只看售价、PM 连售价也看不到」,前提是有一份
+   成本单和一份报价。手工做一份要导价格表、存方案、补线材、确认 —— 太长了。
+   演示模式下在 Lentor Mansion(张三的项目)上预置:2026 LED 价格表 + 两条线材、
+   一份 LED 方案、一份已确认的成本单、一份 Sales 提交的报价(毛利低于下限,
+   审批人那边会标红)。价格库或方案里已有东西就不动。内网服务器不开演示模式。 */
+function seedDemoAv(d: ReturnType<typeof getDb>): void {
+  const has = (t: string) => (d.prepare(`SELECT count(*) AS n FROM ${t}`).get() as { n: number }).n > 0;
+  if (has('av_price_item') || has('av_config')) return;
+  const project = listProjects().find((p) => p.name === 'Lentor Mansion' && p.packages.some((k) => k.svc === 'led'));
+  if (!project) return;
+  try {
+    importPriceItems(DEMO_PRICE_SEED.items.map((r) => ({
+      line: 'led', category: r.category, categoryLabel: r.category_label, model: r.model, pitch: r.pitch,
+      moduleSize: r.module_size, cabinetSize: r.cabinet_size, unit: r.unit, costPrice: r.cost_price,
+      listPrice: r.list_price, currency: r.currency, source: r.source, validUntil: '', active: true,
+    })), '演示数据');
+    const cable = (model: string, cost: number, list: number) => createPriceItem({
+      line: 'led', category: 'cable', categoryLabel: '线材', model, pitch: '', moduleSize: '', cabinetSize: '', unit: '根',
+      costPrice: cost, listPrice: list, currency: 'SGD', source: '演示数据', validUntil: '', active: true,
+    }, '演示数据').id;
+    const pc = cable('20A power cable', 80, 120);
+    const dc = cable('Cat6 data cable', 40, 60);
+
+    const cfg = {
+      led_opening_w: 4480, led_opening_h: 2560, led_screen_type: 'in_fixed', led_pitch: 2, led_cabinet: [640, 480],
+      led_refresh: 3840, led_nits: 800, led_install: 'steel', led_maintain: 'front', led_redundancy: 'sender_1plus1',
+      led_ctrl_brand: 'novastar', led_power_cable: '3*2.5',
+    } as unknown as LedConfig;
+    const r = compute(cfg, LATEST_LED_PACK, {});
+    if (!r.layout || !r.wiring) return;
+    const t = r.trace;
+    const config = saveConfig<LedSummary>({
+      projectId: project.id, line: 'led', packVersion: LATEST_LED_PACK, drawingId: null, createdBy: '张三',
+      summary: {
+        sqm: t.sqm.value, pitch: cfg.led_pitch, screenType: cfg.led_screen_type, mods: t.mods.value,
+        cabinets: r.layout.cells.length, nPowerCable: t.n_power_cable.value, nDataCable: t.n_data_cable.value,
+        powerCableSpec: cfg.led_power_cable, exportable: r.exportable,
+        blocking: r.findings.filter((f) => f.severity === 'block').map((f) => f.code),
+      },
+    }, cfg);
+
+    const items = listPriceItems('led');
+    const display = displayCandidates(items, cfg.led_pitch)[0];
+    const lines = buildLedLines(config, { display: display?.id ?? null, power_cable: pc, data_cable: dc }, [], items);
+    const tt = totals(lines);
+    const sheet = saveCostSheet({ projectId: project.id, line: 'led', configId: config.id, lines, cost: tt.cost, list: tt.list }, '总监 PD', true);
+    const costP = { line: 'LED 显示屏', cost: tt.cost.toLocaleString('en-US'), list: tt.list.toLocaleString('en-US'),
+      margin: tt.margin === null ? '—' : (tt.margin * 100).toFixed(1) + '%' };
+
+    const sections = [toSection('led', sheet)];
+    const marginFloor = getMarginFloor();
+    const qt = quoteTotals(sections, 0, GST_RATE, []);
+    const quote = createQuote({ projectId: project.id, sections, dedup: [], discountPct: 0, gstRate: GST_RATE, marginFloor, reason: '' }, '销售 Sales');
+    const qP = { no: quoteNo(quote.id), lines: 'LED 显示屏', total: qt.total.toLocaleString('en-US'), shared: '',
+      margin: qt.margin === null ? '—' : (qt.margin * 100).toFixed(1) + '%' };
+    const now = Date.now();
+    appendAudit(project.id, [
+      { at: now, by: '总监 PD', text: logZh('av.cost', costP), k: 'av.cost', p: costP },
+      { at: now + 1, by: '销售 Sales', text: logZh('av.quoteSubmit', qP), k: 'av.quoteSubmit', p: qP },
+    ]);
+  } catch { /* 演示数据铺不上就算了,不能挡住页面 */ }
 }
 
 type ExtractionRow = {
