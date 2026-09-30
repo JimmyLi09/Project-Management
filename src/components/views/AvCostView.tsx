@@ -14,7 +14,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { lineInfo, LINES } from '@/av/core/lines';
 import {
-  buildElvLines, buildLedLines, buildPrjLines, buildPvLines, checkSheet, displayCandidates, elvChecks, itemLabel, lumensOf, pitchOf, prjChecks, pvChecks, totals,
+  buildElvLines, buildLedLines, buildPrjLines, buildPvLines, checkSheet, displayCandidates, elvChecks, itemLabel, ledChecks, lumensOf, pitchFits, pitchOf, prjChecks, pvChecks, totals,
   type CostCheck, type CostLine, type ElvPicks, type ElvSummary, type LedSummary, type ManualLine, type Picks, type PriceItem, type PrjPicks, type PrjSummary,
   type PvPicks, type PvSummary, type SavedConfig,
 } from '@/av/core/pricing';
@@ -96,6 +96,11 @@ export default function AvCostView() {
     const byKey = new Map((s.sheet?.lines ?? []).map((l) => [l.key, l]));
     const next: Record<string, number | null> = {};
     for (const k of AUTO_KEYS[line]) next[k] = byKey.get(k)?.itemId ?? null;
+    /* 05 改了点间距:上一版挑的显示屏条目对不上了,不沿用,重新建议 */
+    if (line === 'led' && next.display !== null && s.config) {
+      const it = s.items.find((i) => i.id === next.display);
+      if (it && pitchFits(it.pitch, (s.config.summary as LedSummary).pitch) === false) next.display = null;
+    }
     /* LED: suggest the display item when exactly one fits the pitch */
     if (line === 'led' && next.display === null && s.config) {
       const pitch = (s.config.summary as LedSummary).pitch;
@@ -125,6 +130,7 @@ export default function AvCostView() {
       extra = pvChecks(lines, cfg, state.items);
     } else {
       lines = buildLedLines(state.config as SavedConfig<LedSummary>, picks as unknown as Picks, manual, state.items);
+      extra = ledChecks(lines, state.config as SavedConfig<LedSummary>, state.items);
     }
     const all = checkSheet(lines, state.config, state.items, state.marginFloor ?? 0, today(), extra);
     return { lines, totals: totals(lines), checks: state.priceView === 'full' ? all : all.filter((c) => !PRICE_CHECKS.has(c.code)) };

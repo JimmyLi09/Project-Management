@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { lineInfo, projectLines } from '@/av/core/lines';
 import {
-  buildElvLines, buildLedLines, buildPrjLines, buildPvLines, checkSheet, elvChecks, prjChecks, pvChecks, totals,
+  buildElvLines, buildLedLines, buildPrjLines, buildPvLines, checkSheet, elvChecks, ledChecks, prjChecks, pvChecks, totals,
   type ElvPicks, type ElvSummary, type LedSummary, type ManualLine, type Picks, type PrjPicks, type PrjSummary, type PvPicks, type PvSummary, type SavedConfig,
 } from '@/av/core/pricing';
 import type { BusinessLine } from '@/av/core/types';
@@ -51,7 +51,8 @@ function price(line: BusinessLine, config: SavedConfig<AnySummary>, picks: Recor
     return { items, lines, extra: prjChecks(lines, cfg, items) };
   }
   const p: Picks = { display: num(picks.display), power_cable: num(picks.power_cable), data_cable: num(picks.data_cable), curve: num(picks.curve) };
-  return { items, lines: buildLedLines(config as SavedConfig<LedSummary>, p, manual, items), extra: [] };
+  const lines = buildLedLines(config as SavedConfig<LedSummary>, p, manual, items);
+  return { items, lines, extra: ledChecks(lines, config as SavedConfig<LedSummary>, items) };
 }
 
 export async function GET(req: NextRequest) {
@@ -75,7 +76,8 @@ export async function GET(req: NextRequest) {
   const extra = !current ? []
     : line === 'projector' ? prjChecks(sheet.lines, config as SavedConfig<PrjSummary>, items)
     : line === 'elv' ? elvChecks(sheet.lines, config as SavedConfig<ElvSummary>, items)
-    : line === 'pv' ? pvChecks(sheet.lines, config as SavedConfig<PvSummary>, items) : [];
+    : line === 'pv' ? pvChecks(sheet.lines, config as SavedConfig<PvSummary>, items)
+    : ledChecks(sheet.lines, config as SavedConfig<LedSummary>, items);
 
   /* one row per business line the project carries */
   const sheets = new Map(COSTED.map((l) => [l, latestCostSheet(projectId, l)]));
