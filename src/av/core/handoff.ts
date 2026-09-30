@@ -7,7 +7,7 @@
    `needs_review`, and the server re-checks the gate on submission. This module
    only tracks what the PM has confirmed. */
 
-import type { LedConfig, Method, Provenance } from './types.ts';
+import type { LedConfig, LedCurve, Maintain, Method, Provenance } from './types.ts';
 
 export type DrawingElement =
   | 'led_opening_w' | 'led_opening_h' | 'led_mount_h'
@@ -38,6 +38,18 @@ export interface IngestResult {
   extractions: IngestRecord[];
 }
 
+/* AV-015: what a reviewed image judgement carries into 05 beyond the six
+   elements. Only drawings created from a picture have it. */
+export interface DrawingExtra {
+  judgeId: number;
+  intent: 'site' | 'ref';
+  curve: LedCurve | null;
+  pitch: number | null;
+  maintain: Maintain | null;
+  pending: DrawingElement[];   // left empty in the picture flow: 05 says 「待补」
+  notes: string[];
+}
+
 /* A drawing as stored against a project (spec §10 drawing + extraction). */
 export interface StoredDrawing extends IngestResult {
   id: number;
@@ -46,6 +58,7 @@ export interface StoredDrawing extends IngestResult {
   uploaded_at: number;
   reviewed_by: string;
   reviewed_at: number;    // 0 until the A10 gate has passed; then the drawing is locked
+  extra?: DrawingExtra;
 }
 
 export interface DrawingSummary {
@@ -76,9 +89,14 @@ export interface Handoff {
   drawingId?: number;
   fields: Partial<Pick<LedConfig, DrawingElement>>;
   prov: Partial<Record<keyof LedConfig, Provenance>>;
+  /* AV-015: settled in the picture flow — the pitch chosen under LED-VD-01,
+     maintenance, the curve — and what 05 must flag as 「待补」 */
+  extra?: Partial<Pick<LedConfig, 'led_pitch' | 'led_maintain' | 'led_curve'>>;
+  pending?: DrawingElement[];
+  notes?: string[];
 }
 
-export function toHandoff(result: IngestResult, project?: string, packVersion?: string): Handoff {
+export function toHandoff(result: IngestResult & { extra?: DrawingExtra }, project?: string, packVersion?: string): Handoff {
   const fields: Handoff['fields'] = {};
   const prov: Handoff['prov'] = {};
   for (const r of result.extractions) {
@@ -97,5 +115,11 @@ export function toHandoff(result: IngestResult, project?: string, packVersion?: 
           note: r.prov.note ?? undefined,
         };
   }
-  return { drawing: result.drawing, project, packVersion, fields, prov };
+  const x = result.extra;
+  if (!x) return { drawing: result.drawing, project, packVersion, fields, prov };
+  const extra: Handoff['extra'] = {};
+  if (x.pitch !== null) extra.led_pitch = x.pitch;
+  if (x.maintain) extra.led_maintain = x.maintain;
+  if (x.curve) extra.led_curve = x.curve;
+  return { drawing: result.drawing, project, packVersion, fields, prov, extra, pending: x.pending, notes: x.notes };
 }

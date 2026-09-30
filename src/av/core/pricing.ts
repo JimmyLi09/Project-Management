@@ -49,6 +49,8 @@ export interface LedSummary extends SummaryBase {
   nPowerCable: number;       // F7, spare included
   nDataCable: number;        // F9, spare included
   powerCableSpec: string;
+  /* AV-015: a curved screen, tiled along its arc; 06 adds the curved build as a line to be quoted */
+  curve?: { shape: 'concave' | 'convex'; arc: number; width: number; given: 'arc' | 'chord' | 'unknown'; radius: number | null; rise: number | null };
 }
 
 export interface PrjSummary extends SummaryBase {
@@ -142,7 +144,10 @@ export function displayCandidates(items: PriceItem[], pitch: number): PriceItem[
 
 export interface ManualLine { key: string; name: string; qty: number; unit: string; itemId: number | null; shared?: SharedTag }
 const tagged = (l: CostLine, shared?: SharedTag): CostLine => (shared ? { ...l, shared } : l);
-export interface Picks { display: number | null; power_cable: number | null; data_cable: number | null }
+export interface Picks { display: number | null; power_cable: number | null; data_cable: number | null; curve?: number | null }
+
+/* AV-015 §4.4: the core has no curvature, so the curved build is a line of its own until it is quoted. */
+export const CURVE_LINE_NAME = '弧形箱体 / 柔性模组 / 弧形钢结构 —— 待询价';
 
 export function buildLedLines(cfg: SavedConfig, picks: Picks, manual: ManualLine[], items: PriceItem[]): CostLine[] {
   const byId = new Map(items.map((i) => [i.id, i]));
@@ -158,6 +163,7 @@ export function buildLedLines(cfg: SavedConfig, picks: Picks, manual: ManualLine
     priced('display', `LED 显示屏 P${s.pitch}`, round2(s.sqm), '㎡', 'F1', picks.display),
     priced('power_cable', `电源线 ${s.powerCableSpec}（含 1 备用）`, s.nPowerCable, '根', 'F7', picks.power_cable),
     priced('data_cable', '数据线（含 1 备用）', s.nDataCable, '根', 'F9', picks.data_cable),
+    ...(s.curve ? [priced('curve', CURVE_LINE_NAME, 1, '项', '待询价', picks.curve ?? null)] : []),
     ...manual.map((m) => tagged(priced(m.key, m.name, m.qty, m.unit, '人工', m.itemId), m.shared)),
   ];
 }
@@ -186,6 +192,10 @@ export function checkSheet(
   }
   for (const l of lines) {
     const it = l.itemId === null ? undefined : byId.get(l.itemId);
+    if (!it && l.key === 'curve') {
+      out.push({ code: 'COST-CURVE', severity: 'block', message: '弧形箱体 / 柔性模组 / 弧形钢结构待询价：询到价后在价格库建一条（单位「项」），再在这里选上。' });
+      continue;
+    }
     if (!it) { out.push({ code: 'COST-ITEM', severity: 'block', message: `「${l.name}」未选择价格库条目。` }); continue; }
     if (it.unit !== l.unit) out.push({ code: 'COST-UNIT', severity: 'block', message: `「${l.name}」按 ${l.unit} 计，所选条目按 ${it.unit} 计价。` });
     if (l.unitCost === null || l.unitList === null) out.push({ code: 'COST-PRICE', severity: 'block', message: `「${it.model || it.pitch || it.categoryLabel}」缺少成本价或售价，需在价格库补全。` });

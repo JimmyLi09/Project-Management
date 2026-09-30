@@ -16,6 +16,9 @@ const DATA_DIR =
 
 let db: Database.Database | null = null;
 
+/* Where uploads that live beside the database go (AV-015 judged images). */
+export const dataDir = () => DATA_DIR;
+
 export function getDb(): Database.Database {
   if (db) return db;
   fs.mkdirSync(DATA_DIR, { recursive: true });

@@ -74,8 +74,9 @@ docker compose up -d --build
 
 - 一个容器:Next.js 应用 + Python 制图服务(图纸解析、DXF 出图)。数据库、每日备份与图纸样本库都在卷 `audax-data`(容器内 `/app/data`),**这个卷需纳入服务器备份**。
 - 升级:`git pull && docker compose up -d --build`,数据不受影响。
-- 可选环境变量(写在同目录的 `.env` 文件里):`SESSION_SECRET` 会话密钥(留空则自动生成并保存在库里);`ANTHROPIC_API_KEY` 用于 C 级图纸的视觉识别。
-- C 级扫描件的 OCR 体积较大,默认不装;需要时 `docker compose build --build-arg WITH_OCR=1` 后再 `up -d`。
+- 可选环境变量(写在同目录的 `.env` 文件里):`SESSION_SECRET` 会话密钥(留空则自动生成并保存在库里)。
+- 图片 / 扫描件的智能判读(AV-015)用宿主机上的 Ollama 本机视觉模型,免费、图片不出内网;容器里在「规则设置 › 识别服务」把服务地址填成宿主机的内网 IP。没装时自动改为手填。
+- 文字识别 OCR 是可选兜底,体积较大,默认不装;需要时 `docker compose build --build-arg WITH_OCR=1` 后再 `up -d`(装在独立的 `.venv-ocr`)。
 - 每日备份另存到 NAS:在 `docker-compose.yml` 里把 NAS 目录挂进容器,并设置 `AUDAX_BACKUP_DIR` 为容器内路径。
 
 ## AV 方案成本平台
@@ -84,7 +85,8 @@ docker compose up -d --build
 
 ```
 src/av/core/          # TypeScript 确定性计算内核,无框架依赖(各业务线规则包、排布、线路、校验、出图、成本、报价、跨线去重)
-services/drawing/     # Python 制图服务:DXF 生成(ezdxf)、图纸分级与解析(DXF / 矢量 PDF / OCR / 视觉)
+services/drawing/     # Python 制图服务:DXF 生成(ezdxf)、图纸分级与解析(DXF / 矢量 PDF)、扫描件转图、OCR 兜底
+                      # 图片智能判读(AV-015):src/server/avvision.ts 调本机 Ollama,src/av/core/imagejudge.ts 做确定性后处理
 src/components/views/ # 各步骤界面(侧栏「AV 立项询价」到「AV 报价审批」)
 ```
 

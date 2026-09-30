@@ -43,6 +43,21 @@ export interface LedConfig {
      an override the profile's values apply. */
   led_cab_lib?: Size[];
   led_mod?: Size;
+
+  /* AV-015: a curved screen read from a picture. The core has no curvature, so
+     05 tiles along the arc length (led_opening_w) and 06 lists the curved
+     cabinets / flexible modules / curved steel as a line to be quoted. Set only
+     from a reviewed image judgement, never typed. */
+  led_curve?: LedCurve;
+}
+
+export interface LedCurve {
+  shape: 'concave' | 'convex';
+  given: 'arc' | 'chord' | 'unknown';   // what the annotated width measured
+  width: number;                         // as annotated, mm
+  arc: number;                           // tiled length, mm
+  radius: number | null;
+  rise: number | null;
 }
 
 /* ===== §9 Provenance — every computed value carries all three labels ===== */

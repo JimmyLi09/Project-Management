@@ -16,9 +16,11 @@ import {
 import { canReviewDrawing, canUploadDrawing } from '@/lib/permissions';
 import { fmtDate } from '@/lib/project';
 import { useLang } from '@/lib/i18n';
+import type { JudgeSummary, JudgeView } from '@/server/avjudge';
 import { useStore } from '../store';
 import { Icon } from '../ui';
 import AvSteps from './AvSteps';
+import ImageJudgePanel from './ImageJudgePanel';
 
 const ELEMENT_LABEL: Record<DrawingElement, [string, string]> = {
   led_opening_w: ['屏体开口宽', 'Opening width'],
@@ -32,7 +34,7 @@ const ELEMENT_LABEL: Record<DrawingElement, [string, string]> = {
 const GRADE: Record<StoredDrawing['grade'], { zh: string; en: string; fg: string; bg: string }> = {
   A: { zh: 'A 级 · DXF · 规则读取', en: 'A · DXF · rule-based', fg: 'var(--success)', bg: 'var(--success-bg, #E4EFE9)' },
   B: { zh: 'B 级 · 矢量 PDF · 按比例尺量取', en: 'B · vector PDF · scaled', fg: 'var(--navy700)', bg: 'var(--hover-bg)' },
-  C: { zh: 'C 级 · 扫描件 · 仅辅助识别', en: 'C · scan · assist only', fg: 'var(--warning)', bg: 'var(--warning-bg, #FDF7F1)' },
+  C: { zh: 'C 级 · 图片 / 扫描件 · 智能判读', en: 'C · picture / scan · recognition', fg: 'var(--warning)', bg: 'var(--warning-bg, #FDF7F1)' },
 };
 
 const METHOD_LABEL: Record<string, [string, string]> = {
@@ -59,6 +61,9 @@ export default function LedIngestView() {
   const [boundPack, setBoundPack] = useState<string | null>(null);
   /* In-progress corrections, as typed; saved with the record on 确认. */
   const [draft, setDraft] = useState<Partial<Record<DrawingElement, string>>>({});
+  /* AV-015: pictures and scans are judged, not parsed */
+  const [judge, setJudge] = useState<JudgeView | null>(null);
+  const [judges, setJudges] = useState<JudgeSummary[]>([]);
 
   /* Spec 01: LED drawings belong to a project carrying an LED service package. */
   const ledProjects = useMemo(
@@ -72,9 +77,15 @@ export default function LedIngestView() {
   const isPdf = !!file && file.name.toLowerCase().endsWith('.pdf');
 
   const refreshList = useCallback(async () => {
-    if (!ledProjectId) { setList([]); return; }
+    if (!ledProjectId) { setList([]); setJudges([]); return; }
     try {
-      setList((await call<{ drawings: DrawingSummary[] }>(`/api/av/drawings?project=${encodeURIComponent(ledProjectId)}`)).drawings);
+      const q = encodeURIComponent(ledProjectId);
+      const [d, j] = await Promise.all([
+        call<{ drawings: DrawingSummary[] }>(`/api/av/drawings?project=${q}`),
+        call<{ judges: JudgeSummary[] }>(`/api/av/judge?project=${q}`).catch(() => ({ judges: [] as JudgeSummary[] })),
+      ]);
+      setList(d.drawings);
+      setJudges(j.judges);
     } catch (e) { setError((e as Error).message); }
   }, [ledProjectId]);
 
@@ -91,14 +102,26 @@ export default function LedIngestView() {
   function pickProject(id: string) {
     setLedProjectId(id);
     if (ledIngest && ledIngest.project_id !== id) setLedIngest(null);
+    if (judge && judge.projectId !== id) setJudge(null);
     setError('');
   }
 
   async function open(id: number) {
     setError('');
-    try { setDraft({}); setLedIngest(await call<StoredDrawing>(`/api/av/drawings/${id}`)); }
+    try { setDraft({}); setJudge(null); setLedIngest(await call<StoredDrawing>(`/api/av/drawings/${id}`)); }
     catch (e) { setError((e as Error).message); }
   }
+
+  async function openJudge(id: number) {
+    setError('');
+    try { setLedIngest(null); setJudge((await call<{ judge: JudgeView }>(`/api/av/judge/${id}`)).judge); }
+    catch (e) { setError((e as Error).message); }
+  }
+
+  const updateJudge = useCallback((j: JudgeView) => {
+    setJudge(j);
+    setJudges((cur) => cur.map((x) => (x.id === j.id ? { ...x, status: j.status, engine: j.engine, drawingId: j.drawingId } : x)));
+  }, []);
 
   async function upload() {
     if (!file || !project) return;
@@ -110,7 +133,9 @@ export default function LedIngestView() {
     if (isPdf && scale.trim()) form.append('scale', scale.trim());
     try {
       setDraft({});
-      setLedIngest(await call<StoredDrawing>('/api/av/ingest', { method: 'POST', body: form }));
+      const res = await call<StoredDrawing | { judge: JudgeView }>('/api/av/ingest', { method: 'POST', body: form });
+      if ('judge' in res) { setLedIngest(null); setJudge(res.judge); }
+      else { setJudge(null); setLedIngest(res); }
       refreshList();
     } catch (e) { setError((e as Error).message); }
     setBusy(false);
@@ -160,6 +185,9 @@ export default function LedIngestView() {
   }
 
   const pending = ledIngest ? ledIngest.extractions.filter(isPending) : [];
+  /* a drawing made from a picture shows as its judgement row, not twice */
+  const judged = new Set(judges.map((j) => j.drawingId).filter(Boolean));
+  const drawingRows = list.filter((d) => !judged.has(d.id));
 
   return (
     <>
@@ -196,12 +224,29 @@ export default function LedIngestView() {
           )}
         </div>
         {project && (
-          list.length ? (
+          drawingRows.length || judges.length ? (
             <div style={{ overflowX: 'auto' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, minWidth: 720 }}>
                 <tbody>
                   <tr>{[t('图纸', 'Drawing'), t('等级', 'Grade'), t('上传', 'Uploaded'), t('校核', 'Review'), ''].map((h, i) => <th key={i} style={th}>{h}</th>)}</tr>
-                  {list.map((d) => (
+                  {judges.map((j) => (
+                    <tr key={`j${j.id}`} style={{ background: judge?.id === j.id ? 'var(--hover-bg)' : undefined }} data-testid={`judge-list-${j.id}`}>
+                      <td style={td}>{j.fileName}</td>
+                      <td style={td}><span style={{ ...chip, background: GRADE.C.bg, color: GRADE.C.fg }}>{t('图', 'Pic')}</span></td>
+                      <td style={{ ...td, color: 'var(--text2)' }}>{j.createdBy} · {fmtDate(new Date(j.createdAt))}</td>
+                      <td style={td}>
+                        {j.drawingId
+                          ? <span style={{ color: 'var(--success)' }}>{t('已确认，已带入 05', 'Confirmed into 05')}</span>
+                          : j.status === 'running'
+                            ? <span style={{ color: 'var(--navy700)' }}>{t('识别中…', 'Recognising…')}</span>
+                            : <span style={{ color: 'var(--warning)' }}>{j.engine === 'vision' ? t('待确认', 'To confirm') : t('待手填', 'To fill in')}</span>}
+                      </td>
+                      <td style={{ ...td, textAlign: 'right', whiteSpace: 'nowrap' }}>
+                        <button className="btn-line" onClick={() => openJudge(j.id)}>{j.drawingId ? t('查看', 'View') : t('打开', 'Open')}</button>
+                      </td>
+                    </tr>
+                  ))}
+                  {drawingRows.map((d) => (
                     <tr key={d.id} style={{ background: ledIngest?.id === d.id ? 'var(--hover-bg)' : undefined }}>
                       <td style={td}>{d.fileName}</td>
                       <td style={td}><span style={{ ...chip, background: GRADE[d.grade].bg, color: GRADE[d.grade].fg }}>{d.grade}</span></td>
@@ -230,14 +275,14 @@ export default function LedIngestView() {
         <div className="panel" style={{ padding: 0 }}>
           <div className="panel-head">
             <span className="panel-title">{t('02 · 图纸接入与分级', '02 · Drawing intake')}</span>
-            <span style={{ fontSize: 11, color: 'var(--text2)' }}>DXF · PDF · PNG / JPG / TIF</span>
+            <span style={{ fontSize: 11, color: 'var(--text2)' }}>DXF · PDF · PNG / JPG / TIF · {t('照片 · 截图', 'photos · screenshots')}</span>
           </div>
           <div style={{ padding: '16px 18px', display: 'grid', gap: 14 }}>
             {mayUpload ? (
               <div style={{ display: 'flex', gap: 12, alignItems: 'flex-end', flexWrap: 'wrap' }}>
                 <div className="field" style={{ marginBottom: 0, flex: '1 1 320px' }}>
                   <label htmlFor="led-file">{t('图纸文件', 'Drawing file')}</label>
-                  <input id="led-file" type="file" accept=".dxf,.pdf,.png,.jpg,.jpeg,.tif,.tiff"
+                  <input id="led-file" type="file" accept=".dxf,.pdf,.png,.jpg,.jpeg,.webp,.bmp,.tif,.tiff"
                     onChange={(e) => { setFile(e.target.files?.[0] ?? null); setError(''); }} />
                 </div>
                 {isPdf && (
@@ -247,7 +292,7 @@ export default function LedIngestView() {
                   </div>
                 )}
                 <button className="btn-navy" disabled={!file || busy} onClick={upload} style={dim(!file || busy)}>
-                  {busy ? t('解析中…', 'Extracting…') : t('上传并解析', 'Upload & extract')}
+                  {busy ? t('上传中…', 'Uploading…') : t('上传并解析', 'Upload & extract')}
                 </button>
               </div>
             ) : (
@@ -259,7 +304,7 @@ export default function LedIngestView() {
                   <strong>{lang === 'zh' ? GRADE[g].zh : GRADE[g].en}</strong><br />
                   {g === 'A' && t('读取实体坐标与图层，不需模型。', 'Entity coordinates and layers; no model.')}
                   {g === 'B' && t('须先填写图框比例，比例尺不做推断。', 'Enter the drawing scale first; never inferred.')}
-                  {g === 'C' && t('OCR 结果仅作参考，全部要素须人工确认（§13.2）。', 'OCR is advisory; every element needs confirmation.')}
+                  {g === 'C' && t('照片、截图、效果图、扫描件：本机视觉模型判断「这是什么、缺什么」，全部要素须人工确认。', 'Photos, screenshots, renders, scans: the local vision model reads them; every element needs confirmation.')}
                 </div>
               ))}
             </div>
@@ -269,6 +314,16 @@ export default function LedIngestView() {
 
       {error && (
         <div style={{ fontSize: 12.5, padding: '9px 12px', borderRadius: 6, background: 'var(--danger-bg, #FDF0EC)', color: 'var(--danger)' }}>{error}</div>
+      )}
+
+      {/* ── AV-015 图片智能判读 ─────────────────────────────── */}
+      {judge && project && judge.projectId === project.id && (
+        <ImageJudgePanel judge={judge} setJudge={updateJudge} mayReview={mayReview}
+          onHandoff={(d, pack) => {
+            refreshList();
+            setLedHandoff({ ...toHandoff(d, project.name, pack ?? undefined), projectId: d.project_id, drawingId: d.id });
+            go('ledstudio');
+          }} />
       )}
 
       {/* ── 03 解析提取 + 04 人工校核 ────────────────────────── */}

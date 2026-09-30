@@ -2,6 +2,8 @@
 
     python -m avdrawing.ingest.cli ingest <drawing> [--scale 50] [--threshold 0.85]
     python -m avdrawing.ingest.cli writeback <store.jsonl>      # reviewed ingest JSON on stdin; re-checks the A10 gate, writes samples only if it passes
+    python -m avdrawing.ingest.cli grade <drawing>              # {"grade": "A"|"B"|"C"} — AV-015 sends C to image judgement
+    python -m avdrawing.ingest.cli raster <pdf> <outdir> [--max-pages 5]   # scanned PDF -> one PNG per page
 
 The Next.js server spawns this per request, so the platform deploys as one app
 on the intranet server (§14) without a second long-running service. Failures
@@ -34,6 +36,15 @@ def main(argv: list[str]) -> int:
     p_write = sub.add_parser("writeback")
     p_write.add_argument("store", type=Path)
 
+    p_grade = sub.add_parser("grade")
+    p_grade.add_argument("drawing", type=Path)
+
+    p_raster = sub.add_parser("raster")
+    p_raster.add_argument("pdf", type=Path)
+    p_raster.add_argument("outdir", type=Path)
+    p_raster.add_argument("--max-pages", type=int, default=5)
+    p_raster.add_argument("--max-edge", type=int, default=1600)
+
     args = parser.parse_args(argv)
     try:
         if args.cmd == "ingest":
@@ -45,6 +56,10 @@ def main(argv: list[str]) -> int:
                 ocr_backend=ocr_backend,
             )
             _emit(result.to_dict(args.threshold))
+        elif args.cmd == "grade":
+            _emit({"grade": grade(args.drawing)})
+        elif args.cmd == "raster":
+            _emit(raster(args.pdf, args.outdir, args.max_pages, args.max_edge))
         else:
             data = json.load(sys.stdin)
             reviewed = DrawingIngest.from_dict(data)
@@ -60,6 +75,27 @@ def main(argv: list[str]) -> int:
         _emit({"error": str(exc)})
         return 2
     return 0
+
+
+def raster(pdf: Path, outdir: Path, max_pages: int, max_edge: int) -> dict:
+    """AV-015 §4.1 — a scanned PDF, page by page, as PNGs no larger than
+    `max_edge` on the long side (what the vision model is shown)."""
+    import pymupdf
+
+    outdir.mkdir(parents=True, exist_ok=True)
+    pages: list[str] = []
+    with pymupdf.open(pdf) as doc:
+        total = doc.page_count
+        for i, page in enumerate(doc):
+            if i >= max_pages:
+                break
+            long_pt = max(page.rect.width, page.rect.height) or 1
+            zoom = min(max_edge / long_pt, 200 / 72)   # at most 200 dpi
+            pix = page.get_pixmap(matrix=pymupdf.Matrix(zoom, zoom), alpha=False)
+            out = outdir / f"p{i + 1}.png"
+            pix.save(out)
+            pages.append(str(out))
+    return {"total": total, "pages": pages}
 
 
 def _emit(payload: dict) -> None:

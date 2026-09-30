@@ -52,7 +52,16 @@ from avdrawing.ingest.pdf_reader import Calibration
 
 pipeline.ingest(Path("01_平面图.dxf"))                                   # A 级
 pipeline.ingest(Path("02_立面图.pdf"), calibration=Calibration.from_scale(50))  # B 级
-pipeline.ingest(Path("03_扫描件.pdf"), ocr_backend=PaddleOcrBackend())   # C 级
+pipeline.ingest(Path("03_扫描件.pdf"), ocr_backend=PaddleOcrBackend())   # C 级（仅离线用；平台里见下）
+```
+
+平台里，图片和扫描件 PDF 不走这里，而是 AV-015 的「图片智能判读」：本机视觉模型
+（Ollama，服务端 `src/server/avvision.ts` 直接 HTTP 调用）读图，确定性后处理在
+`src/av/core/imagejudge.ts`。制图服务只负责两件事：
+
+```bash
+.venv/bin/python -m avdrawing.ingest.cli grade  X.pdf                       # A / B / C —— C 级 PDF 进图片判读
+.venv/bin/python -m avdrawing.ingest.cli raster X.pdf outdir --max-pages 5  # 扫描件逐页转 PNG（长边 ≤ 1600）
 ```
 
 产出六条带 provenance 三标签的要素记录。B 级必须先标定比例尺、C 级必须提供 OCR 引擎，
@@ -60,14 +69,21 @@ pipeline.ingest(Path("03_扫描件.pdf"), ocr_backend=PaddleOcrBackend())   # C 
 
 扫描件按 §13.2 不可作为算量依据：置信度上限压到 0.75，且必须逐项人工确认才放行到 05。
 
-### 可选依赖
+### 可选依赖：文字识别 OCR（AV-015 的第二道兜底）
+
+PaddleOCR 放在**独立的虚拟环境** `.venv-ocr`：`paddleocr 2.9.1` 要 `numpy<2`，和本服务的
+numpy 2.x 冲突，装在一起会弄坏其中一边。
 
 ```bash
-.venv/bin/pip install -r requirements-ocr.txt   # C 级 OCR，体积大，首次运行下载权重
+python3.11 -m venv .venv-ocr
+.venv-ocr/bin/pip install -r requirements-ocr.txt          # 约 1.6 GB
+.venv-ocr/bin/python -m avdrawing.ingest.ocrcli some.png   # {"boxes": [...]}；首次运行下载权重
 ```
 
-图例视觉识别需要 `ANTHROPIC_API_KEY`（或 `ant auth login` 的配置），模型按 §14 用
-Claude Sonnet。
+`scripts/update.bat --with-ocr`（或 `update.sh --with-ocr`、Docker 的 `WITH_OCR=1`）会做这几步。
+没装时 `ocrcli` 回 `{"code": "ocr_missing"}`，平台直接给手填表单。
+
+不接任何收费视觉 API（AV-015 §2）：原来的 Claude 图例识别模块已删除。
 
 ## 历史案例（统计表读取）
 

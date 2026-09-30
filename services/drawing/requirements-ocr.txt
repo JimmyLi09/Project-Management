@@ -1,4 +1,9 @@
-# C 级扫描件 OCR（可选）。体积较大且首次运行会下载 PP-OCRv4 权重，
-# 只有需要处理扫描件时才安装。
+# Optional text recognition (OCR) fallback for AV-015 image judgement.
+# Installed into its OWN virtual environment (.venv-ocr), never into .venv:
+# paddleocr 2.9.1 needs numpy<2 while the drawing service runs on numpy 2.x,
+# so sharing one environment breaks one or the other.
+# scripts/update.bat --with-ocr (or WITH_OCR=1 for Docker) sets it up.
+# Comments must stay ASCII: pip reads this file in the Windows code page.
 paddlepaddle==3.3.1
 paddleocr==2.9.1
+numpy<2

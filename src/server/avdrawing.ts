@@ -21,9 +21,10 @@ export class DrawingServiceError extends Error {}
 
 function runPython(args: string[], stdin?: string): Promise<{ code: number | null; out: string; err: string }> {
   if (!existsSync(PYTHON)) {
-    return Promise.reject(new DrawingServiceError(
-      `制图服务未安装（找不到 ${PYTHON}）。装好 Python 3.11 后重新运行 scripts/update，或按 services/drawing/README.md 建立虚拟环境，或设置 AV_PYTHON。`,
-    ));
+    /* AV-015 §5: no install steps on a colleague's screen — they go to the
+       server log (and the runbook); the screen says what to do in plain words. */
+    console.warn(`[制图服务] 找不到 ${PYTHON}：装好 Python 3.11 后重新运行 scripts/update，或设置 AV_PYTHON。`);
+    return Promise.reject(new DrawingServiceError('制图服务暂不可用，请联系管理员。'));
   }
   return new Promise((resolve, reject) => {
     // UTF-8 both ways: a Windows pipe otherwise defaults to the ANSI code page and

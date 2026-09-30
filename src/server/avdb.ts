@@ -17,7 +17,7 @@ import { GST_RATE, quoteNo, quoteTotals, toSection } from '@/av/core/quote';
 import { LATEST_LED_PACK } from '@/av/core/rulepack';
 import type { LedConfig } from '@/av/core/types';
 import { logZh } from '@/lib/logmsg';
-import type { DrawingElement, DrawingSummary, IngestRecord, IngestResult, StoredDrawing } from '@/av/core/handoff';
+import type { DrawingElement, DrawingExtra, DrawingSummary, IngestRecord, IngestResult, StoredDrawing } from '@/av/core/handoff';
 import type { CostLine, LedSummary, PriceItem, SavedConfig, SummaryBase } from '@/av/core/pricing';
 import type { QuoteSection } from '@/av/core/quote';
 import type { Deduction } from '@/av/core/xline';
@@ -179,6 +179,10 @@ function db() {
     /* quotations saved before cross-line savings existed */
     const qcols = (d.prepare('PRAGMA table_info(av_quote)').all() as { name: string }[]).map((c) => c.name);
     if (!qcols.includes('dedup')) d.exec("ALTER TABLE av_quote ADD COLUMN dedup TEXT NOT NULL DEFAULT '[]'");
+    /* AV-015: what an image judgement carries into 05 beyond the six elements
+       (curve, chosen pitch, maintenance, items left to fill) — JSON, '' for drawings */
+    const dcols = (d.prepare('PRAGMA table_info(av_drawing)').all() as { name: string }[]).map((c) => c.name);
+    if (!dcols.includes('extra')) d.exec("ALTER TABLE av_drawing ADD COLUMN extra TEXT NOT NULL DEFAULT ''");
 
     /* ===== AV-014 · 人工修改与跨导入的身份 =====
        av_case 仍然只存统计表导入的原始值 —— 导入逻辑不变,人看到的值是
@@ -315,17 +319,18 @@ type ExtractionRow = {
 type DrawingRow = {
   id: number; project_id: string; file_name: string; grade: string; scale_mm_per_unit: number;
   threshold: number; notes: string; uploaded_by: string; uploaded_at: number; reviewed_by: string; reviewed_at: number;
+  extra: string;
 };
 
-export function insertDrawing(projectId: string, result: IngestResult, by: string): number {
+export function insertDrawing(projectId: string, result: IngestResult, by: string, extra?: DrawingExtra): number {
   const d = db();
   const now = Date.now();
   const tx = d.transaction(() => {
     const { lastInsertRowid } = d.prepare(`
-      INSERT INTO av_drawing (project_id, file_name, grade, scale_mm_per_unit, threshold, notes, uploaded_by, uploaded_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
+      INSERT INTO av_drawing (project_id, file_name, grade, scale_mm_per_unit, threshold, notes, uploaded_by, uploaded_at, extra)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
       .run(projectId, result.drawing, result.grade, result.scale_mm_per_unit, result.threshold,
-        JSON.stringify(result.notes), by, now);
+        JSON.stringify(result.notes), by, now, extra ? JSON.stringify(extra) : '');
     const ins = d.prepare(`
       INSERT INTO av_extraction (drawing_id, element, value, unit, source, method, confidence, rule, note, needs_review)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
@@ -372,6 +377,7 @@ export function getDrawing(id: number): StoredDrawing | null {
     uploaded_at: row.uploaded_at,
     reviewed_by: row.reviewed_by,
     reviewed_at: row.reviewed_at,
+    ...(row.extra ? { extra: JSON.parse(row.extra) as DrawingExtra } : {}),
   };
 }
 

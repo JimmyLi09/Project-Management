@@ -58,6 +58,21 @@ const svcTerm = (k: string, lang: Lang) => {
 const enumTerm = (map: Record<string, [string, string]>, v: string, lang: Lang) =>
   (map[v] ? map[v][lang === 'zh' ? 0 : 1] : v);
 
+const JUDGE_KIND: Record<string, [string, string]> = {
+  drawing: ['施工图', 'drawing'], drawing_screenshot: ['施工图截图', 'drawing screenshot'], site_photo: ['现场照片', 'site photo'],
+  render: ['效果图', 'render'], screenshot: ['其他截图', 'screenshot'], unrelated: ['与屏无关', 'unrelated'], none: ['未判断', 'not judged'],
+};
+const JUDGE_ENGINE: Record<string, [string, string]> = {
+  vision: ['本机视觉模型', 'local vision model'], ocr: ['文字识别（本机视觉模型不可用）', 'OCR (local model unavailable)'],
+  manual: ['手填（本机识别服务不可用）', 'manual (local recognition unavailable)'], running: ['本机视觉模型，识别中', 'local vision model, running'],
+};
+const JUDGE_ITEM: Record<string, [string, string]> = {
+  led_opening_w: ['屏宽', 'width'], led_opening_h: ['屏高', 'height'], led_mount_h: ['离地高度', 'mounting height'],
+  led_view_min: ['最近观看距离', 'min viewing distance'], led_ctrl_dist: ['控制室距离', 'control room distance'],
+  led_pwr_dist: ['配电距离', 'power distance'], shape: ['形状', 'shape'], mount: ['安装方式', 'mounting'],
+  pitch_hint: ['图上点间距', 'pitch on picture'], intent: ['用途', 'purpose'],
+};
+
 /* 槽位名 → 怎么把值翻成当前语言。不在表里的槽位原样填。 */
 const TRANSLATED: Record<string, (v: string, lang: Lang) => string> = {
   svc: svcTerm,
@@ -74,6 +89,13 @@ const TRANSLATED: Record<string, (v: string, lang: Lang) => string> = {
   cf: caseFieldTerm,
   fv: caseStatusTerm,
   tv: caseStatusTerm,
+  /* AV-015 图片判读:图片类型、识别方式、人改了哪几项(元素代码:原值:新值;…) */
+  jk: (v, l) => enumTerm(JUDGE_KIND, v, l),
+  eng: (v, l) => enumTerm(JUDGE_ENGINE, v, l),
+  jchg: (v, l) => v.split(';').filter(Boolean).map((c) => {
+    const [k, a, b] = c.split(':');
+    return `${enumTerm(JUDGE_ITEM, k, l)} ${a || '—'}→${b || '—'}`;
+  }).join(l === 'zh' ? '；' : '; '),
 };
 
 /* ---- 词条表 ---- */
@@ -176,6 +198,11 @@ export const LOG_MSG: Record<string, [string, string]> = {
   'av.inquiry': ['立项询价:{lines}', 'AV inquiry opened: {lines}'],
   'av.ingest': ['LED 图纸上传并解析:{file}({grade} 级)', 'LED drawing uploaded and parsed: {file} (grade {grade})'],
   'av.review': ['LED 图纸校核完成:{file}(修正 {fixed} 项,已锁定)', 'LED drawing review done: {file} ({fixed} corrections, locked)'],
+  /* AV-015 图片智能判读 */
+  'av.judgeUpload': ['上传图片做智能判读:{file}', 'Picture uploaded for recognition: {file}'],
+  'av.judgeResult': ['图片判读:{file} · {jk} · 宽 {w} × 高 {h} mm · {eng}', 'Picture read: {file} · {jk} · {w} × {h} mm · {eng}'],
+  'av.judgeConfirm': ['图片判读已确认并带入 05:{file} · 宽 {w} × 高 {h} mm · P{pitch}(人工修改:{jchg})',
+    'Picture confirmed into 05: {file} · {w} × {h} mm · P{pitch} (changed by hand: {jchg})'],
   'av.cfgLed': ['保存 LED 方案:P{pitch} · {sqm} ㎡ · 箱体 {cabinets} 只(规则包 {pack})',
     'LED design saved: P{pitch} · {sqm} m² · {cabinets} cabinets (pack {pack})'],
   'av.cfgPrj': ['保存投影方案:{size} mm · {n} 台 × {lm} lm(规则包 {pack})',
