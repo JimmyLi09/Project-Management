@@ -49,6 +49,7 @@ const INTENTS: [Intent, [string, string], [string, string]][] = [
 
 /* Plain words for why the local model did not read this picture (§5). */
 function fallbackText(j: JudgeView, t: Tx): string {
+  if (j.fallback === 'by_hand') return t('解析失败的留档，按你的选择改为手填：对照原件填好尺寸，确认后同样带入 05。', 'Failed upload, switched to manual entry as you chose: fill in the sizes from the original, then confirm into 05.');
   if (j.fallback === 'bad_image') return t('这种图片格式读不了，已改为手填；可以另存为 JPG / PNG 再上传。', 'This picture format cannot be read; switched to manual entry. Save it as JPG / PNG and upload again.');
   if (j.fallback === 'vision_off') return t('本机视觉模型已被管理员关闭，已改为手填。', 'The local vision model is switched off by the admin; switched to manual entry.');
   const via = j.engine === 'ocr' ? t('已退回文字识别，只读出了图上的文字', 'fell back to text recognition (numbers only)') : t('已改为手填', 'switched to manual entry');

@@ -199,6 +199,16 @@ export const LOG_MSG: Record<string, [string, string]> = {
   'av.ingest': ['LED 图纸上传并解析:{file}({grade} 级)', 'LED drawing uploaded and parsed: {file} (grade {grade})'],
   'av.review': ['LED 图纸校核完成:{file}(修正 {fixed} 项,已锁定)', 'LED drawing review done: {file} ({fixed} corrections, locked)'],
   'av.uploadFail': ['图纸已留档,解析失败:{file}({err})', 'Drawing archived, parsing failed: {file} ({err})'],
+  /* AV-016:草稿自动保存(同一人同一页 10 分钟内合并成一条)、01 编辑自动保存、留档删除 / 改手填 */
+  'av.draft': ['05 {svc} 方案草稿自动保存', '05 {svc} design draft saved automatically'],
+  'av.inquiryEdit': ['01 立项信息自动保存:{fields}', '01 inquiry details saved automatically: {fields}'],
+  'av.uploadDel': ['删除解析失败的留档:{file}', 'Failed upload removed: {file}'],
+  'av.uploadManual': ['解析失败的留档改为手填:{file}', 'Failed upload switched to manual entry: {file}'],
+  /* 工作台 / 步骤条「最近更新」只要一句话:带金额、毛利的那几条换成不带数字的说法(谁都一样) */
+  'av.costBrief': ['{line} 成本已确认', '{line} cost confirmed'],
+  'av.quoteBrief': ['提交报价 {no} 待审批', 'Quotation {no} submitted'],
+  'av.quoteApproveBrief': ['批准报价 {no}', 'Quotation {no} approved'],
+  'av.quoteRejectBrief': ['退回报价 {no}', 'Quotation {no} rejected'],
   /* AV-015 图片智能判读 */
   'av.judgeUpload': ['上传图片做智能判读:{file}', 'Picture uploaded for recognition: {file}'],
   'av.judgeResult': ['图片判读:{file} · {jk} · 宽 {w} × 高 {h} mm · {eng}', 'Picture read: {file} · {jk} · {w} × {h} mm · {eng}'],

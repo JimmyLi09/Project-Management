@@ -87,7 +87,8 @@ export function saveVisionSettings(s: Omit<VisionSettings, 'updatedBy' | 'update
    words; the detail next to it is for the admin only. */
 export type FallbackCode =
   | 'vision_off' | 'vision_down' | 'model_missing' | 'vision_timeout' | 'vision_failed' | 'bad_output'
-  | 'bad_image' | 'interrupted';
+  | 'bad_image' | 'interrupted'
+  | 'by_hand';   // AV-016:解析失败的留档,同事点了「手填」
 
 class EngineError extends Error {
   constructor(public code: FallbackCode, detail: string) { super(detail); }

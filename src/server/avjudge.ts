@@ -205,6 +205,22 @@ export async function startJudge(a: { projectId: string; fileName: string; file:
 
 const queued = new Set<number>();
 
+/* AV-016 ①「手填」:解析失败的留档不跑识别,直接给一张空的手填判读单。
+   图能显示(图片、扫描 PDF 能转成图)就带上图,对着图填;转不了也照样能填 */
+export async function startManual(a: { projectId: string; fileName: string; file: string; ext: string; by: string }): Promise<number> {
+  const { lastInsertRowid } = db().prepare(`INSERT INTO av_judge (project_id, file_name, status, phase, created_by, created_at)
+    VALUES (?, ?, 'running', 'queued', ?, ?)`).run(a.projectId, a.fileName, a.by, Date.now());
+  const id = Number(lastInsertRowid);
+  Q.live.add(id);
+  try {
+    let stored: { pages: string[]; total: number } = { pages: [], total: 1 };
+    try { stored = await storePages(id, a.file, a.ext); } catch { /* 转不成图:没有图也能手填 */ }
+    db().prepare('UPDATE av_judge SET pages = ?, total_pages = ? WHERE id = ?').run(JSON.stringify(stored.pages), stored.total, id);
+    finish(id, { result: manualResult('manual'), engine: 'manual', model: '', fallback: 'by_hand', detail: '' }, 0, a.by);
+  } finally { Q.live.delete(id); }
+  return id;
+}
+
 async function startJudgeBody(id: number, a: { projectId: string; fileName: string; file: string; ext: string; by: string }): Promise<number> {
   const up = { file: a.fileName };
   appendAudit(a.projectId, [{ at: Date.now(), by: a.by, text: logZh('av.judgeUpload', up), k: 'av.judgeUpload', p: up }]);

@@ -384,14 +384,15 @@ export function getDrawing(id: number): StoredDrawing | null {
 export function listDrawings(projectId: string): DrawingSummary[] {
   return (db().prepare(`
     SELECT d.id, d.project_id, d.file_name, d.grade, d.uploaded_by, d.uploaded_at, d.reviewed_by, d.reviewed_at,
-      (SELECT COUNT(*) FROM av_extraction e WHERE e.drawing_id = d.id AND e.needs_review = 1 AND e.confirmed = 0) AS pending
+      (SELECT COUNT(*) FROM av_extraction e WHERE e.drawing_id = d.id AND e.needs_review = 1 AND e.confirmed = 0) AS pending,
+      (SELECT COUNT(*) FROM av_extraction e WHERE e.drawing_id = d.id AND e.needs_review = 1) AS flagged
     FROM av_drawing d WHERE d.project_id = ? ORDER BY d.uploaded_at DESC, d.id DESC`).all(projectId) as {
       id: number; project_id: string; file_name: string; grade: string; uploaded_by: string; uploaded_at: number;
-      reviewed_by: string; reviewed_at: number; pending: number;
+      reviewed_by: string; reviewed_at: number; pending: number; flagged: number;
     }[]).map((r) => ({
       id: r.id, projectId: r.project_id, fileName: r.file_name, grade: r.grade as IngestResult['grade'],
       uploadedBy: r.uploaded_by, uploadedAt: r.uploaded_at, reviewedBy: r.reviewed_by, reviewedAt: r.reviewed_at,
-      pending: r.pending,
+      pending: r.pending, flagged: r.flagged,
     }));
 }
 
@@ -462,6 +463,11 @@ export function openInquiry(inq: Omit<Inquiry, 'createdAt'>, createProject: () =
   return { ...inq, createdAt };
 }
 
+/* AV-016:01 编辑已有项目时自动保存 —— 地点、补充说明(业务线和规则包立项后不改) */
+export function updateInquiry(projectId: string, f: { location: string; notes: string }): boolean {
+  return db().prepare('UPDATE av_inquiry SET location = ?, notes = ? WHERE project_id = ?').run(f.location, f.notes, projectId).changes > 0;
+}
+
 export function getInquiry(projectId: string): Inquiry | null {
   const r = db().prepare('SELECT * FROM av_inquiry WHERE project_id = ?').get(projectId) as {
     project_id: string; location: string; notes: string; lines: string; packs: string; created_by: string; created_at: number;
@@ -480,7 +486,7 @@ export function deleteProjectDrawings(projectId: string): void {
     d.prepare('DELETE FROM av_inquiry WHERE project_id = ?').run(projectId);
     d.prepare('DELETE FROM av_config WHERE project_id = ?').run(projectId);
     draftTable();
-    d.prepare('DELETE FROM av_config_draft WHERE project_id = ?').run(projectId);
+    d.prepare('DELETE FROM av_config_draft_u WHERE project_id = ?').run(projectId);
     d.prepare('DELETE FROM av_cost_sheet WHERE project_id = ?').run(projectId);
     d.prepare('DELETE FROM av_quote WHERE project_id = ?').run(projectId);
     d.prepare('DELETE FROM av_extraction WHERE drawing_id IN (SELECT id FROM av_drawing WHERE project_id = ?)').run(projectId);
@@ -597,13 +603,18 @@ export function saveConfig<S extends SummaryBase>(c: Omit<SavedConfig<S>, 'id' |
 type ConfigRow = { id: number; project_id: string; line: string; pack_version: string; drawing_id: number | null; cfg: string; summary: string; created_by: string; created_at: number };
 
 /* ===== AV-016 ② · 05 的自动草稿 =====
-   每个项目每条业务线一份,谁改都存在同一份里(最后一次写的为准,记着是谁、几点)。
-   存成正式版本(av_config 新一行)时草稿清掉。草稿不进 06:成本只按正式版本算。 */
+   每人一份:按 项目 × 业务线 × 用户 存(av_config_draft_u),两个人同时改互不覆盖。
+   存成正式版本(av_config 新一行)时只清掉保存人自己的草稿。草稿不进 06:成本只按正式版本算。
+
+   0930 的先行版是「每个项目每条线一份」(av_config_draft)。那张表的行第一次用到时
+   原样搬进新表、归到当时最后写的那个人名下(按姓名找账号;找不到的记作 0 号,
+   只会出现在「别人的草稿」提示里),旧表留着不删。 */
 let draftReady = false;
 function draftTable() {
   if (draftReady) return;
   draftReady = true;
-  db().exec(`CREATE TABLE IF NOT EXISTS av_config_draft (
+  const d = db();
+  d.exec(`CREATE TABLE IF NOT EXISTS av_config_draft (
     project_id TEXT NOT NULL,
     line TEXT NOT NULL,
     cfg TEXT NOT NULL,
@@ -611,26 +622,49 @@ function draftTable() {
     updated_by TEXT NOT NULL,
     updated_at INTEGER NOT NULL,
     PRIMARY KEY (project_id, line)
+  );
+  CREATE TABLE IF NOT EXISTS av_config_draft_u (
+    project_id TEXT NOT NULL,
+    line TEXT NOT NULL,
+    user_id INTEGER NOT NULL,
+    cfg TEXT NOT NULL,
+    drawing_id INTEGER,
+    updated_by TEXT NOT NULL,
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY (project_id, line, user_id)
   )`);
+  d.transaction(() => {
+    d.exec(`INSERT OR IGNORE INTO av_config_draft_u (project_id, line, user_id, cfg, drawing_id, updated_by, updated_at)
+      SELECT o.project_id, o.line, COALESCE((SELECT u.id FROM users u WHERE u.name = o.updated_by ORDER BY u.id LIMIT 1), 0),
+        o.cfg, o.drawing_id, o.updated_by, o.updated_at FROM av_config_draft o`);
+    d.exec('DELETE FROM av_config_draft');
+  })();
 }
 export interface ConfigDraft { cfg: unknown; drawingId: number | null; updatedBy: string; updatedAt: number }
-export function getDraft(projectId: string, line: BusinessLine): ConfigDraft | null {
+export interface DraftOwner { userId: number; updatedBy: string; updatedAt: number }
+type DraftRow = { cfg: string; drawing_id: number | null; user_id: number; updated_by: string; updated_at: number };
+export function getDraft(projectId: string, line: BusinessLine, userId: number): ConfigDraft | null {
   draftTable();
-  const r = db().prepare('SELECT * FROM av_config_draft WHERE project_id = ? AND line = ?').get(projectId, line) as
-    { cfg: string; drawing_id: number | null; updated_by: string; updated_at: number } | undefined;
+  const r = db().prepare('SELECT * FROM av_config_draft_u WHERE project_id = ? AND line = ? AND user_id = ?').get(projectId, line, userId) as DraftRow | undefined;
   return r ? { cfg: JSON.parse(r.cfg), drawingId: r.drawing_id, updatedBy: r.updated_by, updatedAt: r.updated_at } : null;
 }
-export function saveDraft(projectId: string, line: BusinessLine, cfg: unknown, drawingId: number | null, by: string): ConfigDraft {
+/* 这条线上谁有草稿(新的在前)。05 用它提示「Skye 有未保存的草稿」,步骤条用它显示「草稿」 */
+export function draftOwners(projectId: string, line: BusinessLine): DraftOwner[] {
+  draftTable();
+  return (db().prepare('SELECT user_id, updated_by, updated_at FROM av_config_draft_u WHERE project_id = ? AND line = ? ORDER BY updated_at DESC')
+    .all(projectId, line) as DraftRow[]).map((r) => ({ userId: r.user_id, updatedBy: r.updated_by, updatedAt: r.updated_at }));
+}
+export function saveDraft(projectId: string, line: BusinessLine, cfg: unknown, drawingId: number | null, user: { id: number; name: string }): ConfigDraft {
   draftTable();
   const now = Date.now();
-  db().prepare(`INSERT INTO av_config_draft (project_id, line, cfg, drawing_id, updated_by, updated_at) VALUES (?, ?, ?, ?, ?, ?)
-    ON CONFLICT(project_id, line) DO UPDATE SET cfg = excluded.cfg, drawing_id = excluded.drawing_id, updated_by = excluded.updated_by, updated_at = excluded.updated_at`)
-    .run(projectId, line, JSON.stringify(cfg), drawingId, by, now);
-  return { cfg, drawingId, updatedBy: by, updatedAt: now };
+  db().prepare(`INSERT INTO av_config_draft_u (project_id, line, user_id, cfg, drawing_id, updated_by, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(project_id, line, user_id) DO UPDATE SET cfg = excluded.cfg, drawing_id = excluded.drawing_id, updated_by = excluded.updated_by, updated_at = excluded.updated_at`)
+    .run(projectId, line, user.id, JSON.stringify(cfg), drawingId, user.name, now);
+  return { cfg, drawingId, updatedBy: user.name, updatedAt: now };
 }
-export function clearDraft(projectId: string, line: BusinessLine): void {
+export function clearDraft(projectId: string, line: BusinessLine, userId: number): void {
   draftTable();
-  db().prepare('DELETE FROM av_config_draft WHERE project_id = ? AND line = ?').run(projectId, line);
+  db().prepare('DELETE FROM av_config_draft_u WHERE project_id = ? AND line = ? AND user_id = ?').run(projectId, line, userId);
 }
 
 /* AV-017: 正式版本号 = 这个项目这条线存过几次方案(第 N 次保存就是 vN) */

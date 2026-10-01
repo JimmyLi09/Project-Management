@@ -71,6 +71,7 @@ export interface DrawingSummary {
   reviewedBy: string;
   reviewedAt: number;
   pending: number;
+  flagged?: number;   // AV-016:要逐项确认的一共几项(确认进度 = flagged − pending / flagged)
 }
 
 export const finalValue = (r: IngestRecord): number | null => r.corrected ?? r.value;

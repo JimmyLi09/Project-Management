@@ -13,7 +13,7 @@ import {
   finalValue, isPending, REQUIRED_ELEMENTS, toHandoff,
   type DrawingElement, type DrawingSummary, type IngestRecord, type StoredDrawing,
 } from '@/av/core/handoff';
-import { canReviewDrawing, canUploadDrawing } from '@/lib/permissions';
+import { canReviewDrawing, canUploadDrawing, isFull } from '@/lib/permissions';
 import { fmtDate } from '@/lib/project';
 import { useLang } from '@/lib/i18n';
 import type { JudgeSummary, JudgeView } from '@/server/avjudge';
@@ -46,9 +46,20 @@ const METHOD_LABEL: Record<string, [string, string]> = {
 async function call<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, init).catch(() => null);
   const body = res ? await res.json().catch(() => ({})) : { error: '网络错误' };
-  if (!res?.ok || body.error) throw new Error(body.error || '请求失败');
+  if (!res?.ok || body.error) throw Object.assign(new Error(body.error || '请求失败'), { reason: body.reason as string | undefined, archived: !!body.archived });
   return body as T;
 }
+
+/* AV-016:解析失败的人话原因,两种语言(服务器给归类,页面按语言显示) */
+const REASON: Record<string, [string, string]> = {
+  down: ['本机识别服务暂不可用。文件已保存，可稍后重新解析，或直接手填。', 'The local recognition service is unavailable. The file is saved — re-parse later or fill in by hand.'],
+  timeout: ['本机识别服务超时。文件已保存，可稍后重新解析，或直接手填。', 'The local recognition service timed out. The file is saved — re-parse later or fill in by hand.'],
+  scale: ['比例尺未标定：在右边填上比例（如 1:50 填 50）再重新解析，或直接手填。', 'No scale set: enter it on the right (1:50 → 50) and re-parse, or fill in by hand.'],
+  units: ['图纸没有设置单位（毫米 / 米），读不出尺寸。请设计方补上单位后重新上传，或直接手填。', 'The drawing has no units (mm / m) so sizes cannot be read. Ask the designer to set them, or fill in by hand.'],
+  type: ['这种文件格式读不了（支持 DXF、PDF、图片）。文件已保存，可以手填。', 'This file type cannot be read (DXF, PDF and pictures are supported). The file is saved — fill in by hand.'],
+  broken: ['文件损坏或打不开。请重新导出后上传，或直接手填。', 'The file is damaged or cannot be opened. Export it again and upload, or fill in by hand.'],
+  other: ['解析没成功。文件已保存，可以重新解析或手填；仍不行请联系管理员。', 'Parsing did not succeed. The file is saved — re-parse or fill in by hand; contact the admin if it keeps failing.'],
+};
 
 export default function LedIngestView() {
   const refreshFlow = useFlowRefresh();
@@ -145,8 +156,11 @@ export default function LedIngestView() {
       if ('judge' in res) { setLedIngest(null); setJudge(res.judge); }
       else { setJudge(null); setLedIngest(res); }
     } catch (e) {
-      setError(t(`${(e as Error).message}（原件已留档，可以在「项目图纸」里重新解析或下载）`,
-        `${(e as Error).message} (the file is archived — re-parse or download it under Project drawings)`));
+      const r = (e as { reason?: string }).reason;
+      setError(!(e as { archived?: boolean }).archived ? (e as Error).message
+        : r && REASON[r] ? t(`解析没成功：${REASON[r][0]}`, `Parsing did not succeed: ${REASON[r][1]}`)
+          : t('解析没成功，但文件已保存到项目，不会丢。可以在上面「项目图纸」里点「重新解析」或「手填」。',
+            'Parsing did not succeed, but the file is saved to the project. Use “Re-parse” or “Fill in by hand” under Project drawings above.'));
     }
     refreshList();
     setBusy(false);
@@ -162,10 +176,24 @@ export default function LedIngestView() {
       });
       if ('judge' in res) { setLedIngest(null); setJudge(res.judge); }
       else { setJudge(null); setLedIngest(res); }
+    } catch (e) {
+      const r = (e as { reason?: string }).reason;
+      setError(r && REASON[r] ? t(...REASON[r]) : (e as Error).message);
+    }
+    refreshList();
+    setBusy(false);
+  }
+  /* AV-016 ①「手填」:不再识别,直接开一张手填单,对着原件填,确认后同样带入 05 */
+  async function manual(u: UploadSummary) {
+    setBusy(true); setError('');
+    try {
+      const res = await call<{ judge: JudgeView }>(`/api/av/uploads/${u.id}/manual`, { method: 'POST' });
+      setLedIngest(null); setJudge(res.judge);
     } catch (e) { setError((e as Error).message); }
     refreshList();
     setBusy(false);
   }
+  const mayRemove = isFull(me);   // 删除留档只给 PD / BD
   const failed = uploads.filter((u) => u.status === 'failed');
   const originalOf = (k: 'drawingId' | 'judgeId', id: number) => uploads.find((u) => u[k] === id);
   const origLink = (u?: UploadSummary) => u && (
@@ -265,7 +293,11 @@ export default function LedIngestView() {
                       <td style={td}>{u.fileName}</td>
                       <td style={td}><span style={{ ...chip, background: 'var(--hover-bg)', color: 'var(--text2)' }}>{t('留档', 'Kept')}</span></td>
                       <td style={{ ...td, color: 'var(--text2)' }}>{u.uploadedBy} · {fmtDate(new Date(u.uploadedAt))}</td>
-                      <td style={{ ...td, color: 'var(--danger)', fontSize: 12.5 }}>{t('解析失败：', 'Parsing failed: ')}{u.error}</td>
+                      <td style={{ ...td, fontSize: 12.5 }}>
+                        <span style={{ ...chip, background: 'var(--danger)', color: '#fff' }} data-testid={`upload-failed-tag-${u.id}`}>{t('解析失败 · 已留档', 'Parse failed · kept')}</span>
+                        <div style={{ color: 'var(--danger)', marginTop: 4 }} data-testid={`upload-reason-${u.id}`}>{u.reason && REASON[u.reason] ? t(...REASON[u.reason]) : u.error}</div>
+                        {u.detail && <div style={{ color: 'var(--text2)', fontSize: 11, marginTop: 2 }} title={u.detail}>{t('技术原因（仅 PD / BD 可见）：', 'Technical detail (PD / BD only): ')}{u.detail.slice(0, 160)}</div>}
+                      </td>
                       <td style={{ ...td, textAlign: 'right', whiteSpace: 'nowrap' }}>
                         {origLink(u)}
                         {mayUpload && u.fileName.toLowerCase().endsWith('.pdf') && (
@@ -273,13 +305,15 @@ export default function LedIngestView() {
                             onChange={(e) => setRescale({ ...rescale, [u.id]: e.target.value })} aria-label={t('比例尺', 'Scale')} />
                         )}
                         {mayUpload && <button className="btn-line" disabled={busy} onClick={() => reparse(u)} data-testid={`upload-reparse-${u.id}`}>{t('重新解析', 'Re-parse')}</button>}
-                        {mayUpload && <button style={{ marginLeft: 8, fontSize: 12, color: 'var(--text2)', textDecoration: 'underline' }} disabled={busy}
+                        {mayUpload && <button className="btn-line" style={{ marginLeft: 6 }} disabled={busy} onClick={() => manual(u)} data-testid={`upload-manual-${u.id}`}>{t('手填', 'Fill in by hand')}</button>}
+                        {mayRemove && <button style={{ marginLeft: 8, fontSize: 12, color: 'var(--text2)', textDecoration: 'underline' }} disabled={busy}
                           data-testid={`upload-remove-${u.id}`}
                           onClick={async () => {
-                            if (!window.confirm(t(`移除「${u.fileName}」这份留档？原件会一起删掉。`, `Remove "${u.fileName}" and its original?`))) return;
-                            await fetch(`/api/av/uploads/${u.id}`, { method: 'DELETE' }).catch(() => null);
+                            if (!window.confirm(t(`删除「${u.fileName}」这份留档？原件会一起删掉，并记入操作日志。`, `Delete "${u.fileName}" and its original? This is written to the log.`))) return;
+                            const res = await fetch(`/api/av/uploads/${u.id}`, { method: 'DELETE' }).catch(() => null);
+                            if (!res?.ok) setError((res && (await res.json().catch(() => ({}))).error) || t('删除失败', 'Delete failed'));
                             refreshList();
-                          }}>{t('移除', 'Remove')}</button>}
+                          }}>{t('删除', 'Delete')}</button>}
                       </td>
                     </tr>
                   ))}
@@ -309,7 +343,9 @@ export default function LedIngestView() {
                       <td style={td}>
                         {d.reviewedAt
                           ? <span style={{ color: 'var(--success)' }}>{t('已校核', 'Reviewed')} · {d.reviewedBy}</span>
-                          : <span style={{ color: 'var(--warning)' }}>{d.pending ? t(`待确认 ${d.pending} 项`, `${d.pending} pending`) : t('待提交', 'Ready to submit')}</span>}
+                          : <span style={{ color: 'var(--warning)' }} data-testid={`drawing-progress-${d.id}`}>
+                            {d.flagged ? t(`已确认 ${d.flagged - d.pending} / ${d.flagged}`, `Confirmed ${d.flagged - d.pending} / ${d.flagged}`) + ' · ' : ''}
+                            {d.pending ? t(`待确认 ${d.pending} 项`, `${d.pending} pending`) : t('待提交', 'Ready to submit')}</span>}
                       </td>
                       <td style={{ ...td, textAlign: 'right', whiteSpace: 'nowrap' }}>
                         {origLink(originalOf('drawingId', d.id))}

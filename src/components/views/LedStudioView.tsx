@@ -18,11 +18,10 @@ import { toHandoff, type DrawingElement, type DrawingSummary, type Handoff, type
 import type { LedConfig, ScreenType, Severity, Size, TraceNode } from '@/av/core/types';
 import { canCostProject, canExportLed } from '@/lib/permissions';
 import { useLang } from '@/lib/i18n';
-import { fmtDate } from '@/lib/project';
-const fmtDateTime = (ms: number) => { const d = new Date(ms); return `${fmtDate(d)} ${d.toTimeString().slice(0, 5)}`; };
 import { useStore } from '../store';
 import { Icon } from '../ui';
 import { useFlowGuard, useFlowRefresh } from './AvFlow';
+import DraftNotice from './DraftNotice';
 import { sameConfig, useAutoDraft, useSavedConfig } from './useSavedConfig';
 
 const SEVERITY: Record<Severity, { bg: string; fg: string; zh: string; en: string }> = {
@@ -195,7 +194,7 @@ export default function LedStudioView() {
     blocked: result.layout ? null : t('排布无解，不能保存：先按右边的阻断提示调整屏体尺寸或箱体库', 'No layout — fix the blocking findings before saving'),
     save: saveToProject,
   } : null);
-  const { draftState, resetDraft } = useAutoDraft({
+  const { draftState, draftSaving, resetDraft } = useAutoDraft({
     projectId: project?.id, line: 'led', payload, drawingId: fromDrawing?.drawingId ?? null,
     enabled: maySave, dirty, hadDraft: !!saved.draft, ready,
   });
@@ -214,12 +213,6 @@ export default function LedStudioView() {
     refreshFlow();
     setReady(true);
   }
-  const hhmm = (ms: number) => new Date(ms).toTimeString().slice(0, 5);
-  const draftLine = draftState?.at
-    ? t(`✓ 草稿已自动保存 · ${hhmm(draftState.at)}`, `✓ Draft saved automatically · ${hhmm(draftState.at)}`)
-    : origin === 'draft' && saved.draft
-      ? t(`已载入草稿（${saved.draft.updatedBy} · ${fmtDateTime(saved.draft.updatedAt)}），还没存成正式版本`, `Loaded a draft (${saved.draft.updatedBy} · ${fmtDateTime(saved.draft.updatedAt)}), not saved as a version yet`)
-      : '';
   const srcLabel = fromDrawing?.notes ? t('来自图片 · 已人工确认', 'From picture · confirmed') : t('来自图纸 · 04 已确认', 'From drawing · 04 confirmed');
   const src = (k: DrawingElement) => locked(k) && <span style={{ display: 'block', fontSize: 11, color: 'var(--success)', marginTop: 3 }} data-testid={`led-src-${k}`}>{srcLabel}</span>;
   const newerDrawing = !!reviewed.d && !!fromDrawing?.drawingId && reviewed.d.id !== fromDrawing.drawingId && origin === 'saved';
@@ -321,16 +314,10 @@ export default function LedStudioView() {
             ) : (
               <span style={{ color: 'var(--text2)' }}>{t('手动输入。', 'Manual entry.')}</span>
             )}
-            {draftLine && (
-              <span style={{ color: 'var(--success)' }} data-testid="led-draft">
-                {draftLine}
-                {saved.cfg && (saved.draft || draftState) && (
-                  <button style={{ marginLeft: 8, fontSize: 12, textDecoration: 'underline', color: 'var(--text2)' }} onClick={discardDraft}
-                    data-testid="led-draft-discard">{t(`丢弃草稿，回到正式版本 v${saved.version}`, `Discard the draft, back to v${saved.version}`)}</button>
-                )}
-              </span>
+            {project && (
+              <DraftNotice testid="led-draft" saved={saved} restored={origin === 'draft'} state={draftState} saving={draftSaving}
+                onDiscard={saved.cfg && maySave ? discardDraft : null} />
             )}
-            {draftState?.error && <span style={{ color: 'var(--danger)' }}>{draftState.error}</span>}
             {project && origin === 'saved' && fromDrawing && <span>{t(`已载入正式版本 v${saved.version}。`, `Loaded saved version v${saved.version}.`)}</span>}
             {newerDrawing && (
               <span style={{ color: 'var(--warning)' }} data-testid="led-newer-drawing">

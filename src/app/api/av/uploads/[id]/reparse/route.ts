@@ -24,5 +24,5 @@ export async function POST(req: NextRequest, { params }: Params) {
   const out = await parseUpload(id, scale, user.name, isFull(identityOf(user)), true);
   if (out.kind === 'judge') return NextResponse.json({ judge: out.judge, uploadId: id });
   if (out.kind === 'drawing') return NextResponse.json({ ...out.drawing, uploadId: id });
-  return NextResponse.json({ error: out.error, uploadId: id, archived: true }, { status: out.status });
+  return NextResponse.json({ error: out.error, reason: out.reason, uploadId: id, archived: true }, { status: out.status });
 }
