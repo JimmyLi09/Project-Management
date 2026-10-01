@@ -82,7 +82,8 @@ export function projectFlow(p: Project, me: Identity): ProjectFlow | null {
   /* 工作台的阶段。后面几步口径与 0929 一致;还没有图纸、也没存过方案时(AV-016):
      解析失败 → 图纸待处理;有图片判读没确认 → 图纸校核;缺立项信息 → 补充信息;
      有 LED 线 → 待上传图纸;没有 LED 线的用不到图纸,直接方案配置 */
-  const pendingDrawing = drawings.some((d) => d.pending > 0);
+  /* 和步骤条 02–04 同一个口径:有项待确认、或解析出来还没提交校核的,都算图纸校核(复查 #68) */
+  const pendingDrawing = pendingDrawings > 0;
   const stage: Stage =
     approved ? 'done'
     : submitted ? 'quoting'

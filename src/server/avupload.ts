@@ -38,6 +38,8 @@ function db() {
     /* AV-016:技术错误另存一列,只给管理员看;error 列只放人话 */
     const cols = (d.prepare('PRAGMA table_info(av_upload)').all() as { name: string }[]).map((c) => c.name);
     if (!cols.includes('detail')) d.exec('ALTER TABLE av_upload ADD COLUMN detail TEXT');
+    /* 复查 #68:这一次开始解析的时间,用来认出「解析中」卡住的(服务器在解析途中重启) */
+    if (!cols.includes('started_at')) d.exec('ALTER TABLE av_upload ADD COLUMN started_at INTEGER');
     ready = true;
   }
   return d;
@@ -46,6 +48,7 @@ function db() {
 type Row = {
   id: number; project_id: string; file_name: string; size: number; status: string; error: string;
   drawing_id: number; judge_id: number; uploaded_by: string; uploaded_at: number; parsed_at: number; detail: string | null;
+  started_at: number | null;
 };
 
 export interface UploadSummary {
@@ -66,6 +69,7 @@ const R = {
   units: '图纸没有设置单位（毫米 / 米），读不出尺寸。请设计方补上单位后重新上传，或直接手填。',
   type: '这种文件格式读不了（支持 DXF、PDF、图片）。文件已保存，可以手填。',
   broken: '文件损坏或打不开。请重新导出后上传，或直接手填。',
+  interrupted: '上次解析被中断（可能是服务器重启）。文件已保存，可以重新解析或手填。',
   other: '解析没成功。文件已保存，可以重新解析或手填；仍不行请联系管理员。',
 };
 export type ReasonCode = keyof typeof R;
@@ -92,17 +96,32 @@ const toSummary = (r: Row, admin = false): UploadSummary => ({
 });
 
 const fileDir = (id: number) => path.join(dataDir(), 'av-files', String(id));
-const getRow = (id: number) => db().prepare('SELECT * FROM av_upload WHERE id = ?').get(id) as Row | undefined;
+/* 「解析中」超过 10 分钟还没有结果:解析途中服务器重启了(制图服务单次最多 2 分钟,一份最多跑两次)。
+   不收拾的话这一份「重新解析」「手填」都说「正在解析」、删也删不掉、清单里也看不见 —— 改成解析失败 */
+const STUCK_MS = 10 * 60 * 1000;
+function healStuck() {
+  db().prepare(`UPDATE av_upload SET status = 'failed', error = ?, detail = '解析中断：超过 10 分钟没有结果（服务器可能在解析途中重启）'
+    WHERE status = 'parsing' AND COALESCE(started_at, uploaded_at) < ?`).run(R.interrupted, Date.now() - STUCK_MS);
+}
+const getRow = (id: number) => { healStuck(); return db().prepare('SELECT * FROM av_upload WHERE id = ?').get(id) as Row | undefined; };
 
 export const uploadProject = (id: number) => getRow(id)?.project_id ?? null;
 
 /* 先落盘、登记,再说解析的事 */
 export async function archiveUpload(projectId: string, fileName: string, data: Buffer, by: string): Promise<number> {
-  const { lastInsertRowid } = db().prepare(`INSERT INTO av_upload (project_id, file_name, size, status, uploaded_by, uploaded_at)
-    VALUES (?, ?, ?, 'parsing', ?, ?)`).run(projectId, fileName, data.length, by, Date.now());
+  const now = Date.now();
+  const { lastInsertRowid } = db().prepare(`INSERT INTO av_upload (project_id, file_name, size, status, uploaded_by, uploaded_at, started_at)
+    VALUES (?, ?, ?, 'parsing', ?, ?, ?)`).run(projectId, fileName, data.length, by, now, now);
   const id = Number(lastInsertRowid);
-  await mkdir(fileDir(id), { recursive: true });
-  await writeFile(path.join(fileDir(id), fileName), data);
+  try {
+    await mkdir(fileDir(id), { recursive: true });
+    await writeFile(path.join(fileDir(id), fileName), data);
+  } catch (e) {
+    /* 原件没写进去(磁盘满、文件名太长…):这一行留着也没有东西可解析、可下载,撤掉 */
+    db().prepare('DELETE FROM av_upload WHERE id = ?').run(id);
+    await rm(fileDir(id), { recursive: true, force: true }).catch(() => null);
+    throw e;
+  }
   return id;
 }
 
@@ -113,6 +132,7 @@ export async function readUpload(id: number): Promise<{ name: string; data: Buff
 }
 
 export function listUploads(projectId: string, admin = false): UploadSummary[] {
+  healStuck();
   return (db().prepare('SELECT * FROM av_upload WHERE project_id = ? ORDER BY uploaded_at DESC, id DESC').all(projectId) as Row[]).map((r) => toSummary(r, admin));
 }
 
@@ -129,7 +149,10 @@ export async function parseUpload(id: number, scale: number | null, by: string, 
   if (retry && r.status !== 'failed') return { kind: 'failed', error: r.status === 'parsing' ? '正在解析，请稍候' : '这份已经解析过了', status: 409, uploadId: id };
   const target = path.join(fileDir(id), r.file_name);
   const ext = path.extname(r.file_name).toLowerCase();
-  db().prepare("UPDATE av_upload SET status = 'parsing', error = '' WHERE id = ?").run(id);
+  /* 先占住(和「手填」一样):同一份同时点两次「重新解析」只跑一次 */
+  const claimed = db().prepare(`UPDATE av_upload SET status = 'parsing', error = '', started_at = ? WHERE id = ? AND status = ?`)
+    .run(Date.now(), id, retry ? 'failed' : 'parsing').changes;
+  if (!claimed) return { kind: 'failed', error: '正在解析，请稍候', status: 409, uploadId: id };
   try {
     const scanned = ext === '.pdf' && ((await runDrawingCli(['grade', target])) as { grade: string }).grade === 'C';
     if (IMAGE_EXT.has(ext) || scanned) {
@@ -164,7 +187,7 @@ export async function manualUpload(id: number, by: string, admin: boolean): Prom
   const target = path.join(fileDir(id), r.file_name);
   const ext = path.extname(r.file_name).toLowerCase();
   /* 先占住:同一份同时点两次「手填」只开一张单子 */
-  const claimed = db().prepare("UPDATE av_upload SET status = 'parsing' WHERE id = ? AND status = 'failed'").run(id).changes;
+  const claimed = db().prepare("UPDATE av_upload SET status = 'parsing', started_at = ? WHERE id = ? AND status = 'failed'").run(Date.now(), id).changes;
   if (!claimed) return { kind: 'failed', error: '正在处理，请稍候', status: 409, uploadId: id };
   let jid: number;
   try { jid = await startManual({ projectId: r.project_id, fileName: r.file_name, file: target, ext, by }); }

@@ -612,7 +612,6 @@ type ConfigRow = { id: number; project_id: string; line: string; pack_version: s
 let draftReady = false;
 function draftTable() {
   if (draftReady) return;
-  draftReady = true;
   const d = db();
   d.exec(`CREATE TABLE IF NOT EXISTS av_config_draft (
     project_id TEXT NOT NULL,
@@ -639,6 +638,7 @@ function draftTable() {
         o.cfg, o.drawing_id, o.updated_by, o.updated_at FROM av_config_draft o`);
     d.exec('DELETE FROM av_config_draft');
   })();
+  draftReady = true;   // 搬迁成功之后才算好;失败(比如库忙)下次再试
 }
 export interface ConfigDraft { cfg: unknown; drawingId: number | null; updatedBy: string; updatedAt: number }
 export interface DraftOwner { userId: number; updatedBy: string; updatedAt: number }
@@ -648,11 +648,14 @@ export function getDraft(projectId: string, line: BusinessLine, userId: number):
   const r = db().prepare('SELECT * FROM av_config_draft_u WHERE project_id = ? AND line = ? AND user_id = ?').get(projectId, line, userId) as DraftRow | undefined;
   return r ? { cfg: JSON.parse(r.cfg), drawingId: r.drawing_id, updatedBy: r.updated_by, updatedAt: r.updated_at } : null;
 }
-/* 这条线上谁有草稿(新的在前)。05 用它提示「Skye 有未保存的草稿」,步骤条用它显示「草稿」 */
+/* 这条线上谁有草稿(新的在前)。05 用它提示「Skye 有未保存的草稿」,步骤条用它显示「草稿」。
+   只算最新正式版本之后还动过的:早于正式版本的草稿已经被那一版盖过了,不该让项目一直挂「草稿」
+   (老表搬过来、找不到账号的那几份也一样,下一次正式保存后就不再提示) */
 export function draftOwners(projectId: string, line: BusinessLine): DraftOwner[] {
   draftTable();
-  return (db().prepare('SELECT user_id, updated_by, updated_at FROM av_config_draft_u WHERE project_id = ? AND line = ? ORDER BY updated_at DESC')
-    .all(projectId, line) as DraftRow[]).map((r) => ({ userId: r.user_id, updatedBy: r.updated_by, updatedAt: r.updated_at }));
+  const since = (db().prepare('SELECT MAX(created_at) AS t FROM av_config WHERE project_id = ? AND line = ?').get(projectId, line) as { t: number | null }).t ?? 0;
+  return (db().prepare('SELECT user_id, updated_by, updated_at FROM av_config_draft_u WHERE project_id = ? AND line = ? AND updated_at > ? ORDER BY updated_at DESC')
+    .all(projectId, line, since) as DraftRow[]).map((r) => ({ userId: r.user_id, updatedBy: r.updated_by, updatedAt: r.updated_at }));
 }
 export function saveDraft(projectId: string, line: BusinessLine, cfg: unknown, drawingId: number | null, user: { id: number; name: string }): ConfigDraft {
   draftTable();

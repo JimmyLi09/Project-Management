@@ -217,6 +217,11 @@ export async function startManual(a: { projectId: string; fileName: string; file
     try { stored = await storePages(id, a.file, a.ext); } catch { /* 转不成图:没有图也能手填 */ }
     db().prepare('UPDATE av_judge SET pages = ?, total_pages = ? WHERE id = ?').run(JSON.stringify(stored.pages), stored.total, id);
     finish(id, { result: manualResult('manual'), engine: 'manual', model: '', fallback: 'by_hand', detail: '' }, 0, a.by);
+  } catch (e) {
+    /* 没开成:别留下一张空判读单(它会让项目一直显示「图片待确认」,再点手填还会多一张) */
+    db().prepare('DELETE FROM av_judge WHERE id = ?').run(id);
+    await rm(imageDir(id), { recursive: true, force: true }).catch(() => null);
+    throw e;
   } finally { Q.live.delete(id); }
   return id;
 }
@@ -439,7 +444,8 @@ export async function handoff(id: number, by: string): Promise<number> {
   const readable = review.intent === 'site';   // a reference picture's sizes are not ours
   const extractions: IngestRecord[] = (Object.keys(final) as DrawingElement[]).map((el) => {
     const it = itemOf(result, el);
-    const readRaw = readable || (el !== 'led_opening_w' && el !== 'led_opening_h') ? it?.value ?? null : null;
+    /* 参考图上的宽、高、离地高度是别人现场的,不是读数 */
+    const readRaw = readable || (el !== 'led_opening_w' && el !== 'led_opening_h' && el !== 'led_mount_h') ? it?.value ?? null : null;
     /* 人把读数清空了(读错了)且最后也没填别的值:这一项就是空的,不能把模型的读数当成
        「已人工确认」的值带进 05(applyReview 表达不了「改成空」) */
     const cleared = typeof readRaw === 'number' && final[el].v === null;
@@ -447,7 +453,8 @@ export async function handoff(id: number, by: string): Promise<number> {
     return {
       drawing: row.file_name, element: el, value: typeof read === 'number' ? read : null, unit: it?.unit ?? (el.endsWith('_h') || el === 'led_opening_w' ? 'mm' : 'm'),
       prov: {
-        source: `来自图片 · 已人工确认 · ${it?.source || (it?.raw ? `读自「${it.raw}」` : '人工填写')}`,
+        /* 这一项用的不是图上读数(没读到、被清掉、或人另填)时,来源就是人填的 —— 别把被拒的那条标注写成依据 */
+        source: `来自图片 · 已人工确认 · ${typeof read !== 'number' || it?.dropped ? '人工填写' : it?.source || (it?.raw ? `读自「${it.raw}」` : '人工填写')}`,
         method: typeof read === 'number' ? METHOD[engine] : 'manual',
         confidence: typeof read === 'number' ? it!.confidence : 0, rule: null,
         note: [final[el].note, it?.estimated ? '估算值' : null, cleared ? `人工清空（原读数 ${readRaw}）` : null].filter(Boolean).join('；') || null,

@@ -6,6 +6,7 @@ import { newProject } from '@/lib/project';
 import { getInquiry, openInquiry, updateInquiry } from '@/server/avdb';
 import { appendAudit, appendAuditMerged, getEffectiveTemplate, getProject, insertProject, saveProject } from '@/server/db';
 import { currentUser } from '@/server/session';
+import { applyAction, PermissionError, ValidationError } from '@/server/actions';
 import { logZh } from '@/lib/logmsg';
 import { denyUnlessVisible } from '@/server/avguard';
 
@@ -89,17 +90,28 @@ export async function PATCH(req: NextRequest) {
   const denied = denyUnlessVisible(user, project);
   if (denied) return denied;
   if (!canMeta(identityOf(user), project)) return NextResponse.json({ error: '你不能修改这个项目的立项信息' }, { status: 403 });
+  if (project.archived) return NextResponse.json({ error: '项目已归档，不能修改' }, { status: 400 });
   const str = (k: string, max = 2000) => (typeof body[k] === 'string' ? (body[k] as string).trim().slice(0, max) : undefined);
-  const name = str('name', 200);
-  if (name !== undefined && !name) return NextResponse.json({ error: '项目名称不能为空' }, { status: 400 });
   const delivery = str('delivery', 10);
   if (delivery && !/^\d{4}-\d{2}-\d{2}$/.test(delivery)) return NextResponse.json({ error: '期望交付日期格式应为 YYYY-MM-DD' }, { status: 400 });
   const inquiry = getInquiry(project.id);
 
+  /* 项目名、客户、交付日期走项目页同一套动作(复查 #68):同样的权限(改交付日期要能编辑这个项目)、
+     同样的长度校验、同样写进项目日志。只改传上来、且和现在不一样的那几项 —— 页面只发人改过的字段,
+     别人在别处刚改的不会被这边旧的值盖回去。 */
+  const me = identityOf(user);
   const changed: string[] = [];
-  const pf: [string, string | undefined, string][] = [['name', name, project.name], ['client', str('client', 200), project.client || ''], ['delivery', delivery, project.delivery || '']];
-  for (const [k, v, cur] of pf) if (v !== undefined && v !== cur) { (project as unknown as Record<string, string>)[k] = v; changed.push(k); }
-  if (changed.length) saveProject(project);
+  const name = str('name', 200), client = str('client', 200);
+  try {
+    if (name !== undefined && name !== project.name) { applyAction(me, project, { type: 'renameProject', name }); changed.push('name'); }
+    if (client !== undefined && client !== (project.client || '')) { applyAction(me, project, { type: 'setClient', value: client }); changed.push('client'); }
+    if (delivery !== undefined && delivery !== (project.delivery || '')) { applyAction(me, project, { type: 'setDelivery', value: delivery }); changed.push('delivery'); }
+  } catch (e) {
+    if (e instanceof PermissionError) return NextResponse.json({ error: e.message }, { status: 403 });
+    if (e instanceof ValidationError) return NextResponse.json({ error: e.message }, { status: 400 });
+    throw e;
+  }
+  if (changed.length) saveProject(project);   // 读和写之间没有 await:不会盖掉别的请求
   if (inquiry) {
     const location = str('location') ?? inquiry.location;
     const notes = str('notes') ?? inquiry.notes;
