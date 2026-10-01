@@ -6,9 +6,9 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start -p 3000",
-    "test": "node --experimental-strip-types --test \"src/av/core/__tests__/*.test.ts\"",
-    "led:regression": "node --experimental-strip-types scripts/led-regression.ts",
-    "led:drawing": "node --experimental-strip-types scripts/led-drawing.ts"
+    "test": "node scripts/run-tests.mjs",
+    "led:regression": "node --import ./scripts/ts-register.mjs scripts/led-regression.ts",
+    "led:drawing": "node --import ./scripts/ts-register.mjs scripts/led-drawing.ts"
   },
   "dependencies": {
     "better-sqlite3": "^11.10.0",

@@ -12,7 +12,7 @@
 
 - **内容**：TypeScript 内核 `src/av/core/proposal.ts` 的 `proposalDoc()` 一处生成全部文字——封面、版权页、各章段落、表格、待确认事项，中文或英文——数值取自同一次计算（与出图、箱体清单、成本一致）。
 - **排版**：制图服务 `services/drawing/avdrawing/proposal.py`（python-docx 1.1.2，与系统二同版本）只负责排版，不产生数字或叙述。
-  TS 与 Python 之间的约定由 `services/drawing/tests/fixtures/proposal/*.json`（TS 内核生成，改动 proposal.ts 后用 `node --experimental-strip-types scripts/proposal-fixtures.ts` 重新生成）锁住。
+  TS 与 Python 之间的约定由 `services/drawing/tests/fixtures/proposal/*.json`（TS 内核生成，改动 proposal.ts 后用 `node --import ./scripts/ts-register.mjs scripts/proposal-fixtures.ts`（Node 20 / 22 都能跑） 重新生成）锁住。
 - **章节**与系统二相同：方案概述、屏体参数、箱体清单、供电与信号、说明与限制、待确认事项（有校验提示时）。
 
 ### 版式
