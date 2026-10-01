@@ -1,6 +1,6 @@
 /* Regenerate services/drawing/tests/fixtures/proposal/*.json — the ProposalDoc
    the TS core hands the Word typesetter — after changing src/av/core/proposal.ts:
-     node --experimental-strip-types scripts/proposal-fixtures.ts */
+     node --import ./scripts/ts-register.mjs scripts/proposal-fixtures.ts */
 import { writeFileSync } from 'node:fs';
 import { compute } from '../src/av/core/compute.ts';
 import { FIXTURES, fixtureConfig } from '../src/av/core/fixtures.ts';
