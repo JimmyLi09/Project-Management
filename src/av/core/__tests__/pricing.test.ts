@@ -116,3 +116,25 @@ test('06 的推荐与阻断检查用同一条点间距规则（区间型号落�
   const got = displayCandidates([it(1, 'P2'), it(2, '3.91-7.81mm'), it(3, 'P5')], 5).map((i) => i.id);
   assert.deepEqual(got.slice(0, 2).sort(), [2, 3], '区间 3.91–7.81 与 P5 都排在前面');
 });
+
+/* ── AV-018 ── */
+test('AV-018:价格库没有这个点间距 → 06 写「待报价」,不报「未选择条目」;单位 m² / sqm 也认', async () => {
+  const { ledChecks, sqmUnit } = await import('../pricing.ts');
+  assert.ok(sqmUnit('㎡') && sqmUnit('m²') && sqmUnit('m2') && sqmUnit(' sqm ') && sqmUnit('平方米'));
+  assert.ok(!sqmUnit('台') && !sqmUnit('m'));
+  const cfg = { ...CFG, summary: { ...CFG.summary, pitch: 1.2 } } as SavedConfig;   // 种子价格库没有 P1.2
+  const lines = buildLedLines(cfg, { display: null, power_cable: null, data_cable: null }, [], ITEMS);
+  const extra = ledChecks(lines, cfg as never, ITEMS);
+  assert.equal(extra[0]?.code, 'LED-COST-QUOTE');
+  assert.match(extra[0].message, /待报价/);
+  const checks = checkSheet(lines, cfg, ITEMS, 0.18, '2026-10-01', extra);
+  assert.ok(!checks.some((c) => c.code === 'COST-ITEM' && /LED 显示屏/.test(c.message)), '显示屏不再报「未选择条目」');
+  assert.ok(checks.some((c) => c.code === 'LED-COST-QUOTE' && c.severity === 'block'), '补上价格前不能确认');
+  /* 价格库里有 P2 的条目但还没选:照旧是「未选择条目」,不是待报价 */
+  const cfg2 = CFG;
+  const l2 = buildLedLines(cfg2, { display: null, power_cable: null, data_cable: null }, [], ITEMS);
+  assert.equal(ledChecks(l2, cfg2 as never, ITEMS).length, 0);
+  /* 手工录入、单位写 m² 的 P1.2 条目也算 */
+  const m2 = { ...ITEMS[0], id: 999, pitch: 'P1.2', unit: 'm²' };
+  assert.equal(ledChecks(lines, cfg as never, [...ITEMS, m2]).length, 0);
+});

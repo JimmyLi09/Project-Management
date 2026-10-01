@@ -304,6 +304,12 @@ export default function AvCostView() {
                             {options(l).map((i) => <option key={i.id} value={i.id}>{itemLabel(i)} · {i.unit}{(showCost ? i.costPrice === null : showList && i.listPrice === null) ? t('（待定价）', ' (tbd)') : ''}</option>)}
                           </select>
                         ) : (l.itemLabel || '—')}
+                        {/* AV-018:05 选的点间距价格库里还没有(02–04 标「待报价」的标准档位) */}
+                        {l.key === 'display' && l.itemId === null && !options(l).some((i) => pitchFits(i.pitch, (state!.config!.summary as LedSummary).pitch) === true) && (
+                          <div style={{ fontSize: 12, color: 'var(--warning)', marginTop: 3 }} data-testid="cost-quote-pending">
+                            {t('待报价 · 先在价格库补这款', 'To be quoted · add this model to the price library first')}
+                          </div>
+                        )}
                       </td>
                       {showCost && <td style={{ ...td, textAlign: 'right' }} className="tnum">{l.unitCost === null ? '—' : l.unitCost.toLocaleString('en-US')}</td>}
                       {showList && <td style={{ ...td, textAlign: 'right' }} className="tnum">{l.unitList === null ? '—' : l.unitList.toLocaleString('en-US')}</td>}

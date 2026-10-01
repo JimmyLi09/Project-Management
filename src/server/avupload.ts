@@ -5,6 +5,7 @@
 
    解析本身不变:DXF / 矢量 PDF 走制图服务,图片 / 扫描件走 AV-015 的图片判读。 */
 
+import { createHash } from 'crypto';
 import { mkdir, readFile, rm, writeFile } from 'fs/promises';
 import path from 'path';
 
@@ -40,6 +41,8 @@ function db() {
     if (!cols.includes('detail')) d.exec('ALTER TABLE av_upload ADD COLUMN detail TEXT');
     /* 复查 #68:这一次开始解析的时间,用来认出「解析中」卡住的(服务器在解析途中重启) */
     if (!cols.includes('started_at')) d.exec('ALTER TABLE av_upload ADD COLUMN started_at INTEGER');
+    /* AV-018:文件内容的 SHA-256,同一项目同一文件再传时提示(AV-018 之前传的没有,不参与比对) */
+    if (!cols.includes('sha256')) d.exec('ALTER TABLE av_upload ADD COLUMN sha256 TEXT');
     ready = true;
   }
   return d;
@@ -48,7 +51,7 @@ function db() {
 type Row = {
   id: number; project_id: string; file_name: string; size: number; status: string; error: string;
   drawing_id: number; judge_id: number; uploaded_by: string; uploaded_at: number; parsed_at: number; detail: string | null;
-  started_at: number | null;
+  started_at: number | null; sha256: string | null;
 };
 
 export interface UploadSummary {
@@ -107,11 +110,21 @@ const getRow = (id: number) => { healStuck(); return db().prepare('SELECT * FROM
 
 export const uploadProject = (id: number) => getRow(id)?.project_id ?? null;
 
-/* 先落盘、登记,再说解析的事 */
-export async function archiveUpload(projectId: string, fileName: string, data: Buffer, by: string): Promise<number> {
+export interface DuplicateUpload { id: number; fileName: string; uploadedBy: string; uploadedAt: number; status: string; judgeId: number; drawingId: number }
+
+/* 先落盘、登记,再说解析的事。
+   AV-018:同一项目里已经有内容一模一样的文件(连点两次「上传并解析」、或者又传了一遍),
+   不再入库,返回已有的那一份让页面问「要打开它吗？」;force = 「仍然再传一份」。
+   查重和登记之间没有 await —— 同时到的两次请求,后一次一定看得到前一次 */
+export async function archiveUpload(projectId: string, fileName: string, data: Buffer, by: string, force = false): Promise<number | { duplicate: DuplicateUpload }> {
+  const sha = createHash('sha256').update(data).digest('hex');
+  if (!force) {
+    const dup = db().prepare('SELECT * FROM av_upload WHERE project_id = ? AND sha256 = ? ORDER BY id LIMIT 1').get(projectId, sha) as Row | undefined;
+    if (dup) return { duplicate: { id: dup.id, fileName: dup.file_name, uploadedBy: dup.uploaded_by, uploadedAt: dup.uploaded_at, status: dup.status, judgeId: dup.judge_id, drawingId: dup.drawing_id } };
+  }
   const now = Date.now();
-  const { lastInsertRowid } = db().prepare(`INSERT INTO av_upload (project_id, file_name, size, status, uploaded_by, uploaded_at, started_at)
-    VALUES (?, ?, ?, 'parsing', ?, ?, ?)`).run(projectId, fileName, data.length, by, now, now);
+  const { lastInsertRowid } = db().prepare(`INSERT INTO av_upload (project_id, file_name, size, status, uploaded_by, uploaded_at, started_at, sha256)
+    VALUES (?, ?, ?, 'parsing', ?, ?, ?, ?)`).run(projectId, fileName, data.length, by, now, now, sha);
   const id = Number(lastInsertRowid);
   try {
     await mkdir(fileDir(id), { recursive: true });
@@ -212,6 +225,13 @@ export async function removeFailedUpload(id: number, by: string): Promise<boolea
   const p = { file: r.file_name };
   appendAudit(r.project_id, [{ at: Date.now(), by, text: logZh('av.uploadDel', p), k: 'av.uploadDel', p }]);
   return true;
+}
+
+/* AV-018:删图片判读时,它那份留档(原件)一起删 */
+export async function removeUploadsOfJudge(judgeId: number): Promise<void> {
+  const ids = (db().prepare('SELECT id FROM av_upload WHERE judge_id = ?').all(judgeId) as { id: number }[]).map((x) => x.id);
+  db().prepare('DELETE FROM av_upload WHERE judge_id = ?').run(judgeId);
+  await Promise.all(ids.map((id) => rm(fileDir(id), { recursive: true, force: true })));
 }
 
 export async function deleteProjectUploads(projectId: string): Promise<void> {

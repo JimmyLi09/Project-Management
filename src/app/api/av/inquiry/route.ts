@@ -3,7 +3,7 @@ import { isAvailable, LINES } from '@/av/core/lines';
 import type { BusinessLine } from '@/av/core/types';
 import { canCreate, canMeta, identityOf } from '@/lib/permissions';
 import { newProject } from '@/lib/project';
-import { getInquiry, openInquiry, updateInquiry } from '@/server/avdb';
+import { ensureInquiry, getInquiry, openInquiry, updateInquiry } from '@/server/avdb';
 import { appendAudit, appendAuditMerged, getEffectiveTemplate, getProject, insertProject, saveProject } from '@/server/db';
 import { currentUser } from '@/server/session';
 import { applyAction, PermissionError, ValidationError } from '@/server/actions';
@@ -24,7 +24,8 @@ export async function GET(req: NextRequest) {
   if (!project) return NextResponse.json({ error: '项目不存在' }, { status: 404 });
   const denied = denyUnlessVisible(user, project);   // REQ-043
   if (denied) return denied;
-  return NextResponse.json({ inquiry: getInquiry(projectId) });
+  /* AV-018:项目页新建 / 复制的 AV 项目没有立项记录 —— 打开 01 时补建,地点和补充说明才能填 */
+  return NextResponse.json({ inquiry: ensureInquiry(project, user.name) });
 }
 
 export async function POST(req: NextRequest) {
@@ -94,7 +95,11 @@ export async function PATCH(req: NextRequest) {
   const str = (k: string, max = 2000) => (typeof body[k] === 'string' ? (body[k] as string).trim().slice(0, max) : undefined);
   const delivery = str('delivery', 10);
   if (delivery && !/^\d{4}-\d{2}-\d{2}$/.test(delivery)) return NextResponse.json({ error: '期望交付日期格式应为 YYYY-MM-DD' }, { status: 400 });
-  const inquiry = getInquiry(project.id);
+  /* AV-018:没有立项记录就先补建 —— 原来在这里静默丢掉地点和补充说明 */
+  const inquiry = ensureInquiry(project, user.name);
+  if (!inquiry && (str('location') || str('notes'))) {
+    return NextResponse.json({ error: '这个项目没有 AV 业务线，存不了地点和补充说明' }, { status: 400 });
+  }
 
   /* 项目名、客户、交付日期走项目页同一套动作(复查 #68):同样的权限(改交付日期要能编辑这个项目)、
      同样的长度校验、同样写进项目日志。只改传上来、且和现在不一样的那几项 —— 页面只发人改过的字段,

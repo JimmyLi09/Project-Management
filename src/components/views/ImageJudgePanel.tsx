@@ -103,12 +103,36 @@ export default function ImageJudgePanel({ judge, setJudge, mayReview, onHandoff 
   const handed = judge.drawingId > 0;
   const editable = mayReview && !handed && judge.status === 'done';
 
-  async function patch(next: Partial<JudgeReview>) {
+  /* AV-018:每次只发改动的那一项,服务端按字段合并 —— 快速连着改几处,不会互相冲掉。
+     回来的结果只认最后发出的那一次(先发的晚回来,不能把界面退回旧状态) */
+  const seq = useRef(0);
+  const [savedAt, setSavedAt] = useState<Record<string, number>>({});
+  async function patch(next: Partial<JudgeReview> & { reset?: string[] }, key?: string) {
     setError('');
-    try { setJudge((await call<{ judge: JudgeView }>(`/api/av/judge/${judge.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(next) })).judge); }
-    catch (e) { setError((e as Error).message); }
+    const my = ++seq.current;
+    try {
+      const j = (await call<{ judge: JudgeView }>(`/api/av/judge/${judge.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(next) })).judge;
+      if (my === seq.current) setJudge(j);
+      if (key) setSavedAt((cur) => ({ ...cur, [key]: Date.now() }));
+    } catch (e) { setError((e as Error).message); }
   }
-  const answer = (k: string, v: string) => patch({ answers: { ...rv.answers, [k]: v } });
+  const answer = (k: string, v: string) => patch({ answers: { [k]: v } as JudgeReview['answers'] }, `a_${k}`);
+  /* 数字输入:停手约 0.8 秒保存,失焦再补一次;同一个值不重复发 */
+  const timers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+  const sent = useRef<Record<string, string>>({});
+  useEffect(() => () => { Object.values(timers.current).forEach(clearTimeout); }, []);
+  const commit = (key: string, v: string, fn: () => void) => {
+    clearTimeout(timers.current[key]); delete timers.current[key];
+    if (sent.current[key] === v) return;
+    sent.current[key] = v;
+    fn();
+  };
+  const schedule = (key: string, v: string, fn: () => void) => {
+    clearTimeout(timers.current[key]);
+    timers.current[key] = setTimeout(() => commit(key, v, fn), 800);
+  };
+  const savedMark = (key: string) => savedAt[key] && !timers.current[key]
+    ? <span style={{ fontSize: 11, color: 'var(--success)', marginLeft: 4 }} data-testid={`judge-saved-${key}`}>{t('已保存 ✓', 'Saved ✓')}</span> : null;
 
   async function rerun(page: number) {
     setBusy(true); setError('');
@@ -205,10 +229,10 @@ export default function ImageJudgePanel({ judge, setJudge, mayReview, onHandoff 
   const pending = [...confirmable].filter((k) => !rv.confirmed[k]).length;
 
   const setValue = (k: ItemKey, v: number | string | null) =>
-    patch({ values: { ...rv.values, [k]: v }, confirmed: confirmable.has(k) ? { ...rv.confirmed, [k]: true } : rv.confirmed });
-  const confirm = (k: ItemKey, on: boolean) => patch({ confirmed: { ...rv.confirmed, [k]: on } });
+    patch({ values: { [k]: v } as JudgeReview['values'], ...(confirmable.has(k) ? { confirmed: { [k]: true } as JudgeReview['confirmed'] } : {}) }, `v_${k}`);
+  const confirm = (k: ItemKey, on: boolean) => patch({ confirmed: { [k]: on } as JudgeReview['confirmed'] });
 
-  const valueCell = (i: JudgeItem) => {
+  const valueCell = (i: JudgeItem, allowEmpty = false) => {
     const v = finalOf(r, rv, i.key);
     if (i.key === 'shape' || i.key === 'mount') {
       const map = i.key === 'shape' ? SHAPE : MOUNT;
@@ -221,19 +245,26 @@ export default function ImageJudgePanel({ judge, setJudge, mayReview, onHandoff 
       ) : <span>{typeof v === 'string' && map[v] ? tt(map[v]) : '—'}</span>;
     }
     if (i.key === 'ratio') return <span>{String(i.value ?? '—')}</span>;
-    if (v === null && i.value === null) return <span style={{ color: 'var(--text2)' }}>—</span>;
+    if (!allowEmpty && v === null && i.value === null) return <span style={{ color: 'var(--text2)' }}>—</span>;
     const typed = draft[i.key];
     return editable ? (
       <span style={{ display: 'inline-flex', gap: 4, alignItems: 'center' }}>
         <input className="in sm tnum" type="number" step="any" style={{ width: 96 }} aria-label={tt(ITEM[i.key])} data-testid={`judge-val-${i.key}`}
-          value={typed ?? String(v ?? '')} onChange={(e) => setDraft({ ...draft, [i.key]: e.target.value })}
+          value={typed ?? String(v ?? '')}
+          onChange={(e) => {
+            const raw = e.target.value;
+            setDraft((d) => ({ ...d, [i.key]: raw }));
+            const n = raw.trim() === '' ? null : Number(raw);
+            if (n === null || n >= 0) schedule(`v_${i.key}`, raw.trim(), () => setValue(i.key, n));
+          }}
           onBlur={() => {
             if (typed === undefined) return;
             const n = typed.trim() === '' ? null : Number(typed);
             if (n !== null && !(n >= 0)) { setError(t('须为非负数', 'Must be ≥ 0')); return; }
-            if (n !== v) setValue(i.key, n);
+            if (n !== v) commit(`v_${i.key}`, typed.trim(), () => setValue(i.key, n));
           }} />
         <span style={{ fontSize: 12, color: 'var(--text2)' }}>{i.key === 'pitch_hint' ? 'mm' : i.unit}</span>
+        {savedMark(`v_${i.key}`)}
       </span>
     ) : <span className="tnum">{v ?? '—'} {i.unit}</span>;
   };
@@ -252,9 +283,10 @@ export default function ImageJudgePanel({ judge, setJudge, mayReview, onHandoff 
     <span style={{ display: 'inline-flex', gap: 4, alignItems: 'center' }}>
       <input className="in sm tnum" type="number" step="any" min="0" style={{ width }} disabled={!editable} data-testid={`judge-ask-${k}`}
         placeholder={placeholder} value={draft[`a_${k}`] ?? (rv.answers as Record<string, string>)[k] ?? ''}
-        onChange={(e) => setDraft({ ...draft, [`a_${k}`]: e.target.value })}
-        onBlur={() => { const v = draft[`a_${k}`]; if (v !== undefined && v !== ((rv.answers as Record<string, string>)[k] ?? '')) answer(k, v.trim()); }} />
+        onChange={(e) => { const v = e.target.value; setDraft((d) => ({ ...d, [`a_${k}`]: v })); schedule(`a_${k}`, v.trim(), () => answer(k, v.trim())); }}
+        onBlur={() => { const v = draft[`a_${k}`]; if (v !== undefined && v.trim() !== ((rv.answers as Record<string, string>)[k] ?? '')) commit(`a_${k}`, v.trim(), () => answer(k, v.trim())); }} />
       <span style={{ fontSize: 12, color: 'var(--text2)' }}>{unit}</span>
+      {savedMark(`a_${k}`)}
     </span>
   );
   const choice = (k: string, v: string, label: string) => {
@@ -272,7 +304,7 @@ export default function ImageJudgePanel({ judge, setJudge, mayReview, onHandoff 
           {t('宽', 'W')} {askInput('size_w', '', 100)} × {t('高', 'H')} {askInput('size_h', 'mm', 100)}
           {intentRef && typeof readW === 'number' && typeof readH === 'number' && editable && (
             <button className="btn-line sm" data-testid="judge-use-read-size"
-              onClick={() => patch({ answers: { ...rv.answers, size_w: String(readW), size_h: String(readH) } })}>
+              onClick={() => patch({ answers: { size_w: String(readW), size_h: String(readH) } })}>
               {t(`沿用图上尺寸 ${readW} × ${readH}`, `Use the picture's ${readW} × ${readH}`)}
             </button>
           )}
@@ -369,12 +401,14 @@ export default function ImageJudgePanel({ judge, setJudge, mayReview, onHandoff 
                     {o.mm === null ? <span style={{ color: 'var(--text2)' }}>{t('不是尺寸', 'Not a size')}</span> : (
                       <select className="in sm" value={cur} disabled={!editable} data-testid={`judge-ocr-${i}`}
                         onChange={(e) => {
-                          const a = { ...rv.answers };
-                          if (a.size_w === String(o.mm)) delete a.size_w;
-                          if (a.size_h === String(o.mm)) delete a.size_h;
-                          if (e.target.value === 'w') a.size_w = String(o.mm);
-                          if (e.target.value === 'h') a.size_h = String(o.mm);
-                          patch({ answers: a });
+                          /* 只发这两个回答(清空 = 删掉),服务端合并 */
+                          const mm = String(o.mm);
+                          const a: Record<string, string> = {};
+                          if (rv.answers.size_w === mm) a.size_w = '';
+                          if (rv.answers.size_h === mm) a.size_h = '';
+                          if (e.target.value === 'w') a.size_w = mm;
+                          if (e.target.value === 'h') a.size_h = mm;
+                          patch({ answers: a as JudgeReview['answers'] });
                         }}>
                         <option value="">{t('不是尺寸', 'Not a size')}</option>
                         <option value="w">{t('屏宽', 'Width')}</option>
@@ -402,7 +436,16 @@ export default function ImageJudgePanel({ judge, setJudge, mayReview, onHandoff 
                       {i.key === 'led_opening_w' && isCurve && <div style={{ fontSize: 11.5, color: 'var(--warning)' }}>⚠ {t('弧形屏：这个宽是弦长还是弧长，下面要回答', 'Curved: is this the chord or the arc? Answer below')}</div>}
                       {refSize && <div style={{ fontSize: 11.5, color: 'var(--text2)' }}>{t('参考图上的尺寸，仅供参考', "The reference picture's size, for reference only")}</div>}
                     </td>
-                    <td style={td}>{valueCell(i)}{i.estimated && i.value !== null && <span style={{ ...tag, background: 'var(--warning-bg, #FDF7F1)', color: 'var(--warning)', marginLeft: 6 }} data-testid={`judge-est-${i.key}`}>{t('估', 'est.')}</span>}</td>
+                    <td style={td}>{valueCell(i)}{i.estimated && i.value !== null && <span style={{ ...tag, background: 'var(--warning-bg, #FDF7F1)', color: 'var(--warning)', marginLeft: 6 }} data-testid={`judge-est-${i.key}`}>{t('估', 'est.')}</span>}
+                      {/* AV-018:重新识别后读到的值和人填的不一样:保留人填的,但说一声 */}
+                      {i.key in rv.values && i.value !== null && rv.values[i.key] !== null && rv.values[i.key] !== i.value && i.key !== 'shape' && i.key !== 'mount' && (
+                        <div style={{ fontSize: 11.5, color: 'var(--warning)', marginTop: 3 }} data-testid={`judge-reread-${i.key}`}>
+                          {t(`模型这次读到 ${i.value}，保留你填的 ${rv.values[i.key]}？`, `The model now reads ${i.value}; keep your ${rv.values[i.key]}?`)}{' '}
+                          {editable && <button style={{ fontSize: 11.5, textDecoration: 'underline', color: 'var(--navy700)' }} onClick={() => patch({ reset: [i.key] })}
+                            data-testid={`judge-useread-${i.key}`}>{t(`改用 ${i.value}`, `Use ${i.value}`)}</button>}
+                        </div>
+                      )}
+                    </td>
                     <td style={{ ...td, fontSize: 12, color: 'var(--text2)', maxWidth: 320 }}>
                       {i.dropped ? <span style={{ color: 'var(--warning)' }}>⚠ {i.dropped}</span>
                         : i.key in rv.values && rv.values[i.key] !== i.value ? t('人工修改', 'Changed by hand')
@@ -418,6 +461,16 @@ export default function ImageJudgePanel({ judge, setJudge, mayReview, onHandoff 
                   </tr>
                 );
               })}
+              {/* AV-018:模型没读到点间距时,图上写着的点间距也可以人手填 */}
+              {!r.items.some((i) => i.key === 'pitch_hint') && (
+                <tr data-testid="judge-row-pitch_hint">
+                  <td style={td}><b>{tt(ITEM.pitch_hint)}</b></td>
+                  <td style={td}>{editable ? valueCell({ key: 'pitch_hint', value: null, unit: 'mm', confidence: 0, raw: '', source: '', estimated: false }, true)
+                    : <span className="tnum">{finalOf(r, rv, 'pitch_hint') ?? '—'}</span>}</td>
+                  <td style={{ ...td, fontSize: 12, color: 'var(--text2)' }}>{'pitch_hint' in rv.values ? t('人工填写', 'Entered by hand') : t('模型没读到；图上写了点间距的话可以填', 'Not read; fill in if the picture states a pitch')}</td>
+                  <td style={td} /><td style={td}><span style={{ color: 'var(--text2)' }}>—</span></td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>
@@ -457,20 +510,21 @@ export default function ImageJudgePanel({ judge, setJudge, mayReview, onHandoff 
             </div>
           )}
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }} data-testid="judge-pitches">
-            {judge.pitchOptions.length === 0 && <span style={{ fontSize: 12.5, color: 'var(--text2)' }}>{r.env === 'outdoor' ? t('价格库里还没有室外型号。', 'No outdoor products in the price library yet.') : t('价格库里还没有 LED 型号，先到价格库导入。', 'No LED products in the price library yet.')}</span>}
+            {judge.pitchOptions.length === 0 && <span style={{ fontSize: 12.5, color: 'var(--text2)' }}>{t('没有满足最近观看距离的点间距。', 'No pitch meets the viewing distance.')}</span>}
             {judge.pitchOptions.map((o) => {
               const ok = meetsVd01(o.pitch, viewM);
               const on = s.pitch !== null && Math.abs(s.pitch - o.pitch) < 1e-9;
               return (
                 <button key={o.pitch} data-testid={`judge-pitch-${o.pitch}`} disabled={!ok || !editable}
                   title={ok ? '' : t('不满足最近观看距离', 'Fails the viewing distance')}
-                  onClick={() => patch({ pitch: o.pitch })}
+                  onClick={() => patch({ pitch: o.pitch, pitchFrom: null })}
                   style={{ textAlign: 'left', minWidth: 120, padding: '8px 12px', borderRadius: 8, cursor: ok && editable ? 'pointer' : 'not-allowed', opacity: ok ? 1 : 0.45,
                     border: `1px solid ${on ? 'var(--navy700)' : 'var(--border)'}`, background: on ? 'var(--hover-bg)' : 'var(--card)', boxShadow: on ? '0 0 0 1px var(--navy700) inset' : undefined }}>
                   <b>{o.label}</b>
                   <small style={{ display: 'block', color: 'var(--text2)' }}>
                     {!ok ? t('不满足观看距离', 'Too coarse') : o.pitch === cheapest && viewM !== null ? t('满足规则中最省的', 'Cheapest that meets the rule') : t('满足规则', 'Meets the rule')}
-                    {' · '}{t(`${o.items} 个型号`, `${o.items} products`)}
+                    {' · '}{o.items > 0 ? t(`有价格 · ${o.items} 个型号`, `priced · ${o.items} products`)
+                      : <span style={{ color: 'var(--warning)' }} data-testid={`judge-pitch-quote-${o.pitch}`}>{t('待报价', 'to be quoted')}</span>}
                   </small>
                 </button>
               );
@@ -495,13 +549,23 @@ export default function ImageJudgePanel({ judge, setJudge, mayReview, onHandoff 
           <div style={{ fontWeight: 700, marginTop: 4 }}>{t('类似的历史案例', 'Similar past cases')} <span style={{ fontWeight: 400, fontSize: 12, color: 'var(--text2)' }}>{t('（从「资料库 › 历史案例」按面积、点间距、形状找）', '(from the case library by area, pitch and shape)')}</span></div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(230px,1fr))', gap: 8 }} data-testid="judge-cases">
             {judge.cases.length === 0 && <span style={{ fontSize: 12.5, color: 'var(--text2)' }}>{t('没有找到面积相近的案例。', 'No case of a similar size.')}</span>}
-            {judge.cases.map((c, i) => (
-              <div key={i} style={{ border: '1px solid var(--border)', borderRadius: 8, padding: '8px 10px', fontSize: 12, background: 'var(--card)' }}>
-                <b>{c.name}</b>{c.client ? ` · ${c.client}` : ''}<br />
-                {[c.pitch !== null ? `P${c.pitch}` : '', c.widthMm && c.heightMm ? `${c.widthMm} × ${c.heightMm}` : '', c.curved ? t('弧形', 'curved') : '',
-                  c.status === 'completed' ? t('已完成', 'completed') : t('进行中', 'ongoing')].filter(Boolean).join(' · ')}
-              </div>
-            ))}
+            {judge.cases.map((c, i) => {
+              /* AV-018:点卡片 = 套用这个案例的点间距(还得满足最近观看距离) */
+              const usable = editable && c.pitch !== null && meetsVd01(c.pitch, viewM);
+              const on = rv.pitchFrom === c.name && s.pitch !== null && c.pitch !== null && Math.abs(s.pitch - c.pitch) < 1e-9;
+              return (
+                <button key={i} type="button" disabled={!usable} data-testid={`judge-case-${i}`}
+                  title={c.pitch === null ? t('这个案例没有记点间距', 'No pitch recorded') : !meetsVd01(c.pitch, viewM) ? t('不满足最近观看距离', 'Fails the viewing distance') : t(`套用 P${c.pitch}`, `Use P${c.pitch}`)}
+                  onClick={() => c.pitch !== null && patch({ pitch: c.pitch, pitchFrom: c.name })}
+                  style={{ textAlign: 'left', border: `1px solid ${on ? 'var(--navy700)' : 'var(--border)'}`, boxShadow: on ? '0 0 0 1px var(--navy700) inset' : undefined,
+                    borderRadius: 8, padding: '8px 10px', fontSize: 12, background: on ? 'var(--hover-bg)' : 'var(--card)', cursor: usable ? 'pointer' : 'default', font: 'inherit' }}>
+                  <b>{c.name}</b>{c.client ? ` · ${c.client}` : ''}<br />
+                  {[c.pitch !== null ? `P${c.pitch}` : '', c.widthMm && c.heightMm ? `${c.widthMm} × ${c.heightMm} mm` : '', c.curved ? t('弧形', 'curved') : '',
+                    c.status === 'completed' ? t('已完成', 'completed') : t('进行中', 'ongoing')].filter(Boolean).join(' · ')}
+                  {on && <div style={{ color: 'var(--success)', marginTop: 3 }} data-testid="judge-case-applied">{t(`已套用 ${c.name} 的 P${c.pitch}`, `Using P${c.pitch} from ${c.name}`)}</div>}
+                </button>
+              );
+            })}
           </div>
         </div>
 
@@ -515,8 +579,12 @@ export default function ImageJudgePanel({ judge, setJudge, mayReview, onHandoff 
               <span style={{ color: 'var(--success)' }}>{t('可以进入 05。', 'Ready for 05.')}</span>
             ) : (
               <span style={{ color: 'var(--warning)' }}>
-                {pending > 0 && <b>{t(`还有 ${pending} 项未确认。`, `${pending} item(s) to confirm. `)}</b>}
-                {(judge.gate?.reasons ?? []).filter((x) => !x.startsWith('还有')).join('；')}
+                {judge.progress && judge.progress.missing.length > 0 && (
+                  <b data-testid="judge-missing">{t(`还差 ${judge.progress.missing.length} 项：${judge.progress.missing.map((m) => m[0]).join('、')}。`,
+                    `${judge.progress.missing.length} left: ${judge.progress.missing.map((m) => m[1]).join(', ')}. `)}</b>
+                )}
+                {pending > 0 && !judge.progress && <b>{t(`还有 ${pending} 项未确认。`, `${pending} item(s) to confirm. `)}</b>}
+                {(judge.gate?.reasons ?? []).filter((x) => !x.startsWith('还有') && !/请确认这张图的用途|请选一个点间距|还没有屏宽和屏高/.test(x)).join('；')}
               </span>
             )}
           </div>

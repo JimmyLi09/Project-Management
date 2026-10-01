@@ -13,5 +13,5 @@ export async function GET(req: NextRequest) {
   if (!project) return NextResponse.json({ error: '项目不存在' }, { status: 404 });
   const denied = denyUnlessVisible(user, project);
   if (denied) return denied;
-  return NextResponse.json({ judges: listJudges(project.id) });
+  return NextResponse.json({ judges: listJudges(project.id, true) });
 }

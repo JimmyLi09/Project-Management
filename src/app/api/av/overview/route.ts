@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { listProjects } from '@/server/db';
 import { currentUser } from '@/server/session';
 import { canViewPrices, canViewQuotes, identityOf, visibleProjects } from '@/lib/permissions';
-import { listPriceItems } from '@/server/avdb';
+import { backfillInquiries, listPriceItems } from '@/server/avdb';
 import { projectFlow } from '@/server/avflow';
 
 /* ===== 0929 AV 工作台 =====
@@ -18,6 +18,8 @@ export async function GET() {
   if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
   const me = identityOf(user);
   const money = canViewPrices(me);
+  /* AV-018:上线后第一次打开工作台时,把缺立项记录的 AV 项目一次补齐 */
+  backfillInquiries();
 
   /* AV-017:阶段判定抽到 server/avflow.ts,步骤条和工作台用同一个函数 */
   const rows = visibleProjects(me, listProjects())
