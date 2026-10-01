@@ -71,14 +71,16 @@ export default function LedStudioView() {
   const maySave = !!project && canCostProject(me, project);
 
   /* 这个项目最新一张已校核的图纸:05 没有正式版本时自动带入它 */
-  const [reviewed, setReviewed] = useState<{ loaded: boolean; d: DrawingSummary | null }>({ loaded: false, d: null });
+  /* 记着是哪个项目的:换项目那一次渲染里,旧项目的结果不能当成新项目的 */
+  const [reviewedOf, setReviewed] = useState<{ pid: string; loaded: boolean; d: DrawingSummary | null }>({ pid: '', loaded: false, d: null });
+  const reviewed = reviewedOf.pid === project?.id ? reviewedOf : { pid: '', loaded: false, d: null };
   useEffect(() => {
-    setReviewed({ loaded: false, d: null });
     if (!project) return;
+    const pid = project.id;
     let live = true;
-    fetch(`/api/av/drawings?project=${encodeURIComponent(project.id)}`).then((r) => r.json())
-      .then((b) => { if (live) setReviewed({ loaded: true, d: ((b.drawings ?? []) as DrawingSummary[]).find((x) => x.reviewedAt > 0) ?? null }); })
-      .catch(() => { if (live) setReviewed({ loaded: true, d: null }); });
+    fetch(`/api/av/drawings?project=${encodeURIComponent(pid)}`).then((r) => r.json())
+      .then((b) => { if (live) setReviewed({ pid, loaded: true, d: ((b.drawings ?? []) as DrawingSummary[]).find((x) => x.reviewedAt > 0) ?? null }); })
+      .catch(() => { if (live) setReviewed({ pid, loaded: true, d: null }); });
     return () => { live = false; };
   }, [project?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -156,6 +158,7 @@ export default function LedStudioView() {
   const [savedMsg, setSaved] = useState('');
   async function saveToProject(): Promise<boolean> {
     if (!project) return false;
+    cancelDraft();   // 排队 / 在路上的草稿作废,别在正式版本之后又写回去
     setSaved('');
     const res = await fetch('/api/av/config', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -164,7 +167,7 @@ export default function LedStudioView() {
     const body = res ? await res.json().catch(() => ({})) : { error: t('网络错误', 'Network error') };
     const ok = !!res?.ok && !body.error;
     setSaved(ok ? `ok:${body.version}` : `✕ ${body.error || t('保存失败', 'Save failed')}`);
-    if (ok) { saved.markSaved(payload, Number(body.version) || saved.version + 1); resetDraft(); saved.reload(); refreshFlow(); }
+    if (ok) { saved.markSaved(payload, Number(body.version) || saved.version + 1); resetDraft(payload); saved.reload(); refreshFlow(); }
     return ok;
   }
 
@@ -194,9 +197,9 @@ export default function LedStudioView() {
     blocked: result.layout ? null : t('排布无解，不能保存：先按右边的阻断提示调整屏体尺寸或箱体库', 'No layout — fix the blocking findings before saving'),
     save: saveToProject,
   } : null);
-  const { draftState, draftSaving, resetDraft } = useAutoDraft({
+  const { draftState, draftSaving, draftCleared, cancelDraft, resetDraft } = useAutoDraft({
     projectId: project?.id, line: 'led', payload, drawingId: fromDrawing?.drawingId ?? null,
-    enabled: maySave, dirty, hadDraft: !!saved.draft, ready,
+    enabled: maySave && !saved.failed, dirty, hadDraft: !!saved.draft, version: saved.version, ready,
   });
   useEffect(() => { if (draftState?.at) refreshFlow(); }, [draftState?.at]); // eslint-disable-line react-hooks/exhaustive-deps
   async function discardDraft() {
@@ -315,7 +318,7 @@ export default function LedStudioView() {
               <span style={{ color: 'var(--text2)' }}>{t('手动输入。', 'Manual entry.')}</span>
             )}
             {project && (
-              <DraftNotice testid="led-draft" saved={saved} restored={origin === 'draft'} state={draftState} saving={draftSaving}
+              <DraftNotice testid="led-draft" saved={saved} restored={origin === 'draft'} state={draftState} saving={draftSaving} cleared={draftCleared}
                 onDiscard={saved.cfg && maySave ? discardDraft : null} />
             )}
             {project && origin === 'saved' && fromDrawing && <span>{t(`已载入正式版本 v${saved.version}。`, `Loaded saved version v${saved.version}.`)}</span>}

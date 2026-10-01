@@ -75,9 +75,9 @@ export default function ElvStudioView() {
     setReady(true);
   }, [project, stored.loaded, stored.cfg, stored.draft]);
   const dirty = !stored.cfg || !sameConfig(cfg, stored.cfg);
-  const { draftState, draftSaving, resetDraft } = useAutoDraft({
+  const { draftState, draftSaving, draftCleared, cancelDraft, resetDraft } = useAutoDraft({
     projectId: project?.id, line: 'elv', payload: cfg, drawingId: null,
-    enabled: !!project && canCostProject(me, project), dirty, hadDraft: !!stored.draft, ready,
+    enabled: !!project && canCostProject(me, project) && !stored.failed, dirty, hadDraft: !!stored.draft, version: stored.version, ready,
   });
   useEffect(() => { if (draftState?.at) refreshFlow(); }, [draftState?.at]); // eslint-disable-line react-hooks/exhaustive-deps
   /* AV-016 ②:放弃草稿 = 回到最新正式版本 */
@@ -86,7 +86,7 @@ export default function ElvStudioView() {
     await fetch(`/api/av/config/draft?project=${encodeURIComponent(project.id)}&line=elv`, { method: 'DELETE' }).catch(() => null);
     setCfg(stored.cfg);
     setRestored(false);
-    resetDraft();
+    resetDraft(stored.cfg);
     stored.reload();
     refreshFlow();
   }
@@ -101,6 +101,7 @@ export default function ElvStudioView() {
 
   async function save(): Promise<boolean> {
     if (!project) return false;
+    cancelDraft();   // 排队 / 在路上的草稿作废,别在正式版本之后又写回去
     setSaved('');
     const res = await fetch('/api/av/config', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -109,7 +110,7 @@ export default function ElvStudioView() {
     const body = res ? await res.json().catch(() => ({})) : { error: '网络错误' };
     const ok = !!res?.ok && !body.error;
     setSaved(ok ? 'ok' : `✕ ${body.error || '保存失败'}`);
-    if (ok) { stored.markSaved(cfg, Number(body.version) || stored.version + 1); resetDraft(); stored.reload(); refreshFlow(); }
+    if (ok) { stored.markSaved(cfg, Number(body.version) || stored.version + 1); resetDraft(cfg); stored.reload(); refreshFlow(); }
     return ok;
   }
 
@@ -172,7 +173,7 @@ export default function ElvStudioView() {
                 {saved === 'ok' && <span style={{ color: 'var(--success)' }}>{t('已保存。', 'Saved. ')}
                   <button style={{ textDecoration: 'underline', color: 'var(--navy700)', fontSize: 12 }} onClick={() => setView({ name: 'avcostquote', sub: 'cost', line: 'elv' })}>{t('去 06 成本核算', 'Open 06')}</button></span>}
                 {saved.startsWith('✕') && <span style={{ color: 'var(--danger)' }}>{saved}</span>}
-                <DraftNotice testid="studio-draft" saved={stored} restored={restored} state={draftState} saving={draftSaving}
+                <DraftNotice testid="studio-draft" saved={stored} restored={restored} state={draftState} saving={draftSaving} cleared={draftCleared}
                   onDiscard={stored.cfg ? discardDraft : null} />
               </div>
             )}

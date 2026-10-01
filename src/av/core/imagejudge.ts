@@ -233,10 +233,13 @@ const HAS_UNIT = /(mm|cm|\dm\b|m\s*m|米)/i;
    reuse it are blanked (with the reason) and the field goes to 「还缺什么」.
    Estimates are worked out, not read, so they never collide. */
 
-/* "2000mm", "2,000", "２０００ mm" → "2000": the number as written */
+/* The annotation as written, so that copies of it compare equal:
+   "2000mm" = "2000" = "２，０００ ｍｍ" = "2,000 mm" → "2000"; "FFL+2000" stays "ffl+2000"
+   (a different annotation); "2.5m" stays "2.5m". Empty when there is no number. */
 export function annotationKey(text: string): string {
-  const t = text.normalize('NFKC').replace(/(\d),(?=\d{3}\b)/g, '$1');
-  return /\d+(?:\.\d+)?/.exec(t)?.[0] ?? '';
+  const t = text.normalize('NFKC').toLowerCase().replace(/\s+/g, '').replace(/(\d)[,，](?=\d{3}(?!\d))/g, '$1');
+  if (!/\d/.test(t)) return '';
+  return t.replace(/(\d)mm$/, '$1');
 }
 
 const NAME: Record<DrawingElement, string> = {
@@ -246,8 +249,8 @@ const NAME: Record<DrawingElement, string> = {
 /* What a field's source or annotation would say if it really were that field */
 const HINT: Record<DrawingElement, RegExp> = {
   led_opening_w: /宽|\bw\b|width/i,
-  led_opening_h: /高(?!度)|屏高|\bh\b|height/i,
-  led_mount_h: /离地|地面|底|ffl|aff|mount/i,
+  led_opening_h: /(?<!标)高(?!度)|\bh\b|height/i,
+  led_mount_h: /离地|地面|底|标高|ffl|aff|mount|elev/i,
   led_view_min: /观看|视距|view/i,
   led_ctrl_dist: /控制|ctrl|control/i,
   led_pwr_dist: /配电|电箱|强电|\bdb\b|power/i,
@@ -265,13 +268,15 @@ function dedupeAnnotations(items: JudgeItem[]) {
   for (const g of groups.values()) {
     if (g.length < 2) continue;
     /* the best match: width / height first, then the field the source wording points to, then the surer reading */
-    const score = (i: JudgeItem) => {
-      const el = i.key as DrawingElement;
-      return (SIZE.includes(el) ? 4 : 0) + (HINT[el].test(`${i.source} ${i.raw}`) ? 2 : 0) + i.confidence;
-    };
+    const own = (i: JudgeItem) => HINT[i.key as DrawingElement].test(`${i.source} ${i.raw}`);
+    const score = (i: JudgeItem) => (SIZE.includes(i.key as DrawingElement) ? 4 : 0) + (own(i) ? 2 : 0) + i.confidence;
     const keep = [...g].sort((a, b) => score(b) - score(a) || ELEMENTS.indexOf(a.key as DrawingElement) - ELEMENTS.indexOf(b.key as DrawingElement))[0];
     for (const i of g) {
       if (i === keep) continue;
+      /* a square screen: width and height may well carry the same number */
+      if (SIZE.includes(i.key as DrawingElement) && SIZE.includes(keep.key as DrawingElement)) continue;
+      /* its own source names it ("离地 2000"、"配电箱旁 5m"): a second annotation with the same number, not a copy */
+      if (own(i)) continue;
       i.dropped = `图上「${i.raw}」已用作${NAME[keep.key as DrawingElement]}，同一条标注不重复填；${NAME[i.key as DrawingElement]}请另行补充`;
       i.value = null;
       i.confidence = 0;
@@ -282,7 +287,7 @@ function dedupeAnnotations(items: JudgeItem[]) {
 /* shape / mount sources: always 「看图判断」; the model's words only when they describe what it saw, not a dimension */
 function lookedAt(src: unknown): string {
   const t = str(src, 160).replace(/^看图判断[:：]?\s*/, '');
-  return t && !/\d/.test(t) && !/[「“"']/.test(t) ? `看图判断：${t}` : '看图判断';
+  return t && !/\d/.test(t) && !/[「」『』“”‘’"'《》]/.test(t) && !/标注|尺寸|dimension/i.test(t) ? `看图判断：${t}` : '看图判断';
 }
 
 /* The model's JSON → what the screen shows. Everything the model said is a
@@ -456,11 +461,15 @@ export function asks(r: JudgeResult, rv: JudgeReview): Ask[] {
     out.push({ id: 'view', zh: '观众离屏最近大概几米？', en: 'Nearest viewing distance (m)?',
       whyZh: '点间距按规则 LED-VD-01「点间距(mm) ≤ 最近观看距离(m)」选。', whyEn: 'Pitch is chosen by LED-VD-01: pitch (mm) ≤ viewing distance (m).' });
   }
-  /* 离地高度:没读到、或者读到的那条标注已经用作屏宽 / 屏高(见 dedupeAnnotations)时问 */
-  if (!has('led_mount_h') && rv.intent !== 'other') {
-    out.push({ id: 'mount_h', zh: '屏底离地面多高？', en: 'How high is the bottom of the screen above the floor?',
-      whyZh: itemOf(r, 'led_mount_h')?.dropped ? '图上那条标注已经用作屏的尺寸，离地高度要另外确认。' : '决定支架 / 钢结构做法和观看角度。',
-      whyEn: itemOf(r, 'led_mount_h')?.dropped ? 'That annotation is already the screen size; the mounting height needs confirming separately.' : 'Sets the bracket / steelwork and the viewing angle.' });
+  /* 离地高度:没读到、或者读到的那条标注已经用作屏宽 / 屏高(见 dedupeAnnotations)时问;
+     参考图上的是别人现场的,和屏宽屏高一样要问我们自己的 */
+  if (rv.intent !== 'other' && (rv.intent === 'ref' || !has('led_mount_h'))) {
+    const dropped = !!itemOf(r, 'led_mount_h')?.dropped;
+    out.push({ id: 'mount_h',
+      zh: rv.intent === 'ref' ? '我们现场屏底离地面多高？（参考图上的不算）' : '屏底离地面多高？',
+      en: rv.intent === 'ref' ? 'Height of the screen bottom above the floor at our site? (not the reference picture)' : 'How high is the bottom of the screen above the floor?',
+      whyZh: dropped ? '图上那条标注已经用作屏的尺寸，离地高度要另外确认。' : '决定支架 / 钢结构做法和观看角度。',
+      whyEn: dropped ? 'That annotation is already the screen size; the mounting height needs confirming separately.' : 'Sets the bracket / steelwork and the viewing angle.' });
   }
   if (finalOf(r, rv, 'mount') === 'recessed') {
     out.push({ id: 'maint', zh: '屏后面有没有检修空间？', en: 'Is there service access behind the screen?',
@@ -642,9 +651,19 @@ export function settle(r: JudgeResult, rv: JudgeReview, suggested: number | null
     width: w, height: h, tileWidth: tile, curve, snap,
     view, ctrl: answerM('ctrl') ?? numOrNull(finalOf(r, rv, 'led_ctrl_dist')),
     pwr: answerM('pwr') ?? numOrNull(finalOf(r, rv, 'led_pwr_dist')),
-    mountH: answerM('mountH') ?? numOrNull(finalOf(r, rv, 'led_mount_h')),
+    mountH: mountHOf(r, rv),
     maintain, pitch: rv.pitch ?? suggested ?? drawn, derived, errors,
   };
+}
+
+/* 离地高度:表里改过的值优先(人最后动的是它),其次图上读到的,再次「还缺什么」里的回答;
+   参考图上读到的不算我们的。0 是合法的(落地屏) */
+function mountHOf(r: JudgeResult, rv: JudgeReview): number | null {
+  const ans = rv.answers.mountH;
+  const answered = ans !== undefined && ans.trim() !== '' && Number(ans) >= 0 ? Number(ans) : null;
+  if ('led_mount_h' in rv.values) return numOrNull(rv.values.led_mount_h ?? null) ?? answered;
+  if (rv.intent === 'ref') return answered;
+  return numOrNull(itemOf(r, 'led_mount_h')?.value ?? null) ?? answered;
 }
 
 export interface GateState { ok: boolean; pending: number; reasons: string[] }

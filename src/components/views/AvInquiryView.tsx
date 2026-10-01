@@ -10,7 +10,7 @@ import React, { useEffect, useRef, useState } from 'react';
 
 import { isAvailable, LINES, projectLines } from '@/av/core/lines';
 import type { BusinessLine } from '@/av/core/types';
-import { canCreate, canMeta } from '@/lib/permissions';
+import { canCreate, canEdit, canMeta } from '@/lib/permissions';
 import { useLang } from '@/lib/i18n';
 import type { Project } from '@/lib/types';
 import { useStore } from '../store';
@@ -160,8 +160,11 @@ function EditInquiry({ project }: { project: Project }) {
   const [inq, setInq] = useState<{ location: string; notes: string; lines: BusinessLine[]; packs: Partial<Record<BusinessLine, string>> } | null | undefined>(undefined);
   const [form, setForm] = useState<Fields>({ name: project.name, client: project.client || '', location: '', delivery: project.delivery || '', notes: '' });
   const [st, setSt] = useState<{ saving: boolean; at: number; error: string }>({ saving: false, at: 0, error: '' });
-  const base = useRef<string | null>(null);
+  /* 服务器上现在的值(最后一次读到 / 存上的)。只发和它不一样的字段 —— 别人在项目页刚改的
+     客户名,这边没动过就不会被旧值盖回去(复查 #68) */
+  const base = useRef<Fields | null>(null);
   const pending = useRef<string | null>(null);
+  const chain = useRef<Promise<unknown>>(Promise.resolve());   // 一次存完再存下一次,先发的不会后到
 
   useEffect(() => {
     let live = true;
@@ -171,30 +174,53 @@ function EditInquiry({ project }: { project: Project }) {
       setInq(i);
       setForm((f) => {
         const next = { ...f, location: i?.location ?? '', notes: i?.notes ?? '' };
-        base.current = JSON.stringify(next);
+        base.current = next;
         return next;
       });
-    }).catch(() => { if (live) { setInq(null); base.current = JSON.stringify(form); } });
+    }).catch(() => { if (live) { setInq(null); base.current = form; } });
     return () => { live = false; };
   }, [project.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  /* 别人改了项目名 / 客户 / 交付日期(store 每 30 秒刷新一次):这边没动过的字段跟着更新 */
+  useEffect(() => {
+    const b = base.current;
+    if (!b) return;
+    const fresh: Partial<Fields> = { name: project.name, client: project.client || '', delivery: project.delivery || '' };
+    const adopt = (Object.keys(fresh) as (keyof Fields)[]).filter((k) => fresh[k] !== b[k] && form[k] === b[k]);
+    if (!adopt.length) return;
+    const patch = Object.fromEntries(adopt.map((k) => [k, fresh[k]])) as Partial<Fields>;
+    base.current = { ...b, ...patch };
+    setForm((f) => ({ ...f, ...patch }));
+  }, [project.name, project.client, project.delivery]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const json = JSON.stringify(form);
   const send = (body: string, keepalive = false) =>
     fetch('/api/av/inquiry', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body, keepalive });
   useEffect(() => {
-    if (!may || base.current === null || json === base.current) return;
+    const b0 = base.current;
+    if (!may || !b0) return;
+    const diff = (Object.keys(form) as (keyof Fields)[]).filter((k) => form[k] !== b0[k]);
+    if (!diff.length) { pending.current = null; return; }
     if (!form.name.trim()) { pending.current = null; setSt((s) => ({ ...s, saving: false, error: t('项目名称不能为空', 'Project name is required') })); return; }
-    const body = JSON.stringify({ projectId: project.id, ...form });
+    const sent = Object.fromEntries(diff.map((k) => [k, form[k]])) as Partial<Fields>;
+    const body = JSON.stringify({ projectId: project.id, ...sent });
     pending.current = body;
     setSt((s) => ({ ...s, saving: true, error: '' }));
-    const timer = setTimeout(async () => {
+    const timer = setTimeout(() => {
       if (pending.current !== body) return;
       pending.current = null;
-      base.current = json;
-      const res = await send(body).catch(() => null);
-      const b = res ? await res.json().catch(() => ({})) : { error: t('网络错误', 'Network error') };
-      if (res?.ok) { setSt({ saving: false, at: b.savedAt || Date.now(), error: '' }); refresh(); refreshFlow(); }
-      else { pending.current = pending.current ?? body; setSt({ saving: false, at: 0, error: b.error || t('没存上', 'Not saved') }); }
+      base.current = { ...(base.current ?? b0), ...sent };
+      chain.current = chain.current.then(async () => {
+        const res = await send(body).catch(() => null);
+        const r = res ? await res.json().catch(() => ({})) : { error: t('网络错误', 'Network error') };
+        if (res?.ok) { setSt({ saving: false, at: r.savedAt || Date.now(), error: '' }); refresh(); refreshFlow(); }
+        else {
+          /* 没存上:基准退回去,下次改动连这几项一起再发;关页面时也会再试一次 */
+          base.current = { ...(base.current ?? b0), ...Object.fromEntries(diff.map((k) => [k, b0[k]])) };
+          pending.current = pending.current ?? body;
+          setSt({ saving: false, at: 0, error: r.error || t('没存上', 'Not saved') });
+        }
+      });
     }, 1500);
     return () => clearTimeout(timer);
   }, [json, may]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -243,7 +269,8 @@ function EditInquiry({ project }: { project: Project }) {
               </div>
               <div className="field" style={{ marginBottom: 0 }}>
                 <label htmlFor="inq-delivery">{t('期望交付日期', 'Target delivery')} *</label>
-                <input id="inq-delivery" type="date" value={form.delivery} onChange={set('delivery')} disabled={ro}
+                <input id="inq-delivery" type="date" value={form.delivery} onChange={set('delivery')} disabled={ro || !canEdit(me, project)}
+                  title={!ro && !canEdit(me, project) ? t('交付日期由项目负责人或 PD / BD 修改（和项目页一样）', 'The delivery date is changed by the project lead or PD / BD') : undefined}
                   style={missing ? { borderColor: 'var(--warning)' } : undefined} />
                 {missing && <span style={{ fontSize: 11.5, color: 'var(--warning)' }} data-testid="inq-missing">{t('还没填：工作台会显示「缺立项信息」。', 'Missing: the workbench shows “Details missing”.')}</span>}
               </div>

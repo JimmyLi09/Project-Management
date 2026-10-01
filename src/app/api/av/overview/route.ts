@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { listProjects } from '@/server/db';
 import { currentUser } from '@/server/session';
-import { canViewPrices, identityOf, visibleProjects } from '@/lib/permissions';
+import { canViewPrices, canViewQuotes, identityOf, visibleProjects } from '@/lib/permissions';
 import { listPriceItems } from '@/server/avdb';
 import { projectFlow } from '@/server/avflow';
 
@@ -63,9 +63,11 @@ export async function GET() {
       review: live.filter((r) => r.stage === 'review' || r.stage === 'failed').length,
       config: live.filter((r) => r.stage === 'config').length,
       costing: money ? live.filter((r) => r.stage === 'costing').length : null,
-      quoting: money ? live.filter((r) => r.stage === 'quoting').length : null,
+      /* 待报价的个数不涉及金额:谁都显示,数字和下面的表对得上(复查 #68) */
+      quoting: live.filter((r) => r.stage === 'quoting').length,
       expiredPrices: expired,
     },
     money,
+    quotes: canViewQuotes(me),
   });
 }

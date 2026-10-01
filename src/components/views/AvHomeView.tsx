@@ -36,6 +36,7 @@ interface Overview {
   projects: Row[];
   counts: { upload: number; review: number; config: number; costing: number | null; quoting: number | null; expiredPrices: number | null };
   money: boolean;
+  quotes?: boolean;   // 能不能看报价(PM / 成员 / 只读看不了)
 }
 
 /* 每一步:怎么叫、什么颜色、下一步点到哪一页哪个标签 */
@@ -102,11 +103,21 @@ export default function AvHomeView() {
   /* 点「下一步」:先把当前 AV 项目设成这一行,再跳过去 —— 四个配置视图和
      成本页读的都是 store 里那个 ledProjectId,不设的话点过去还得再选一次。
      05 落在这个项目上次停下的那条业务线。 */
-  const goNext = (r: Row) => {
+  /* 看不了报价的人(PM / 成员 / 只读):待报价、已报价的项目「下一步」不能把他带到锁住的报价页 */
+  const nextOf = (r: Row) => {
     const s = STAGES[r.stage];
+    if ((r.stage === 'quoting' || r.stage === 'done') && data && data.quotes === false) {
+      return data.money
+        ? { view: 'avcostquote' as View['name'], sub: 'cost', zh: '查看成本', en: 'View costing' }
+        : { view: 'avconfig' as View['name'], sub: undefined, zh: '查看方案', en: 'View design' };
+    }
+    return { view: s.next.view, sub: s.next.sub, zh: s.goZh, en: s.goEn };
+  };
+  const goNext = (r: Row) => {
+    const n = nextOf(r);
     setLedProjectId(r.id);
-    const sub = s.next.view === 'avconfig' ? (lastLine(r.id) || r.lines[0]?.line) : s.next.sub;
-    setView({ name: s.next.view, sub });
+    const sub = n.view === 'avconfig' ? (lastLine(r.id) || r.lines[0]?.line) : n.sub;
+    setView({ name: n.view, sub });
   };
 
   const live = (data?.projects || []).filter((r) => r.stage !== 'done' && (!only || TILE_STAGES[only].includes(r.stage)));
@@ -126,7 +137,7 @@ export default function AvHomeView() {
     >
       {err && <div className="panel" style={{ padding: '14px 18px', fontSize: 13, color: 'var(--danger)' }}>{err}</div>}
 
-      <div className={`kpi-grid${data && !data.money ? '' : ' six'}`} data-testid="av-counts">
+      <div className={`kpi-grid${data && !data.money ? ' four' : ' six'}`} data-testid="av-counts">
         {([
           ['upload', t('待上传图纸', 'Awaiting drawings'), data?.counts.upload],
           ['review', t('待图纸校核', 'Awaiting drawing review'), data?.counts.review],
@@ -191,7 +202,7 @@ export default function AvHomeView() {
               <span data-testid="av-last-update" style={{ minWidth: 0 }}><Ell full={upd} style={{ fontSize: 12.5, color: 'var(--text2)' }}>{upd || '—'}</Ell></span>
               <span className="tnum" style={{ fontSize: 13, color: 'var(--text2)' }}>{d ? fmtDate(d) : '—'}</span>
               <button className="av-next" onClick={() => goNext(r)} data-testid="av-next">
-                {lang === 'zh' ? s.goZh : s.goEn} ›
+                {lang === 'zh' ? nextOf(r).zh : nextOf(r).en} ›
               </button>
             </div>
           );

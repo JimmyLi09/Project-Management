@@ -58,6 +58,7 @@ const REASON: Record<string, [string, string]> = {
   units: ['图纸没有设置单位（毫米 / 米），读不出尺寸。请设计方补上单位后重新上传，或直接手填。', 'The drawing has no units (mm / m) so sizes cannot be read. Ask the designer to set them, or fill in by hand.'],
   type: ['这种文件格式读不了（支持 DXF、PDF、图片）。文件已保存，可以手填。', 'This file type cannot be read (DXF, PDF and pictures are supported). The file is saved — fill in by hand.'],
   broken: ['文件损坏或打不开。请重新导出后上传，或直接手填。', 'The file is damaged or cannot be opened. Export it again and upload, or fill in by hand.'],
+  interrupted: ['上次解析被中断（可能是服务器重启）。文件已保存，可以重新解析或手填。', 'The last parse was interrupted (the server may have restarted). The file is saved — re-parse or fill in by hand.'],
   other: ['解析没成功。文件已保存，可以重新解析或手填；仍不行请联系管理员。', 'Parsing did not succeed. The file is saved — re-parse or fill in by hand; contact the admin if it keeps failing.'],
 };
 
@@ -195,6 +196,8 @@ export default function LedIngestView() {
   }
   const mayRemove = isFull(me);   // 删除留档只给 PD / BD
   const failed = uploads.filter((u) => u.status === 'failed');
+  /* 正在解析的也列出来(原来看不见,以为没传上) */
+  const parsing = uploads.filter((u) => u.status === 'parsing');
   const originalOf = (k: 'drawingId' | 'judgeId', id: number) => uploads.find((u) => u[k] === id);
   const origLink = (u?: UploadSummary) => u && (
     <a href={`/api/av/uploads/${u.id}/file`} style={{ fontSize: 12, color: 'var(--navy700)', textDecoration: 'underline', marginRight: 10 }}
@@ -283,11 +286,20 @@ export default function LedIngestView() {
           )}
         </div>
         {project && (
-          drawingRows.length || judges.length || failed.length ? (
+          drawingRows.length || judges.length || failed.length || parsing.length ? (
             <div style={{ overflowX: 'auto' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, minWidth: 720 }}>
                 <tbody>
                   <tr>{[t('图纸', 'Drawing'), t('等级', 'Grade'), t('上传', 'Uploaded'), t('校核', 'Review'), ''].map((h, i) => <th key={i} style={th}>{h}</th>)}</tr>
+                  {parsing.map((u) => (
+                    <tr key={`p${u.id}`} data-testid={`upload-parsing-${u.id}`}>
+                      <td style={td}>{u.fileName}</td>
+                      <td style={td}><span style={{ ...chip, background: 'var(--hover-bg)', color: 'var(--text2)' }}>{t('留档', 'Kept')}</span></td>
+                      <td style={{ ...td, color: 'var(--text2)' }}>{u.uploadedBy} · {fmtDate(new Date(u.uploadedAt))}</td>
+                      <td style={{ ...td, color: 'var(--navy700)' }}>{t('解析中…', 'Parsing…')}</td>
+                      <td style={{ ...td, textAlign: 'right', whiteSpace: 'nowrap' }}>{origLink(u)}</td>
+                    </tr>
+                  ))}
                   {failed.map((u) => (
                     <tr key={`u${u.id}`} data-testid={`upload-failed-${u.id}`} style={{ background: 'var(--danger-bg, #FDF0EC)' }}>
                       <td style={td}>{u.fileName}</td>

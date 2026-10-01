@@ -781,9 +781,10 @@ export function appendAuditMerged(projectId: string, e: { at: number; by: string
   combine?: (prev: LogParams | undefined) => { text: string; p: LogParams }) {
   const d = getDb();
   const p = e.p ? JSON.stringify(e.p) : null;
-  const last = d.prepare('SELECT id, at, by, k, p FROM audit_log WHERE project_id = ? ORDER BY at DESC, id DESC LIMIT 1')
-    .get(projectId) as { id: number; at: number; by: string; k: string | null; p: string | null } | undefined;
-  if (last && last.k === e.k && last.by === e.by && (combine || last.p === p) && e.at - last.at < MERGE_MS) {
+  /* 看的是「这个人」在这个项目上的上一条:两个人同时在改时,别人的日志夹在中间也不打断合并(复查 #68) */
+  const last = d.prepare('SELECT id, at, by, k, p FROM audit_log WHERE project_id = ? AND by = ? ORDER BY at DESC, id DESC LIMIT 1')
+    .get(projectId, e.by) as { id: number; at: number; by: string; k: string | null; p: string | null } | undefined;
+  if (last && last.k === e.k && (combine || last.p === p) && e.at - last.at < MERGE_MS) {
     if (combine) {
       const c = combine(last.p ? JSON.parse(last.p) as LogParams : undefined);
       d.prepare('UPDATE audit_log SET at = ?, text = ?, p = ? WHERE id = ?').run(e.at, c.text, JSON.stringify(c.p), last.id);

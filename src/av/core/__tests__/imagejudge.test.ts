@@ -249,7 +249,7 @@ test('同一条标注被宽 / 高以外的两个字段同时用:留来源最像�
 test('不同的标注、或推算出来的值，不算重复', () => {
   assert.equal(annotationKey('2,000 mm'), '2000');
   assert.equal(annotationKey('２０００ｍｍ'), '2000');
-  assert.equal(annotationKey('FFL+900'), '900');
+  assert.equal(annotationKey('FFL+900'), 'ffl+900', 'FFL+900 和裸数 900 不是同一条标注');
   /* 估出来的 2000 不是读自标注,不和屏高 2000 打架 */
   const r = normalise({ ...PHOTO, mount_height: rd('2000mm', 0.4, '按门高推算', true) });
   assert.equal(r.items.find((i) => i.key === 'led_mount_h')!.value, 2000);
@@ -268,4 +268,49 @@ test('形状 / 安装方式的来源统一写「看图判断」，不引用尺�
   assert.equal(ok.items.find((i) => i.key === 'mount')!.source, '看图判断：四周有墙面包边');
   /* 没判断出来的:来源留空,由人选 */
   assert.equal(normalise({ ...PHOTO, shape: 'unknown' as JudgeRaw['shape'] }).items.find((i) => i.key === 'shape')!.source, '');
+});
+
+/* ── 1001 复查(#70 之后) ── */
+test('复查:千分位标注不会塌成同一个数', () => {
+  assert.equal(annotationKey('2,400mm'), '2400');
+  assert.equal(annotationKey('２，４００ｍｍ'), '2400');
+  assert.equal(annotationKey('2,000 mm'), '2000');
+  const r = normalise({ ...PHOTO, width: rd('2,400mm', 0.8, '读自标注'), height: rd('2,000mm', 0.8, '读自标注') });
+  assert.equal(r.items.find((i) => i.key === 'led_opening_w')!.value, 2400);
+  assert.equal(r.items.find((i) => i.key === 'led_opening_h')!.value, 2000, '屏高不能被当成「已用作屏宽」');
+});
+
+test('复查:方形屏宽高同为 2000,两边都保留', () => {
+  const r = normalise({ ...PHOTO, width: rd('2000mm', 0.8, '读自上方标注'), height: rd('2000mm', 0.8, '读自右侧标注') });
+  assert.equal(r.items.find((i) => i.key === 'led_opening_w')!.value, 2000);
+  assert.equal(r.items.find((i) => i.key === 'led_opening_h')!.value, 2000);
+});
+
+test('复查:来源说得清是自己那一项的不同标注,不算重复', () => {
+  const r = normalise({ ...PHOTO, mount_height: rd('FFL+2000', 0.8, '读自离地标注「FFL+2000」') });
+  assert.equal(r.items.find((i) => i.key === 'led_mount_h')!.value, 2000, 'FFL+2000 是离地高度,不是屏高那条');
+  const d = normalise({ ...PHOTO, mount_height: none,
+    control_distance: rd('5m', 0.7, '控制室旁标注 5m'), power_distance: rd('5m', 0.7, '配电箱旁标注 5m') });
+  assert.equal(d.items.find((i) => i.key === 'led_ctrl_dist')!.value, 5);
+  assert.equal(d.items.find((i) => i.key === 'led_pwr_dist')!.value, 5);
+  /* 「标高」是离地高度的说法,不是屏高 */
+  const e = normalise({ ...PHOTO, mount_height: rd('2000mm', 0.7, '读自标高标注 2000mm') });
+  assert.equal(e.items.find((i) => i.key === 'led_mount_h')!.value, 2000);
+});
+
+test('复查:离地高度 —— 表里改的值优先于先前的回答;0 可以填;参考图要问', () => {
+  const r = normalise(PHOTO_1001);
+  const rv: JudgeReview = { ...emptyReview(), intent: 'site', answers: { mountH: '1200' }, values: { led_mount_h: 1500 } };
+  assert.equal(settle(r, rv).mountH, 1500, '后来在表里改成 1500,以表为准');
+  assert.equal(settle(r, { ...emptyReview(), intent: 'site', answers: { mountH: '0' } }).mountH, 0, '落地屏离地 0');
+  const ref = normalise({ ...PHOTO, mount_height: rd('900mm', 0.7, '读自离地标注') });
+  assert.ok(asks(ref, { ...emptyReview(), intent: 'ref' }).some((a) => a.id === 'mount_h'), '参考图:离地高度是别人现场的,要问我们自己的');
+  assert.equal(settle(ref, { ...emptyReview(), intent: 'ref' }).mountH, null, '参考图上的离地高度不带入');
+  assert.equal(settle(ref, { ...emptyReview(), intent: 'ref', answers: { mountH: '600' } }).mountH, 600);
+});
+
+test('复查:看图判断不收引用标注的说法(各种引号)', () => {
+  const r = normalise({ ...PHOTO, shape_source: '依据”宽度”标注判断', mount_source: '见『立面』' });
+  assert.equal(r.items.find((i) => i.key === 'shape')!.source, '看图判断');
+  assert.equal(r.items.find((i) => i.key === 'mount')!.source, '看图判断');
 });

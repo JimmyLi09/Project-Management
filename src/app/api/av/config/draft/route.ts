@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { canCostProject, identityOf } from '@/lib/permissions';
 import { logZh } from '@/lib/logmsg';
-import { clearDraft, getDrawing, saveDraft } from '@/server/avdb';
+import { clearDraft, configCount, getDrawing, latestConfig, saveDraft } from '@/server/avdb';
 import { denyUnlessVisible } from '@/server/avguard';
 import { appendAuditMerged, getProject } from '@/server/db';
 import { currentUser } from '@/server/session';
@@ -24,7 +24,7 @@ async function guard(projectId: string) {
 }
 
 export async function PUT(req: NextRequest) {
-  const body = (await req.json().catch(() => null)) as { projectId?: string; line?: string; cfg?: unknown; drawingId?: number | null } | null;
+  const body = (await req.json().catch(() => null)) as { projectId?: string; line?: string; cfg?: unknown; drawingId?: number | null; base?: number } | null;
   const g = await guard(String(body?.projectId ?? ''));
   if ('error' in g) return g.error;
   if (!body?.cfg || typeof body.cfg !== 'object') return NextResponse.json({ error: '缺少方案参数' }, { status: 400 });
@@ -35,6 +35,12 @@ export async function PUT(req: NextRequest) {
     if (!d || d.project_id !== g.project.id) return NextResponse.json({ error: '图纸不属于该项目' }, { status: 400 });
   }
   const line = lineOf(body.line);
+  /* 这份草稿基于第 base 版,而之后是我自己存了正式版本:它是正式保存时还在路上的那一次,
+     已经被那一版取代 —— 不再存,免得把刚清掉的草稿又写回去(复查 #68) */
+  if (typeof body.base === 'number' && body.base < configCount(g.project.id, line) && latestConfig(g.project.id, line)?.createdBy === g.user.name) {
+    clearDraft(g.project.id, line, g.user.id);
+    return NextResponse.json({ draft: null, superseded: true });
+  }
   const draft = saveDraft(g.project.id, line, body.cfg, drawingId, g.user);
   const p = { svc: line };
   appendAuditMerged(g.project.id, { at: draft.updatedAt, by: g.user.name, text: logZh('av.draft', p), k: 'av.draft', p });
