@@ -165,7 +165,7 @@ export default function LedStudioView() {
     const body = res ? await res.json().catch(() => ({})) : { error: t('网络错误', 'Network error') };
     const ok = !!res?.ok && !body.error;
     setSaved(ok ? `ok:${body.version}` : `✕ ${body.error || t('保存失败', 'Save failed')}`);
-    if (ok) { saved.reload(); resetDraft(); refreshFlow(); }
+    if (ok) { saved.markSaved(payload, Number(body.version) || saved.version + 1); resetDraft(); saved.reload(); refreshFlow(); }
     return ok;
   }
 
@@ -174,7 +174,10 @@ export default function LedStudioView() {
   const lib = useMemo(() => parseLib(libText), [libText]);
   const [modW, modH] = cfg.led_mod ?? [profile.modW, profile.modH];
 
-  const payload = useMemo(() => ({ ...cfg, led_cab_lib: lib.length ? lib : undefined }), [cfg, lib]);
+  /* 弧形只随已确认的图片判读走(服务端没带图纸就删掉它);改为手动输入后也不再带,
+     否则和存下来的正式版本永远对不上,05 会一直显示「有改动」 */
+  const payload = useMemo(() => ({ ...cfg, led_curve: fromDrawing?.drawingId ? cfg.led_curve : undefined, led_cab_lib: lib.length ? lib : undefined }),
+    [cfg, lib, fromDrawing]);
   const result = useMemo(
     () => compute(payload, packVersion, fromDrawing?.prov),
     [payload, packVersion, fromDrawing],

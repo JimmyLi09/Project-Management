@@ -205,3 +205,11 @@ test('兜底：OCR 只列出数字让人指定，手填时六项全空', () => {
   assert.ok(m.items.every((i) => i.value === null));
   assert.deepEqual(toConfirm(m), []);
 });
+
+test('选完点间距又把观看距离改小:闸门重新按 LED-VD-01 拦下', () => {
+  const r = normalise({ ...DWG, pitch: rd('', 0) });
+  const base: JudgeReview = { ...emptyReview(), intent: 'site', confirmed: Object.fromEntries(toConfirm(r).map((k) => [k, true])), answers: { view: '5' }, pitch: 4 };
+  assert.ok(!gate(r, base).reasons.some((x) => x.includes('不满足 LED-VD-01')));
+  const g = gate(r, { ...base, answers: { view: '2' } });
+  assert.ok(g.reasons.some((x) => x.includes('所选 P4 不满足 LED-VD-01')), g.reasons.join('|'));
+});

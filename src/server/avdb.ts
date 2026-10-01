@@ -599,7 +599,10 @@ type ConfigRow = { id: number; project_id: string; line: string; pack_version: s
 /* ===== AV-016 ② · 05 的自动草稿 =====
    每个项目每条业务线一份,谁改都存在同一份里(最后一次写的为准,记着是谁、几点)。
    存成正式版本(av_config 新一行)时草稿清掉。草稿不进 06:成本只按正式版本算。 */
+let draftReady = false;
 function draftTable() {
+  if (draftReady) return;
+  draftReady = true;
   db().exec(`CREATE TABLE IF NOT EXISTS av_config_draft (
     project_id TEXT NOT NULL,
     line TEXT NOT NULL,

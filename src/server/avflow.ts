@@ -16,7 +16,7 @@ import type { Project } from '@/lib/types';
 import { configCount, getDraft, getInquiry, latestConfig, latestCostSheet, listDrawings, listQuotes } from './avdb';
 import { listUploads } from './avupload';
 import { listJudges } from './avjudge';
-import { listAudit } from './db';
+import { lastAvAudit } from './db';
 
 export type StepKey = 's1' | 's2' | 's5' | 's6' | 's7';
 export type StepState = 'done' | 'todo' | 'draft' | 'pending' | 'lock' | 'na';
@@ -79,13 +79,17 @@ export function projectFlow(p: Project, me: Identity): ProjectFlow | null {
 
   const hasLed = keys.includes('led');
   const reviewed = drawings.filter((d) => d.reviewedAt > 0).length;
+  /* 已经有校核完的图纸、又没有解析出来还没校核的:这一步算完成。解析失败的留档、
+     没带入 05 的图片(比如「只是资料」)只作提示,不能让这一步永远卡在「待处理」 */
+  const loose = failedUploads + openJudges;
   const s2 = !hasLed ? st('na', '本项目不用', 'Not needed')
-    : failedUploads > 0 && pendingDrawings + openJudges === 0
-      ? st('pending', `${failedUploads} 份解析失败，原件已留档`, `${failedUploads} failed to parse (kept)`)
-    : pendingDrawings + openJudges > 0
-      ? st('pending', `还有 ${pendingDrawings + openJudges} 张待确认`, `${pendingDrawings + openJudges} to confirm`)
-      : reviewed > 0 ? st('done', '已完成', 'Done')
-        : st('todo', '待做 · 也可直接去 05 手填', 'To do · or fill in 05 by hand');
+    : pendingDrawings > 0
+      ? st('pending', `还有 ${pendingDrawings} 张待确认`, `${pendingDrawings} to confirm`)
+      : reviewed > 0
+        ? (loose ? st('done', `已完成（另有 ${loose} 份未用）`, `Done (${loose} unused)`) : st('done', '已完成', 'Done'))
+        : openJudges > 0 ? st('pending', `还有 ${openJudges} 张图片待确认`, `${openJudges} picture(s) to confirm`)
+          : failedUploads > 0 ? st('pending', `${failedUploads} 份解析失败，原件已留档`, `${failedUploads} failed to parse (kept)`)
+            : st('todo', '待做 · 也可直接去 05 手填', 'To do · or fill in 05 by hand');
 
   const s5 = !keys.length ? st('todo', '待做', 'To do')
     : drafts.length > 0 ? st('draft', '草稿 · 未保存正式版', 'Draft · not saved as a version')
@@ -108,7 +112,7 @@ export function projectFlow(p: Project, me: Identity): ProjectFlow | null {
         : submitted ? st('pending', '待 PD / BD 审批', 'Awaiting approval')
           : st('todo', '待做', 'To do');
 
-  const last = listAudit(p.id, 200).find((e) => (e as { k?: string }).k?.startsWith('av.'));
+  const last = lastAvAudit(p.id);
   return {
     lines: lines.map((l) => ({ line: l.line, label: l.label, en: l.en })),
     steps: { s1, s2, s5, s6, s7 },

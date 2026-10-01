@@ -589,5 +589,10 @@ export function gate(r: JudgeResult, rv: JudgeReview, suggested: number | null =
   reasons.push(...s.errors);
   if (s.width === null || s.height === null) reasons.push('还没有屏宽和屏高');
   if (s.pitch === null) reasons.push('请选一个点间距');
+  /* 选完点间距又改了观看距离:人选的那一个可能已经不满足 LED-VD-01 了(图上写明的只告警) */
+  const drawnP = numOrNull(finalOf(r, rv, 'pitch_hint'));
+  if (rv.pitch !== null && s.view !== null && !meetsVd01(rv.pitch, s.view) && !(drawnP !== null && Math.abs(drawnP - rv.pitch) < 1e-9)) {
+    reasons.push(`所选 P${rv.pitch} 不满足 LED-VD-01（最近观看距离 ${s.view} m），请重选点间距`);
+  }
   return { ok: reasons.length === 0, pending, reasons };
 }

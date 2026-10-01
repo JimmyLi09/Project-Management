@@ -23,8 +23,12 @@ const EMPTY = { loaded: false, cfg: null, drawingId: null, packVersion: null, ve
 export function useSavedConfig<C>(projectId: string | undefined, line: string) {
   const [s, setS] = useState<SavedConfig<C>>(EMPTY);
   const [tick, setTick] = useState(0);
+  const keyRef = useRef('');
   useEffect(() => {
-    setS(EMPTY);
+    /* 换项目 / 换线才清空;同一条线的 reload 保留旧值直到新值回来 ——
+       清空的那一瞬 dirty 会变 true,自动草稿就可能把刚被正式保存清掉的草稿又存回去 */
+    const key = `${projectId}|${line}`;
+    if (keyRef.current !== key) { keyRef.current = key; setS(EMPTY); }
     if (!projectId) return;
     let live = true;
     fetch(`/api/av/config?project=${encodeURIComponent(projectId)}&line=${line}`).then((r) => r.json()).then((b) => {
@@ -37,7 +41,7 @@ export function useSavedConfig<C>(projectId: string | undefined, line: string) {
   }, [projectId, line, tick]);
   const reload = useCallback(() => setTick((x) => x + 1), []);
   /* 存成功后直接记下,不必再问一次 */
-  const markSaved = useCallback((cfg: C, version: number) => setS((cur) => ({ ...cur, cfg, version })), []);
+  const markSaved = useCallback((cfg: C, version: number) => setS((cur) => ({ ...cur, cfg, version, draft: null })), []);
   return { ...s, reload, markSaved };
 }
 
@@ -65,8 +69,10 @@ export function useAutoDraft(opts: {
   const { projectId, line, payload, drawingId, enabled, dirty, hadDraft, ready } = opts;
   const [state, setState] = useState<{ at: number; by: string; error: string } | null>(null);
   const exists = useRef(hadDraft);
+  const latest = useRef('');
   useEffect(() => { exists.current = hadDraft; }, [hadDraft, projectId, line]);
   const json = JSON.stringify(payload);
+  latest.current = json;
   /* 载入完那一刻的参数:只是打开看一眼,不存草稿(否则「最后改的人」就成了看的人) */
   const base = useRef<string | null>(null);
   useEffect(() => { base.current = ready ? json : null; }, [ready, projectId, line]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -91,6 +97,7 @@ export function useAutoDraft(opts: {
     }, 1200);
     return () => clearTimeout(timer);
   }, [json, dirty, enabled, projectId, line, drawingId, ready]); // eslint-disable-line react-hooks/exhaustive-deps
-  const reset = useCallback(() => { exists.current = false; setState(null); }, []);
+  /* 刚存成正式版本:当前参数就是新的基准,别再为它存草稿 */
+  const reset = useCallback(() => { exists.current = false; base.current = latest.current; setState(null); }, []);
   return { draftState: state, resetDraft: reset };
 }

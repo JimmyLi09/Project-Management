@@ -108,3 +108,11 @@ test('06 显示屏条目的点间距必须等于 05 方案的点间距（改了�
   assert.equal(c[0]?.severity, 'block');
   assert.deepEqual(ledChecks(lines, cfg, [item(1, 'P2.5')]), []);
 });
+
+test('06 的推荐与阻断检查用同一条点间距规则（区间型号落在区间里算合适）', async () => {
+  const { displayCandidates } = await import('../pricing.ts');
+  const it = (id: number, pitch: string) => ({ id, line: 'led' as const, category: 'hard_smd', categoryLabel: 'SMD', model: '', pitch, moduleSize: '', cabinetSize: '',
+    unit: '㎡', costPrice: 1, listPrice: 2, currency: 'SGD', source: '', validUntil: '', active: true, updatedBy: '', updatedAt: 0 });
+  const got = displayCandidates([it(1, 'P2'), it(2, '3.91-7.81mm'), it(3, 'P5')], 5).map((i) => i.id);
+  assert.deepEqual(got.slice(0, 2).sort(), [2, 3], '区间 3.91–7.81 与 P5 都排在前面');
+});

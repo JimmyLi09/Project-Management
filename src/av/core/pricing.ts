@@ -138,7 +138,8 @@ export const itemLabel = (i: PriceItem) =>
 /* Display items that fit the configured pitch come first; the rest follow. */
 export function displayCandidates(items: PriceItem[], pitch: number): PriceItem[] {
   const sqm = items.filter((i) => i.active && i.unit === '㎡');
-  const fits = (i: PriceItem) => { const p = pitchOf(i.pitch); return p !== null && Math.abs(p - pitch) < 1e-3; };
+  /* 与 06 的阻断检查(ledChecks)同一条规则:区间型号落在区间里也算合适 */
+  const fits = (i: PriceItem) => pitchFits(i.pitch, pitch) === true;
   return [...sqm.filter(fits), ...sqm.filter((i) => !fits(i))];
 }
 

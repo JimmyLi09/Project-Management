@@ -94,7 +94,7 @@ export default function PvStudioView() {
     const body = res ? await res.json().catch(() => ({})) : { error: '网络错误' };
     const ok = !!res?.ok && !body.error;
     setSaved(ok ? 'ok' : `✕ ${body.error || '保存失败'}`);
-    if (ok) { stored.reload(); resetDraft(); refreshFlow(); }
+    if (ok) { stored.markSaved(cfg, Number(body.version) || stored.version + 1); resetDraft(); stored.reload(); refreshFlow(); }
     return ok;
   }
 

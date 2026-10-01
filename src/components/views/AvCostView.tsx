@@ -104,7 +104,7 @@ export default function AvCostView() {
     /* LED: suggest the display item when exactly one fits the pitch */
     if (line === 'led' && next.display === null && s.config) {
       const pitch = (s.config.summary as LedSummary).pitch;
-      const fit = displayCandidates(s.items, pitch).filter((i) => { const p = pitchOf(i.pitch); return p !== null && Math.abs(p - pitch) < 1e-3; });
+      const fit = displayCandidates(s.items, pitch).filter((i) => pitchFits(i.pitch, pitch) === true);
       if (fit.length === 1) next.display = fit[0].id;
     }
     setPicks(next);
