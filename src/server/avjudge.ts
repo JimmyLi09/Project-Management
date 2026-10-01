@@ -344,7 +344,7 @@ export const judgeProject = (id: number) => getRow(id)?.project_id ?? null;
 
 const SHAPES = new Set(['flat', 'concave', 'convex', 'corner', 'irregular']);
 const MOUNTS = new Set(['recessed', 'wall', 'floor', 'hanging', 'truss']);
-const ANSWER_KEYS = new Set(['arc', 'radKind', 'rad', 'view', 'maint', 'ctrl', 'pwr', 'size_w', 'size_h', 'snapW', 'snapH']);
+const ANSWER_KEYS = new Set(['arc', 'radKind', 'rad', 'view', 'mountH', 'maint', 'ctrl', 'pwr', 'size_w', 'size_h', 'snapW', 'snapH']);
 
 export function saveReview(id: number, input: Partial<JudgeReview>): JudgeReview {
   const row = getRow(id);
@@ -385,7 +385,7 @@ export function saveReview(id: number, input: Partial<JudgeReview>): JudgeReview
     for (const [k, v] of Object.entries(input.answers)) {
       if (!ANSWER_KEYS.has(k)) continue;
       const sv = String(v ?? '').slice(0, 20);
-      if (sv && ['rad', 'view', 'ctrl', 'pwr', 'size_w', 'size_h', 'snapW', 'snapH'].includes(k) && !(Number(sv) >= 0)) throw new Error('请填数字');
+      if (sv && ['rad', 'view', 'mountH', 'ctrl', 'pwr', 'size_w', 'size_h', 'snapW', 'snapH'].includes(k) && !(Number(sv) >= 0)) throw new Error('请填数字');
       if (sv) (next.answers as Record<string, string>)[k] = sv;
     }
   }

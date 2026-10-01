@@ -13,7 +13,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { asks, emptyReview, JUDGE_PROMPT, JUDGE_SCHEMA, normalise, type JudgeResult } from '../src/av/core/imagejudge.ts';
+import { annotationKey, asks, ELEMENTS, emptyReview, JUDGE_PROMPT, JUDGE_SCHEMA, normalise, type JudgeResult } from '../src/av/core/imagejudge.ts';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const URL_ = process.env.AV_VISION_URL || 'http://127.0.0.1:11434';
@@ -139,6 +139,21 @@ const qs = asks(r, { ...emptyReview(), intent: 'site' }).map((a) => a.id);
 say(`- 还缺什么（规则表）：${qs.join('、') || '—'}`);
 say();
 
+/* 1001:确定性后处理的两条规矩,任何图片都适用 */
+const used = r.items.filter((i) => (ELEMENTS as string[]).includes(i.key) && i.value !== null && !i.estimated && annotationKey(i.raw));
+const keys = used.map((i) => annotationKey(i.raw));
+const dupes = r.items.filter((i) => i.dropped && /同一条标注不重复填/.test(i.dropped)).map((i) => i.key);
+say('## 后处理自检');
+say();
+const post: [boolean, string][] = [
+  [new Set(keys).size === keys.length, `同一条图上标注只填了一个字段${dupes.length ? `（模型重复用了，已清空：${dupes.join('、')}）` : ''}`],
+  [dupes.every((k) => k !== 'led_mount_h') || qs.includes('mount_h'), '被清空的离地高度列入了「还缺什么」'],
+  [(['shape', 'mount'] as const).every((k) => { const i = v(k); return !i || i.value === null || i.source.startsWith('看图判断'); }),
+    `形状 / 安装方式的来源写「看图判断」（${v('shape')?.source || '—'}；${v('mount')?.source || '—'}）`],
+];
+for (const [ok, s2] of post) say(`- ${ok ? '√' : '×'} ${s2}`);
+say();
+
 if (isDefaultPhoto) {
   say('## 对照验收第 1 条（0930 弧形屏照片）');
   say();
@@ -151,6 +166,7 @@ if (isDefaultPhoto) {
     [qs.includes('view'), '「还缺什么」有「最近观看距离」'],
     [qs.includes('maint'), '「还缺什么」有「前 / 后维护」（需要模型认出嵌墙）'],
     [r.items.every((i) => i.confidence <= 0.75), '把握度都不超过 75%'],
+    [v('led_mount_h')?.value !== 2000, `离地高度没有沿用屏高那条「2000mm」（${v('led_mount_h')?.value ?? '空'}）`],
   ];
   for (const [ok, s] of checks) say(`- ${ok ? '√' : '×'} ${s}`);
   say();
