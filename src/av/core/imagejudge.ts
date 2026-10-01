@@ -105,7 +105,9 @@ export const JUDGE_PROMPT = `你是 LED 显示屏工程公司的读图助手。�
 5. shape：flat 平面、concave 内凹弧、convex 外凸弧、corner 转角、irregular 异形。mount：recessed 嵌墙、wall 挂墙、floor 落地、hanging 吊装、truss 桁架。
 6. intent_guess：site=要施工的现场；ref=客户想要类似效果的参考；other=只是资料。
 7. source 用中文一句话说明依据，例如「读自图上手写标注 2400m m」「看图判断：屏面向内弯」。space、description、intent_reason 用中文。
-8. confidence 取 0 到 1。other_text 列出图上其他可能有用的文字（如 "DB AT CORRIDOR"）。`;
+8. confidence 取 0 到 1。other_text 列出图上其他可能有用的文字（如 "DB AT CORRIDOR"）。
+9. 图上同一条标注只能填进一个字段：一个数字已经当作屏宽或屏高，就不要再填到离地高度、距离等其他字段（那些字段留空）。
+10. shape、mount 是看图判断的，shape_source、mount_source 写「看图判断：……」说明看到了什么，不要引用尺寸标注。`;
 
 /* ── normalised result ── */
 
@@ -224,6 +226,65 @@ const reading = (raw: Partial<JudgeRaw>, k: keyof JudgeRaw): RawReading => {
 const NEEDS_UNIT = new Set<ImageKind>(['render', 'screenshot', 'unrelated']);
 const HAS_UNIT = /(mm|cm|\dm\b|m\s*m|米)/i;
 
+/* ── one annotation, one field (1001) ──
+   The 0930 photo has two hand-written numbers. The model filled the screen height
+   with "2000mm" — and the mounting height with the same "2000mm". An annotation
+   on the picture says one thing, so it may fill one field: the readings that
+   reuse it are blanked (with the reason) and the field goes to 「还缺什么」.
+   Estimates are worked out, not read, so they never collide. */
+
+/* "2000mm", "2,000", "２０００ mm" → "2000": the number as written */
+export function annotationKey(text: string): string {
+  const t = text.normalize('NFKC').replace(/(\d),(?=\d{3}\b)/g, '$1');
+  return /\d+(?:\.\d+)?/.exec(t)?.[0] ?? '';
+}
+
+const NAME: Record<DrawingElement, string> = {
+  led_opening_w: '屏宽', led_opening_h: '屏高', led_mount_h: '离地高度',
+  led_view_min: '最近观看距离', led_ctrl_dist: '控制室距离', led_pwr_dist: '配电箱距离',
+};
+/* What a field's source or annotation would say if it really were that field */
+const HINT: Record<DrawingElement, RegExp> = {
+  led_opening_w: /宽|\bw\b|width/i,
+  led_opening_h: /高(?!度)|屏高|\bh\b|height/i,
+  led_mount_h: /离地|地面|底|ffl|aff|mount/i,
+  led_view_min: /观看|视距|view/i,
+  led_ctrl_dist: /控制|ctrl|control/i,
+  led_pwr_dist: /配电|电箱|强电|\bdb\b|power/i,
+};
+const SIZE: DrawingElement[] = ['led_opening_w', 'led_opening_h'];
+
+function dedupeAnnotations(items: JudgeItem[]) {
+  const groups = new Map<string, JudgeItem[]>();
+  for (const i of items) {
+    if (i.value === null || i.estimated) continue;
+    const k = annotationKey(i.raw);
+    if (!k) continue;
+    groups.set(k, [...(groups.get(k) ?? []), i]);
+  }
+  for (const g of groups.values()) {
+    if (g.length < 2) continue;
+    /* the best match: width / height first, then the field the source wording points to, then the surer reading */
+    const score = (i: JudgeItem) => {
+      const el = i.key as DrawingElement;
+      return (SIZE.includes(el) ? 4 : 0) + (HINT[el].test(`${i.source} ${i.raw}`) ? 2 : 0) + i.confidence;
+    };
+    const keep = [...g].sort((a, b) => score(b) - score(a) || ELEMENTS.indexOf(a.key as DrawingElement) - ELEMENTS.indexOf(b.key as DrawingElement))[0];
+    for (const i of g) {
+      if (i === keep) continue;
+      i.dropped = `图上「${i.raw}」已用作${NAME[keep.key as DrawingElement]}，同一条标注不重复填；${NAME[i.key as DrawingElement]}请另行补充`;
+      i.value = null;
+      i.confidence = 0;
+    }
+  }
+}
+
+/* shape / mount sources: always 「看图判断」; the model's words only when they describe what it saw, not a dimension */
+function lookedAt(src: unknown): string {
+  const t = str(src, 160).replace(/^看图判断[:：]?\s*/, '');
+  return t && !/\d/.test(t) && !/[「“"']/.test(t) ? `看图判断：${t}` : '看图判断';
+}
+
 /* The model's JSON → what the screen shows. Everything the model said is a
    candidate; this decides which candidates are even admissible. */
 export function normalise(input: unknown): JudgeResult {
@@ -256,13 +317,16 @@ export function normalise(input: unknown): JudgeResult {
     items.push({ ...base, value: v, confidence: round(Math.min(r.confidence, cap), 2) });
   }
 
-  /* shape and mounting always get a row: when the model could not tell, a person picks */
+  dedupeAnnotations(items);
+
+  /* shape and mounting always get a row: when the model could not tell, a person picks.
+     They are judged by looking, never read off a dimension — the source says so (1001) */
   const shape = SHAPE_OK.has(raw.shape as Shape) && raw.shape !== 'unknown' ? raw.shape as Shape : null;
   items.push({ key: 'shape', value: shape, unit: '', confidence: shape ? round(Math.min(clamp01(raw.shape_confidence), C_GRADE_CAP), 2) : 0,
-    raw: '', source: shape ? str(raw.shape_source, 160) : '', estimated: false });
+    raw: '', source: shape ? lookedAt(raw.shape_source) : '', estimated: false });
   const mount = MOUNT_OK.has(raw.mount as Mount) && raw.mount !== 'unknown' ? raw.mount as Mount : null;
   items.push({ key: 'mount', value: mount, unit: '', confidence: mount ? round(Math.min(clamp01(raw.mount_confidence), C_GRADE_CAP), 2) : 0,
-    raw: '', source: mount ? str(raw.mount_source, 160) : '', estimated: false });
+    raw: '', source: mount ? lookedAt(raw.mount_source) : '', estimated: false });
   const p = reading(raw, 'pitch');
   const pitch = p.estimated ? null : parsePitch(p.text);   // a pitch is read, never guessed
   if (pitch !== null) {
@@ -325,7 +389,7 @@ export interface JudgeReview {
   pitch: number | null;
 }
 
-export type AskAnswerKey = 'arc' | 'radKind' | 'rad' | 'view' | 'maint' | 'ctrl' | 'pwr' | 'size_w' | 'size_h' | 'snapW' | 'snapH';
+export type AskAnswerKey = 'arc' | 'radKind' | 'rad' | 'view' | 'mountH' | 'maint' | 'ctrl' | 'pwr' | 'size_w' | 'size_h' | 'snapW' | 'snapH';
 
 export const emptyReview = (): JudgeReview => ({ intent: null, confirmed: {}, values: {}, answers: {}, pitch: null });
 
@@ -354,7 +418,7 @@ export function toConfirm(r: JudgeResult): ItemKey[] {
 /* ── 还缺什么: a fixed rule table (§4.3) ── */
 
 export interface Ask {
-  id: 'arc' | 'rad' | 'view' | 'maint' | 'dist' | 'size' | 'dxf';
+  id: 'arc' | 'rad' | 'view' | 'mount_h' | 'maint' | 'dist' | 'size' | 'dxf';
   zh: string; en: string;
   whyZh: string; whyEn: string;
 }
@@ -391,6 +455,12 @@ export function asks(r: JudgeResult, rv: JudgeReview): Ask[] {
   if (!has('led_view_min') || (guessed('led_view_min') && !rv.answers.view)) {
     out.push({ id: 'view', zh: '观众离屏最近大概几米？', en: 'Nearest viewing distance (m)?',
       whyZh: '点间距按规则 LED-VD-01「点间距(mm) ≤ 最近观看距离(m)」选。', whyEn: 'Pitch is chosen by LED-VD-01: pitch (mm) ≤ viewing distance (m).' });
+  }
+  /* 离地高度:没读到、或者读到的那条标注已经用作屏宽 / 屏高(见 dedupeAnnotations)时问 */
+  if (!has('led_mount_h') && rv.intent !== 'other') {
+    out.push({ id: 'mount_h', zh: '屏底离地面多高？', en: 'How high is the bottom of the screen above the floor?',
+      whyZh: itemOf(r, 'led_mount_h')?.dropped ? '图上那条标注已经用作屏的尺寸，离地高度要另外确认。' : '决定支架 / 钢结构做法和观看角度。',
+      whyEn: itemOf(r, 'led_mount_h')?.dropped ? 'That annotation is already the screen size; the mounting height needs confirming separately.' : 'Sets the bracket / steelwork and the viewing angle.' });
   }
   if (finalOf(r, rv, 'mount') === 'recessed') {
     out.push({ id: 'maint', zh: '屏后面有没有检修空间？', en: 'Is there service access behind the screen?',
@@ -572,7 +642,7 @@ export function settle(r: JudgeResult, rv: JudgeReview, suggested: number | null
     width: w, height: h, tileWidth: tile, curve, snap,
     view, ctrl: answerM('ctrl') ?? numOrNull(finalOf(r, rv, 'led_ctrl_dist')),
     pwr: answerM('pwr') ?? numOrNull(finalOf(r, rv, 'led_pwr_dist')),
-    mountH: numOrNull(finalOf(r, rv, 'led_mount_h')),
+    mountH: answerM('mountH') ?? numOrNull(finalOf(r, rv, 'led_mount_h')),
     maintain, pitch: rv.pitch ?? suggested ?? drawn, derived, errors,
   };
 }

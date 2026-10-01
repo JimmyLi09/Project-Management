@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
 import {
-  arcFromRadius, arcFromRise, asks, C_GRADE_CAP, defaultPitch, emptyReview, ESTIMATE_CAP, gate, manualResult, normalise,
+  annotationKey, arcFromRadius, arcFromRise, asks, C_GRADE_CAP, defaultPitch, emptyReview, ESTIMATE_CAP, gate, manualResult, normalise,
   ocrNumbers, parseLength, parsePitch, pitchOptions, settle, similarCases, snapOptions, toConfirm,
   type JudgeRaw, type JudgeReview, type PriceLike, type RawReading,
 } from '../imagejudge.ts';
@@ -66,6 +66,7 @@ test('现场照片：宽 2400、高 2000、弧形；估算值带「估」且把�
   assert.equal(get('led_ctrl_dist').value, null);
 
   const ids = asks(r, { ...emptyReview(), intent: 'site' }).map((a) => a.id);
+  assert.ok(!ids.includes('mount_h'), '离地高度估到了（600），不再问');
   assert.ok(ids.includes('arc'), '弧长还是弦长');
   assert.ok(ids.includes('rad'), '弧半径 / 弧高');
   assert.ok(ids.includes('maint'), '前 / 后维护');
@@ -212,4 +213,59 @@ test('选完点间距又把观看距离改小:闸门重新按 LED-VD-01 拦下',
   assert.ok(!gate(r, base).reasons.some((x) => x.includes('不满足 LED-VD-01')));
   const g = gate(r, { ...base, answers: { view: '2' } });
   assert.ok(g.reasons.some((x) => x.includes('所选 P4 不满足 LED-VD-01')), g.reasons.join('|'));
+});
+
+/* 1001 服务器实测(GPU 15.7 秒):模型把屏高那条「2000mm」又填进了离地高度,
+   形状 / 安装方式的来源引用了尺寸标注。 */
+const PHOTO_1001: JudgeRaw = {
+  ...PHOTO,
+  shape_source: '图上标注 2400m m 的屏面向内弯', mount_source: '读自手写标注「2000mm」',
+  mount_height: rd('2000mm', 0.7, '读自图上手写标注「2000mm」'),
+};
+
+test('同一条标注只能填一个字段：屏高 2000 保留，离地高度留空并问', () => {
+  const r = normalise(PHOTO_1001);
+  const get = (k: string) => r.items.find((i) => i.key === k)!;
+  assert.equal(get('led_opening_h').value, 2000, '屏高保留');
+  assert.equal(get('led_mount_h').value, null, '离地高度不是 2000');
+  assert.equal(get('led_mount_h').confidence, 0);
+  assert.match(get('led_mount_h').dropped ?? '', /已用作屏高/);
+  const ids = asks(r, { ...emptyReview(), intent: 'site' }).map((a) => a.id);
+  assert.ok(ids.includes('mount_h'), '「还缺什么」里有离地高度');
+  /* 人在「还缺什么」里补了离地高度:05 用这个数 */
+  const rv: JudgeReview = { ...emptyReview(), intent: 'site', answers: { mountH: '600' } };
+  assert.equal(settle(r, rv).mountH, 600);
+});
+
+test('同一条标注被宽 / 高以外的两个字段同时用:留来源最像的那个', () => {
+  const r = normalise({ ...PHOTO, mount_height: none,
+    control_distance: rd('15m', 0.6, '图上标注 15m'), power_distance: rd('15 m', 0.5, '配电箱旁标注 15 m') });
+  const get = (k: string) => r.items.find((i) => i.key === k)!;
+  assert.equal(get('led_pwr_dist').value, 15, '来源写着配电箱:留给配电箱距离');
+  assert.equal(get('led_ctrl_dist').value, null);
+  assert.ok(asks(r, { ...emptyReview(), intent: 'site' }).some((a) => a.id === 'dist'));
+});
+
+test('不同的标注、或推算出来的值，不算重复', () => {
+  assert.equal(annotationKey('2,000 mm'), '2000');
+  assert.equal(annotationKey('２０００ｍｍ'), '2000');
+  assert.equal(annotationKey('FFL+900'), '900');
+  /* 估出来的 2000 不是读自标注,不和屏高 2000 打架 */
+  const r = normalise({ ...PHOTO, mount_height: rd('2000mm', 0.4, '按门高推算', true) });
+  assert.equal(r.items.find((i) => i.key === 'led_mount_h')!.value, 2000);
+  /* 施工图截图:宽 5760、高 3240、离地 FFL+900 各是各的 */
+  const d = normalise(DWG);
+  assert.ok(d.items.filter((i) => ['led_opening_w', 'led_opening_h', 'led_mount_h'].includes(i.key)).every((i) => i.value !== null && !i.dropped));
+});
+
+test('形状 / 安装方式的来源统一写「看图判断」，不引用尺寸标注', () => {
+  const r = normalise(PHOTO_1001);
+  const get = (k: string) => r.items.find((i) => i.key === k)!;
+  assert.equal(get('shape').source, '看图判断');
+  assert.equal(get('mount').source, '看图判断');
+  const ok = normalise(PHOTO);
+  assert.equal(ok.items.find((i) => i.key === 'shape')!.source, '看图判断：屏面向内弯');
+  assert.equal(ok.items.find((i) => i.key === 'mount')!.source, '看图判断：四周有墙面包边');
+  /* 没判断出来的:来源留空,由人选 */
+  assert.equal(normalise({ ...PHOTO, shape: 'unknown' as JudgeRaw['shape'] }).items.find((i) => i.key === 'shape')!.source, '');
 });

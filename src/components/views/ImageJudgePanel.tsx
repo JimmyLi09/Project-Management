@@ -285,6 +285,8 @@ export default function ImageJudgePanel({ judge, setJudge, mayReview, onHandoff 
         const est = itemOf(r, 'led_view_min');
         return askInput('view', 'm', 110, est?.estimated && est.value !== null ? t(`AI 估 ${est.value}`, `AI est. ${est.value}`) : '');
       }
+      case 'mount_h':
+        return askInput('mountH', 'mm', 110);
       case 'maint':
         return <>{choice('maint', 'rear', t('有，后维护', 'Yes — rear service'))}{choice('maint', 'front', t('没有，需前维护', 'No — front service'))}</>;
       case 'dist':
