@@ -6,15 +6,26 @@
    keeps the version it was created with). Only LED has a published rule pack in
    phase 1; the other lines are shown, reserved (§2.2). */
 
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 
-import { isAvailable, LINES } from '@/av/core/lines';
+import { isAvailable, LINES, projectLines } from '@/av/core/lines';
 import type { BusinessLine } from '@/av/core/types';
-import { canCreate } from '@/lib/permissions';
+import { canCreate, canMeta } from '@/lib/permissions';
 import { useLang } from '@/lib/i18n';
+import type { Project } from '@/lib/types';
 import { useStore } from '../store';
+import { useFlowRefresh } from './AvFlow';
 
+/* AV-016:选了项目进 01 = 编辑这个项目的立项信息(改了自动保存);
+   「＋ 新建询价」(工作台右上角、本页右上角)= 空白表单立新项目 */
 export default function AvInquiryView() {
+  const { view, projects, ledProjectId } = useStore();
+  const project = view.sub === 'new' ? undefined
+    : projects.find((p) => p.id === ledProjectId && !p.archived && projectLines(p.packages.map((k) => k.svc)).length > 0);
+  return project ? <EditInquiry key={project.id} project={project} /> : <NewInquiry />;
+}
+
+function NewInquiry() {
   const { me, refresh, setLedProjectId, setLedIngest, go } = useStore();
   const { t } = useLang();
   const [form, setForm] = useState({ name: '', client: '', location: '', delivery: '', notes: '' });
@@ -135,5 +146,129 @@ export default function AvInquiryView() {
         </button>
       </div>
     </form>
+  );
+}
+
+/* ===== AV-016 · 01 编辑已有项目:改了约 1.5 秒自动保存 =====
+   不再需要记得点保存。业务线和规则包立项时就定了(换规则包会改变已算好的方案),这里只读。 */
+type Fields = { name: string; client: string; location: string; delivery: string; notes: string };
+function EditInquiry({ project }: { project: Project }) {
+  const { me, refresh, setView } = useStore();
+  const { t } = useLang();
+  const refreshFlow = useFlowRefresh();
+  const may = canMeta(me, project);
+  const [inq, setInq] = useState<{ location: string; notes: string; lines: BusinessLine[]; packs: Partial<Record<BusinessLine, string>> } | null | undefined>(undefined);
+  const [form, setForm] = useState<Fields>({ name: project.name, client: project.client || '', location: '', delivery: project.delivery || '', notes: '' });
+  const [st, setSt] = useState<{ saving: boolean; at: number; error: string }>({ saving: false, at: 0, error: '' });
+  const base = useRef<string | null>(null);
+  const pending = useRef<string | null>(null);
+
+  useEffect(() => {
+    let live = true;
+    fetch(`/api/av/inquiry?project=${encodeURIComponent(project.id)}`).then((r) => r.json()).then((b) => {
+      if (!live) return;
+      const i = b.inquiry ?? null;
+      setInq(i);
+      setForm((f) => {
+        const next = { ...f, location: i?.location ?? '', notes: i?.notes ?? '' };
+        base.current = JSON.stringify(next);
+        return next;
+      });
+    }).catch(() => { if (live) { setInq(null); base.current = JSON.stringify(form); } });
+    return () => { live = false; };
+  }, [project.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const json = JSON.stringify(form);
+  const send = (body: string, keepalive = false) =>
+    fetch('/api/av/inquiry', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body, keepalive });
+  useEffect(() => {
+    if (!may || base.current === null || json === base.current) return;
+    if (!form.name.trim()) { pending.current = null; setSt((s) => ({ ...s, saving: false, error: t('项目名称不能为空', 'Project name is required') })); return; }
+    const body = JSON.stringify({ projectId: project.id, ...form });
+    pending.current = body;
+    setSt((s) => ({ ...s, saving: true, error: '' }));
+    const timer = setTimeout(async () => {
+      if (pending.current !== body) return;
+      pending.current = null;
+      base.current = json;
+      const res = await send(body).catch(() => null);
+      const b = res ? await res.json().catch(() => ({})) : { error: t('网络错误', 'Network error') };
+      if (res?.ok) { setSt({ saving: false, at: b.savedAt || Date.now(), error: '' }); refresh(); refreshFlow(); }
+      else { pending.current = pending.current ?? body; setSt({ saving: false, at: 0, error: b.error || t('没存上', 'Not saved') }); }
+    }, 1500);
+    return () => clearTimeout(timer);
+  }, [json, may]); // eslint-disable-line react-hooks/exhaustive-deps
+  /* 切走 / 关浏览器时,排着队的那一次当场发出去 */
+  useEffect(() => {
+    const flush = () => { const b = pending.current; if (b) { pending.current = null; send(b, true).catch(() => null); } };
+    const h = (e: BeforeUnloadEvent) => { const had = !!pending.current; flush(); if (had && !navigator.onLine) { e.preventDefault(); e.returnValue = ''; } };
+    window.addEventListener('beforeunload', h);
+    return () => { window.removeEventListener('beforeunload', h); flush(); };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const set = (k: keyof Fields) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => setForm({ ...form, [k]: e.target.value });
+  const lines = projectLines(project.packages.map((k) => k.svc), inq?.lines);
+  const missing = !form.delivery;
+  const ro = !may || inq === undefined;
+
+  return (
+    <div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12, fontSize: 12.5, flexWrap: 'wrap' }}>
+        <span style={{ color: 'var(--text2)' }}>{may ? t('编辑立项信息，改了会自动保存。', 'Editing the inquiry — changes save automatically.') : t('只读：立项信息由项目负责人、销售或 PD / BD 修改。', 'Read-only: the project lead, Sales or PD / BD edit the inquiry.')}</span>
+        {st.saving && <span style={{ color: 'var(--warning)' }} data-testid="inq-autosave">{t('● 正在保存…', '● Saving…')}</span>}
+        {!st.saving && st.at > 0 && <span style={{ color: 'var(--success)' }} data-testid="inq-autosave">{t(`✓ 已自动保存 · ${new Date(st.at).toTimeString().slice(0, 5)}`, `✓ Saved automatically · ${new Date(st.at).toTimeString().slice(0, 5)}`)}</span>}
+        {st.error && <span style={{ color: 'var(--danger)' }} data-testid="inq-autosave-error">{st.error}</span>}
+        {canCreate(me) && (
+          <button className="btn-line sm" style={{ marginLeft: 'auto' }} onClick={() => setView({ name: 'avinquiry', sub: 'new' })} data-testid="inq-new">
+            ＋ {t('新建询价', 'New inquiry')}
+          </button>
+        )}
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,380px)', gap: 20, alignItems: 'start' }}>
+        <div className="panel" style={{ padding: 0 }}>
+          <div className="panel-head"><span className="panel-title">{t('项目信息', 'Project')}</span></div>
+          <div style={{ padding: '16px 18px', display: 'grid', gap: 14 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(220px,1fr))', gap: 14 }}>
+              <div className="field" style={{ marginBottom: 0 }}>
+                <label htmlFor="inq-name">{t('项目名称', 'Project name')} *</label>
+                <input id="inq-name" value={form.name} onChange={set('name')} disabled={ro} />
+              </div>
+              <div className="field" style={{ marginBottom: 0 }}>
+                <label htmlFor="inq-client">{t('客户 / 甲方', 'Client')}</label>
+                <input id="inq-client" value={form.client} onChange={set('client')} disabled={ro} />
+              </div>
+              <div className="field" style={{ marginBottom: 0 }}>
+                <label htmlFor="inq-location">{t('项目地点', 'Location')}</label>
+                <input id="inq-location" value={form.location} onChange={set('location')} disabled={ro || !inq} placeholder="Singapore" />
+              </div>
+              <div className="field" style={{ marginBottom: 0 }}>
+                <label htmlFor="inq-delivery">{t('期望交付日期', 'Target delivery')} *</label>
+                <input id="inq-delivery" type="date" value={form.delivery} onChange={set('delivery')} disabled={ro}
+                  style={missing ? { borderColor: 'var(--warning)' } : undefined} />
+                {missing && <span style={{ fontSize: 11.5, color: 'var(--warning)' }} data-testid="inq-missing">{t('还没填：工作台会显示「缺立项信息」。', 'Missing: the workbench shows “Details missing”.')}</span>}
+              </div>
+            </div>
+            <div className="field" style={{ marginBottom: 0 }}>
+              <label htmlFor="inq-notes">{t('需求补充说明', 'Requirements')}</label>
+              <textarea id="inq-notes" rows={3} value={form.notes} onChange={set('notes')} disabled={ro || !inq} />
+            </div>
+          </div>
+        </div>
+        <div className="panel" style={{ padding: 0 }}>
+          <div className="panel-head"><span className="panel-title">{t('业务线', 'Business lines')}</span></div>
+          <div style={{ padding: '16px 18px', display: 'grid', gap: 8, fontSize: 13.5 }}>
+            {lines.map((l) => (
+              <div key={l.line} style={{ display: 'flex', gap: 10, padding: '10px 12px', border: '1px solid var(--border)', borderRadius: 6 }}>
+                <span style={{ fontWeight: 500 }}>{t(l.label, l.en)}</span>
+                <span style={{ marginLeft: 'auto', fontSize: 12, color: 'var(--text2)' }}>{t('规则包', 'pack')} {inq?.packs?.[l.line] ?? l.pack ?? '—'}</span>
+              </div>
+            ))}
+            <p style={{ fontSize: 12, color: 'var(--text2)', lineHeight: 1.7 }}>
+              {t('业务线和规则包在立项时就定下了，这里不改；要加业务线请新建询价，或在项目里加服务包。', 'Lines and rule packs are fixed when the project is opened.')}
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
   );
 }

@@ -11,16 +11,20 @@
 
 import { projectLines } from '@/av/core/lines';
 import type { BusinessLine } from '@/av/core/types';
-import { canViewPrices, canViewQuotes, type Identity } from '@/lib/permissions';
+import { canViewPrices, canViewQuotes, priceView, type Identity } from '@/lib/permissions';
 import type { Project } from '@/lib/types';
-import { configCount, getDraft, getInquiry, latestConfig, latestCostSheet, listDrawings, listQuotes } from './avdb';
+import { configCount, draftOwners, getInquiry, latestConfig, latestCostSheet, listDrawings, listQuotes } from './avdb';
 import { listUploads } from './avupload';
 import { listJudges } from './avjudge';
+import { logZh, type LogParams } from '@/lib/logmsg';
 import { lastAvAudit } from './db';
+import { redactLog } from './avredact';
 
 export type StepKey = 's1' | 's2' | 's5' | 's6' | 's7';
 export type StepState = 'done' | 'todo' | 'draft' | 'pending' | 'lock' | 'na';
-export type Stage = 'intake' | 'review' | 'config' | 'costing' | 'quoting' | 'done';
+/* AV-016:原来的 intake 拆成两种 —— info 立项必填项缺(交付日期 / 业务线)、upload 待上传图纸;
+   failed 解析失败、还没有一张解析出来的图纸(工作台标红,计入「待图纸校核」) */
+export type Stage = 'info' | 'upload' | 'failed' | 'review' | 'config' | 'costing' | 'quoting' | 'done';
 
 export interface StepStatus { state: StepState; zh: string; en: string }
 
@@ -30,11 +34,18 @@ export interface ProjectFlow {
   stage: Stage;
   versions: Partial<Record<BusinessLine, number>>;   // 已保存的正式版本数
   costConfirmed: boolean;
-  lastUpdate: { at: number; by: string } | null;
+  /* 最近一条 AV 操作日志(工作台「最近更新」、步骤条右上角) */
+  lastUpdate: { at: number; by: string; text: string; k?: string; p?: LogParams } | null;
+  /* 工作台进度条第二格「02 上传图纸」:传过图纸 / 图片(成功失败都算)就算这一格做了 */
+  uploaded: boolean;
   counts: { drawings: number; pendingDrawings: number; configured: number; costed: number; total: number };
 }
 
 const COSTED: BusinessLine[] = ['led', 'projector', 'elv', 'pv'];
+const BRIEF: Record<string, string> = {
+  'av.cost': 'av.costBrief', 'av.quoteSubmit': 'av.quoteBrief', 'av.quoteSubmitShared': 'av.quoteBrief',
+  'av.quoteApprove': 'av.quoteApproveBrief', 'av.quoteReject': 'av.quoteRejectBrief',
+};
 const st = (state: StepState, zh: string, en: string): StepStatus => ({ state, zh, en });
 
 /* null = 不是 AV 项目(没有 AV 业务线也没走过 01) */
@@ -61,10 +72,16 @@ export function projectFlow(p: Project, me: Identity): ProjectFlow | null {
   const pendingDrawings = drawings.filter((d) => d.pending > 0 || (!d.reviewedAt && d.pending === 0)).length;
   const openJudges = judges.filter((j) => !j.drawingId).length;
   /* AV-016:解析失败但原件留着的,也算这一步没完 */
-  const failedUploads = listUploads(p.id).filter((u) => u.status === 'failed').length;
-  const drafts = keys.filter((l) => !!getDraft(p.id, l));
+  const uploads = listUploads(p.id);
+  const failedUploads = uploads.filter((u) => u.status === 'failed').length;
+  const drafts = keys.filter((l) => draftOwners(p.id, l).length > 0);
+  const hasLed = keys.includes('led');
+  /* 立项必填:交付日期、至少一条业务线 */
+  const infoMissing = !p.delivery || !lines.length;
 
-  /* 工作台的阶段,口径与 0929 完全一致 */
+  /* 工作台的阶段。后面几步口径与 0929 一致;还没有图纸、也没存过方案时(AV-016):
+     解析失败 → 图纸待处理;有图片判读没确认 → 图纸校核;缺立项信息 → 补充信息;
+     有 LED 线 → 待上传图纸;没有 LED 线的用不到图纸,直接方案配置 */
   const pendingDrawing = drawings.some((d) => d.pending > 0);
   const stage: Stage =
     approved ? 'done'
@@ -73,11 +90,15 @@ export function projectFlow(p: Project, me: Identity): ProjectFlow | null {
     : keys.length > 0 && configured.length === keys.length ? (money ? 'costing' : 'config')
     : pendingDrawing ? 'review'
     : drawings.length > 0 || configured.length > 0 ? 'config'
-    : 'intake';
+    : hasLed && failedUploads > 0 ? 'failed'
+    : hasLed && openJudges > 0 ? 'review'
+    : infoMissing ? 'info'
+    : hasLed ? 'upload'
+    : 'config';
 
-  const s1 = inquiry || keys.length ? st('done', '已完成', 'Done') : st('todo', '待做', 'To do');
+  const s1 = infoMissing ? st('draft', p.delivery ? '缺业务线' : '缺交付日期', p.delivery ? 'Business line missing' : 'Delivery date missing')
+    : inquiry || keys.length ? st('done', '已完成', 'Done') : st('todo', '待做', 'To do');
 
-  const hasLed = keys.includes('led');
   const reviewed = drawings.filter((d) => d.reviewedAt > 0).length;
   /* 已经有校核完的图纸、又没有解析出来还没校核的:这一步算完成。解析失败的留档、
      没带入 05 的图片(比如「只是资料」)只作提示,不能让这一步永远卡在「待处理」 */
@@ -112,14 +133,21 @@ export function projectFlow(p: Project, me: Identity): ProjectFlow | null {
         : submitted ? st('pending', '待 PD / BD 审批', 'Awaiting approval')
           : st('todo', '待做', 'To do');
 
-  const last = lastAvAudit(p.id);
+  /* 成本确认、提交报价那几条日志带金额和毛利。「最近更新」只要一句话,换成不带数字的说法;
+     老日志(没有 key)照操作日志的规矩按人抹掉 —— 否则会把 Sales / PM 看不到的数字露出来 */
+  const raw = lastAvAudit(p.id);
+  const brief = raw?.k ? BRIEF[raw.k] : undefined;
+  const last = !raw ? null
+    : brief ? { at: raw.at, by: raw.by, k: brief, p: { line: raw.p?.line ?? '', no: raw.p?.no ?? '' }, text: logZh(brief, { line: raw.p?.line ?? '', no: raw.p?.no ?? '' }) }
+      : redactLog(raw, priceView(me));
   return {
     lines: lines.map((l) => ({ line: l.line, label: l.label, en: l.en })),
     steps: { s1, s2, s5, s6, s7 },
     stage,
     versions: Object.fromEntries(keys.map((l) => [l, configCount(p.id, l)])),
     costConfirmed,
-    lastUpdate: last ? { at: last.at, by: last.by } : null,
+    lastUpdate: last,
+    uploaded: uploads.length > 0 || drawings.length > 0 || judges.length > 0,
     counts: { drawings: drawings.length, pendingDrawings: drawings.filter((d) => d.pending > 0).length, configured: configured.length, costed: costed.length, total: keys.length },
   };
 }

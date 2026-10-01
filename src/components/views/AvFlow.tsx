@@ -16,10 +16,11 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 
 import { projectLines } from '@/av/core/lines';
-import { fmtDate } from '@/lib/project';
+import { logText } from '@/lib/logmsg';
 import { useLang } from '@/lib/i18n';
 import type { ProjectFlow, StepKey, StepState } from '@/server/avflow';
 import { useStore, type View } from '../store';
+import { stamp } from './DraftNotice';
 
 export interface FlowGuard {
   line: string;
@@ -64,7 +65,7 @@ export const stepOf = (v: View): StepKey | null =>
 /* 05 进来时落在这个项目上次的业务线 */
 const LINE_KEY = (pid: string) => `audax.avLine.${pid}`;
 export const rememberLine = (pid: string, line: string) => { try { if (pid) localStorage.setItem(LINE_KEY(pid), line); } catch { /* ignore */ } };
-const lastLine = (pid: string) => { try { return localStorage.getItem(LINE_KEY(pid)) || undefined; } catch { return undefined; } };
+export const lastLine = (pid: string) => { try { return localStorage.getItem(LINE_KEY(pid)) || undefined; } catch { return undefined; } };
 
 const TONE: Record<StepState | 'cur', { bg: string; fg: string; bd: string }> = {
   cur: { bg: 'var(--navy900)', fg: '#fff', bd: 'var(--navy900)' },
@@ -190,8 +191,8 @@ export default function AvFlow({ children }: { children: React.ReactNode }) {
             </select>
           </label>
           <span style={{ fontSize: 12, color: 'var(--text2)' }} data-testid="flow-last">
-            {flow?.lastUpdate ? t(`最近更新：${fmtDate(new Date(flow.lastUpdate.at))} ${new Date(flow.lastUpdate.at).toTimeString().slice(0, 5)} · ${flow.lastUpdate.by}`,
-              `Last update: ${fmtDate(new Date(flow.lastUpdate.at))} ${new Date(flow.lastUpdate.at).toTimeString().slice(0, 5)} · ${flow.lastUpdate.by}`) : ''}
+            {flow?.lastUpdate ? t(`最近更新：${stamp(flow.lastUpdate.at, lang)} · ${flow.lastUpdate.by} · ${logText(flow.lastUpdate, lang)}`,
+              `Last update: ${stamp(flow.lastUpdate.at, lang)} · ${flow.lastUpdate.by} · ${logText(flow.lastUpdate, lang)}`) : ''}
           </span>
         </div>
 

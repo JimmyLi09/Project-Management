@@ -773,10 +773,30 @@ export function appendAudit(projectId: string, entries: { at: number; by: string
   const ins = getDb().prepare('INSERT INTO audit_log (project_id, at, by, text, k, p) VALUES (?, ?, ?, ?, ?, ?)');
   for (const e of entries) ins.run(projectId, e.at, e.by, e.text, e.k ?? null, e.p ? JSON.stringify(e.p) : null);
 }
+/* AV-016 · 自动保存的日志要合并:同一人、同一页(同一个 key + 参数)10 分钟内的连续草稿
+   只记一条 —— 上一条就是它的话,把那条的时间挪到现在,不再新增一行 */
+const MERGE_MS = 10 * 60 * 1000;
+export function appendAuditMerged(projectId: string, e: { at: number; by: string; text: string; k: string; p?: LogParams },
+  /* 同一页但参数会变的(01 改了哪几项):给出怎么把上一条和这一条合成一条 */
+  combine?: (prev: LogParams | undefined) => { text: string; p: LogParams }) {
+  const d = getDb();
+  const p = e.p ? JSON.stringify(e.p) : null;
+  const last = d.prepare('SELECT id, at, by, k, p FROM audit_log WHERE project_id = ? ORDER BY at DESC, id DESC LIMIT 1')
+    .get(projectId) as { id: number; at: number; by: string; k: string | null; p: string | null } | undefined;
+  if (last && last.k === e.k && last.by === e.by && (combine || last.p === p) && e.at - last.at < MERGE_MS) {
+    if (combine) {
+      const c = combine(last.p ? JSON.parse(last.p) as LogParams : undefined);
+      d.prepare('UPDATE audit_log SET at = ?, text = ?, p = ? WHERE id = ?').run(e.at, c.text, JSON.stringify(c.p), last.id);
+    } else d.prepare('UPDATE audit_log SET at = ? WHERE id = ?').run(e.at, last.id);
+    return;
+  }
+  appendAudit(projectId, [e]);
+}
 /* AV-017 步骤条 / 工作台的「最近更新」:这个项目最后一条 AV 日志,一次查到 */
-export function lastAvAudit(projectId: string): { at: number; by: string } | null {
-  return (getDb().prepare("SELECT at, by FROM audit_log WHERE project_id = ? AND k LIKE 'av.%' ORDER BY at DESC LIMIT 1")
-    .get(projectId) as { at: number; by: string } | undefined) ?? null;
+export function lastAvAudit(projectId: string): { at: number; by: string; text: string; k?: string; p?: LogParams } | null {
+  const r = getDb().prepare("SELECT at, by, text, k, p FROM audit_log WHERE project_id = ? AND k LIKE 'av.%' ORDER BY at DESC, id DESC LIMIT 1")
+    .get(projectId) as { at: number; by: string; text: string; k: string; p: string | null } | undefined;
+  return r ? { at: r.at, by: r.by, text: r.text, k: r.k, ...(r.p ? { p: JSON.parse(r.p) as LogParams } : {}) } : null;
 }
 export function listAudit(projectId: string, limit = 1000) {
   const rows = getDb()

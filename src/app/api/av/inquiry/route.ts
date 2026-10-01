@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { isAvailable, LINES } from '@/av/core/lines';
 import type { BusinessLine } from '@/av/core/types';
-import { canCreate, identityOf } from '@/lib/permissions';
+import { canCreate, canMeta, identityOf } from '@/lib/permissions';
 import { newProject } from '@/lib/project';
-import { getInquiry, openInquiry } from '@/server/avdb';
-import { appendAudit, getEffectiveTemplate, getProject, insertProject } from '@/server/db';
+import { getInquiry, openInquiry, updateInquiry } from '@/server/avdb';
+import { appendAudit, appendAuditMerged, getEffectiveTemplate, getProject, insertProject, saveProject } from '@/server/db';
 import { currentUser } from '@/server/session';
 import { logZh } from '@/lib/logmsg';
 import { denyUnlessVisible } from '@/server/avguard';
@@ -74,4 +74,49 @@ export async function POST(req: NextRequest) {
     text: logZh('av.inquiry', { lines: avLines }), k: 'av.inquiry', p: { lines: avLines },
   }]);
   return NextResponse.json({ project: p, inquiry });
+}
+
+/* AV-016 · 01 编辑已有项目,自动保存。PATCH { projectId, name, client, location, delivery, notes }
+   —— 只写改了的字段;业务线 / 规则包立项时定下,这里不改。
+   能改项目信息的人(项目负责人、销售、PD / BD)才能改。日志:同一人 10 分钟内的连续改动合并成一条。 */
+const FIELD_ZH: Record<string, string> = { name: '项目名称', client: '客户', location: '地点', delivery: '交付日期', notes: '补充说明' };
+export async function PATCH(req: NextRequest) {
+  const user = await currentUser();
+  if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
+  const body = (await req.json().catch(() => ({}))) as Record<string, unknown>;
+  const project = getProject(String(body.projectId || ''));
+  if (!project) return NextResponse.json({ error: '项目不存在' }, { status: 404 });
+  const denied = denyUnlessVisible(user, project);
+  if (denied) return denied;
+  if (!canMeta(identityOf(user), project)) return NextResponse.json({ error: '你不能修改这个项目的立项信息' }, { status: 403 });
+  const str = (k: string, max = 2000) => (typeof body[k] === 'string' ? (body[k] as string).trim().slice(0, max) : undefined);
+  const name = str('name', 200);
+  if (name !== undefined && !name) return NextResponse.json({ error: '项目名称不能为空' }, { status: 400 });
+  const delivery = str('delivery', 10);
+  if (delivery && !/^\d{4}-\d{2}-\d{2}$/.test(delivery)) return NextResponse.json({ error: '期望交付日期格式应为 YYYY-MM-DD' }, { status: 400 });
+  const inquiry = getInquiry(project.id);
+
+  const changed: string[] = [];
+  const pf: [string, string | undefined, string][] = [['name', name, project.name], ['client', str('client', 200), project.client || ''], ['delivery', delivery, project.delivery || '']];
+  for (const [k, v, cur] of pf) if (v !== undefined && v !== cur) { (project as unknown as Record<string, string>)[k] = v; changed.push(k); }
+  if (changed.length) saveProject(project);
+  if (inquiry) {
+    const location = str('location') ?? inquiry.location;
+    const notes = str('notes') ?? inquiry.notes;
+    if (location !== inquiry.location) changed.push('location');
+    if (notes !== inquiry.notes) changed.push('notes');
+    if (location !== inquiry.location || notes !== inquiry.notes) updateInquiry(project.id, { location, notes });
+  }
+  if (changed.length) {
+    const at = Date.now();
+    const fieldsOf = (ks: string[]) => ks.map((k) => FIELD_ZH[k]).join('、');
+    const p = { fields: fieldsOf(changed) };
+    appendAuditMerged(project.id, { at, by: user.name, text: logZh('av.inquiryEdit', p), k: 'av.inquiryEdit', p }, (prev) => {
+      const had = String(prev?.fields ?? '').split('、').filter(Boolean);
+      const all = Object.keys(FIELD_ZH).filter((k) => had.includes(FIELD_ZH[k]) || changed.includes(k));
+      const q = { fields: fieldsOf(all) };
+      return { text: logZh('av.inquiryEdit', q), p: q };
+    });
+  }
+  return NextResponse.json({ ok: true, changed, savedAt: Date.now(), project: getProject(project.id), inquiry: getInquiry(project.id) });
 }

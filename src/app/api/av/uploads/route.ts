@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { identityOf, isFull } from '@/lib/permissions';
 import { denyUnlessVisible } from '@/server/avguard';
 import { listUploads } from '@/server/avupload';
 import { getProject } from '@/server/db';
@@ -12,5 +13,6 @@ export async function GET(req: NextRequest) {
   if (!project) return NextResponse.json({ error: '项目不存在' }, { status: 404 });
   const denied = denyUnlessVisible(user, project);
   if (denied) return denied;
-  return NextResponse.json({ uploads: listUploads(project.id) });
+  /* 解析失败的技术原因(detail)只给 PD / BD;同事看到的是人话 */
+  return NextResponse.json({ uploads: listUploads(project.id, isFull(identityOf(user))) });
 }

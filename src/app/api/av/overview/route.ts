@@ -39,6 +39,9 @@ export async function GET() {
         total: f.counts.total,
         /* AV-016 ③:每个项目一条 01→07 进度条,和步骤条同一份状态 */
         steps: f.steps,
+        uploaded: f.uploaded,
+        /* 「最近更新」:谁、什么时候、做了什么(日志词条,页面按语言渲染) */
+        lastUpdate: f.lastUpdate,
       };
     })
     .filter((r): r is NonNullable<typeof r> => !!r);
@@ -54,9 +57,10 @@ export async function GET() {
   return NextResponse.json({
     projects: rows,
     counts: {
-      /* AV-016 ③:五个数字 = 五个阶段各有几个项目(看不到价格的人没有后两格) */
-      intake: live.filter((r) => r.stage === 'intake').length,
-      review: live.filter((r) => r.stage === 'review').length,
+      /* AV-016 ③:五个数字 = 五个阶段各有几个项目(看不到价格的人没有后两格)。
+         「待上传图纸」含缺立项信息的;「待图纸校核」含解析失败待处理的 */
+      upload: live.filter((r) => r.stage === 'upload' || r.stage === 'info').length,
+      review: live.filter((r) => r.stage === 'review' || r.stage === 'failed').length,
       config: live.filter((r) => r.stage === 'config').length,
       costing: money ? live.filter((r) => r.stage === 'costing').length : null,
       quoting: money ? live.filter((r) => r.stage === 'quoting').length : null,
