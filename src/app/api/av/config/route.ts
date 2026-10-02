@@ -165,6 +165,12 @@ export async function POST(req: NextRequest) {
   if (!r.layout || !r.wiring) {
     return NextResponse.json({ error: `排布无解，不能保存：${r.findings.filter((f) => f.severity === 'block').map((f) => f.code).join('、')}` }, { status: 400 });
   }
+  /* AV-019 §2.3:人工调整有违规只能存草稿;输入变了已失效的调整不再带进新版本(原调整留在历史版本里) */
+  if (r.manualBlock) return NextResponse.json({ error: r.manualBlock.zh, manualBlock: r.manualBlock }, { status: 400 });
+  if (r.manualStale || (cfg.led_wiring_override && !r.manual)) {
+    const { led_wiring_override: _stale, ...rest } = cfg;
+    cfg = rest;
+  }
   const t = r.trace;
   const saved = saveConfig<LedSummary>({
     projectId: project!.id, line, packVersion, drawingId, createdBy: user.name,

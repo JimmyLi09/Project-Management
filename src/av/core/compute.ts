@@ -11,7 +11,7 @@ import { evalExpr, varsOf } from './expr.ts';
 import { layout as solveLayout, solveAxis, type LayoutResult } from './layout.ts';
 import { getRulePack, type RulePack, type ScreenProfile } from './rulepack.ts';
 import { blocksExport, usableLib, validate } from './rules.ts';
-import { wiring as solveWiring, type WiringResult } from './wiring.ts';
+import { cellId, layoutSig, wiring as solveWiring, type WiringOverrideInput, type WiringResult } from './wiring.ts';
 import type { Finding, LedConfig, Provenance, Size, TraceNode } from './types.ts';
 
 export interface ComputeResult {
@@ -24,6 +24,27 @@ export interface ComputeResult {
   findings: Finding[];
   /* No blocking finding bars a formal export (LED-TYPE-01 and friends, A6). */
   exportable: boolean;
+  /* AV-019 §2.3:人工调整生效时是谁、什么时候改的;输入变了对不上时 stale 记着原来那份 */
+  manual: { by: string; at: number; power: boolean; data: boolean } | null;
+  manualStale: { by: string; at: number } | null;
+  /* 人工调整有违规(超限 / 没分配)时不能存正式版本,只能存草稿 —— 原因 */
+  manualBlock: { zh: string; en: string } | null;
+}
+
+/* 人工调整按箱体编号存;换成这次排布的箱体下标。对不上(指纹不同、编号缺)就返回 null */
+function overrideInput(cfg: LedConfig, layout: LayoutResult): WiringOverrideInput | null {
+  const ov = cfg.led_wiring_override;
+  if (!ov || (!ov.power && !ov.data)) return null;
+  if (ov.sig !== layoutSig(layout.cells)) return null;
+  const byId = new Map(ov.cells.map((c) => [c.id, c]));
+  const rows = layout.cells.map((c) => byId.get(cellId(c)));
+  if (rows.some((x) => !x)) return null;
+  return {
+    circuit: ov.power ? rows.map((x) => x!.circuit ?? null) : null,
+    run: ov.data ? rows.map((x) => x!.run ?? null) : null,
+    seq: ov.data ? rows.map((x) => x!.seq ?? null) : null,
+    ports: ov.ports,
+  };
 }
 
 const UNITS: Record<string, string> = {
@@ -79,6 +100,7 @@ export function compute(
 
   let layout: LayoutResult | null = null;
   let wiring: WiringResult | null = null;
+  let ovInput: WiringOverrideInput | null = null;
 
   for (const f of pack.formulas) {
     if (f.id === 'F3') {
@@ -90,7 +112,9 @@ export function compute(
     if (f.kind === 'algorithm' && (f.id === 'F6' || f.id === 'F8')) {
       if (!layout) continue;
       if (!wiring) {
+        ovInput = overrideInput(cfg, layout);
         wiring = solveWiring({
+          override: ovInput,
           widths: layout.widths, heights: layout.heights, H: cfg.led_opening_h, cells: layout.cells,
           algo: 'chain', dataMode: cfg.led_data_mode ?? 'row', voltage: pack.company.voltage ?? null,
           pitch: cfg.led_pitch, wSqm: profile.wSqm, circuitKw: pack.company.circuitKw,
@@ -141,7 +165,50 @@ export function compute(
 
   if (wiring) findings.push(...powerFindings(wiring, pack, cfg));
 
-  return { pack, profile, cfg, trace, layout, wiring, findings, exportable: !blocksExport(findings) };
+  /* AV-019 §2.3 人工调整 */
+  const ov = cfg.led_wiring_override;
+  const chain = wiring?.algo === 'chain';
+  const manualInfo = ov && ovInput && chain ? { by: ov.by, at: ov.at, power: !!ov.power, data: !!ov.data } : null;
+  const manualStale = ov && (ov.power || ov.data) && layout && chain && !ovInput ? { by: ov.by, at: ov.at } : null;
+  if (manualStale) {
+    findings.push({ code: 'LED-MAN-01', severity: 'warn', gate: 'compute',
+      message: `输入已变，人工调整（${ov!.by}）已失效，已回到自动结果；原调整留在历史版本里。` });
+  }
+  let manualBlock: ComputeResult['manualBlock'] = null;
+  if (manualInfo && wiring) {
+    const zh: string[] = [], en: string[] = [];
+    const ids = (list: number[]) => list.slice(0, 6).map((i) => cellId(layout!.cells[i])).join('、') + (list.length > 6 ? ` 等 ${list.length} 只` : ' ');
+    const idsEn = (list: number[]) => list.slice(0, 6).map((i) => cellId(layout!.cells[i])).join(', ') + (list.length > 6 ? ` and ${list.length - 6} more` : '');
+    if (wiring.unassigned.power.length) {
+      zh.push(`${ids(wiring.unassigned.power)}没分配回路`); en.push(`${idsEn(wiring.unassigned.power)} not on any circuit`);
+    }
+    if (wiring.unassigned.data.length) {
+      zh.push(`${ids(wiring.unassigned.data)}没接网线`); en.push(`${idsEn(wiring.unassigned.data)} not on any data run`);
+    }
+    const over = wiring.power.map((pc, k) => ({ k, pc })).filter(({ pc }) => pc.w > wiring!.limitW + 1e-6);
+    if (over.length) {
+      zh.push(`回路 ${over.map(({ k }) => k + 1).join('、')} 超过 ${pack.company.circuitKw} kW`);
+      en.push(`circuit ${over.map(({ k }) => k + 1).join(', ')} over ${pack.company.circuitKw} kW`);
+    }
+    const fat = wiring.runs.map((r, k) => ({ k, r })).filter(({ r }) => r.px > pack.control.dataPx + 1e-6);
+    if (fat.length) {
+      zh.push(`网线 ${fat.map(({ k }) => k + 1).join('、')} 超过 ${pack.control.dataPx.toLocaleString('en-US')} px`);
+      en.push(`data run ${fat.map(({ k }) => k + 1).join(', ')} over ${pack.control.dataPx.toLocaleString('en-US')} px`);
+    }
+    const dup = [...new Set(wiring.ports.filter((p, k) => wiring!.ports.indexOf(p) !== k))];
+    if (dup.length) { zh.push(`网口 ${dup.join('、')} 接了不止一条网线`); en.push(`port ${dup.join(', ')} used by more than one run`); }
+    const cmax = pack.company.cascadeMax;
+    if (typeof cmax === 'number') {
+      const long = wiring.power.map((pc, k) => ({ k, n: pc.cells.length })).filter((x) => x.n > cmax);
+      if (long.length) { zh.push(`回路 ${long.map((x) => x.k + 1).join('、')} 串接超过 ${cmax} 只`); en.push(`circuit ${long.map((x) => x.k + 1).join(', ')} chains more than ${cmax} cabinets`); }
+    }
+    if (zh.length) {
+      manualBlock = { zh: `人工调整有违规，只能存草稿：${zh.join('；')}。`, en: `The manual wiring breaks the rules and can only be kept as a draft: ${en.join('; ')}.` };
+      findings.push({ code: 'LED-MAN-02', severity: 'warn', gate: 'compute', message: manualBlock.zh });
+    }
+  }
+
+  return { pack, profile, cfg, trace, layout, wiring, findings, exportable: !blocksExport(findings), manual: manualInfo, manualStale, manualBlock };
 }
 
 /* AV-019 §2.2:逐路校核。led@1.0 的分组也照样查 —— 数字不改,但要让人看见超限。 */

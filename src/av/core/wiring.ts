@@ -37,7 +37,28 @@ export interface WiringResult {
   /* True when the screen needs more circuits than it has columns, so a column
      carries more than one circuit and the grouping cannot show them apart. */
   circuitsExceedColumns: boolean;
+  /* AV-019 §2.3:每条网线接控制器第几个网口(缺省 = 网线号) */
+  ports: number[];
+  /* 人工调整:哪部分是人改的;没分配到回路 / 网线的箱体 */
+  manual: { power: boolean; data: boolean };
+  unassigned: { power: number[]; data: number[] };
 }
+
+/* 人工调整按箱体下标给进来(compute 把 R1C1 这样的编号换成下标) */
+export interface WiringOverrideInput {
+  circuit: (number | null)[] | null;     // 每只箱体的回路号(1 起);null = 不改电源
+  run: (number | null)[] | null;         // 每只箱体的网线号(1 起);null = 不改网线
+  seq: (number | null)[] | null;         // 网线上的先后
+  ports?: Record<string, number>;
+}
+
+/* 排布指纹:箱体的行列和尺寸。人工调整存着它,输入一变就对不上 */
+export function layoutSig(cells: { r: number; c: number; w: number; h: number }[]): string {
+  let h = 0x811c9dc5;
+  for (const ch of cells.map((c) => `${c.r},${c.c},${c.w},${c.h}`).join(';')) { h ^= ch.charCodeAt(0); h = Math.imul(h, 0x01000193) >>> 0; }
+  return `${cells.length}:${h.toString(16)}`;
+}
+export const cellId = (c: { r: number; c: number }) => `R${c.r}C${c.c}`;
 
 /* §7.1 — group cabinet columns into contiguous circuits of even load
    ("各组功耗尽量均衡"). Exact DP minimising the squared deviation of each
@@ -100,6 +121,8 @@ export interface WiringInput {
   kw: number;
   /* F8's stored expression, evaluated once per row. */
   rowRunOf: (rowH: number) => number;
+  /* AV-019 §2.3:人工调整(只在 chain 算法用) */
+  override?: WiringOverrideInput | null;
 }
 
 export function wiring(inp: WiringInput): WiringResult {
@@ -119,6 +142,8 @@ export function wiring(inp: WiringInput): WiringResult {
   let runs: DataRun[];
   let nCircuit: number;
   const dataMode: DataMode = inp.dataMode ?? 'row';
+  let manualPower = false, manualData = false;
+  let ports: number[] | null = null;
 
   if (inp.algo === 'chain') {
     /* led@1.1 —— 电源按列竖向蛇形成链,按箱体分回路,允许一列中途换回路;逐路校核 */
@@ -137,6 +162,32 @@ export function wiring(inp: WiringInput): WiringResult {
     power.forEach((pc, k) => pc.cells.forEach((i) => { circuitOf[i] = k; }));
     circuits = power.map((pc) => ({ cols: [...new Set(pc.cells.map((i) => cells[i].c - 1))].sort((a, b) => a - b), kw: pc.w / 1000 }));
     runs = dataRuns(idx, nc, nr, cellPx, inp.dataPx, dataMode);
+    const ov = inp.override;
+    if (ov?.circuit) {
+      /* 人改的回路:按回路号分组(空的回路去掉),组内按电源链的先后 */
+      const pos = new Map(chain.map((i, k) => [i, k]));
+      const nums = [...new Set(ov.circuit.filter((x): x is number => x != null))].sort((a, b) => a - b);
+      power = nums.map((num) => {
+        const list = cells.map((_, i) => i).filter((i) => ov.circuit![i] === num).sort((a, b) => pos.get(a)! - pos.get(b)!);
+        const w = list.reduce((a, i) => a + cellW[i], 0);
+        return { cells: list, w, amps: amps(w) };
+      });
+      nCircuit = power.length;
+      circuitOf = new Array<number>(cells.length).fill(-1);
+      power.forEach((pc, k) => pc.cells.forEach((i) => { circuitOf[i] = k; }));
+      circuits = power.map((pc) => ({ cols: [...new Set(pc.cells.map((i) => cells[i].c - 1))].sort((a, b) => a - b), kw: pc.w / 1000 }));
+      manualPower = true;
+    }
+    if (ov?.run) {
+      /* 人改的网线:按网线号分组,组内按点的先后 */
+      const nums = [...new Set(ov.run.filter((x): x is number => x != null))].sort((a, b) => a - b);
+      runs = nums.map((num) => {
+        const list = cells.map((_, i) => i).filter((i) => ov.run![i] === num).sort((a, b) => (ov.seq?.[a] ?? 0) - (ov.seq?.[b] ?? 0) || a - b);
+        return { cells: list, px: list.reduce((a, i) => a + cellPx[i], 0) };
+      });
+      ports = nums.map((num, k) => ov.ports?.[String(num)] ?? k + 1);
+      manualData = true;
+    }
   } else {
     /* led@1.0 —— 原样:整列均衡分组;数据线按 F8 每行条数 */
     nCircuit = Math.ceil(inp.kw / inp.circuitKw);
@@ -174,6 +225,12 @@ export function wiring(inp: WiringInput): WiringResult {
     nDataRun,
     nDataCable: nDataRun + 1,
     circuitsExceedColumns: inp.algo === 'chain' ? false : nCircuit > inp.widths.length,
+    ports: ports ?? runs.map((_, k) => k + 1),
+    manual: { power: manualPower, data: manualData },
+    unassigned: {
+      power: manualPower ? cells.map((_, i) => i).filter((i) => circuitOf[i] < 0) : [],
+      data: manualData ? cells.map((_, i) => i).filter((i) => !runs.some((r) => r.cells.includes(i))) : [],
+    },
   };
 }
 

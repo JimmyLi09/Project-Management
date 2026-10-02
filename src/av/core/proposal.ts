@@ -7,6 +7,7 @@
    Template ported from avcost-phase1 (2026-09-28), English added 2026-09-28. */
 
 import { calcBasis } from './calc.ts';
+import { manualLabel } from './override.ts';
 import type { ComputeResult } from './compute.ts';
 import type { CtrlBrand, ScreenType } from './types.ts';
 
@@ -101,6 +102,8 @@ export function proposalDoc(r: ComputeResult, meta: { title: string; client?: st
       + (w.algo === 'columns' ? `: ${r.pack.version} groups whole columns without checking each circuit; a newer rule pack reassigns cabinets circuit by circuit.` : '.'),
     'LED-PWR-10': `The current on one or more circuits exceeds the rating of the ${c.led_power_cable} power cable; upsize the cable or add circuits.`,
     'LED-PWR-11': 'One or more power chains exceed the cabinet power-cascade limit.',
+    'LED-MAN-01': 'The inputs changed, so the manual wiring no longer fits and the automatic result is used.',
+    'LED-MAN-02': 'The manual wiring breaks the rules (over-limit or unassigned cabinets).',
     'LED-DATA-01': `One or more data runs exceed ${px(r.pack.control.dataPx, lang)} pixels per port.`,
   };
   /* AV-019:「线径待填」「级联上限待填」是公司内部参数没填,不写进给客户的方案书(计算依据表里照样显示) */
@@ -161,11 +164,13 @@ export function proposalDoc(r: ComputeResult, meta: { title: string; client?: st
       notes: zh ? [
         '本方案数值由规则引擎确定性计算，未使用生成式模型，每项结果均可追溯至公式编号。',
         `计算依据规则包 ${r.pack.version}，参数组「${profile}」。`,
+        ...(r.manual ? [`${[r.manual.power && '电源回路', r.manual.data && '网线'].filter(Boolean).join('、')}为人工调整（${manualLabel(r.manual)}），已逐路校核。`] : []),
         '箱体规格与回路分组需现场复核后方可施工。结构承重、既有管线、实际净高不在本方案判断范围内。',
         '规范合规性（SCDF / BCA 等）须由工程师另行确认，系统不作判断。',
       ] : [
         'All figures are calculated deterministically by the rule engine without generative models; every result traces back to a formula number.',
         `Calculated with rule pack ${r.pack.version}, parameter group "${profile}".`,
+        ...(r.manual ? [`The ${[r.manual.power && 'power circuits', r.manual.data && 'data runs'].filter(Boolean).join(' and ')} were adjusted by hand (${manualLabel(r.manual)}) and checked one by one.`] : []),
         'Cabinet sizes and circuit grouping must be verified on site before installation. Structural loading, existing services and actual clear height are outside the scope of this proposal.',
         'Code compliance (SCDF / BCA etc.) must be confirmed separately by a qualified engineer; the system does not assess it.',
       ],

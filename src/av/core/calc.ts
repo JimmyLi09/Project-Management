@@ -3,6 +3,7 @@
    05 的图下方、技术方案、DXF 说明栏三处用的都是这一份,数字不会对不上。 */
 
 import type { ComputeResult } from './compute.ts';
+import { manualLabel } from './override.ts';
 
 export interface CalcRow {
   key: string;
@@ -32,7 +33,10 @@ export function calcBasis(r: ComputeResult, lang: 'zh' | 'en' = 'zh', opt: { man
   const total = w.cellW.reduce((a, b) => a + b, 0);
   const limitW = w.limitW;
   const chain = w.algo === 'chain';
-  const manual = opt.manual ? T(`人工调整 · ${opt.manual}`, `Manual · ${opt.manual}`) : '';
+  /* 人工调整:来源一律写「人工调整 · 谁 · 何时」(只标人改过的那部分) */
+  const who = opt.manual ?? manualLabel(r.manual);
+  const manualP = who && (opt.manual || r.manual?.power) ? T(`人工调整 · ${who}`, `Manual · ${who}`) : '';
+  const manualD = who && (opt.manual || r.manual?.data) ? T(`人工调整 · ${who}`, `Manual · ${who}`) : '';
   const srcCompany = T(`公司参数 · ${pack.version}`, `Company parameter · ${pack.version}`);
   const srcPack = T(`规则包 ${pack.version}`, `Rule pack ${pack.version}`);
   const srcScreen = T('屏体参数', 'Screen parameters');
@@ -53,16 +57,19 @@ export function calcBasis(r: ComputeResult, lang: 'zh' | 'en' = 'zh', opt: { man
   const nAuto = Math.ceil(total / limitW - 1e-9);
   rows.push({
     key: 'circuits', item: T('回路数', 'Circuits'),
-    formula: chain
+    formula: manualP
+      ? T(`人工划分 ${w.nCircuit} 路（逐路校核）`, `${w.nCircuit} circuits assigned by hand (each checked)`)
+      : chain
       ? T(`ceil(${n1(total)} ÷ ${limitW})，逐路校核${w.nCircuit > nAuto ? `，超限加到 ${w.nCircuit}` : ''}`, `ceil(${n1(total)} ÷ ${limitW}), each circuit checked${w.nCircuit > nAuto ? `, raised to ${w.nCircuit}` : ''}`)
       : T(`ceil(${n1(total / 1000)} ÷ ${pack.company.circuitKw})，按整列分组（不校核）`, `ceil(${n1(total / 1000)} ÷ ${pack.company.circuitKw}), grouped by whole column (not checked)`),
     result: T(`${w.nCircuit} 路 + 1 备用`, `${w.nCircuit} + 1 spare`),
-    ok: null, source: manual || T(`公司参数 单回路 ≤ ${pack.company.circuitKw} kW`, `Company parameter ≤ ${pack.company.circuitKw} kW per circuit`),
+    ok: null, source: manualP || T(`公司参数 单回路 ≤ ${pack.company.circuitKw} kW`, `Company parameter ≤ ${pack.company.circuitKw} kW per circuit`),
     params: [T(`单回路上限 ${pack.company.circuitKw} kW（${srcCompany}）`, `Circuit limit ${pack.company.circuitKw} kW (${srcCompany})`),
       T(chain ? '电源按列竖向成链（第 1 列自下而上、第 2 列自上而下……），允许一列中途换回路' : '按整列均衡分组', chain ? 'Power chained up / down each column in turn; a column may switch circuit part-way' : 'Balanced by whole column')],
   });
   const maxW = Math.max(...w.power.map((x) => x.w));
   const loadOk = maxW <= limitW + 1e-6 && w.circuitOf.every((k) => k >= 0 && k < w.power.length);
+  const unP = w.unassigned.power.length, unD = w.unassigned.data.length;
   const same = w.power.every((x) => x.cells.length === w.power[0].cells.length) && types.length === 1;
   const amps = w.voltage ? maxW / w.voltage : null;
   rows.push({
@@ -70,8 +77,8 @@ export function calcBasis(r: ComputeResult, lang: 'zh' | 'en' = 'zh', opt: { man
     formula: same
       ? `${w.power[0].cells.length} × ${n1(types[0].W)}${w.voltage ? ` ÷ ${w.voltage} V` : ''}`
       : w.power.map((x, k) => T(`回路 ${k + 1}：${x.cells.length} 只 ${n1(x.w)} W`, `C${k + 1}: ${x.cells.length} pcs ${n1(x.w)} W`)).join('；'),
-    result: `${same ? '' : T('最大 ', 'max ')}${n1(maxW)} W${amps !== null ? ` / ${n1(amps)} A` : ''} ${loadOk ? '✓' : T('✕ 超限', '✕ over limit')}`,
-    ok: loadOk, source: manual || srcCompany,
+    result: `${same ? '' : T('最大 ', 'max ')}${n1(maxW)} W${amps !== null ? ` / ${n1(amps)} A` : ''} ${loadOk ? '✓' : unP && maxW <= limitW + 1e-6 ? T(`✕ ${unP} 只没分配`, `✕ ${unP} unassigned`) : T('✕ 超限', '✕ over limit')}`,
+    ok: loadOk, source: manualP || srcCompany,
     params: w.voltage ? [T(`电压 ${w.voltage} V（公司参数）`, `Voltage ${w.voltage} V (company parameter)`)] : [T('规则包没有电压参数，不算电流', 'No voltage in this rule pack; current not calculated')],
   });
   if (w.voltage) {
@@ -100,7 +107,7 @@ export function calcBasis(r: ComputeResult, lang: 'zh' | 'en' = 'zh', opt: { man
   });
   const cap = pack.control.dataPx;
   const maxRun = Math.max(...w.runs.map((x) => x.px));
-  const runOk = maxRun <= cap + 1e-6;
+  const runOk = maxRun <= cap + 1e-6 && !unD;
   const rowFormula = () => {
     const widest = Math.max(...lay.heights.map((_, ri) => lay.cells.filter((c) => c.r === ri + 1).reduce((a, c) => a + w.cellPx[lay.cells.indexOf(c)], 0)));
     const nc = lay.widths.length;
@@ -111,13 +118,15 @@ export function calcBasis(r: ComputeResult, lang: 'zh' | 'en' = 'zh', opt: { man
   };
   rows.push({
     key: 'data', item: T('网线', 'Data runs'),
-    formula: !chain
+    formula: manualD
+      ? T(`人工串接 ${w.nDataRun} 条，每条 ≤ ${int(cap, en)}`, `${w.nDataRun} runs chained by hand, each ≤ ${int(cap, en)}`)
+      : !chain
       ? T(`每行 ceil(行像素 ÷ ${int(cap, en)})`, `per row ceil(row px ÷ ${int(cap, en)})`)
       : w.dataMode === 'snake'
         ? T(`蛇形按带载：每条最多 floor(${int(cap, en)} ÷ ${int(types[0].px, en)}) = ${Math.floor(cap / types[0].px)} 只`, `Serpentine by load: up to floor(${int(cap, en)} ÷ ${int(types[0].px, en)}) = ${Math.floor(cap / types[0].px)} per run`)
         : rowFormula(),
-    result: `${T(`${w.nDataRun} 条 + 1 备用`, `${w.nDataRun} + 1 spare`)} · ${T('最大带载', 'max load')} ${int(maxRun, en)} ${runOk ? '✓' : '✕'}`,
-    ok: runOk, source: manual || T(`单线带载 ${int(cap, en)} px（${srcPack}）`, `${int(cap, en)} px per port (${srcPack})`),
+    result: `${T(`${w.nDataRun} 条 + 1 备用`, `${w.nDataRun} + 1 spare`)} · ${T('最大带载', 'max load')} ${int(maxRun, en)} ${runOk ? '✓' : '✕'}${unD ? T(` · ${unD} 只没接`, ` · ${unD} unassigned`) : ''}`,
+    ok: runOk, source: manualD || T(`单线带载 ${int(cap, en)} px（${srcPack}）`, `${int(cap, en)} px per port (${srcPack})`),
   });
   return rows;
 }

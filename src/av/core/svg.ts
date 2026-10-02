@@ -8,7 +8,7 @@
 
 import type { Drawing, Entity } from './drawing.ts';
 
-const PAD = 400; // mm of margin around the drawing extents
+export const PAD = 400; // mm of margin around the drawing extents
 
 export interface SvgOptions {
   /* Rendered size, px per mm. The default keeps a 5 m screen near 1200 px. */
@@ -53,7 +53,7 @@ function entity(e: Entity, rgb: string, X: (n: number) => number, Y: (n: number)
     case 'line':
       return `<line x1="${X(e.x1)}" y1="${Y(e.y1)}" x2="${X(e.x2)}" y2="${Y(e.y2)}"${st}${e.sw ? ` stroke-width="${e.sw}"` : ''}/>`;
     case 'rect':
-      return `<rect x="${X(e.x)}" y="${Y(e.y + e.h)}" width="${round(e.w)}" height="${round(e.h)}"${st}${e.fill ? ` fill="${e.fill}"` : ''}/>`;
+      return `<rect x="${X(e.x)}" y="${Y(e.y + e.h)}" width="${round(e.w)}" height="${round(e.h)}"${st}${e.sw ? ` stroke-width="${e.sw}"` : ''}${e.fill ? ` fill="${e.fill}"` : ''}/>`;
     case 'circle':
       return `<circle cx="${X(e.cx)}" cy="${Y(e.cy)}" r="${round(e.r)}"${st}${e.fill ? ` fill="${e.fill}"` : ''}/>`;
     case 'text':
