@@ -34,6 +34,20 @@ export const DEFAULT_SYNONYMS: string[][] = [
   ['地址 + 联系人', '项目地址 + 开发商/Main Con 联系人'],
 ];
 
+/* 当前生效的同义项:服务端启动时从数据库读一次(PD / BD 改了再设),没有就是默认那份。
+   放在模块里是为了让 newProject / 加服务包这些纯函数不用一层层传参数。 */
+let ACTIVE_SYNONYMS: string[][] = DEFAULT_SYNONYMS;
+export const getSynonyms = () => ACTIVE_SYNONYMS;
+export function setSynonyms(list: string[][] | null | undefined) {
+  ACTIVE_SYNONYMS = Array.isArray(list) ? cleanSynonyms(list) : DEFAULT_SYNONYMS;
+}
+/* 清洗:每组至少两个不同的名字,名字去空白、限长,最多 200 组 */
+export function cleanSynonyms(list: unknown): string[][] {
+  if (!Array.isArray(list)) return [];
+  return list.slice(0, 200).map((g) => (Array.isArray(g) ? [...new Set(g.map((x) => String(x ?? '').trim().slice(0, 120)).filter(Boolean))] : []))
+    .filter((g) => g.length >= 2);
+}
+
 /* 去掉空格、标点、符号,统一全半角和大小写 */
 export const normName = (s: string | undefined | null): string =>
   String(s || '').normalize('NFKC').toLowerCase().replace(/[\s\p{P}\p{S}]+/gu, '');
@@ -100,12 +114,6 @@ export function mergeItems(src: MergeSource[]): { item: ChecklistItem; conflicts
   const remark = remarks.length <= 1 ? (remarks[0]?.text || '') : remarks.map((r) => `[${r.tag}] ${r.text}`).join('\n');
   if (remarks.length > 1) conflicts.push(`备注不同,都保留(${remarks.length} 条)`);
 
-  /* 「收到内容」跟着状态走:优先取状态最靠后、日期最新的那一份 */
-  const best = [...src].sort((a, b) => rankOf(b.item.status) - rankOf(a.item.status) || (b.item.date || '').localeCompare(a.item.date || ''))[0].item;
-  const recvs = [...new Set(src.map((s) => (s.item.received || '').trim()).filter(Boolean))];
-  const received = (best.received || '').trim() || recvs[0] || '';
-  if (recvs.length > 1) conflicts.push(`收到内容 ${recvs.join(' / ')} → ${received}`);
-
   const shots: string[] = [];
   src.forEach((s) => (s.item.shots || []).forEach((d) => { if (d && !shots.includes(d)) shots.push(d); }));
 
@@ -118,11 +126,22 @@ export function mergeItems(src: MergeSource[]): { item: ChecklistItem; conflicts
   const svcs: string[] = [];
   src.forEach((s) => { if (!svcs.includes(s.svc)) svcs.push(s.svc); });
 
+  /* 「收到内容」和日期跟着合并后的最新一条收料记录走(REQ-042 的约定:行上的老字段永远
+     等于 Latest)。否则下次在行上改状态,会把行上的文件名写进别人的那条记录。
+     没有记录时才按「状态最靠后、日期最新」挑一份。 */
+  const sortedRc = sortRc(receipts);
+  const latest = sortedRc[0];
+  const best = [...src].sort((a, b) => rankOf(b.item.status) - rankOf(a.item.status) || (b.item.date || '').localeCompare(a.item.date || ''))[0].item;
+  const recvs = [...new Set(src.map((s) => (s.item.received || '').trim()).filter(Boolean))];
+  const received = latest ? (latest.fileName || '') : ((best.received || '').trim() || recvs[0] || '');
+  const dateOut = latest?.date || date;
+  if (recvs.length > 1) conflicts.push(`收到内容 ${recvs.join(' / ')} → ${received || '(空)'}(跟最新一条收料记录)`);
+
   const updatedAt = Math.max(0, ...src.map((s) => s.item.updatedAt || 0)) || undefined;
   const item: ChecklistItem = {
     ...first,
-    status, date, remark, received, owner, shots,
-    receipts: sortRc(receipts),
+    status, date: dateOut, remark, received, owner, shots,
+    receipts: sortedRc,
     highlight: src.some((s) => s.item.highlight) || undefined,
     updatedAt,
     svcs,
@@ -149,7 +168,7 @@ export interface MergeResult {
      (如「大堂 LED」「户外 LED」)时,两块屏各有各的尺寸、电源,合了就分不清是哪块。
      第二份里和第一份重名的项单独保留,名字后面加上实例名,如「电源规格与位置(户外 LED)」。 */
 export function mergeChecklists(pkgs: LegacyPackage[], opts: { synonyms?: string[][]; tagOf: (svc: string, label?: string) => string }): MergeResult {
-  const syn = synonymIndex(opts.synonyms || DEFAULT_SYNONYMS);
+  const syn = synonymIndex(opts.synonyms || ACTIVE_SYNONYMS);
   const groups: ChecklistGroup[] = [];
   const gIndex = new Map<string, ChecklistGroup>();
   type Slot = { group: ChecklistGroup; pos: number; src: MergeSource[]; svcs: Set<string> };
@@ -182,7 +201,7 @@ export function mergeChecklists(pkgs: LegacyPackage[], opts: { synonyms?: string
           return;
         }
         /* 同一种服务第二份里的重名项:单独一条,名字后加实例名 */
-        if (inst && cands.length) it = { ...it, zh: `${it.zh}(${inst})`, en: it.en ? `${it.en} (${inst})` : it.en };
+        if (inst && cands.length) it = { ...it, zh: `${it.zh}(${inst})`, en: it.en ? `${it.en} (${inst})` : it.en, inst };
         const slot: Slot = { group: tg!, pos: tg!.items.length, src: [{ svc: pk.svc, tag, item: it }], svcs: new Set([pk.svc]) };
         tg!.items.push(it);   // 占位,下面换成合并结果
         slots.push(slot);
@@ -209,7 +228,7 @@ export function mergeChecklists(pkgs: LegacyPackage[], opts: { synonyms?: string
 
 /* 预演 / 迁移后的自检:合并前的每一项都找得到去处;已确认的没被降级;收料记录一条不少 */
 export function verifyMerge(pkgs: LegacyPackage[], out: ChecklistGroup[], synonyms?: string[][]): string[] {
-  const syn = synonymIndex(synonyms || DEFAULT_SYNONYMS);
+  const syn = synonymIndex(synonyms || ACTIVE_SYNONYMS);
   const flat = out.flatMap((g) => g.items);
   const problems: string[] = [];
   const allRc = new Set(flat.flatMap((it) => (it.receipts || []).map(receiptSig)));
