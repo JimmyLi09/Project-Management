@@ -1,13 +1,13 @@
 'use client';
 
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useStore } from '../store';
 import { useLang } from '@/lib/i18n';
 import { canEdit } from '@/lib/permissions';
 import { pkgSuffix, projCode } from '@/lib/project';
 import { svcName } from '@/lib/templates';
 import { CalendarPlanner } from '@/features/schedule-planner/components/CalendarPlanner';
-import { stageName, type LocalDate, type StageDefinition } from '@/features/schedule-planner/domain/schedule';
+import { isLegacyCgiStages, stageName, type LocalDate, type StageDefinition } from '@/features/schedule-planner/domain/schedule';
 import type { ScheduleArchive } from '@/features/schedule-planner/domain/archives';
 import type { CalendarStage, Project } from '@/lib/types';
 import '@/features/schedule-planner/planner.css';
@@ -28,11 +28,23 @@ export default function CalendarScheduleTab({ p, pkgIdx }: { p: Project; pkgIdx:
   const cal = pkg?.calendar;
   const [syncDelivery, setSyncDelivery] = useState(true);
   const [busy, setBusy] = useState(false);
+  /* REQ-047:这项服务的默认阶段(当前生效模板的排期步骤)。取到之前先不画 planner,
+     免得先闪一下别的阶段 */
+  const [defaults, setDefaults] = useState<StageDefinition[] | null | undefined>(undefined);
+  useEffect(() => {
+    if (!pkg) return;
+    let live = true;
+    setDefaults(undefined);
+    fetch(`/api/templates/stages?svc=${encodeURIComponent(pkg.svc)}`).then((r) => (r.ok ? r.json() : null))
+      .then((b) => { if (live) setDefaults(Array.isArray(b?.stages) && b.stages.length ? b.stages : null); })
+      .catch(() => { if (live) setDefaults(null); });
+    return () => { live = false; };
+  }, [pkg?.svc]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /* 项目里存的 → planner 认的形状。备注单独抽成 stageId → 文字。 */
   const initialStages = useMemo<StageDefinition[] | undefined>(
     () => (cal?.stages?.length
-      ? cal.stages.map((s) => ({ id: s.id, name: s.name, nameEn: s.nameEn, tone: s.tone }))
+      ? cal.stages.map((s) => ({ id: s.id, name: s.name, nameEn: s.nameEn, tone: s.tone, ...(s.weeks !== undefined ? { weeks: s.weeks } : {}) }))
       : undefined),
     [cal],
   );
@@ -55,16 +67,17 @@ export default function CalendarScheduleTab({ p, pkgIdx }: { p: Project; pkgIdx:
     [cal],
   );
 
-  async function save(payload: { stages: StageDefinition[]; boundaries: LocalDate[]; notes: Record<string, string> }) {
+  async function save(payload: { stages: StageDefinition[]; boundaries: LocalDate[]; notes: Record<string, string>; excludeHolidays: boolean }) {
     setBusy(true);
     /* nameEn 只是出厂英文位,用户改过名的阶段 planner 已经把它丢掉了 ——
        这里原样带过去就行,不要自作主张补。 */
     const stages: CalendarStage[] = payload.stages.map((s) => ({
       id: s.id, name: s.name, ...(s.nameEn ? { nameEn: s.nameEn } : {}), tone: s.tone,
       note: payload.notes[s.id] || '',
+      ...(s.weeks !== undefined ? { weeks: s.weeks } : {}),
     }));
     const ok = await dispatch(p.id, {
-      type: 'saveCalendar', pkg: pkgIdx, stages, boundaries: payload.boundaries, syncDelivery,
+      type: 'saveCalendar', pkg: pkgIdx, stages, boundaries: payload.boundaries, syncDelivery, excludeHolidays: payload.excludeHolidays,
     });
     setBusy(false);
     setToast(ok
@@ -118,6 +131,19 @@ export default function CalendarScheduleTab({ p, pkgIdx }: { p: Project; pkgIdx:
 
   if (!pkg) return null;
 
+  /* REQ-047:已有 CGI 项目的日历排期还是老流程 → 提示一次 */
+  const legacyCgi = pkg.svc === 'cgi' && !!cal && isLegacyCgiStages(cal.stages) && !cal.flow047;
+  const canUndoFlow = pkg.svc === 'cgi' && cal?.flow047 === 'switched' && !!cal.flowUndo;
+  async function flow(choice: 'switch' | 'keep' | 'undo') {
+    setBusy(true);
+    const ok = await dispatch(p.id, { type: 'calendarFlow', pkg: pkgIdx, choice });
+    setBusy(false);
+    setToast(!ok ? t('操作失败', 'Failed')
+      : choice === 'switch' ? t('已换成新阶段，日期按新阶段重新分配（可撤销）', 'Switched to the new stages; dates redistributed (can be undone)')
+        : choice === 'undo' ? t('已撤销，恢复原来的阶段和日期', 'Undone — previous stages and dates restored')
+          : t('保持原阶段，不再提示', 'Keeping the current stages; won’t ask again'));
+  }
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
       <div className="panel" style={{ padding: '11px 16px', display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
@@ -141,9 +167,35 @@ export default function CalendarScheduleTab({ p, pkgIdx }: { p: Project; pkgIdx:
         </button>
       </div>
 
+      {ed && legacyCgi && (
+        <div className="panel" data-testid="cgi-flow-banner" style={{ padding: '11px 16px', display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', background: 'var(--warning-bg, #FDF7F1)' }}>
+          <span style={{ flex: 1, minWidth: 260, fontSize: 13 }}>
+            {t('效果图流程已更新（白膜小样 → AI 效果图 → 后期图），要换成新阶段吗？',
+              'The CGI flow has changed (clay previews → AI mood renders → final renders). Switch this schedule to the new stages?')}
+            <span style={{ display: 'block', fontSize: 11.5, color: 'var(--text2)' }}>
+              {t('换的话，已排好的首日到末日不变，按新阶段的默认工期重新分配；换完可以撤销。',
+                'If you switch, the first and last dates stay; the new stages share them by their default durations. You can undo it.')}
+            </span>
+          </span>
+          <button className="btn-navy sm" disabled={busy} onClick={() => flow('switch')} data-testid="cgi-flow-switch">{t('换成新阶段', 'Switch to the new stages')}</button>
+          <button className="btn-line sm" disabled={busy} onClick={() => flow('keep')} data-testid="cgi-flow-keep">{t('保持不变', 'Keep as is')}</button>
+        </div>
+      )}
+      {ed && canUndoFlow && (
+        <div className="panel" data-testid="cgi-flow-undo" style={{ padding: '9px 16px', display: 'flex', gap: 10, alignItems: 'center', fontSize: 12.5 }}>
+          <span style={{ flex: 1, color: 'var(--text2)' }}>{t('已换成新的效果图阶段。', 'Switched to the new CGI stages.')}</span>
+          <button className="btn-line sm" disabled={busy} onClick={() => flow('undo')} data-testid="cgi-flow-undo-btn">{t('撤销', 'Undo')}</button>
+        </div>
+      )}
+
       {/* planner 本体 —— 交互沿用原实现 */}
+      {defaults === undefined ? (
+        <div className="panel" style={{ padding: 16, fontSize: 13, color: 'var(--text2)' }}>{t('读取中…', 'Loading…')}</div>
+      ) : (
       <div className="planner-host">
         <CalendarPlanner
+          defaultStages={defaults ?? undefined}
+          initialExcludeHolidays={cal ? cal.excludeHolidays !== false : true}
           key={`${p.id}:${pkgIdx}`}
           initialStages={initialStages}
           initialBoundaries={initialBoundaries}
@@ -164,6 +216,7 @@ export default function CalendarScheduleTab({ p, pkgIdx }: { p: Project; pkgIdx:
           busy={busy}
         />
       </div>
+      )}
     </div>
   );
 }

@@ -158,6 +158,8 @@ export interface CalendarStage {
   nameEn?: string;
   tone: string;
   note?: string;
+  /* REQ-046 / 047:默认工期(周),选开始日时按它排 */
+  weeks?: number;
 }
 export interface CalendarSchedule {
   stages: CalendarStage[];
@@ -165,6 +167,12 @@ export interface CalendarSchedule {
   version: number;           // 每存一次 +1,用来看改过几轮
   updatedAt: number;
   updatedBy: string;
+  /* REQ-046:Exclude Holidays 开关随排期一起存(老数据没有 = 勾选,和原来默认一致) */
+  excludeHolidays?: boolean;
+  /* REQ-047:老 CGI 流程的排期,提示过一次「要换成新阶段吗」之后的选择;
+     flowUndo = 换之前的阶段和日期(「撤销」用,撤销或再存一次后清掉) */
+  flow047?: 'kept' | 'switched';
+  flowUndo?: { stages: CalendarStage[]; boundaries: string[] };
   /* 项目级命名存档(替掉浏览器 localStorage) */
   archives?: { id: string; name: string; savedAt: string; stages: CalendarStage[]; boundaries: string[] }[];
 }

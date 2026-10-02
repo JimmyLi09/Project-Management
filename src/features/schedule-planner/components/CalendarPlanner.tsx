@@ -34,6 +34,10 @@ import {
   type LocalDate,
   MAX_STAGES,
   replaceBoundary,
+  setStageEnd,
+  setStageStart,
+  type EditError,
+  type EditMode,
   type StageDefinition,
   stageName,
   STAGES
@@ -45,7 +49,7 @@ import {
   type ScheduleArchive
 } from '../domain/archives'
 import { getPublicHoliday } from '../domain/holidays'
-import { calculateDuration, formatDuration } from '../domain/duration'
+import { calculateDuration, distributeByWeights, formatDuration, layoutFromStart } from '../domain/duration'
 import { ArchivePanel } from './ArchivePanel'
 import { ExportPanel } from './ExportPanel'
 import { DEFAULT_EXPORT_NOTE, PrintSchedule, type PrintScheduleMeta } from './PrintSchedule'
@@ -140,12 +144,17 @@ export interface CalendarPlannerProps {
   initialStages?: StageDefinition[]
   initialBoundaries?: LocalDate[]
   initialNotes?: Record<string, string>
+  /* REQ-047:这项服务的默认阶段(当前生效模板的排期步骤,带默认周数)。不传 = 独立版的 STAGES */
+  defaultStages?: StageDefinition[]
+  /* REQ-046:Exclude Holidays 开关随排期一起存;不传 = 勾选(原来的默认) */
+  initialExcludeHolidays?: boolean
   archives?: ScheduleArchive[]
   onArchivesChange?: (next: ScheduleArchive[]) => void
   onSave?: (payload: {
     stages: StageDefinition[]
     boundaries: LocalDate[]
     notes: Record<string, string>
+    excludeHolidays: boolean
   }) => void | Promise<void>
   saveLabel?: string
   busy?: boolean
@@ -155,6 +164,8 @@ export function CalendarPlanner({
   initialStages,
   initialBoundaries,
   initialNotes,
+  defaultStages,
+  initialExcludeHolidays,
   archives: archivesProp,
   onArchivesChange,
   onSave,
@@ -165,13 +176,13 @@ export function CalendarPlanner({
   const initialCursorRef = useRef<MonthCursor>(monthFromDate(todayLocalDate()))
   const initialCursor = initialCursorRef.current
   const [stages, setStages] = useState<StageDefinition[]>(
-    () => (initialStages && initialStages.length ? initialStages.map((stage) => ({ ...stage })) : STAGES.map((stage) => ({ ...stage })))
+    () => (initialStages && initialStages.length ? initialStages : defaultStages && defaultStages.length ? defaultStages : STAGES).map((stage) => ({ ...stage }))
   )
   const [boundaries, setBoundaries] = useState<LocalDate[]>(() => (initialBoundaries ? initialBoundaries.slice() : []))
   /* REQ-040: 每阶段备注(stageId → 文字),跟排期一起存回项目 */
   const [notes, setNotes] = useState<Record<string, string>>(() => ({ ...(initialNotes || {}) }))
   const [saving, setSaving] = useState(false)
-  const [excludeHolidays, setExcludeHolidays] = useState(true)
+  const [excludeHolidays, setExcludeHolidays] = useState(initialExcludeHolidays !== false)
   const [reverseOpen, setReverseOpen] = useState(false)
   const [reverseStart, setReverseStart] = useState('')
   const [reverseDeadline, setReverseDeadline] = useState('')
@@ -201,7 +212,7 @@ export function CalendarPlanner({
   })
   /* 外面换了项目(或别人改了排期后刷新),把带进来的数据同步到本地状态。
      只在「传进来的东西真的变了」时跑,免得把用户正在拖的边界打回去。 */
-  const syncKey = JSON.stringify([initialBoundaries, initialStages?.map((x) => x.id + x.name), initialNotes])
+  const syncKey = JSON.stringify([initialBoundaries, initialStages?.map((x) => x.id + x.name), initialNotes, initialExcludeHolidays])
   const lastSync = useRef(syncKey)
   useEffect(() => {
     if (lastSync.current === syncKey) return
@@ -209,7 +220,8 @@ export function CalendarPlanner({
     if (initialStages && initialStages.length) setStages(initialStages.map((x) => ({ ...x })))
     if (initialBoundaries) setBoundaries(initialBoundaries.slice())
     setNotes({ ...(initialNotes || {}) })
-  }, [syncKey, initialStages, initialBoundaries, initialNotes])
+    setExcludeHolidays(initialExcludeHolidays !== false)
+  }, [syncKey, initialStages, initialBoundaries, initialNotes, initialExcludeHolidays])
 
   const calendarGridRef = useRef<HTMLDivElement>(null)
   const pendingBoundaryFocus = useRef<number | null>(null)
@@ -240,8 +252,11 @@ export function CalendarPlanner({
     : boundaries.length < stageCount + 1
       ? boundaries.length - 1
       : null
+  /* REQ-046 / 047:还没有开始日时,点一天 = 从这天按各阶段默认工期一口气排好(左边日历和右边日期框一样)。
+     悬停时也按这个预览 */
+  const layoutFrom = (start: LocalDate) => layoutFromStart(start, stages.map((stage) => stage.weeks), excludeHolidays)
   const selectionPreviewBoundaries = !reverseOpen && activeBoundaryIndex !== null && !drag && hoverDate
-    ? replaceBoundary(boundaries, activeBoundaryIndex, hoverDate, stageCount)
+    ? (boundaries.length === 0 ? layoutFrom(hoverDate) : replaceBoundary(boundaries, activeBoundaryIndex, hoverDate, stageCount))
     : null
   const dragPreviewBoundaries = drag?.draftDate
     ? replaceBoundary(boundaries, drag.index, drag.draftDate, stageCount)
@@ -325,6 +340,13 @@ export function CalendarPlanner({
       return
     }
 
+    if (boundaries.length === 0) {
+      setBoundaries(layoutFrom(date))
+      setHoverDate(null)
+      setIsDone(false)
+      return
+    }
+
     const next = replaceBoundary(boundaries, activeBoundaryIndex, date, stageCount)
     if (!next) {
       return
@@ -369,13 +391,18 @@ export function CalendarPlanner({
 
     let next: LocalDate[] | null = null
     try {
-      next = distributeStagesEvenly(reverseStart as LocalDate, reverseDeadline as LocalDate, stageCount)
+      /* REQ-046:勾了 Exclude Holidays 就按工作日平均分(每阶段至少 1 个工作日) */
+      next = excludeHolidays
+        ? distributeByWeights(reverseStart as LocalDate, reverseDeadline as LocalDate, stages.map(() => 1), true)
+        : distributeStagesEvenly(reverseStart as LocalDate, reverseDeadline as LocalDate, stageCount)
     } catch {
-      setReverseError('Enter valid dates.')
+      setReverseError(t('请输入有效日期。', 'Enter valid dates.'))
       return
     }
     if (!next) {
-      setReverseError(`Allow at least ${stageCount} calendar days for ${stageCount} stages.`)
+      setReverseError(excludeHolidays
+        ? t(`${stageCount} 个阶段至少要 ${stageCount} 个工作日。`, `Allow at least ${stageCount} working days for ${stageCount} stages.`)
+        : t(`${stageCount} 个阶段至少要 ${stageCount} 天。`, `Allow at least ${stageCount} calendar days for ${stageCount} stages.`))
       return
     }
 
@@ -443,13 +470,49 @@ export function CalendarPlanner({
     setIsDone(false)
   }
 
+  /* REQ-047:恢复成这项服务当前的模板阶段;已经有开始日的,从开始日按默认工期重排 */
   function handleRestoreStages() {
-    setStages(STAGES.map((stage) => ({ ...stage })))
-    setBoundaries((current) => current.slice(0, STAGES.length + 1))
+    const defaults = (defaultStages && defaultStages.length ? defaultStages : STAGES).map((stage) => ({ ...stage }))
+    setStages(defaults)
+    setBoundaries((current) => (current[0] ? layoutFromStart(current[0], defaults.map((stage) => stage.weeks), excludeHolidays) : []))
     setHoverDate(null)
     setDrag(null)
     setIsDone(false)
-    setNotice(t('已恢复默认 6 阶段。', 'Restored the default 6 stages.'))
+    setNotice(t(`已恢复默认阶段（${defaults.length} 个）。`, `Restored the ${defaults.length} default stages.`))
+  }
+
+  /* REQ-046:右边日期框改开始 / 结束日。返回 null = 成功,否则是给人看的原因 */
+  const EDIT_ERR: Record<EditError, [string, string]> = {
+    endBeforeStart: ['结束日不能早于开始日。', 'The end date cannot be before the start date.'],
+    startAfterEnd: ['开始日不能晚于结束日。', 'The start date cannot be after the end date.'],
+    squeezeNext: ['这样会把下一阶段压到 0 天，不允许。', 'That would squeeze the next stage to zero days.'],
+    squeezePrev: ['这样会把上一阶段压到 0 天，不允许。', 'That would squeeze the previous stage to zero days.'],
+    notReady: ['先选阶段 01 的开始日期。', 'Pick the stage 01 start date first.'],
+  }
+  function handleEditDate(index: number, which: 'start' | 'end', date: LocalDate, mode: EditMode): string | null {
+    if (reverseOpen) return t('先关掉 Reverse plan。', 'Close Reverse plan first.')
+    if (boundaries.length === 0) {
+      if (index !== 0 || which !== 'start') return t(...EDIT_ERR.notReady)
+      const next = layoutFrom(date)
+      const startCursor = monthFromDate(date)
+      setBoundaries(next)
+      setCursor(startCursor)
+      setCalendarDays(buildInitialCalendarDays(startCursor))
+      setHoverDate(null)
+      setIsDone(false)
+      requestAnimationFrame(() => {
+        const grid = calendarGridRef.current
+        if (grid) { grid.scrollTop = 0; lastScrollTop.current = 0 }
+      })
+      return null
+    }
+    const r = which === 'start' ? setStageStart(boundaries, index, date, mode) : setStageEnd(boundaries, index, date, mode)
+    if ('error' in r) return t(...EDIT_ERR[r.error])
+    setBoundaries(r.boundaries)
+    setHoverDate(null)
+    setIsDone(false)
+    keepDateVisible(date)
+    return null
   }
 
   function handleMoveStage(fromIndex: number, toIndex: number) {
@@ -885,11 +948,12 @@ export function CalendarPlanner({
             onRenameStage={handleRenameStage}
             onReset={handleReset}
             onRestoreStages={handleRestoreStages}
+            onEditDate={handleEditDate}
             notes={notes}
             onNoteChange={onSave ? (stageId, note) => setNotes((cur) => ({ ...cur, [stageId]: note })) : undefined}
             onSave={onSave ? async () => {
               setSaving(true)
-              try { await onSave({ stages, boundaries, notes }) } finally { setSaving(false) }
+              try { await onSave({ stages, boundaries, notes, excludeHolidays }) } finally { setSaving(false) }
             } : undefined}
             saveLabel={saveLabel}
             saving={saving || busy}

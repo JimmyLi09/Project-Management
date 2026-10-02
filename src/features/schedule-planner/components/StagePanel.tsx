@@ -1,13 +1,16 @@
 import { Fragment, useState } from 'react'
 
-import { formatDisplayDate, formatRangeParts } from '../domain/calendar'
-import { calculateDuration, formatDuration } from '../domain/duration'
+import { formatDisplayDate } from '../domain/calendar'
+import { calculateDuration, durationExact, formatDuration, nonWorkingReason } from '../domain/duration'
 import {
   MAX_STAGES,
   MIN_STAGES,
   stageName,
+  type EditMode,
+  type LocalDate,
   type StageSchedule
 } from '../domain/schedule'
+import { DateField } from './DateField'
 import { useLang } from '@/lib/i18n'
 
 export interface StagePanelProps {
@@ -30,6 +33,8 @@ export interface StagePanelProps {
   onRemoveStage: (index: number) => void
   onRestoreStages: () => void
   onMoveStage: (fromIndex: number, toIndex: number) => void
+  /* REQ-046:在右边直接改某阶段的开始 / 结束日。返回 null = 成功;否则是不允许的原因(给人看的一句话) */
+  onEditDate?: (index: number, which: 'start' | 'end', date: LocalDate, mode: EditMode) => string | null
 }
 
 export function StagePanel({
@@ -50,9 +55,23 @@ export function StagePanel({
   onAddStage,
   onRemoveStage,
   onRestoreStages,
-  onMoveStage
+  onMoveStage,
+  onEditDate
 }: StagePanelProps) {
   const { lang, t } = useLang()
+  const unit = excludeHolidays ? 'workdays' : 'days'
+  /* 「只移动这一个边界」:默认改结束日时后面整体顺延;勾上就只挤压下一阶段 */
+  const [oneBoundary, setOneBoundary] = useState(false)
+  /* 每行最近一次改日期的结果:不允许的原因(红)/ 选到周末假期的提醒(黄) */
+  const [rowMsg, setRowMsg] = useState<Record<number, { kind: 'error' | 'warn'; text: string }>>({})
+  const noStart = !schedules[0]?.start
+  function edit(index: number, which: 'start' | 'end', date: LocalDate) {
+    if (!onEditDate) return
+    const err = onEditDate(index, which, date, oneBoundary ? 'one' : 'shift')
+    const off = !err && excludeHolidays ? nonWorkingReason(date, lang) : null
+    setRowMsg(err ? { [index]: { kind: 'error', text: err } }
+      : off ? { [index]: { kind: 'warn', text: t(`这天是${off}，不算工作日。`, `That day is ${off} — not a working day.`) } } : {})
+  }
   const completeCount = schedules.filter((stage) => stage.end).length
   const canAdd = schedules.length < MAX_STAGES
   const canRemove = schedules.length > MIN_STAGES
@@ -113,13 +132,14 @@ export function StagePanel({
         <div className="final-results" data-testid="final-results">
           <span className="final-results-label">FINAL RESULT</span>
           <strong>{formatDisplayDate(schedules[0].start)} <span aria-hidden="true">→</span> {formatDisplayDate(schedules.at(-1)!.end!)}</strong>
-          <span>
-            {excludeHolidays ? 'Working days' : 'Calendar days'} · {formatDuration(calculateDuration(
-              schedules[0].start,
-              schedules.at(-1)!.end!,
-              excludeHolidays
-            ))}
-          </span>
+          {(() => {
+            const total = calculateDuration(schedules[0].start, schedules.at(-1)!.end!, excludeHolidays)
+            return (
+              <span data-testid="final-total" title={durationExact(total, unit, lang)}>
+                {excludeHolidays ? t(`共 ${total} 个工作日`, `${total} working days`) : t(`共 ${total} 天`, `${total} calendar days`)} · {formatDuration(total, unit)}
+              </span>
+            )
+          })()}
         </div>
       )}
 
@@ -140,7 +160,18 @@ export function StagePanel({
           const isComplete = Boolean(stage.start && stage.end) && !isPreviewStage
           const isEditing = editingIndex === stage.index
           const isDragging = dragFrom === stage.index
-          const range = stage.start && stage.end ? formatRangeParts(stage.start, stage.end) : null
+          /* REQ-040: 每阶段备注 —— 跟排期一起存回项目。只有接了后端(传了 onNoteChange)才出现 */
+          const noteInput = onNoteChange ? (
+            <input
+              className="stage-note-input"
+              aria-label={t(`阶段 ${stage.index + 1} 备注`, `Stage ${stage.index + 1} note`)}
+              data-testid={`stage-note-${stage.index}`}
+              maxLength={200}
+              placeholder={t('备注(如:客户出差,顺延一周)', 'Note (e.g. client away — pushed back a week)')}
+              value={notes?.[stage.id] ?? ''}
+              onChange={(event) => onNoteChange(stage.id, event.target.value)}
+            />
+          ) : null
 
           return (
             <Fragment key={stage.id}>
@@ -190,46 +221,59 @@ export function StagePanel({
                           }
                         }}
                         tabIndex={0}
-                        title={t('点击编辑阶段名称', 'Click to rename this stage')}
+                        title={`${stageName(stage, lang)} — ${t('点击编辑阶段名称', 'click to rename')}`}
                       >
                         {stageName(stage, lang)}
                       </h3>
                     )}
                     {isActive && <span className="stage-current-label">CURRENT</span>}
+                    {stage.duration !== null && (
+                      <strong className="stage-duration" data-testid={`stage-duration-${stage.index}`} title={durationExact(stage.duration, unit, lang)}>
+                        {formatDuration(stage.duration, unit)}
+                      </strong>
+                    )}
                   </div>
-                  <div className="stage-row-dates">
-                    <span data-testid={`stage-start-${stage.index}`}>
-                      {range ? range.start : stage.start ? formatDisplayDate(stage.start) : '—'}
-                    </span>
-                    <span className="stage-arrow" aria-hidden="true">→</span>
-                    <span data-testid={`stage-end-${stage.index}`}>
-                      {range ? range.end : '—'}
-                    </span>
-                    {stage.duration !== null ? (
-                      <strong data-testid={`stage-duration-${stage.index}`}>{formatDuration(stage.duration)}</strong>
-                    ) : null}
-                  </div>
-                  {isActive && (
-                    <span className="stage-hint">
-                      {isPreviewStage && <span className="preview-label">PREVIEW · </span>}
-                      {stage.index === 0 && !stage.start
-                        ? 'Select a project start date'
-                        : `Select an end date for Stage ${stage.index + 1}`}
-                    </span>
+                  {/* REQ-046:第 2 行 = 开始 → 结束两个日期框(点开小日历,也可直接输入)+ 备注 */}
+                  {onEditDate ? (
+                    <div className="stage-row-edit">
+                      <DateField
+                        excludeHolidays={excludeHolidays}
+                        focusMonth={schedules[0]?.start ?? null}
+                        highlight={stage.index === 0 && noStart}
+                        disabled={stage.index > 0 && !stage.start && noStart}
+                        label={t(`阶段 ${stage.index + 1} 开始日期`, `Stage ${stage.index + 1} start date`)}
+                        onPick={(d) => edit(stage.index, 'start', d)}
+                        placeholder={stage.index === 0 && noStart ? t('选开始日期', 'Pick a start date') : '—'}
+                        testid={`stage-start-input-${stage.index}`}
+                        value={stage.start}
+                      />
+                      <span className="stage-arrow" aria-hidden="true">→</span>
+                      <DateField
+                        excludeHolidays={excludeHolidays}
+                        focusMonth={stage.start}
+                        disabled={!stage.start}
+                        label={t(`阶段 ${stage.index + 1} 结束日期`, `Stage ${stage.index + 1} end date`)}
+                        onPick={(d) => edit(stage.index, 'end', d)}
+                        placeholder="—"
+                        testid={`stage-end-input-${stage.index}`}
+                        value={stage.end}
+                      />
+                      {noteInput}
+                    </div>
+                  ) : (
+                    <div className="stage-row-dates">
+                      <span data-testid={`stage-start-${stage.index}`}>{stage.start ? formatDisplayDate(stage.start) : '—'}</span>
+                      <span className="stage-arrow" aria-hidden="true">→</span>
+                      <span data-testid={`stage-end-${stage.index}`}>{stage.end ? formatDisplayDate(stage.end) : '—'}</span>
+                    </div>
                   )}
-                  {/* REQ-040: 每阶段备注 —— 跟排期一起存回项目。
-                      只有接了后端(传了 onNoteChange)才出现,独立版保持原样。 */}
-                  {onNoteChange && (
-                    <input
-                      className="stage-note-input"
-                      aria-label={t(`阶段 ${stage.index + 1} 备注`, `Stage ${stage.index + 1} note`)}
-                      data-testid={`stage-note-${stage.index}`}
-                      maxLength={200}
-                      placeholder={t('备注(如:客户出差,顺延一周)', 'Note (e.g. client away — pushed back a week)')}
-                      value={notes?.[stage.id] ?? ''}
-                      onChange={(event) => onNoteChange(stage.id, event.target.value)}
-                    />
+                  {stage.index === 0 && noStart && onEditDate && (
+                    <span className="stage-need-hint" data-testid="stage-need-start">{t('选开始日期（在这里选，或在左边日历点一天）', 'Pick a start date (here, or click a day on the calendar)')}</span>
                   )}
+                  {rowMsg[stage.index] && (
+                    <span className={`stage-row-msg stage-row-msg-${rowMsg[stage.index].kind}`} data-testid={`stage-msg-${stage.index}`}>{rowMsg[stage.index].text}</span>
+                  )}
+                  {!onEditDate && noteInput}
                 </div>
                 <div className="stage-side-actions">
                   <button
@@ -288,6 +332,12 @@ export function StagePanel({
         )}
       </ol>
 
+      {onEditDate && (
+        <label className="stage-one-boundary" title={t('不勾:改某阶段结束日时,后面各阶段整体顺延(工期不变)。勾上:只挤压下一阶段。', 'Off: changing an end date shifts all later stages (durations kept). On: only the next stage is squeezed.')}>
+          <input type="checkbox" checked={oneBoundary} onChange={(e) => setOneBoundary(e.target.checked)} data-testid="stage-one-boundary" />
+          {t('只移动这一个边界', 'Move only this boundary')}
+        </label>
+      )}
       <div className="stage-manage-row">
         <button
           className="button button-secondary button-small"

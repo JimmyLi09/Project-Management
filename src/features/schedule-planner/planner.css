@@ -768,11 +768,13 @@
   color: var(--accent-deep);
 }
 
+/* REQ-046:两行 —— 第 1 行序号 + 阶段名(省略)+ 工期;第 2 行开始 → 结束日期框 + 备注。
+   原来是 flex-wrap + baseline,标题和日期挤在一行里互相压住 */
 .stage-row-main {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 4px 10px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: center;
+  gap: 5px;
   min-width: 0;
 }
 
@@ -786,7 +788,9 @@
 
 .stage-row-name h3 {
   overflow: hidden;
-  margin: 0 0 0 -4px;
+  min-width: 0;
+  flex: 0 1 auto;
+  margin: 0;
   padding: 1px 4px;
   border-radius: 3px;
   color: var(--ink);
@@ -1463,3 +1467,104 @@
     line-height: 1.5;
   }
 }
+
+/* ===== REQ-046 · 右侧阶段行 ===== */
+.stage-row-name { align-items: center; }
+.stage-duration {
+  flex: 0 0 auto;
+  margin-left: auto;
+  padding: 1px 7px;
+  border-radius: 10px;
+  background: #eef1f5;
+  color: var(--ink);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: help;
+}
+.stage-row-complete .stage-duration { background: #e3efe9; color: #39745e; }
+.stage-row-edit {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.stage-row-edit .stage-arrow { color: var(--muted); font-size: 11px; }
+.stage-note-input {
+  flex: 1 1 140px;
+  min-width: 0;
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: 4px;
+  background: #fff;
+  color: var(--ink);
+  font: inherit;
+  font-size: 12px;
+}
+.stage-note-input:focus,
+.date-field-input:focus { outline: 2px solid rgba(47, 111, 179, 0.35); outline-offset: 1px; border-color: #2f6fb3; }
+.stage-need-hint { color: var(--accent-deep, #b8433c); font-size: 11.5px; }
+.stage-row-msg { font-size: 11.5px; }
+.stage-row-msg-error { color: #b42318; }
+.stage-row-msg-warn { color: #a15c07; }
+.stage-one-boundary {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  margin-top: 10px;
+  color: var(--muted);
+  font-size: 12px;
+}
+@media (max-width: 1100px) {
+  /* 窄屏:备注换到第 3 行 */
+  .stage-row-edit .stage-note-input { flex-basis: 100%; }
+}
+
+.date-field { position: relative; display: inline-flex; }
+.date-field-input {
+  width: 116px;
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: 4px;
+  background: #fff;
+  color: var(--ink);
+  font: inherit;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.date-field-input:disabled { background: #f4f6f9; color: var(--muted); cursor: not-allowed; }
+.date-field-need { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(228, 93, 85, 0.18); }
+.date-pop {
+  position: absolute;
+  z-index: 40;
+  top: calc(100% + 4px);
+  left: 0;
+  width: 232px;
+  padding: 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 10px 28px rgba(23, 32, 51, 0.16);
+}
+.date-pop-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; font-size: 12.5px; }
+.date-pop-nav { width: 26px; height: 24px; border: 1px solid var(--line); border-radius: 4px; background: #fff; cursor: pointer; }
+.date-pop-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; }
+.date-pop-wd { color: var(--muted); font-size: 10.5px; text-align: center; }
+.date-pop-day {
+  height: 26px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.date-pop-day:hover { background: #eef1f5; }
+.date-pop-other { color: #b5bcc8; }
+.date-pop-off { color: #b5bcc8; background: #f4f6f9; }
+.date-pop-today { box-shadow: inset 0 0 0 1px var(--line-strong); }
+.date-pop-sel, .date-pop-sel:hover { background: var(--ink); color: #fff; }
+.date-pop-foot { margin-top: 6px; color: var(--muted); font-size: 10.5px; }
