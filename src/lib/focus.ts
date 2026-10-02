@@ -36,7 +36,10 @@ const isActive = (p: Project) => { const s = projStage(p); return s !== 'invoice
 
 /* 这一组该不该把归档项目一起算进来 */
 export const focusWantsArchived = (f: Focus | undefined): boolean =>
-  !!f && f.kind === 'all' && !!f.withArchived;
+  !!f && ((f.kind === 'all' && !!f.withArchived)
+    /* REQ-045: 开 Invoice 自动归档后,逾期收款和流程时效的样本里会有归档项目 ——
+       点开数字要看得到它们,否则条数对不上 */
+    || f.kind === 'collections' || f.kind === 'ids');
 
 export function matchFocus(p: Project, f: Focus): boolean {
   switch (f.kind) {

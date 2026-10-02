@@ -23,11 +23,14 @@ async function typescript() {
   return ts;
 }
 
-/* 让脚本能直接复用 src/lib 里的代码(和网站跑的是同一份):
+/* 让脚本 / 单元测试直接复用 src 里的代码(和网站跑的是同一份):
      ./xxx(没扩展名)→ 有 ./xxx.ts / ./xxx.tsx 就用它(Next 打包时的写法);
-     @/xxx → 项目根的 src/xxx(tsconfig 里的路径别名)。 */
+     @/xxx → 项目根的 src/xxx(tsconfig 里的路径别名);
+     'vitest' → scripts/vitest-shim.mjs(REQ-046:排期日历的测试是 vitest 写法,
+     用基于 node:test 的最小实现跑,不用另装 vitest)。 */
 const SRC = new URL('../src/', import.meta.url);
 export async function resolve(specifier, context, next) {
+  if (specifier === 'vitest') return { url: new URL('./vitest-shim.mjs', import.meta.url).href, shortCircuit: true };
   let base = null, rest = specifier;
   if (specifier.startsWith('@/')) { base = SRC; rest = './' + specifier.slice(2); }
   else if ((specifier.startsWith('./') || specifier.startsWith('../')) && context.parentURL?.startsWith('file:')) base = context.parentURL;

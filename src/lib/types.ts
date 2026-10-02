@@ -49,6 +49,7 @@ export interface InvoiceClose {
   invoiceStatus: InvoiceStatus;
   paymentStatus: PaymentStatus;
   financeNote: string;
+  issuedBy?: string; // REQ-045: 谁点的「已开 Invoice」
 }
 
 export type RiskLevel = 'none' | 'watch' | 'high';
@@ -162,6 +163,8 @@ export interface CalendarStage {
   nameEn?: string;
   tone: string;
   note?: string;
+  /* REQ-046 / 047:默认工期(周),选开始日时按它排 */
+  weeks?: number;
 }
 export interface CalendarSchedule {
   stages: CalendarStage[];
@@ -169,6 +172,12 @@ export interface CalendarSchedule {
   version: number;           // 每存一次 +1,用来看改过几轮
   updatedAt: number;
   updatedBy: string;
+  /* REQ-046:Exclude Holidays 开关随排期一起存(老数据没有 = 勾选,和原来默认一致) */
+  excludeHolidays?: boolean;
+  /* REQ-047:老 CGI 流程的排期,提示过一次「要换成新阶段吗」之后的选择;
+     flowUndo = 换之前的阶段和日期(「撤销」用,撤销或再存一次后清掉) */
+  flow047?: 'kept' | 'switched';
+  flowUndo?: { stages: CalendarStage[]; boundaries: string[] };
   /* 项目级命名存档(替掉浏览器 localStorage) */
   archives?: { id: string; name: string; savedAt: string; stages: CalendarStage[]; boundaries: string[] }[];
 }
@@ -296,8 +305,13 @@ export interface Project {
   delivery: string;
   buffer: number;
   created: number;
-  invoiced?: boolean;
+  invoiced?: boolean; // 旧「已开票」开关;REQ-045 起只由「已开 Invoice」/「撤回开票」带着改
   archived?: boolean; // hidden from working views, kept for records/stats
+  /* REQ-045: 谁、什么时候、为什么归档。invoiced = 开 Invoice 自动归档(撤回开票时
+     自动取消);manual = PD / BD 手动归档。旧项目没有这几个字段。 */
+  archivedAt?: number;
+  archivedBy?: string;
+  archiveReason?: 'invoiced' | 'manual';
   dismissedRisks?: string[]; // risk keys the team has marked handled/ignored
   updatedAt?: number; // server-injected on read; used for conflict detection
   update: DirectorUpdate;

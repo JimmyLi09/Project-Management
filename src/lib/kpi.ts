@@ -199,7 +199,9 @@ export interface KpiInput {
    归属:项目算在它的 PM(owners)头上 —— 与 REQ-038 的「积分默认全归 PM」一致。 */
 export function computeKpi(inp: KpiInput): PersonKpi[] {
   const { projects, users, rules, period, svc, pointRulesFor } = inp;
-  const pool = projects.filter((p) => !p.archived && inPeriod(p, period) && (!svc || (p.packages || []).some((pk) => pk.svc === svc)));
+  /* REQ-045: 开 Invoice 自动归档的是做完的项目,积分 / 准时 / 一次通过照算(和开票前一样);
+     手动归档的照旧不算 */
+  const pool = projects.filter((p) => (!p.archived || p.archiveReason === 'invoiced') && inPeriod(p, period) && (!svc || (p.packages || []).some((pk) => pk.svc === svc)));
 
   return users.map((u) => {
     const mine = pool.filter((p) => (p.owners || []).includes(u.name));

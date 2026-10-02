@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
-import { getPublicHoliday, isPublicHoliday } from './holidays'
-import type { LocalDate } from './schedule'
+import { getPublicHoliday, isPublicHoliday } from '../domain/holidays'
+import type { LocalDate } from '../domain/schedule'
 
 describe('Singapore public holidays', () => {
   it('recognizes gazetted dates with names', () => {
