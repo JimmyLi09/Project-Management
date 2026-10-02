@@ -76,6 +76,7 @@ export function getDb(): Database.Database {
   maybeSeedDemo(db);
   backfillIds(db);
   backfillSerials(db);
+  migrateInvoiceArchive(db);
   scheduleBackups(db);
   return db;
 }
@@ -125,6 +126,44 @@ function backfillSerials(d: Database.Database) {
     const { updatedAt: _u, version: _v, ...data } = o;
     upd.run(JSON.stringify(data), id);
   }
+}
+
+/* REQ-045 上线时一次性整理(meta 里记一笔,只跑一次 —— 之后 PD / BD 手动取消归档的
+   不会被再归回去):已开票(invoiceStatus=issued)且有 Invoice 号、还没归档的项目 →
+   自动归档,原因 invoiced,每个项目写一条日志。只标了旧「已开票」没有号的不动,
+   由项目列表顶部的「缺 Invoice 号」清单交给 PD / BD 补。不删任何数据。 */
+const MIG_045 = 'mig.req045.invoiceArchive';
+function migrateInvoiceArchive(d: Database.Database) {
+  if (d.prepare('SELECT 1 FROM meta WHERE key = ?').get(MIG_045)) return;
+  const rows = d.prepare('SELECT id, data FROM projects').all() as { id: string; data: string }[];
+  const upd = d.prepare('UPDATE projects SET data = ?, updated_at = ?, version = version + 1 WHERE id = ?');
+  const audit = d.prepare('INSERT INTO audit_log (project_id, at, by, text, k, p) VALUES (?, ?, ?, ?, ?, ?)');
+  const now = Date.now();
+  const done: string[] = [];
+  d.transaction(() => {
+    for (const r of rows) {
+      let o: any;
+      try { o = JSON.parse(r.data); } catch { continue; }
+      const inv = o.invoiceClose;
+      const ref = String(inv?.invoiceRef || '').trim();
+      if (o.archived || inv?.invoiceStatus !== 'issued' || !ref) continue;
+      o.archived = true;
+      o.archivedAt = now;
+      o.archivedBy = '系统';
+      o.archiveReason = 'invoiced';
+      o.invoiced = true;
+      const k = 'proj.invoiceArchiveMig', params = { ref };
+      o.log = Array.isArray(o.log) ? o.log : [];
+      o.log.unshift({ at: now, by: '系统', text: logZh(k, params), k, p: params });
+      if (o.log.length > 200) o.log.length = 200;
+      const { updatedAt: _u, version: _v, ...data } = o;
+      upd.run(JSON.stringify(data), now, r.id);
+      audit.run(r.id, now, '系统', logZh(k, params), k, JSON.stringify(params));
+      done.push(`${o.name || r.id} (${ref})`);
+    }
+    d.prepare('INSERT INTO meta (key, value) VALUES (?, ?)').run(MIG_045, JSON.stringify({ at: now, archived: done.length }));
+  })();
+  if (done.length) console.log(`[REQ-045] 已开 Invoice 的项目自动归档 ${done.length} 个:${done.join('、')}`);
 }
 
 /* next project NO. — one past the current max across all projects */

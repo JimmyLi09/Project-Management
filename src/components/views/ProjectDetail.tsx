@@ -11,7 +11,7 @@ import { rulePoints, ruleFor } from '@/lib/points';
 import {
   canAssign, canCommercial, canCreate, canDecide, canDelete, canEdit, canEditFinance, isFull,
   canSeeWorkflow, canSeeWorkflowTimeline, canSeeHandoverBlock, canSeeCompletionBlock,
-  canSeeVerifyBlock, canSeeFinanceBlock, isPM, canMeta,
+  canSeeVerifyBlock, canSeeFinanceBlock, isPM, canMeta, canMarkInvoice,
 } from '@/lib/permissions';
 import { DIFF, STAGES, stageIdx, svcColor, svcName } from '@/lib/templates';
 import { contactRoleTerm, diffTerm, fieldGroupTerm } from '@/lib/terms';
@@ -23,6 +23,7 @@ import ChecklistTab from './ChecklistTab';
 import JobRecordTab from './JobRecordTab';
 import ExportOverlay from './ExportOverlay';
 import TransferModal from '../TransferModal';
+import InvoiceModal from '../InvoiceModal';
 import type { Project, ProjectContact } from '@/lib/types';
 
 export default function ProjectDetail() {
@@ -188,12 +189,7 @@ export default function ProjectDetail() {
               {canCreate(me) && (
                 <button className="btn-line sm" onClick={() => setCopyOpen(true)}>⧉ {t('复制项目', 'Copy project')}</button>
               )}
-              {stage === 'complete' && canCommercial(me, p) && (
-                <button className="btn-line sm" onClick={() => dispatch(p.id, { type: 'toggleInvoiced' })}>{t('标记开票/收尾', 'Mark invoiced')}</button>
-              )}
-              {p.invoiced && canCommercial(me, p) && (
-                <button className="btn-line sm" onClick={() => dispatch(p.id, { type: 'toggleInvoiced' })}>{t('撤销开票', 'Undo invoiced')}</button>
-              )}
+              {/* REQ-045: 旧的「标记开票 / 撤销开票」并进概览里阶段 5 的「已开 Invoice」卡片 */}
               {canAssign(me, p) && (
                 <button className="btn-line sm" onClick={() => dispatch(p.id, { type: 'setArchived', value: !p.archived })}>
                   📦 {p.archived ? t('取消归档', 'Unarchive') : t('归档', 'Archive')}
@@ -366,6 +362,63 @@ function AssignModal({ candidates, onClose, onAssign }: { candidates: string[]; 
           <button className="btn-navy" disabled={!name} onClick={() => onAssign(name)}>{t('确认指派', 'Assign')}</button>
         </div>
       </div>
+    </div>
+  );
+}
+
+/* ===== REQ-045 — 阶段 5「开票 / 收尾」:已开 Invoice → 自动归档 =====
+   Finance / Sales / PD / BD 有按钮;PM / Engineer 只在开过票后看到一行结果。
+   项目到「完成」才出现(和原来的「标记开票」一样);旧开关标过「已开票」但没有号的,
+   在这里补号。 */
+function InvoiceCard({ p }: { p: Project }) {
+  const { me, dispatch, setToast } = useStore();
+  const { t } = useLang();
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const inv = p.invoiceClose;
+  const issued = inv?.invoiceStatus === 'issued';
+  const legacy = !issued && !!p.invoiced;           // 旧「已开票」开关,缺号
+  const can = canMarkInvoice(me, p);
+  const late = stageIdx(projStage(p)) >= stageIdx('complete');
+  if (!issued && !legacy && !(late && can)) return null;
+
+  async function undo() {
+    const r = prompt(t('撤回开票的原因(选填)', 'Why withdraw the invoice? (optional)'), '');
+    if (r === null) return;
+    setBusy(true);
+    const ok = await dispatch(p.id, { type: 'undoInvoice', reason: r });
+    setBusy(false);
+    if (ok) setToast(t('已撤回开票', 'Invoice withdrawn') + (p.archiveReason === 'invoiced' ? t(',项目回到项目列表', ' — the project is back in the list') : ''));
+  }
+
+  return (
+    <div className="panel" data-testid="invoice-card" style={{ padding: '14px 20px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+        <span className="panel-title" style={{ fontSize: 14 }}>{t('阶段 5 · 开票 / 收尾', 'Stage 5 · Invoice / close-out')}</span>
+        <div style={{ flex: 1 }} />
+        {issued ? (
+          <>
+            <span data-testid="invoice-status" style={{ fontSize: 13 }}>
+              <span className="badge" style={{ background: 'var(--hover-bg)', color: 'var(--success)' }}>{t('已开 Invoice', 'Invoice issued')}</span>{' '}
+              <b className="tnum">{inv!.invoiceRef}</b>
+              <span style={{ color: 'var(--text2)' }}> · {t('开票日期', 'issued')} {inv!.issuedDate ? fmtDate(parseISO(inv!.issuedDate)) : '—'}{inv!.issuedBy ? ` · ${inv!.issuedBy}` : ''}</span>
+            </span>
+            {can && <button className="btn-line sm" data-testid="invoice-undo" disabled={busy} onClick={undo}>{t('撤回开票', 'Withdraw invoice')}</button>}
+          </>
+        ) : legacy ? (
+          <>
+            <span style={{ fontSize: 12.5, color: 'var(--warning)' }}>{t('已标「已开票」,但缺 Invoice 号 —— 补号后自动归档', 'Marked invoiced but no invoice number — add it to archive the project')}</span>
+            {can && <button className="btn-navy sm" data-testid="invoice-open" onClick={() => setOpen(true)}>{t('补 Invoice 号', 'Add invoice number')}</button>}
+            {can && <button className="btn-line sm" data-testid="invoice-undo" disabled={busy} onClick={undo}>{t('撤回开票', 'Withdraw invoice')}</button>}
+          </>
+        ) : (
+          <>
+            <span style={{ fontSize: 12.5, color: 'var(--text2)' }}>{t('项目已到收尾,开了 Invoice 之后点这里,项目会自动归档。', 'Once the invoice is out, click here — the project archives itself.')}</span>
+            <button className="btn-navy sm" data-testid="invoice-open" onClick={() => setOpen(true)}>{t('已开 Invoice', 'Invoice issued')}</button>
+          </>
+        )}
+      </div>
+      {open && <InvoiceModal p={p} onClose={() => setOpen(false)} onDone={(r) => setToast(t(`已归档 · ${r}`, `Archived · ${r}`))} />}
     </div>
   );
 }
@@ -602,6 +655,7 @@ function OverviewTab({ p, onSchedule }: { p: Project; onSchedule: (pkg: number) 
   return (
     <div className="grid-2col" style={{ display: 'grid', gridTemplateColumns: '1.5fr 1fr', gap: 20, alignItems: 'start' }}>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 20, minWidth: 0 }}>
+        <InvoiceCard p={p} />
         <WorkflowPanel p={p} users={users} me={me} dispatch={dispatch} />
         <div className="panel clip">
           <div className="panel-head" style={{ padding: '16px 22px' }}>
