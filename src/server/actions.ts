@@ -4,9 +4,12 @@
 
 import type { Identity } from '@/lib/permissions';
 import {
-  canAssign, canCommercial, canDecide, canEdit, canEditFinance, canRowEdit, isFull, canDelete , canMeta } from '@/lib/permissions';
+  canAssign, canCommercial, canDecide, canEdit, canEditFinance, canRowEdit, isFull, canDelete , canMeta, canMarkInvoice } from '@/lib/permissions';
 import { buildPackage, deriveStatuses, fitWindow, newId, parseISO, isoDate, totalDays } from '@/lib/project';
-import { SVC, type Template } from '@/lib/templates';
+import { getBuiltinTemplate, SVC, type Template } from '@/lib/templates';
+import { stagesFromTemplate } from '@/lib/calendarStages';
+import { isLegacyCgiStages, type LocalDate } from '@/features/schedule-planner/domain/schedule';
+import { distributeByWeights, layoutFromStart } from '@/features/schedule-planner/domain/duration';
 import {
   ALL, clGroups, dropSvc, findClItem, inScope, instOf, mergeIntoProject, moveToRemoved, projectSvcs, replaceSection, restoreRemoved,
 } from '@/lib/sharedChecklist';
@@ -67,7 +70,8 @@ export type ProjectAction =
   | { type: 'setPoints'; value: number | null }
   | { type: 'setPkgTier'; pkg: number; id: string; value?: number | null }
   /* REQ-040: 日历排期存回项目 */
-  | { type: 'saveCalendar'; pkg: number; stages: CalendarStage[]; boundaries: string[]; syncDelivery?: boolean }
+  | { type: 'saveCalendar'; pkg: number; stages: CalendarStage[]; boundaries: string[]; syncDelivery?: boolean; excludeHolidays?: boolean }
+  | { type: 'calendarFlow'; pkg: number; choice: 'switch' | 'keep' | 'undo' }
   | { type: 'saveCalendarArchives'; pkg: number; archives: NonNullable<CalendarSchedule['archives']> }
   | { type: 'addOwner'; name: string }
   | { type: 'removeOwner'; name: string }
@@ -99,7 +103,10 @@ export type ProjectAction =
   | { type: 'addServicePackage'; svc: string; patch: Record<string, string>; asNew?: boolean; label?: string }
   | { type: 'removeServicePackage'; pkg: number }
   | { type: 'addCustomNode'; pkg: number; name: string; date: string; owner: string; atIdx?: number }
-  | { type: 'toggleInvoiced' };
+  | { type: 'toggleInvoiced' }
+  /* REQ-045 */
+  | { type: 'markInvoiced'; invoiceRef: string; issuedDate: string; dueDate?: string; note?: string }
+  | { type: 'undoInvoice'; reason?: string };
 
 export class PermissionError extends Error {}
 export class ValidationError extends Error {}
@@ -140,6 +147,27 @@ function logIt(p: Project, by: string, k: string, params?: LogParams) {
   p.log.unshift({ at: Date.now(), by, text: logZh(k, params), k, p: params });
   if (p.log.length > 200) p.log.length = 200;
 }
+
+/* ===== REQ-045 开 Invoice 自动归档 =====
+   归档只是「不出现在工作视图」,开票 / 收款信息原样留着 —— 财务页按开票状态显示,
+   不看 archived。 */
+export function archiveForInvoice(p: Project, by: string, at = Date.now()) {
+  /* 已经被 PD / BD 手动归档的(含没有原因的老归档)不改原因 —— 否则以后撤回开票会把它带出来 */
+  if (p.archived) return;
+  p.archived = true;
+  p.archivedAt = at;
+  p.archivedBy = by;
+  p.archiveReason = 'invoiced';
+}
+/* 撤回开票时:只有「因开票自动归档」的才跟着取消;PD / BD 手动归档的不动 */
+function unarchiveForInvoice(p: Project): boolean {
+  if (!p.archived || p.archiveReason !== 'invoiced') return false;
+  p.archived = false;
+  delete p.archivedAt; delete p.archivedBy; delete p.archiveReason;
+  return true;
+}
+const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/;
+const validDay = (s: string) => ISO_DAY.test(s) && !!parseISO(s) && isoDate(parseISO(s)!) === s;
 
 /* 0922 变更单:资料 patch 里如果有与项目同源的 key(Project detail / Client
    Contact / Handover Date),把它写到项目字段上并记一条日志,返回 true 表示
@@ -625,6 +653,7 @@ export function applyAction(u: Identity, p: Project, a: ProjectAction, ctx: Acti
         ...(x?.nameEn ? { nameEn: String(x.nameEn).slice(0, 120) } : {}),
         tone: String(x?.tone || 'coral').slice(0, 20),
         note: String(x?.note || '').slice(0, 200),
+        ...(typeof x?.weeks === 'number' && Number.isFinite(x.weeks) && x.weeks >= 0 ? { weeks: Math.min(x.weeks, 52) } : {}),
       }));
       if (!stages.length) throw new ValidationError('至少要有一个阶段');
       const boundaries = (Array.isArray(a.boundaries) ? a.boundaries : [])
@@ -639,6 +668,9 @@ export function applyAction(u: Identity, p: Project, a: ProjectAction, ctx: Acti
         version: (prev?.version || 0) + 1,
         updatedAt: Date.now(), updatedBy: u.name,
         archives: prev?.archives || [],
+        excludeHolidays: a.excludeHolidays !== false,
+        /* 已经提示过的选择留着;再存一次之后「撤销换阶段」就不再提供 */
+        ...(prev?.flow047 ? { flow047: prev.flow047 } : {}),
       };
       /* 打通交付日:最后一个分界点就是这份业务排到的交付日。
          只在用户勾了同步时才动项目的交付日 —— 不声不响改掉交付日太吓人。 */
@@ -652,6 +684,50 @@ export function applyAction(u: Identity, p: Project, a: ProjectAction, ctx: Acti
         }
       }
       logIt(p, u.name, 'cal.save', { svc: pk.svc, version: pk.calendar.version, stages: stages.length });
+      break;
+    }
+    /* REQ-047:已有 CGI 项目的日历排期还是老流程 → 提示一次。
+       switch:换成当前 CGI 模板的阶段,把原来的整段日期(首日 → 末日)按新阶段的默认周数重新分配,
+               原来的阶段和日期留在 flowUndo,可撤销;keep:保持不变,不再提示;undo:换回原来的。 */
+    case 'calendarFlow': {
+      if (!canEdit(u, p)) throw new PermissionError('无编辑权限');
+      const pk = p.packages[a.pkg];
+      if (!pk) throw new ValidationError('无效的服务包');
+      const cal = pk.calendar;
+      if (!cal) throw new ValidationError('还没有日历排期');
+      if (a.choice === 'keep') {
+        cal.flow047 = 'kept';
+        logIt(p, u.name, 'cal.flowKeep', { svc: pk.svc });
+        break;
+      }
+      if (a.choice === 'undo') {
+        if (!cal.flowUndo) throw new ValidationError('没有可撤销的更换');
+        cal.stages = cal.flowUndo.stages;
+        cal.boundaries = cal.flowUndo.boundaries;
+        delete cal.flowUndo;
+        cal.flow047 = 'kept';
+        cal.version += 1; cal.updatedAt = Date.now(); cal.updatedBy = u.name;
+        logIt(p, u.name, 'cal.flowUndo', { svc: pk.svc });
+        break;
+      }
+      if (pk.svc !== 'cgi' || !isLegacyCgiStages(cal.stages)) throw new ValidationError('这份排期不是老的效果图流程');
+      const next = stagesFromTemplate(pk.svc, (tplForSvc ?? getBuiltinTemplate)(pk.svc));
+      const ex = cal.excludeHolidays !== false;
+      const b = cal.boundaries as LocalDate[];
+      let boundaries: string[] = [];
+      if (b.length === cal.stages.length + 1) {
+        boundaries = distributeByWeights(b[0], b[b.length - 1], next.map((x) => x.weeks ?? 1), ex)
+          ?? distributeByWeights(b[0], b[b.length - 1], next.map((x) => x.weeks ?? 1), false)
+          ?? layoutFromStart(b[0], next.map((x) => x.weeks), ex);
+      } else if (b.length) {
+        boundaries = layoutFromStart(b[0], next.map((x) => x.weeks), ex);
+      }
+      cal.flowUndo = { stages: cal.stages, boundaries: cal.boundaries };
+      cal.stages = next.map((x) => ({ id: x.id, name: x.name, ...(x.nameEn ? { nameEn: x.nameEn } : {}), tone: x.tone, note: '', ...(x.weeks !== undefined ? { weeks: x.weeks } : {}) }));
+      cal.boundaries = boundaries;
+      cal.flow047 = 'switched';
+      cal.version += 1; cal.updatedAt = Date.now(); cal.updatedBy = u.name;
+      logIt(p, u.name, 'cal.flowSwitch', { svc: pk.svc, stages: next.length });
       break;
     }
     case 'saveCalendarArchives': {
@@ -728,9 +804,48 @@ export function applyAction(u: Identity, p: Project, a: ProjectAction, ctx: Acti
       break;
     }
     case 'toggleInvoiced': {
-      if (!canCommercial(u, p)) throw new PermissionError('仅 PD/BD/销售可标记开票收尾');
-      p.invoiced = !p.invoiced;
-      logIt(p, u.name, p.invoiced ? 'proj.invoiced' : 'proj.uninvoiced');
+      /* REQ-045: 旧开关并进「已开 Invoice」—— 不再单独存在(没刷新的旧页面点到这里时给句人话) */
+      throw new ValidationError('「标记开票」已改为「已开 Invoice」,请刷新页面后在阶段 5 填 Invoice 号');
+    }
+    case 'markInvoiced': {
+      if (!canMarkInvoice(u, p)) throw new PermissionError('仅 Finance / Sales / PD / BD 可标记已开 Invoice');
+      const inv = p.invoiceClose!;
+      if (inv.invoiceStatus === 'issued') throw new ValidationError('这个项目已开 Invoice');
+      const ref = String(a.invoiceRef || '').trim().slice(0, 60);
+      const day = String(a.issuedDate || '').trim();
+      if (!ref) throw new ValidationError('请填写 Invoice 号');
+      if (!validDay(day)) throw new ValidationError('请填写开票日期');
+      const due = String(a.dueDate || '').trim();
+      if (due && !validDay(due)) throw new ValidationError('到期日格式不对');
+      inv.invoiceRef = ref;
+      inv.issuedDate = day;
+      if (due) inv.dueDate = due;
+      const note = String(a.note || '').trim().slice(0, 300);
+      if (note) inv.financeNote = inv.financeNote ? `${inv.financeNote}\n${note}` : note;
+      inv.invoiceStatus = 'issued';
+      inv.issuedBy = u.name;
+      p.invoiced = true;
+      archiveForInvoice(p, u.name);
+      logIt(p, u.name, 'proj.invoiceArchive', { ref });
+      break;
+    }
+    case 'undoInvoice': {
+      if (!canMarkInvoice(u, p)) throw new PermissionError('仅 Finance / Sales / PD / BD 可撤回开票');
+      const inv = p.invoiceClose!;
+      if (inv.invoiceStatus !== 'issued' && !p.invoiced) throw new ValidationError('这个项目还没开 Invoice');
+      if (inv.paymentStatus === 'partial' || inv.paymentStatus === 'received') {
+        throw new ValidationError('已登记收款,不能撤回开票;请 Finance 先核对收款记录');
+      }
+      const ref = inv.invoiceRef || '—';
+      inv.invoiceStatus = 'pending_finance';
+      inv.invoiceRef = '';
+      inv.issuedDate = '';
+      inv.paymentStatus = 'pending';
+      delete inv.issuedBy;
+      p.invoiced = false;
+      const reason = String(a.reason || '').trim().slice(0, 200);
+      const back = unarchiveForInvoice(p);
+      logIt(p, u.name, back ? 'proj.invoiceUndoUnarchive' : 'proj.invoiceUndo', { ref, note: reason ? ' — ' + reason : '' });
       break;
     }
     /* ===== v2.2 Version 1A · S2 — Sales → PM handover ===== */
@@ -877,6 +992,17 @@ export function applyAction(u: Identity, p: Project, a: ProjectAction, ctx: Acti
       if (a.value === 'issued' && !inv.issuedDate) inv.issuedDate = isoDate(new Date());
       inv.invoiceStatus = a.value;
       logIt(p, u.name, 'fin.invoiceStatus', { from, to: a.value, note: a.reason ? ' — ' + a.reason : '' });
+      /* REQ-045: Finance 在 ④ 里点「开票」和「已开 Invoice」是同一件事 → 一样自动归档;
+         作废则一样取消(只取消因开票而归档的) */
+      if (from !== 'issued' && a.value === 'issued') {
+        inv.issuedBy = u.name;
+        p.invoiced = true;
+        archiveForInvoice(p, u.name);
+        logIt(p, u.name, 'proj.invoiceArchive', { ref: inv.invoiceRef });
+      } else if (from === 'issued' && a.value !== 'issued') {
+        p.invoiced = false;
+        if (unarchiveForInvoice(p)) logIt(p, u.name, 'proj.unarchive');
+      }
       break;
     }
     case 'setPaymentStatus': {
@@ -1070,6 +1196,9 @@ export function applyAction(u: Identity, p: Project, a: ProjectAction, ctx: Acti
     case 'setArchived': {
       if (!canAssign(u, p)) throw new PermissionError('仅 PD/BD 可归档项目');
       p.archived = !!a.value;
+      /* REQ-045: 记下谁、何时、为什么;手动取消归档后,撤回开票也不会再动它 */
+      if (p.archived) { p.archivedAt = Date.now(); p.archivedBy = u.name; p.archiveReason = 'manual'; }
+      else { delete p.archivedAt; delete p.archivedBy; delete p.archiveReason; }
       logIt(p, u.name, p.archived ? 'proj.archive' : 'proj.unarchive');
       break;
     }

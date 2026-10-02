@@ -9,6 +9,8 @@ export interface StageDefinition {
      老数据没有这一位,读出来是 undefined,自动回落到 name,不需要迁移。 */
   nameEn?: string
   tone: string
+  /* REQ-046 / 047:默认工期(周)。选开始日时按它一口气排好各阶段;0 = 1 天(如「信息收集」) */
+  weeks?: number
 }
 
 export interface StageSchedule extends StageDefinition {
@@ -44,17 +46,23 @@ export function createStage(name: string, index: number): StageDefinition {
 }
 
 /**
- * These labels intentionally stay fixed: the planner is a calendar-first
- * sequencing tool, not an editable project-template form.
+ * 独立版(不接项目)的默认阶段。接了项目时,默认阶段按服务包的服务从模板取
+ * (REQ-047,见 src/lib/calendarStages.ts),这一套只是兜底。
+ * REQ-047:CGI 静帧新流程 —— 白膜角度小样 → AI 效果图定角度与大效果 → 带材质后期图。
  */
 export const STAGES: readonly StageDefinition[] = [
-  { id: 'brief', name: '信息收集（见信息清单）', nameEn: 'Information gathering (see checklist)', tone: 'coral' },
-  { id: 'concept', name: '搭建 3D 建筑模型', nameEn: 'Build the 3D architectural model', tone: 'peach' },
-  { id: 'development', name: '出角度草图，客户审阅（含 2–3 轮）', nameEn: 'Angle drafts, client review (2–3 rounds)', tone: 'sage' },
-  { id: 'documentation', name: '灯光 / 材质渲染草图（含 2–3 轮）', nameEn: 'Lighting / material draft renders (2–3 rounds)', tone: 'sky' },
-  { id: 'delivery', name: '合成 / 调色 / 配景（含 2–3 轮）', nameEn: 'Compositing / grading / entourage (2–3 rounds)', tone: 'lavender' },
-  { id: 'handover', name: '导出成品格式，客户签收', nameEn: 'Export final formats, client sign-off', tone: 'sand' }
+  { id: 'brief', name: '信息收集：收到模型资料（见信息清单）', nameEn: 'Information gathering: model files received', tone: 'coral', weeks: 0 },
+  { id: 'clay', name: '白膜角度小样', nameEn: 'Clay-model angle previews', tone: 'peach', weeks: 2 },
+  { id: 'shortlist', name: '角度 shortlist + AI 效果图，确定角度与大效果（含 1–2 轮）', nameEn: 'Angle shortlist + AI mood renders: lock angles and overall look (1–2 rounds)', tone: 'sage', weeks: 2 },
+  { id: 'final', name: '带材质、模型的后期图（参考大效果，含 2–3 轮）', nameEn: 'Final renders with materials and model detail, following the approved look (2–3 rounds)', tone: 'sky', weeks: 2 },
+  { id: 'handover', name: '导出成品格式，客户签收', nameEn: 'Export final formats, client sign-off', tone: 'lavender', weeks: 1 }
 ]
+
+/* REQ-047 之前所有服务共用的那 6 个阶段(CGI 老流程)。已有项目存的就是它 —— 用来认出
+   「还在用老 CGI 流程」的排期,提示一次要不要换成新阶段 */
+export const LEGACY_CGI_STAGE_IDS = ['brief', 'concept', 'development', 'documentation', 'delivery', 'handover'] as const
+export const isLegacyCgiStages = (stages: readonly { id: string }[]) =>
+  stages.length === LEGACY_CGI_STAGE_IDS.length && stages.every((s, i) => s.id === LEGACY_CGI_STAGE_IDS[i])
 
 /* 当前语言下这个阶段该显示的名字。没有英文位就回落到 name —— 用户改过名的
    阶段两种语言显示的是同一个名字,这正是「用户内容不翻译」要的效果。 */
@@ -273,7 +281,9 @@ export function sanitizeStages(value: unknown): StageDefinition[] | null {
     const tone = typeof entry.tone === 'string' && (STAGE_TONES as readonly string[]).includes(entry.tone)
       ? entry.tone
       : STAGE_TONES[index % STAGE_TONES.length]
-    result.push({ id, name, tone })
+    const nameEn = typeof entry.nameEn === 'string' && entry.nameEn.trim() ? entry.nameEn.trim().slice(0, 120) : undefined
+    const weeks = typeof entry.weeks === 'number' && Number.isFinite(entry.weeks) && entry.weeks >= 0 ? entry.weeks : undefined
+    result.push({ id, name, tone, ...(nameEn ? { nameEn } : {}), ...(weeks !== undefined ? { weeks } : {}) })
   }
   return result
 }
@@ -324,6 +334,63 @@ export function boundariesAfterStageRemoval(
     return boundaries.slice()
   }
   return [...boundaries.slice(0, dropAt), ...boundaries.slice(dropAt + 1)]
+}
+
+/* ===== REQ-046:在右侧直接改某阶段的开始 / 结束日 =====
+   阶段 i:开始 = i === 0 ? b[0] : b[i] + 1,结束 = b[i + 1]。
+   mode 'shift'(默认):改结束日时,后面的阶段整体顺延 / 提前(各自工期不变);
+                       改阶段 01 的开始日时,整份排期一起平移。
+   mode 'one'(勾「只移动这一个边界」):只动这一个分界点,挤压相邻那一段。
+   改开始日(阶段 02 起)= 动上一阶段的结束日。 */
+export type EditMode = 'shift' | 'one'
+export type EditError = 'endBeforeStart' | 'startAfterEnd' | 'squeezeNext' | 'squeezePrev' | 'notReady'
+export type EditResult = { boundaries: LocalDate[] } | { error: EditError }
+
+const stageStartOf = (b: readonly LocalDate[], i: number): LocalDate | null =>
+  i === 0 ? b[0] ?? null : b[i] ? addDays(b[i], 1) : null
+
+const dayDelta = (from: LocalDate, to: LocalDate) => inclusiveDays(from, to) - 1
+
+export function setStageEnd(b: readonly LocalDate[], i: number, end: LocalDate, mode: EditMode = 'shift'): EditResult {
+  parseLocalDate(end)
+  const start = stageStartOf(b, i)
+  if (!start) return { error: 'notReady' }
+  if (compareDates(end, start) < 0) return { error: 'endBeforeStart' }
+  const next = b.slice()
+  if (b[i + 1] === undefined) {
+    if (b.length !== i + 1) return { error: 'notReady' }
+    next.push(end)
+    return { boundaries: next }
+  }
+  if (mode === 'shift') {
+    const delta = dayDelta(b[i + 1], end)
+    for (let k = i + 1; k < next.length; k += 1) next[k] = addDays(next[k], delta)
+    return { boundaries: next }
+  }
+  if (b[i + 2] !== undefined && compareDates(addDays(end, 1), b[i + 2]) > 0) return { error: 'squeezeNext' }
+  next[i + 1] = end
+  return { boundaries: next }
+}
+
+export function setStageStart(b: readonly LocalDate[], i: number, start: LocalDate, mode: EditMode = 'shift'): EditResult {
+  parseLocalDate(start)
+  const next = b.slice()
+  if (i === 0) {
+    if (!b.length) return { error: 'notReady' }
+    if (mode === 'shift') {
+      const delta = dayDelta(b[0], start)
+      return { boundaries: next.map((d) => addDays(d, delta)) }
+    }
+    if (b[1] !== undefined && compareDates(start, b[1]) > 0) return { error: 'startAfterEnd' }
+    next[0] = start
+    return { boundaries: next }
+  }
+  if (b[i] === undefined) return { error: 'notReady' }
+  if (b[i + 1] !== undefined && compareDates(start, b[i + 1]) > 0) return { error: 'startAfterEnd' }
+  const prevStart = stageStartOf(b, i - 1)!
+  if (compareDates(addDays(start, -1), prevStart) < 0) return { error: 'squeezePrev' }
+  next[i] = addDays(start, -1)
+  return { boundaries: next }
 }
 
 export type ScheduleStatus = 'Done' | 'In progress' | 'Not started'

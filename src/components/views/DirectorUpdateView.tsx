@@ -2,7 +2,7 @@
 
 import React, { useMemo, useState } from 'react';
 import { useStore } from '../store';
-import { fmtDate, overdueItems, projectHealth, projStage, staleInfo, todayMid } from '@/lib/project';
+import { awaitingPayment, fmtDate, overdueItems, projectHealth, projStage, staleInfo, todayMid } from '@/lib/project';
 import { canDecide, canEdit } from '@/lib/permissions';
 import { useLang } from '@/lib/i18n';
 import { Avatar, Drill, Ell, HM, Icon, Pill } from '../ui';
@@ -44,7 +44,7 @@ export default function DirectorUpdateView() {
   /* v2.2 §5.2: commercial overdue collections — production done, money not in.
      Reads derived Commercial status so PM delivery is never blamed for late payment. */
   const overdueCollections = useMemo(
-    () => projects.filter((p) => !p.archived && (p.commercialStatus === 'overdue' || p.paymentRisk?.level === 'high')),
+    () => projects.filter((p) => (!p.archived || awaitingPayment(p)) && (p.commercialStatus === 'overdue' || p.paymentRisk?.level === 'high')),
     [projects],
   );
 

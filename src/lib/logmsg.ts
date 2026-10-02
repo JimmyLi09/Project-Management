@@ -114,6 +114,11 @@ export const LOG_MSG: Record<string, [string, string]> = {
   'proj.transferTasks': ['项目转交(含任务指派):{from} → {to}', 'Handover incl. task assignments: {from} → {to}'],
   'proj.invoiced': ['标记开票 / 收尾', 'Marked invoiced / closing'],
   'proj.uninvoiced': ['撤销开票', 'Invoiced mark removed'],
+  /* REQ-045 */
+  'proj.invoiceArchive': ['已开 Invoice {ref} · 自动归档', 'Invoice {ref} issued · archived automatically'],
+  'proj.invoiceUndo': ['撤回开票 {ref}{note}', 'Invoice {ref} withdrawn{note}'],
+  'proj.invoiceUndoUnarchive': ['撤回开票 {ref} · 取消归档{note}', 'Invoice {ref} withdrawn · unarchived{note}'],
+  'proj.invoiceArchiveMig': ['上线整理:已有 Invoice {ref},自动归档', 'Go-live tidy-up: invoice {ref} already issued, archived automatically'],
 
   /* 人员 */
   'owner.add': ['指派 PM:{name}', 'PM assigned: {name}'],
@@ -138,6 +143,10 @@ export const LOG_MSG: Record<string, [string, string]> = {
 
   /* 日历排期 */
   'cal.save': ['{svc} 保存日历排期(第 {version} 版,{stages} 阶段)', '{svc} calendar saved (v{version}, {stages} stages)'],
+  /* REQ-047:老效果图流程的日历排期 */
+  'cal.flowSwitch': ['{svc} 日历排期换成新效果图流程({stages} 阶段,日期按新阶段重新分配)', '{svc} calendar switched to the new CGI flow ({stages} stages, dates redistributed)'],
+  'cal.flowKeep': ['{svc} 日历排期保持原效果图流程', '{svc} calendar keeps the previous CGI flow'],
+  'cal.flowUndo': ['{svc} 日历排期撤销更换,恢复原效果图流程', '{svc} calendar switch undone; previous CGI flow restored'],
   'cal.delivery': ['交付日按日历排期更新:{from} → {to}', 'Delivery updated from the calendar: {from} → {to}'],
 
   /* 信息清单 */

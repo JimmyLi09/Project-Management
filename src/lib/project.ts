@@ -280,17 +280,27 @@ export function deriveStatuses(p: Project): { productionStatus: import('./types'
   if (productionStatus === 'production_completed') {
     const allowed = !!sv && sv.status === 'verified' && sv.finalInvoiceAllowed;
     commercialStatus = allowed ? 'pending_invoice' : 'not_ready';
-    if (inv && inv.invoiceStatus === 'issued') {
-      if (inv.paymentStatus === 'received') commercialStatus = 'payment_received';
-      else {
-        const due = parseISO(inv.dueDate);
-        const overdue = inv.paymentStatus === 'overdue' || (!!due && due < todayMid());
-        commercialStatus = overdue ? 'overdue' : (inv.paymentStatus === 'partial' ? 'payment_pending' : 'invoiced');
-      }
+  }
+  /* REQ-045: 开了 Invoice 就按开票 / 收款算 —— 不再要求先走完完成包审批。
+     Sales / PD 在没走售后流程的老项目上点「已开 Invoice」,财务页也要看得到它待收款。 */
+  if (inv && inv.invoiceStatus === 'issued') {
+    if (inv.paymentStatus === 'received') commercialStatus = 'payment_received';
+    else {
+      const due = parseISO(inv.dueDate);
+      const overdue = inv.paymentStatus === 'overdue' || (!!due && due < todayMid());
+      commercialStatus = overdue ? 'overdue' : (inv.paymentStatus === 'partial' ? 'payment_pending' : 'invoiced');
     }
   }
   return { productionStatus, commercialStatus };
 }
+
+/* REQ-045: 开了 Invoice、钱还没收齐 —— 财务页不管归档与否都要显示它 */
+export const awaitingPayment = (p: Project) =>
+  p.invoiceClose?.invoiceStatus === 'issued' && p.invoiceClose.paymentStatus !== 'received';
+
+/* REQ-045: 只标过旧「已开票」开关、没有 Invoice 号的项目 —— 上线时不自动归档,列给 PD / BD 补号 */
+export const missingInvoiceRef = (p: Project) =>
+  !!p.invoiced && !p.archived && p.invoiceClose?.invoiceStatus !== 'issued';
 
 export const pkgStart = (p: Project, pk: ServicePackage) => (pk && pk.start) || p.start || '';
 
@@ -319,7 +329,8 @@ export const statusPct = (s: string) => (s === 'done' ? 100 : s === 'wip' ? 50 :
 /* v2.2 §1.1 workflow tasks: what (if anything) this project is waiting on THIS
    user to do right now. Drives the "工作流待办" inbox so people know when to act. */
 export function pendingWorkflowAction(p: Project, me: { name: string; role: string }): { key: string; label: string; labelEn: string } | null {
-  if (p.archived) return null;
+  /* REQ-045: 开 Invoice 会自动归档,但 Finance 还得跟到收款为止 */
+  if (p.archived) return me.role === 'finance' && awaitingPayment(p) ? { key: 'payment', label: '更新收款状态', labelEn: 'Update payment' } : null;
   const full = me.role === 'director' || me.role === 'bd';
   const commercial = full || me.role === 'sales';
   /* REQ-043: 项目工程师和 PM 一样能提交完成包(canSubmitCompletionHere 走的就是

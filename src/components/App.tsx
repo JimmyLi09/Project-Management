@@ -3,7 +3,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import type { User } from '@/lib/types';
 import { StoreProvider, useStore, type View } from './store';
-import { allOverdue, fmtDate, isMyProject, pendingWorkflowAction } from '@/lib/project';
+import { allOverdue, awaitingPayment, fmtDate, isMyProject, pendingWorkflowAction } from '@/lib/project';
 import { canCreate, canViewPrices, isFull } from '@/lib/permissions';
 import { roleTerm } from '@/lib/terms';
 import { useLang } from '@/lib/i18n';
@@ -184,7 +184,7 @@ function Shell() {
 
   /* collections badge — projects needing Finance eyes now (to invoice or overdue) */
   const financeAlertCount = useMemo(
-    () => projects.reduce((n, p) => n + (!p.archived && (p.commercialStatus === 'pending_invoice' || p.commercialStatus === 'overdue') ? 1 : 0), 0),
+    () => projects.reduce((n, p) => n + ((!p.archived || awaitingPayment(p)) && (p.commercialStatus === 'pending_invoice' || p.commercialStatus === 'overdue') ? 1 : 0), 0),
     [projects],
   );
 
