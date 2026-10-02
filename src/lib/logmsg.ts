@@ -152,6 +152,14 @@ export const LOG_MSG: Record<string, [string, string]> = {
   'cl.grouped': ['清单恢复分区模式', 'Checklist sections restored'],
   'cl.reset': ['恢复默认信息清单', 'Checklist reset to the default'],
   'cl.shot': ['上传资料截图:{item}', 'Reference image uploaded: {item}'],
+  /* REQ-044 共用信息清单 */
+  'cl.svcs': ['信息项「{item}」适用服务:{svcs}', 'Checklist “{item}” now applies to: {svcs}'],
+  'cl.removeItem': ['移除信息项「{item}」(可在「已移除的项」恢复)', 'Checklist item “{item}” removed (restorable)'],
+  'cl.restore': ['恢复信息项「{item}」', 'Checklist item “{item}” restored'],
+  'cl.resetScope': ['套用默认信息清单:{scope}', 'Default checklist applied: {scope}'],
+  'cl.pkgMerge': ['{svc} 的信息项并入共用清单:新增 {added} 项,{tagged} 项加上服务标签', '{svc} checklist merged in: {added} new, {tagged} shared items tagged'],
+  'cl.pkgDrop': ['{svc} 的专属信息项移到「已移除的项」:{moved} 项', '{svc}-only checklist items moved to “Removed”: {moved}'],
+  'cl.sharedMig': ['信息清单合成一张(各业务共用):{from} 项 → {to} 项', 'Checklists merged into one shared list: {from} → {to} items'],
 
   /* 服务包 / 资料 */
   'pkg.field': ['{svc} {field}={value}', '{svc} {field} = {value}'],

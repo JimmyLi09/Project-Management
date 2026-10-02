@@ -4,7 +4,8 @@
    data formats — a fragment is literally the slice of a ServicePackage that
    REQ-018 (schedule) / REQ-019 (checklist) already render. */
 import { newId } from '@/lib/project';
-import type { ChecklistGroup, Project, ScheduleRow, ServicePackage } from '@/lib/types';
+import { ALL, mergeIntoProject, projectSvcs, replaceSection, sectionOf, type ClScope } from '@/lib/sharedChecklist';
+import type { ChecklistGroup, ChecklistItem, Project, ScheduleRow, ServicePackage } from '@/lib/types';
 
 export type FragmentKind = 'schedule' | 'checklist';
 
@@ -42,23 +43,42 @@ export function freshChecklist(groups: ChecklistGroup[], withContent = false): C
   }));
 }
 
-export function extractFragment(pkg: ServicePackage, kind: FragmentKind, schedStyle?: string, withContent = false): Fragment {
-  return kind === 'schedule'
-    ? { schedule: freshSchedule(pkg.schedule, withContent), schedStyle }
-    : { checklist: freshChecklist(pkg.checklist, withContent), noCategories: !!pkg.noCategories };
+export function extractSchedule(pkg: ServicePackage, schedStyle?: string, withContent = false): ScheduleFragment {
+  return { schedule: freshSchedule(pkg.schedule, withContent), schedStyle };
 }
 
-/* apply a fragment onto a package — replace swaps the section, append adds to it */
-export function applyFragment(pkg: ServicePackage, kind: FragmentKind, frag: Fragment, mode: 'replace' | 'append', withContent = false) {
-  if (kind === 'schedule') {
-    const rows = freshSchedule((frag as ScheduleFragment).schedule || [], withContent);
-    pkg.schedule = mode === 'replace' ? rows : [...pkg.schedule, ...rows];
-  } else {
-    const groups = freshChecklist((frag as ChecklistFragment).checklist || [], withContent);
-    pkg.checklist = mode === 'replace' ? groups : [...pkg.checklist, ...groups];
-    const nc = (frag as ChecklistFragment).noCategories;
-    if (mode === 'replace' && typeof nc === 'boolean') pkg.noCategories = nc;
-  }
+/* REQ-044: 清单在项目上 —— 取当前标签那一段(「全部」= 整张);来源项目没有这个服务时取整张。
+   每项带着它的服务标签走(存为模板时也带上)。 */
+export function extractChecklist(p: Project, scope: ClScope, withContent = false): ChecklistFragment {
+  let groups = sectionOf(p, scope);
+  if (!groups.length && scope !== ALL) groups = sectionOf(p, ALL);
+  return { checklist: freshChecklist(groups, withContent), noCategories: !!p.noCategories };
+}
+
+/* apply a schedule fragment onto a package — replace swaps the section, append adds to it */
+export function applySchedule(pkg: ServicePackage, frag: ScheduleFragment, mode: 'replace' | 'append', withContent = false) {
+  const rows = freshSchedule(frag.schedule || [], withContent);
+  pkg.schedule = mode === 'replace' ? rows : [...pkg.schedule, ...rows];
+}
+
+/* REQ-044: 套用 / 导入清单 —— 作用于当前标签对应服务的项;「全部」下作用于整张清单。
+   - 覆盖:当前这一段换掉(被换掉的进「已移除的项」,可恢复),再并入新内容;
+   - 追加:并入新内容。
+   并入时同名项不重复,只加服务标签(已有的内容保留)。
+   在某个服务标签下,新项都挂这个服务;在「全部」下沿用来源项的服务标签
+   (只认本项目有的服务,一个都对不上就挂全部服务)。 */
+export function applyChecklist(p: Project, scope: ClScope, frag: ChecklistFragment, mode: 'replace' | 'append', withContent: boolean, by: string) {
+  const groups = freshChecklist(frag.checklist || [], withContent);
+  const have = projectSvcs(p);
+  const svcsOf = scope === ALL
+    ? (it: ChecklistItem) => { const s = (it.svcs || []).filter((x) => have.includes(x)); return s.length ? s : have; }
+    : () => [scope];
+  const r = mode === 'replace'
+    ? replaceSection(p, scope, groups, svcsOf, { by, reason: 'reset', withContent })
+    : { moved: 0, ...mergeIntoProject(p, groups, svcsOf, { withContent }) };
+  const nc = frag.noCategories;
+  if (mode === 'replace' && scope === ALL && typeof nc === 'boolean') p.noCategories = nc;
+  return r;
 }
 
 /* pick the package on the source project that best matches a destination
@@ -72,15 +92,16 @@ export function matchPackage(src: Project, svc: string, ordinal = 0): ServicePac
   return src.packages[0];
 }
 
-/* strip a package down to one section (used by Copy Schedule/Checklist Only) */
+/* strip a package down to one section (used by Copy Schedule/Checklist Only).
+   REQ-044: 清单在项目上,由复制路由单独处理;这里只管排期 */
 export function trimPackage(pkg: ServicePackage, mode: 'entire' | 'schedule' | 'checklist'): ServicePackage {
   const out: ServicePackage = {
     ...pkg,
     schedule: freshSchedule(pkg.schedule),
-    checklist: freshChecklist(pkg.checklist),
     start: '', delivery: '',
   };
-  if (mode === 'schedule') out.checklist = [];
+  delete out.checklist;
+  delete out.noCategories;
   if (mode === 'checklist') out.schedule = [];
   /* Job Record never rides along: its fields (尺寸/链接/安装日期/保修) belong to
      one physical job and would show up as stale rows in Project Registers. */

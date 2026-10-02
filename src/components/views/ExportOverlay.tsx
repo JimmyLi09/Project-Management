@@ -6,7 +6,7 @@ import { isFull } from '@/lib/permissions';
 import { fmtDate, parseISO, pkgStart, planDates, projCode, projStage, todayMid } from '@/lib/project';
 import { useLang } from '@/lib/i18n';
 import { STAGES, stageIdx, SVC, svcColor } from '@/lib/templates';
-import type { Project, ServicePackage } from '@/lib/types';
+import type { ChecklistItem, Project, ServicePackage } from '@/lib/types';
 
 /* REQ-016: built-in fallback when no global note has been saved yet.
    0917 收尾:导出是发给客户的,一份文件不该中英各来一段 —— 拆成两份,
@@ -33,7 +33,7 @@ function resolveNotes(zhRaw: string | null, enRaw: string | null): { zh: string;
   return { zh, en };
 }
 
-type Cols = { owner: boolean; start: boolean; due: boolean; status: boolean; clStatus: boolean; clDate: boolean; clRemark: boolean };
+type Cols = { owner: boolean; start: boolean; due: boolean; status: boolean; clStatus: boolean; clDate: boolean; clRemark: boolean; clSvcs: boolean };
 export type ExportScope = 'all' | 'schedule' | 'checklist';
 type Order = 'byPkg' | 'schedFirst' | 'clFirst';
 
@@ -43,15 +43,16 @@ type Order = 'byPkg' | 'schedFirst' | 'clFirst';
      all checklists first — one unified table template throughout
    - print: A4 portrait|landscape, real margins, page numbers & header/footer
      via @page margin boxes, repeating table heads, no mid-row page breaks */
-export default function ExportOverlay({ p, onClose, scope = 'all' }: { p: Project; onClose: () => void; scope?: ExportScope }) {
+/* clScope(REQ-044):从信息清单的某个服务标签点「导出清单」时带进来 —— 默认只勾这个服务 */
+export default function ExportOverlay({ p, onClose, scope = 'all', clScope = 'all' }: { p: Project; onClose: () => void; scope?: ExportScope; clScope?: string }) {
   const { lang: appLang } = useLang();
   const { me, setToast } = useStore();
   const [lang, setLang] = useState<'en' | 'zh'>(appLang);
-  const [cols, setCols] = useState<Cols>({ owner: true, start: true, due: true, status: true, clStatus: true, clDate: true, clRemark: true });
+  const [cols, setCols] = useState<Cols>({ owner: true, start: true, due: true, status: true, clStatus: true, clDate: true, clRemark: true, clSvcs: true });
   const [sec, setSec] = useState<ExportScope>(scope);
   const [order, setOrder] = useState<Order>('byPkg');
   const [orient, setOrient] = useState<'portrait' | 'landscape'>('portrait');
-  const [pkgSel, setPkgSel] = useState<boolean[]>(() => p.packages.map(() => true));
+  const [pkgSel, setPkgSel] = useState<boolean[]>(() => p.packages.map((pk) => clScope === 'all' || pk.svc === clScope));
   const [blanks, setBlanks] = useState(true); // REQ-013: include blank (Pending) items — default on
   /* REQ-021 封面页。0917 变更单:「Checklist 导出第一页空白太多」——
      量过正文本身已经很紧凑(标题在最顶、表格 103px 处就开始),空白来自
@@ -247,34 +248,45 @@ export default function ExportOverlay({ p, onClose, scope = 'all' }: { p: Projec
     );
   }
 
-  /* ── unified checklist block (per package) — REQ-019 template columns ── */
-  function ClBlock({ pkg, pi }: { pkg: ServicePackage; pi: number }) {
+  /* ── unified checklist block — REQ-019 template columns ──
+     REQ-044: 清单是项目一张,导出也是一张:勾了哪些服务就出适用这些服务的项
+     (共用项只出一次),多一列「适用服务」。 */
+  function ClBlock() {
     const clStat: Record<string, string> = {
       pending: T('未收到', 'Pending'), received: T('已收到', 'Received'), confirmed: T('已确认', 'Confirmed'),
       na: 'N/A', revision: T('需修订', 'Revision'), rejected: T('退回', 'Rejected'),
     };
-    const flat = !!pkg.noCategories; // REQ-014: export follows the chosen mode
+    const svcLabel = (k: string) => (SVC[k] ? (L === 'zh' ? SVC[k].label : SVC[k].en) : k);
+    const selSvcs = [...new Set(selPkgs.map((x) => x.pkg.svc))];
+    const allSvcs = [...new Set(p.packages.map((x) => x.svc))];
+    const partial = selSvcs.length < allSvcs.length;
+    const flat = !!p.noCategories; // REQ-014: export follows the chosen mode
     const showOwner = !flat;
-    const clSpan = 1 + (showOwner ? 1 : 0) + (cols.clStatus ? 1 : 0) + (cols.clDate ? 1 : 0) + (cols.clRemark ? 1 : 0);
+    const showSvcs = cols.clSvcs && allSvcs.length > 1;
+    const clSpan = 1 + (showSvcs ? 1 : 0) + (showOwner ? 1 : 0) + (cols.clStatus ? 1 : 0) + (cols.clDate ? 1 : 0) + (cols.clRemark ? 1 : 0);
     /* REQ-013: blank items are exported too (kept Pending) unless the user
        unticks 「含空白项」. N/A rows are always dropped. */
-    const keep = (it: { status: string; date: string; remark: string; received?: string }) =>
-      it.status !== 'na' && (blanks || !!(it.date || it.remark || it.received) || it.status !== 'pending');
+    const keep = (it: ChecklistItem) =>
+      it.status !== 'na' && (it.svcs || allSvcs).some((s) => selSvcs.includes(s))
+      && (blanks || !!(it.date || it.remark || it.received) || it.status !== 'pending');
+    const cl = p.checklist || [];
     const groups = flat
-      ? [{ g: { group: '', groupEn: '', color: '', items: [] }, items: pkg.checklist.flatMap((g) => g.items).filter(keep) }]
-      : pkg.checklist.map((g) => ({ g, items: g.items.filter(keep) })).filter((x) => x.items.length);
+      ? [{ g: { group: '', groupEn: '', color: '', items: [] }, items: cl.flatMap((g) => g.items).filter(keep) }]
+      : cl.map((g) => ({ g, items: g.items.filter(keep) })).filter((x) => x.items.length);
     const head = (
       <tr>
         <th>{T('信息项', 'Item')}</th>
-        {showOwner && <th style={{ width: '13%' }}>{T('负责人', 'Owner')}</th>}
-        {cols.clStatus && <th style={{ width: '24%' }}>{T('状态 / 收到内容', 'Status / Received')}</th>}
-        {cols.clDate && <th style={{ width: '13%' }}>{T('收到日期', 'Date received')}</th>}
-        {cols.clRemark && <th style={{ width: '22%' }}>{T('备注', 'Remark')}</th>}
+        {showSvcs && <th style={{ width: '14%' }}>{T('适用服务', 'Applies to')}</th>}
+        {showOwner && <th style={{ width: '12%' }}>{T('负责人', 'Owner')}</th>}
+        {cols.clStatus && <th style={{ width: '22%' }}>{T('状态 / 收到内容', 'Status / Received')}</th>}
+        {cols.clDate && <th style={{ width: '12%' }}>{T('收到日期', 'Date received')}</th>}
+        {cols.clRemark && <th style={{ width: '20%' }}>{T('备注', 'Remark')}</th>}
       </tr>
     );
-    const row = (it: (typeof pkg.checklist)[0]['items'][0], ii: number) => (
+    const row = (it: ChecklistItem, ii: number) => (
       <tr key={it.id || ii}>
         <td>{L === 'zh' ? it.zh : it.en}</td>
+        {showSvcs && <td>{(it.svcs || allSvcs).map(svcLabel).join(L === 'zh' ? '、' : ', ')}</td>}
         {showOwner && <td>{it.owner || '—'}</td>}
         {cols.clStatus && (
           <td style={it.status === 'pending' ? { background: '#fffbeb' } : undefined}>
@@ -287,7 +299,9 @@ export default function ExportOverlay({ p, onClose, scope = 'all' }: { p: Projec
     );
     return (
       <React.Fragment>
-        <h2 style={{ color: svcColor(pkg.svc) }}>{svcName(pkg)} — {T('信息清单', 'Information Checklist')}</h2>
+        <h2 style={{ color: selSvcs.length === 1 ? svcColor(selSvcs[0]) : undefined }}>
+          {T('信息清单', 'Information Checklist')}{partial ? ` — ${selSvcs.map(svcLabel).join(L === 'zh' ? '、' : ', ')}` : ''}
+        </h2>
         {groups.length === 0 || groups.every((x) => !x.items.length) ? (
           <p style={{ color: '#888', fontSize: 12 }}>{T('暂无信息项。', 'No checklist items.')}</p>
         ) : flat ? (
@@ -307,18 +321,10 @@ export default function ExportOverlay({ p, onClose, scope = 'all' }: { p: Projec
 
   /* REQ-015: assemble blocks per ordering preset */
   const blocks: React.ReactNode[] = [];
-  if (order === 'byPkg' || !(showSched && showCl)) {
-    selPkgs.forEach(({ pkg, pi }) => {
-      if (showSched) blocks.push(<SchedBlock key={`s${pi}`} pkg={pkg} pi={pi} />);
-      if (showCl) blocks.push(<ClBlock key={`c${pi}`} pkg={pkg} pi={pi} />);
-    });
-  } else if (order === 'schedFirst') {
-    selPkgs.forEach(({ pkg, pi }) => blocks.push(<SchedBlock key={`s${pi}`} pkg={pkg} pi={pi} />));
-    selPkgs.forEach(({ pkg, pi }) => blocks.push(<ClBlock key={`c${pi}`} pkg={pkg} pi={pi} />));
-  } else {
-    selPkgs.forEach(({ pkg, pi }) => blocks.push(<ClBlock key={`c${pi}`} pkg={pkg} pi={pi} />));
-    selPkgs.forEach(({ pkg, pi }) => blocks.push(<SchedBlock key={`s${pi}`} pkg={pkg} pi={pi} />));
-  }
+  /* REQ-044: 清单项目一张 —— 不再按服务包穿插;「清单在前」放最前,其余放在排期后面 */
+  if (order === 'clFirst' && showCl && selPkgs.length) blocks.push(<ClBlock key="cl" />);
+  if (showSched) selPkgs.forEach(({ pkg, pi }) => blocks.push(<SchedBlock key={`s${pi}`} pkg={pkg} pi={pi} />));
+  if (order !== 'clFirst' && showCl && selPkgs.length) blocks.push(<ClBlock key="cl" />);
 
   return (
     <div className="ex-wrap">
@@ -362,16 +368,16 @@ export default function ExportOverlay({ p, onClose, scope = 'all' }: { p: Projec
           <span className="ex-grp">
             {T('排列', 'Order')}:
             <select className="in sm" value={order} onChange={(e) => setOrder(e.target.value as Order)} style={{ width: 'auto', padding: '3px 6px' }}>
-              <option value="byPkg">{T('按服务穿插', 'Interleaved by service')}</option>
-              <option value="schedFirst">{T('所有排期集中在前', 'All schedules first')}</option>
-              <option value="clFirst">{T('所有清单集中在前', 'All checklists first')}</option>
+              {/* REQ-044: 清单是项目一张,不再按服务穿插 —— 只剩谁在前 */}
+              <option value="byPkg">{T('排期在前,清单在后', 'Schedules, then checklist')}</option>
+              <option value="clFirst">{T('清单在前', 'Checklist first')}</option>
             </select>
           </span>
         )}
         {T('栏位', 'Columns')}:
         {showSched && <span className="ex-grp">{T('排期', 'Schedule')} {colToggle('owner', '负责', 'Owner')}{colToggle('start', '开始', 'Start')}{colToggle('due', '到期', 'Due')}{colToggle('status', '状态', 'Status')}</span>}
         {showCl && (
-          <span className="ex-grp">{T('清单', 'Checklist')} {colToggle('clStatus', '状态', 'Status')}{colToggle('clDate', '日期', 'Date')}{colToggle('clRemark', '备注', 'Remark')}
+          <span className="ex-grp">{T('清单', 'Checklist')} {colToggle('clStatus', '状态', 'Status')}{colToggle('clDate', '日期', 'Date')}{colToggle('clRemark', '备注', 'Remark')}{p.packages.length > 1 && colToggle('clSvcs', '适用服务', 'Applies to')}
             <label className="ex-col" title={T('未收到的空白项也一并导出(状态 Pending)', 'Export blank items too (kept Pending)')}>
               <input type="checkbox" checked={blanks} onChange={() => setBlanks(!blanks)} /> {T('含空白项', 'Include blanks')}
             </label>

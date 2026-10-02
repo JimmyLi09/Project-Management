@@ -7,6 +7,7 @@ import { migrate } from '@/lib/project';
 import { getBuiltinTemplate, SVC, type Template } from '@/lib/templates';
 import { applyProjField, projSourceOf } from '@/lib/records';
 import { logZh, type LogParams } from '@/lib/logmsg';
+import { cleanSynonyms, DEFAULT_SYNONYMS, getSynonyms, migrationReport, setSynonyms, type ProjectMigration } from '@/lib/checklistMerge';
 
 /* On serverless platforms (Vercel) the project directory is read-only and
    ephemeral — keep the demo database in /tmp there. */
@@ -74,6 +75,8 @@ export function getDb(): Database.Database {
   migrateSchema(db);
   seedIfEmpty(db);
   maybeSeedDemo(db);
+  loadSynonyms(db);
+  migrateSharedChecklist(db);   // REQ-044:要在 backfillIds 之前 —— 它读项目时也会顺手合并,那样就没有报告了
   backfillIds(db);
   backfillSerials(db);
   scheduleBackups(db);
@@ -93,9 +96,12 @@ function backfillIds(d: Database.Database) {
   for (const r of rows) {
     let obj: any;
     try { obj = JSON.parse(r.data); } catch { continue; }
+    const badItem = (it: any) => !it.id || it.shot !== undefined || !Array.isArray(it.shots) || (Array.isArray(obj.checklist) && !Array.isArray(it.svcs));
     const need = (obj.packages || []).some((pk: any) =>
       (pk.schedule || []).some((x: any) => !x.id) ||
-      (pk.checklist || []).some((g: any) => (g.items || []).some((it: any) => !it.id || it.shot !== undefined || !Array.isArray(it.shots))));
+      (pk.checklist || []).some((g: any) => (g.items || []).some(badItem)))
+      /* REQ-044: 项目上的共用清单也一样 —— 按 id 定位的动作要求 id 稳定 */
+      || (obj.checklist || []).some((g: any) => (g.items || []).some(badItem));
     if (!need) continue;
     const m = migrate(obj);
     const { updatedAt: _drop, ...data } = m as any;
@@ -124,6 +130,72 @@ function backfillSerials(d: Database.Database) {
     o.serial = ++max;
     const { updatedAt: _u, version: _v, ...data } = o;
     upd.run(JSON.stringify(data), id);
+  }
+}
+
+/* ===== REQ-044 一个项目一张信息清单 =====
+   同义项:PD / BD 在模板管理里维护,存在 meta 表 cl.synonyms;没存过就用默认那份。 */
+const SYN_KEY = 'cl.synonyms';
+function loadSynonyms(d: Database.Database) {
+  const row = d.prepare('SELECT value FROM meta WHERE key = ?').get(SYN_KEY) as { value: string } | undefined;
+  try { setSynonyms(row ? JSON.parse(row.value) : null); } catch { setSynonyms(null); }
+}
+export function getChecklistSynonyms(): { list: string[][]; custom: boolean; defaults: string[][] } {
+  const d = getDb();
+  const custom = !!d.prepare('SELECT 1 FROM meta WHERE key = ?').get(SYN_KEY);
+  return { list: getSynonyms(), custom, defaults: DEFAULT_SYNONYMS };
+}
+export function saveChecklistSynonyms(list: unknown): string[][] {
+  const clean = cleanSynonyms(list);
+  getDb().prepare('INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value').run(SYN_KEY, JSON.stringify(clean));
+  setSynonyms(clean);
+  return clean;
+}
+export function resetChecklistSynonyms() {
+  getDb().prepare('DELETE FROM meta WHERE key = ?').run(SYN_KEY);
+  setSynonyms(null);
+}
+
+/* 上线迁移(每次启动检查一遍,只处理还是老结构的项目):各服务包的清单合成项目一张,
+   原样备份进 checklistLegacy;每个项目写一条日志;报告写到
+   data/migrations/044-checklist-merge-<时间>.md 给 PD 抽查。规则和预演工具
+   (scripts/req044-dryrun.ts)是同一份代码。不删任何数据。 */
+function migrateSharedChecklist(d: Database.Database) {
+  const rows = d.prepare('SELECT id, data FROM projects ORDER BY created_at ASC').all() as { id: string; data: string }[];
+  const upd = d.prepare('UPDATE projects SET data = ?, updated_at = ?, version = version + 1 WHERE id = ?');
+  const audit = d.prepare('INSERT INTO audit_log (project_id, at, by, text, k, p) VALUES (?, ?, ?, ?, ?, ?)');
+  const done: ProjectMigration[] = [];
+  const now = Date.now();
+  d.transaction(() => {
+    for (const r of rows) {
+      let o: any;
+      try { o = JSON.parse(r.data); } catch { continue; }
+      if (Array.isArray(o.checklist)) continue;
+      let m: ProjectMigration | null = null;
+      const p = migrate(o, { onChecklistMigrated: (x) => { m = x; } });
+      if (!m) continue;
+      const mm = m as ProjectMigration;
+      done.push(mm);
+      const k = 'cl.sharedMig', params = { from: mm.sourceItems, to: mm.items };
+      p.log = Array.isArray(p.log) ? p.log : [];
+      p.log.unshift({ at: now, by: '系统', text: logZh(k, params), k, p: params });
+      if (p.log.length > 200) p.log.length = 200;
+      const { updatedAt: _u, version: _v, ...data } = p;
+      upd.run(JSON.stringify(data), now, r.id);
+      audit.run(r.id, now, '系统', logZh(k, params), k, JSON.stringify(params));
+    }
+  })();
+  if (!done.length) return;
+  try {
+    const dir = path.join(DATA_DIR, 'migrations');
+    fs.mkdirSync(dir, { recursive: true });
+    const t = new Date(now), pad = (n: number) => String(n).padStart(2, '0');
+    const stamp = `${t.getFullYear()}${pad(t.getMonth() + 1)}${pad(t.getDate())}-${pad(t.getHours())}${pad(t.getMinutes())}${pad(t.getSeconds())}`;
+    const file = path.join(dir, `044-checklist-merge-${stamp}.md`);
+    fs.writeFileSync(file, migrationReport(done, { title: 'REQ-044 共用信息清单 · 上线迁移报告', when: t.toLocaleString('zh-CN'), db: path.join(DATA_DIR, 'audax.db'), synonyms: getSynonyms() }), 'utf8');
+    console.log(`[REQ-044] 信息清单合成一张:${done.length} 个项目,报告 ${file}`);
+  } catch (e) {
+    console.warn('[REQ-044] 迁移报告没写成(数据已迁移,不影响使用):', e);
   }
 }
 
@@ -729,7 +801,7 @@ export function importRegisterRecords(
       const p = hit.p;
       let pk = p.packages.find((x) => x.svc === svc);
       if (!pk) {
-        pk = { svc, start: '', delivery: '', buffer: 0, owner: '', status: 'active', schedule: [], checklist: [] };
+        pk = { svc, start: '', delivery: '', buffer: 0, owner: '', status: 'active', schedule: [] };
         p.packages.push(pk);
         if (!Array.isArray(p.services)) p.services = [];
         if (!p.services.includes(svc)) p.services.push(svc);

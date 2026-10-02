@@ -6,6 +6,7 @@ import { canDeleteTemplate, canSaveTemplate } from '@/lib/permissions';
 import { useLang } from '@/lib/i18n';
 import { Icon } from './ui';
 import { freshChecklist, freshSchedule } from '@/server/fragments';
+import { sectionOf } from '@/lib/sharedChecklist';
 import type { Project } from '@/lib/types';
 
 interface TplRow { id: number; type: string; name: string; created_by: string }
@@ -18,7 +19,8 @@ interface TplRow { id: number; type: string; name: string; created_by: string }
    · 存为模板   — save the current section to the server
    Everything is applied server-side through /api/projects/:id/fragment, so
    templates and projects share the exact same package schema. */
-export default function FragmentBar({ p, pkgIdx, kind }: { p: Project; pkgIdx: number; kind: 'schedule' | 'checklist' }) {
+/* REQ-044: 清单在项目上 —— kind='checklist' 时按 scope(当前服务标签,'all' = 整张)操作,pkgIdx 只给排期用 */
+export default function FragmentBar({ p, pkgIdx, kind, scope = 'all' }: { p: Project; pkgIdx: number; kind: 'schedule' | 'checklist'; scope?: string }) {
   const { projects, me, setToast, refresh, dispatch } = useStore();
   const { lang, t } = useLang();
   const [open, setOpen] = useState<null | 'import' | 'tpl'>(null);
@@ -40,7 +42,7 @@ export default function FragmentBar({ p, pkgIdx, kind }: { p: Project; pkgIdx: n
   async function callFragment(body: Record<string, unknown>) {
     const res = await fetch(`/api/projects/${p.id}/fragment`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ pkg: pkgIdx, kind, ...body }),
+      body: JSON.stringify({ pkg: pkgIdx, scope, kind, ...body }),
     });
     const data = await res.json().catch(() => ({}));
     return { ok: res.ok, data };
@@ -71,8 +73,10 @@ export default function FragmentBar({ p, pkgIdx, kind }: { p: Project; pkgIdx: n
       const ok = await dispatch(p.id, { type: 'setSchedStyle', value: key as 'weeks' | 'dates' });
       if (ok) { setOpen(null); setToast(t('已套用参考模板', 'Reference template applied')); }
     } else {
-      if (!confirm(t('用默认模板恢复本业务的清单?当前信息项/状态/备注将被清空。', 'Restore this package’s checklist from the default template? Current items will be cleared.'))) return;
-      const ok = await dispatch(p.id, { type: 'resetChecklist', pkg: pkgIdx });
+      if (!confirm(scope === 'all'
+        ? t('用各服务的默认模板重建整张清单?当前所有信息项会移到「已移除的项」(可恢复)。', 'Rebuild the whole checklist from the default templates? Current items move to “Removed” (restorable).')
+        : t('用默认模板恢复这个服务的清单?只属于它的项会移到「已移除的项」(可恢复),共用项保留。', 'Reset this service’s items from the template? Its own items move to “Removed” (restorable); shared items stay.'))) return;
+      const ok = await dispatch(p.id, { type: 'resetChecklist', scope });
       if (ok) { setOpen(null); setToast(t('已套用参考模板', 'Reference template applied')); }
     }
   }
@@ -83,9 +87,10 @@ export default function FragmentBar({ p, pkgIdx, kind }: { p: Project; pkgIdx: n
   async function saveTpl(name: string, withContent: boolean) {
     if (!name.trim()) return;
     const pkg = p.packages[pkgIdx];
+    /* REQ-044: 存清单 = 存当前标签那一段(「全部」= 整张),每项带着它的服务标签 */
     const payload = kind === 'schedule'
       ? { schedule: freshSchedule(pkg.schedule, withContent), schedStyle: p.schedStyle }
-      : { checklist: freshChecklist(pkg.checklist, withContent), noCategories: !!pkg.noCategories };
+      : { checklist: freshChecklist(sectionOf(p, scope), withContent), noCategories: !!p.noCategories };
     setBusy(true);
     const res = await fetch('/api/user-templates', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -122,7 +127,11 @@ export default function FragmentBar({ p, pkgIdx, kind }: { p: Project; pkgIdx: n
         </button>
         {canWrite && <button className="btn-line sm" onClick={() => setSaveTplOpen(true)} disabled={busy}>{t('存为模板', 'Save as template')}</button>}
         <span style={{ fontSize: 11.5, color: 'var(--text2)' }}>
-          {t('导入/套用只影响当前服务包,状态会重置为未开始。', 'Applies to the current service package; progress resets.')}
+          {kind === 'checklist'
+            ? (scope === 'all'
+              ? t('导入 / 套用作用于整张清单;同名项不重复。', 'Applies to the whole checklist; same-name items are not duplicated.')
+              : t('导入 / 套用只作用于当前服务的项;和别的服务共用的项只加标签、内容保留。', 'Applies to this service’s items only; shared items are tagged, their content kept.'))
+            : t('导入/套用只影响当前服务包,状态会重置为未开始。', 'Applies to the current service package; progress resets.')}
         </span>
       </div>
 

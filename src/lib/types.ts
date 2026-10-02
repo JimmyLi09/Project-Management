@@ -147,6 +147,20 @@ export interface ChecklistItem {
   /* REQ-044: 这一项哪些服务需要(如 ['cgi','scale'])。项目级共用清单靠它筛选;
      老的「每个服务包一份」结构里没有这一位。 */
   svcs?: string[];
+  /* REQ-044: 同一种服务有两份(大堂 LED / 户外 LED)时,只属于其中一份的项记下是哪一份
+     (= 那份的实例名,没有名字时是 #2、#3)。删掉那一份业务时据此把它移进「已移除的项」。 */
+  inst?: string;
+}
+
+/* REQ-044: 删服务包 / 删分类 / 删项时不直接删,先放进这里,可恢复 */
+export interface RemovedClItem {
+  item: ChecklistItem;
+  group: string;
+  groupEn: string;
+  color: string;
+  at: number;
+  by: string;
+  reason: string;   // 'svc:<svc>' 删了服务包 · 'item' 删了这一项 · 'group' 删了分类 · 'reset' 套用模板 / 恢复默认
 }
 
 /* REQ-040: 日历式排期的落库形态。boundaries 是 N+1 个本地日期
@@ -193,11 +207,13 @@ export interface ServicePackage {
   owner: string;
   status: string;
   schedule: ScheduleRow[];
-  checklist: ChecklistGroup[];
+  /* REQ-044 起清单在项目上(Project.checklist)。这一位只有迁移前的老数据才有,
+     读的时候会合并上去、原样备份到 Project.checklistLegacy。 */
+  checklist?: ChecklistGroup[];
   resourceLinks?: string; // free text: web links / network paths to renders, VR, drone, models
   scopeItems?: ScopeItem[]; // R5-3: deliverables breakdown (item / qty / notes)
   record?: ServiceRecord; // business "资料 record" — single source for Job Record & Registers
-  noCategories?: boolean; // REQ-014: flat checklist (no fixed categories) for this package
+  noCategories?: boolean; // REQ-014(老数据):以前按服务包;REQ-044 起是 Project.noCategories
   label?: string;         // REQ-026: 同类业务有多份时的实例名(如「大堂 LED」);留空则按序号显示
   /* REQ-038: PM 给这份业务选的积分档位。区间档(LED 3–7)再带上选定的分值。
      没选就按资料卡里的数自动落档;都判不出来就等 PM 选。 */
@@ -303,6 +319,12 @@ export interface Project {
   contacts?: ProjectContact[]; // R5-2/R5-4: company contact directory for this project
   log: LogEntry[];
   packages: ServicePackage[];
+  /* ===== REQ-044 一个项目一张信息清单 =====
+     每项的 svcs 说明哪些服务需要它,服务标签只是筛选。 */
+  checklist?: ChecklistGroup[];
+  noCategories?: boolean;                       // 无固定分类(项目级开关)
+  checklistLegacy?: { svc: string; label?: string; checklist?: ChecklistGroup[]; noCategories?: boolean }[];   // 迁移前各服务包的清单原样
+  checklistRemoved?: RemovedClItem[];           // 已移除的项(可恢复)
   /* ===== v2.2 Version 1A post-sales workflow ===== */
   version?: number; // server-injected optimistic-lock counter (CAS)
   workflowVersion?: number; // schema version of the workflow blocks below (1)

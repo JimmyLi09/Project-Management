@@ -5,7 +5,8 @@ import { ItemReceipts, ReceivingLog } from './ReceiptLog';
 import { useStore } from '../store';
 import { canEdit } from '@/lib/permissions';
 import { getBuiltinTemplate, svcColor, svcName } from '@/lib/templates';
-import { parseISO, todayMid , pkgSuffix } from '@/lib/project';
+import { parseISO, todayMid } from '@/lib/project';
+import { ALL, clGroups, clStats, inScope, projectSvcs, type ClScope } from '@/lib/sharedChecklist';
 import { useLang } from '@/lib/i18n';
 import { Avatar, CM, Icon, Pill } from '../ui';
 import FragmentBar from '../FragmentBar';
@@ -31,51 +32,56 @@ function relTime(ts: number | undefined, zh: boolean): string {
   return zh ? `${Math.floor(day / 30)} 个月前` : `${Math.floor(day / 30)}mo ago`;
 }
 
-export default function ChecklistTab({ p, pkgIdx, onExport, onPkg }: {
-  p: Project; pkgIdx: number; onExport: () => void; onPkg: (i: number) => void;
+/* REQ-044: 一个项目一张信息清单。上面一排服务标签只是筛选(默认「全部」),
+   在任一标签下改,别的标签看到的是同一条数据。 */
+export default function ChecklistTab({ p, scope, onScope, onExport }: {
+  p: Project; scope: ClScope; onScope: (s: ClScope) => void; onExport: () => void;
 }) {
-  const { me, dispatch, users } = useStore();
+  const { me, dispatch, users, setToast } = useStore();
   const { lang, t, dual } = useLang();
   const [editMode, setEditMode] = useState(false);
   /* REQ-005: 信息清单默认只读,点「编辑」才可改字段(状态/日期/备注/图片) */
   const [fieldEdit, setFieldEdit] = useState(false);
   const [lightbox, setLightbox] = useState<string | null>(null);
   const [collapsed, setCollapsed] = useState<Record<number, boolean>>({});
-  /* REQ-012: drag-to-reorder items inside a category (gi:ii identifies a row) */
-  const [drag, setDrag] = useState<{ gi: number; ii: number } | null>(null);
+  /* REQ-012: drag-to-reorder items inside a category. REQ-044: 按项 id 记(筛选后序号会错位) */
+  const [drag, setDrag] = useState<{ gi: number; id: string } | null>(null);
   const [dragOver, setDragOver] = useState<string | null>(null);
   /* REQ-042: 两套视图 —— 对外清单(每项只看最新)/ 内部收料记录(全部记录+路径)。
-     展开某一项看它的全部收料历史时记下 gi:ii。 */
+     展开某一项看它的全部收料历史时记下它的 id。 */
   const [view, setView] = useState<'external' | 'log'>('external');
   const [openRec, setOpenRec] = useState<string | null>(null);
   const ed = canEdit(me, p);
   const fe = ed && fieldEdit;
-  const pkg = p.packages[pkgIdx];
   const assigneeNames = users.filter((u) => u.role !== 'viewer').map((u) => u.name);
   const today = todayMid();
+  const svcs = projectSvcs(p);
+  const short = (k: string) => svcName(k, lang).replace(/^其他\s*/, '');
+  const scopeName = scope === ALL ? t('全部服务合计 · 共用项只算一次', 'All services · shared items counted once') : svcName(scope, lang);
 
-  let doneN = 0, totalN = 0, pendingN = 0, overdueN = 0;
-  pkg.checklist.forEach((g) => g.items.forEach((it) => {
-    if (it.status === 'na') return;
-    totalN++;
-    if (it.status === 'confirmed') doneN++;
-    if (it.status === 'pending') pendingN++;
-    const due = parseISO(it.date);
-    // REQ-003: overdue = 未收到(pending) 且已过截止日。已收到/需修改/已确认等
-    // 都不算逾期(资料已到位或已在处理),避免把「已收到」误报成逾期。
-    if (due && due < today && it.status === 'pending') overdueN++;
-  }));
-  const pct = totalN ? Math.round((doneN / totalN) * 100) : 0;
+  /* REQ-003: overdue = 未收到(pending) 且已过截止日。已收到/需修改/已确认等
+     都不算逾期(资料已到位或已在处理),避免把「已收到」误报成逾期。
+     REQ-044: 按当前标签算 */
+  const st = clStats(p, scope, today);
+  const doneN = st.done, totalN = st.total, pendingN = st.pending, overdueN = st.overdue, pct = st.pct;
 
-  const tpl = getBuiltinTemplate(pkg.svc);
+  /* 「添加信息项」的常用默认项:当前标签对应服务的模板;「全部」下是所有服务的 */
   function defaultsForGroup(group: string, groupEn: string): { zh: string; en: string }[] {
-    const tg = tpl.checklist.find((g) => g[0] === group || g[1] === groupEn);
-    if (!tg) return [];
-    return tg[3].map(([zh, en]) => ({ zh, en }));
+    const out: { zh: string; en: string }[] = [];
+    (scope === ALL ? svcs : [scope]).forEach((k) => {
+      const tg = getBuiltinTemplate(k).checklist.find((g) => g[0] === group || g[1] === groupEn);
+      (tg ? tg[3] : []).forEach(([zh, en]) => { if (!out.some((x) => x.zh === zh)) out.push({ zh, en }); });
+    });
+    return out;
   }
+  /* 改了一项共用的:提示一句别的服务也同步了(本来就是同一条) */
+  const synced = (it: { svcs?: string[] }) => {
+    const others = (it.svcs || []).filter((k) => k !== scope);
+    if ((it.svcs || []).length > 1 && others.length) setToast(t(`已同步到 ${(it.svcs || []).map((k) => svcName(k, 'zh')).join('、')}`, `Synced to ${(it.svcs || []).map((k) => svcName(k, 'en')).join(', ')}`));
+  };
 
   /* shared image pipeline: compress to <=560px JPEG and attach (multi-image). */
-  function processImageFile(gi: number, ii: number, f: File | null | undefined) {
+  function processImageFile(item: string, f: File | null | undefined) {
     if (!f) return;
     if (!f.type.startsWith('image/')) { alert(t('只支持图片文件', 'Only image files are supported')); return; }
     const rd = new FileReader();
@@ -90,16 +96,16 @@ export default function ChecklistTab({ p, pkgIdx, onExport, onPkg }: {
         c.getContext('2d')!.drawImage(img, 0, 0, w, h);
         let data: string;
         try { data = c.toDataURL('image/jpeg', 0.6); } catch { alert(t('图片处理失败', 'Failed to process image')); return; }
-        dispatch(p.id, { type: 'attachShot', pkg: pkgIdx, gi, ii, data });
+        dispatch(p.id, { type: 'attachShot', item, data });
       };
       img.onerror = () => alert(t('无法读取图片', 'Could not read image'));
       img.src = e.target!.result as string;
     };
     rd.readAsDataURL(f);
   }
-  function attachShot(gi: number, ii: number, input: HTMLInputElement) {
+  function attachShot(item: string, input: HTMLInputElement) {
     const files = input.files ? Array.from(input.files) : [];
-    files.forEach((f) => processImageFile(gi, ii, f));
+    files.forEach((f) => processImageFile(item, f));
     input.value = '';
   }
   function imageFromDataTransfer(dt: DataTransfer | null): File | null {
@@ -113,7 +119,7 @@ export default function ChecklistTab({ p, pkgIdx, onExport, onPkg }: {
 
   /* REQ-014: flat mode drops the Owner column (Item / Status+received / Date / Remark);
      REQ-019: template columns are Item · Status(含收到内容) · Date received. */
-  const flat = !!pkg.noCategories;
+  const flat = !!p.noCategories;   // REQ-044: 项目级开关
   /* REQ-024: 「参考图」列插在 信息项 与 负责人 之间(无分类模式下就在信息项之后) */
   const cols = flat
     ? (editMode && ed ? 'minmax(260px,2.4fr) 132px 220px 132px 34px' : 'minmax(260px,2.4fr) 132px 220px 132px')
@@ -121,13 +127,17 @@ export default function ChecklistTab({ p, pkgIdx, onExport, onPkg }: {
 
   return (
     <>
-      {p.packages.length > 1 && (
-        <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap', marginBottom: 16 }}>
-          {p.packages.map((pk, i) => (
-            <button key={i} className={`chip ${i === pkgIdx ? 'active' : ''}`}
-              style={i === pkgIdx ? { background: svcColor(pk.svc), borderColor: svcColor(pk.svc) } : undefined}
-              onClick={() => onPkg(i)}>
-              {svcName(pk.svc, lang)}{pkgSuffix(p, i) ? ' ' + pkgSuffix(p, i) : ''}
+      {/* REQ-044: 「全部」+ 各服务。服务标签只是筛选 */}
+      {svcs.length > 1 && (
+        <div data-testid="cl-scope-tabs" style={{ display: 'flex', gap: 7, flexWrap: 'wrap', marginBottom: 16 }}>
+          <button className={`chip ${scope === ALL ? 'active' : ''}`} data-scope={ALL}
+            style={scope === ALL ? { background: 'var(--navy900)', borderColor: 'var(--navy900)' } : undefined}
+            onClick={() => onScope(ALL)}>{t('全部', 'All')}</button>
+          {svcs.map((k) => (
+            <button key={k} className={`chip ${scope === k ? 'active' : ''}`} data-scope={k}
+              style={scope === k ? { background: svcColor(k), borderColor: svcColor(k) } : undefined}
+              onClick={() => onScope(k)}>
+              {svcName(k, lang)}
             </button>
           ))}
         </div>
@@ -139,19 +149,19 @@ export default function ChecklistTab({ p, pkgIdx, onExport, onPkg }: {
           <div style={{ flex: 1 }}>
             <div className="kpi-label">{t('完成率', 'Completion rate')}</div>
             <div className="tnum" style={{ fontSize: 30, fontWeight: 600, color: 'var(--navy900)', marginTop: 4, lineHeight: 1 }}>{pct}%</div>
-            <div style={{ fontSize: 11.5, color: 'var(--text2)', marginTop: 5 }}>{t(`${doneN} / ${totalN} 项已确认`, `${doneN} / ${totalN} confirmed`)}</div>
+            <div data-testid="cl-kpi-done" style={{ fontSize: 11.5, color: 'var(--text2)', marginTop: 5 }}>{t(`${doneN} / ${totalN} 项已确认`, `${doneN} / ${totalN} confirmed`)}{svcs.length > 1 ? ` · ${scopeName}` : ''}</div>
           </div>
           <Ring pct={pct} />
         </div>
         <div className="kpi" style={{ padding: '18px 20px' }}>
           <div className="kpi-label">{t('待处理项', 'Pending items')}</div>
-          <div className="tnum" style={{ fontSize: 30, fontWeight: 600, color: pendingN ? 'var(--warning)' : 'var(--navy900)', marginTop: 4, lineHeight: 1 }}>{pendingN}</div>
-          <div style={{ fontSize: 11.5, color: 'var(--text2)', marginTop: 5 }}>{t('全部栏目合计', 'across all sections')}</div>
+          <div className="tnum" data-testid="cl-kpi-pending" style={{ fontSize: 30, fontWeight: 600, color: pendingN ? 'var(--warning)' : 'var(--navy900)', marginTop: 4, lineHeight: 1 }}>{pendingN}</div>
+          <div style={{ fontSize: 11.5, color: 'var(--text2)', marginTop: 5 }}>{svcs.length > 1 ? scopeName : t('全部栏目合计', 'across all sections')}</div>
         </div>
         <div className="kpi" style={{ padding: '18px 20px' }}>
           <div className="kpi-label">{t('已逾期项', 'Overdue items')}</div>
-          <div className="tnum" style={{ fontSize: 30, fontWeight: 600, color: overdueN ? 'var(--danger)' : 'var(--navy900)', marginTop: 4, lineHeight: 1 }}>{overdueN}</div>
-          <div style={{ fontSize: 11.5, color: 'var(--text2)', marginTop: 5 }}>{t('需要跟进', 'require action')}</div>
+          <div className="tnum" data-testid="cl-kpi-overdue" style={{ fontSize: 30, fontWeight: 600, color: overdueN ? 'var(--danger)' : 'var(--navy900)', marginTop: 4, lineHeight: 1 }}>{overdueN}</div>
+          <div style={{ fontSize: 11.5, color: 'var(--text2)', marginTop: 5 }}>{svcs.length > 1 ? scopeName : t('需要跟进', 'require action')}</div>
         </div>
       </div>
 
@@ -164,8 +174,15 @@ export default function ChecklistTab({ p, pkgIdx, onExport, onPkg }: {
         <div style={{ flex: 1 }} />
         {ed && editMode && (
           <button className="btn-line sm" style={{ color: 'var(--danger)' }}
-            title={t('用默认模板恢复本业务的清单(会清空当前信息项)', 'Reset this package’s checklist from the template (clears current items)')}
-            onClick={() => { if (confirm(t('确定用默认模板恢复本业务的清单吗?当前的信息项、状态和备注将被清空。', 'Restore this package’s checklist from the default template? Current items, statuses and notes will be cleared.'))) dispatch(p.id, { type: 'resetChecklist', pkg: pkgIdx }); }}>
+            title={scope === ALL
+              ? t('用各服务的默认模板重建整张清单(当前的项移到「已移除的项」,可恢复)', 'Rebuild the whole checklist from the default templates (current items move to “Removed”, restorable)')
+              : t('用默认模板恢复这个服务的清单(只属于它的项移到「已移除的项」,共用项保留)', 'Reset this service’s items from the template (its own items move to “Removed”; shared items stay)')}
+            onClick={() => {
+              const msg = scope === ALL
+                ? t('用各服务的默认模板重建整张清单?当前所有信息项会移到「已移除的项」(可恢复)。', 'Rebuild the whole checklist from the default templates? All current items move to “Removed” (restorable).')
+                : t(`用默认模板恢复「${svcName(scope, 'zh')}」的清单?只属于它的项会移到「已移除的项」(可恢复),和别的服务共用的项保留。`, `Reset “${svcName(scope, 'en')}” from the template? Its own items move to “Removed” (restorable); shared items stay.`);
+              if (confirm(msg)) dispatch(p.id, { type: 'resetChecklist', scope });
+            }}>
             ↺ {t('恢复默认', 'Reset')}
           </button>
         )}
@@ -180,7 +197,7 @@ export default function ChecklistTab({ p, pkgIdx, onExport, onPkg }: {
         {ed && (
           <label className="btn-line sm" style={{ cursor: 'pointer', display: 'inline-flex', gap: 6, alignItems: 'center' }}
             title={t('开启后清单不分分类,仅 信息项/状态/日期/备注', 'Flat list — Item / Status / Date / Remark only')}>
-            <input type="checkbox" checked={flat} onChange={(e) => dispatch(p.id, { type: 'setNoCategories', pkg: pkgIdx, value: e.target.checked })} />
+            <input type="checkbox" checked={flat} onChange={(e) => dispatch(p.id, { type: 'setNoCategories', value: e.target.checked })} />
             {t('无固定分类', 'No categories')}
           </label>
         )}
@@ -201,12 +218,12 @@ export default function ChecklistTab({ p, pkgIdx, onExport, onPkg }: {
       </div>
 
       {view === 'log' ? (
-        <ReceivingLog p={p} pkgIdx={pkgIdx} canEd={ed}
-          onOpenItem={(gi, ii) => { setView('external'); setOpenRec(`${gi}:${ii}`); }} />
+        <ReceivingLog p={p} scope={scope} canEd={ed}
+          onOpenItem={(id) => { setView('external'); setOpenRec(id); }} />
       ) : (
       <>
       {/* REQ-012: import this package's checklist from another project / a saved template */}
-      {ed && <FragmentBar p={p} pkgIdx={pkgIdx} kind="checklist" />}
+      {ed && <FragmentBar p={p} pkgIdx={0} scope={scope} kind="checklist" />}
 
       <div className="panel clip">
         {/* column headers (image7) */}
@@ -223,8 +240,11 @@ export default function ChecklistTab({ p, pkgIdx, onExport, onPkg }: {
           {editMode && ed && <div />}
         </div>
 
-        {pkg.checklist.map((g, gi) => {
-          const applicable = g.items.filter((i) => i.status !== 'na');
+        {clGroups(p).map((g, gi) => {
+          /* REQ-044: 只显示当前标签的项;一项都不剩的分组不显示 */
+          const vis = g.items.filter((it) => inScope(it, scope));
+          if (!vis.length) return null;
+          const applicable = vis.filter((i) => i.status !== 'na');
           const conf = applicable.filter((i) => i.status === 'confirmed').length;
           const gpct = applicable.length ? Math.round((conf / applicable.length) * 100) : 0;
           const isCol = !!collapsed[gi];
@@ -252,28 +272,35 @@ export default function ChecklistTab({ p, pkgIdx, onExport, onPkg }: {
                         const name = prompt(t('分类名称(中)', 'Category name'), g.group);
                         if (name == null || !name.trim()) return;
                         const nameEn = prompt(t('分类名称(英,可空)', 'Category name (EN, optional)'), g.groupEn) ?? g.groupEn;
-                        dispatch(p.id, { type: 'renameGroup', pkg: pkgIdx, gi, name: name.trim(), nameEn });
+                        dispatch(p.id, { type: 'renameGroup', gi, name: name.trim(), nameEn });
                       }}>✎</button>
                     <button className="btn-line sm danger" title={t('删除分类', 'Delete category')}
-                      onClick={() => { if (confirm(t(`删除分类「${g.group}」及其 ${g.items.length} 个信息项?`, `Delete category "${g.group}" and its ${g.items.length} items?`))) dispatch(p.id, { type: 'removeGroup', pkg: pkgIdx, gi }); }}>✕</button>
+                      onClick={() => {
+                        const others = g.items.length - vis.length;
+                        const msg = t(`删除分类「${g.group}」?它的 ${g.items.length} 个信息项会移到「已移除的项」(可恢复)${others ? `,其中 ${others} 项属于别的服务、当前标签下看不到` : ''}。`,
+                          `Delete category "${g.group}"? Its ${g.items.length} items move to “Removed” (restorable)${others ? `; ${others} of them belong to other services` : ''}.`);
+                        if (confirm(msg)) dispatch(p.id, { type: 'removeGroup', gi });
+                      }}>✕</button>
                   </>
                 )}
               </div>
               )}
 
-              {!isCol && g.items.map((it, ii) => {
+              {!isCol && vis.map((it, ii) => {
                 const due = parseISO(it.date);
                 // REQ-003: 仅「未收到 pending」且过期才标逾期(已收到不算)
                 const overdue = due && due < today && it.status === 'pending';
                 const shots = it.shots && it.shots.length ? it.shots : (it.shot ? [it.shot] : []);
-                const over = dragOver === `${gi}:${ii}` && drag && drag.gi === gi && drag.ii !== ii;
+                const over = dragOver === it.id && drag && drag.gi === gi && drag.id !== it.id;
+                const shared = (it.svcs || []).length > 1;
                 return (
                   <React.Fragment key={it.id || ii}>
                   <div
-                    onDragOver={editMode && ed ? (e) => { if (drag && drag.gi === gi) { e.preventDefault(); setDragOver(`${gi}:${ii}`); } } : undefined}
+                    data-testid={`cl-row-${it.id}`}
+                    onDragOver={editMode && ed ? (e) => { if (drag && drag.gi === gi) { e.preventDefault(); setDragOver(it.id || null); } } : undefined}
                     onDrop={editMode && ed ? (e) => {
                       e.preventDefault();
-                      if (drag && drag.gi === gi && drag.ii !== ii) dispatch(p.id, { type: 'reorderItem', pkg: pkgIdx, gi, from: drag.ii, to: ii });
+                      if (drag && drag.gi === gi && drag.id !== it.id) dispatch(p.id, { type: 'reorderItem', item: drag.id, to: it.id! });
                       setDrag(null); setDragOver(null);
                     } : undefined}
                     style={{
@@ -282,20 +309,49 @@ export default function ChecklistTab({ p, pkgIdx, onExport, onPkg }: {
                     /* REQ-019: 未收到 Pending 用黄底高亮 */
                     background: it.status === 'pending' ? '#fffbeb' : undefined,
                     borderLeft: `3px solid ${over ? 'var(--navy700)' : 'transparent'}`,
-                    opacity: drag && drag.gi === gi && drag.ii === ii ? 0.45 : 1,
+                    opacity: drag && drag.id === it.id ? 0.45 : 1,
                   }}>
                     {/* ── Item: name, thumbnails, remark ── */}
                     <div style={{ minWidth: 0 }}>
                       {editMode && ed ? (
                         <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
                           <input className="in sm" defaultValue={it.zh}
-                            onBlur={(e) => e.target.value !== it.zh && dispatch(p.id, { type: 'editCl', pkg: pkgIdx, gi, ii, field: 'zh', value: e.target.value })} />
+                            onBlur={(e) => e.target.value !== it.zh && dispatch(p.id, { type: 'editCl', item: it.id!, field: 'zh', value: e.target.value })} />
                           <input className="in sm" defaultValue={it.en}
-                            onBlur={(e) => e.target.value !== it.en && dispatch(p.id, { type: 'editCl', pkg: pkgIdx, gi, ii, field: 'en', value: e.target.value })} />
+                            onBlur={(e) => e.target.value !== it.en && dispatch(p.id, { type: 'editCl', item: it.id!, field: 'en', value: e.target.value })} />
+                          {/* REQ-044: 这一项哪些服务需要 —— 勾掉 / 加上 */}
+                          {svcs.length > 1 && (
+                            <div data-testid={`cl-svcs-${it.id}`} style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', fontSize: 11.5, color: 'var(--text2)' }}>
+                              {t('适用服务', 'Applies to')}:
+                              {svcs.map((k) => {
+                                const on = (it.svcs || []).includes(k);
+                                return (
+                                  <label key={k} style={{ display: 'inline-flex', gap: 3, alignItems: 'center', cursor: 'pointer' }}>
+                                    <input type="checkbox" checked={on} data-svc={k}
+                                      onChange={() => {
+                                        const next = on ? (it.svcs || []).filter((x) => x !== k) : [...(it.svcs || []), k];
+                                        if (!next.length) { setToast(t('至少留一个服务;不需要这一项就点右边的 ✕', 'Keep at least one service — use ✕ to remove the item')); return; }
+                                        dispatch(p.id, { type: 'setItemSvcs', item: it.id!, svcs: next });
+                                      }} />
+                                    {short(k)}
+                                  </label>
+                                );
+                              })}
+                            </div>
+                          )}
                         </div>
                       ) : (
                         <>
-                          <div style={{ fontSize: 13.5, fontWeight: 500 }}>{lang === 'zh' ? it.zh : it.en || it.zh}</div>
+                          <div style={{ fontSize: 13.5, fontWeight: 500 }}>
+                            {lang === 'zh' ? it.zh : it.en || it.zh}
+                            {/* REQ-044: 多个服务共用的项 —— 在任一标签下改,别的标签看到的是同一条 */}
+                            {shared && (
+                              <span className="badge" data-testid="cl-shared" title={t('多个服务共用这一项,改一处各处同步', 'Shared by several services — one record, kept in sync')}
+                                style={{ marginLeft: 7, background: '#e8f3ef', color: '#1f6f5a', fontWeight: 600 }}>
+                                {t('共用', 'Shared')} · {(it.svcs || []).map(short).join(' · ')}
+                              </span>
+                            )}
+                          </div>
                           {dual && <div style={{ fontSize: 11.5, color: 'var(--text2)' }}>{lang === 'zh' ? it.en : it.zh}</div>}
                         </>
                       )}
@@ -304,7 +360,7 @@ export default function ChecklistTab({ p, pkgIdx, onExport, onPkg }: {
                       <div style={{ marginTop: 10, display: 'flex', alignItems: 'flex-start', gap: 6 }}>
                         {fe && (
                           <button title={it.highlight ? t('取消重点', 'Unmark important') : t('标为重点', 'Mark important')}
-                            onClick={() => dispatch(p.id, { type: 'toggleHighlight', pkg: pkgIdx, gi, ii })}
+                            onClick={() => dispatch(p.id, { type: 'toggleHighlight', item: it.id! })}
                             style={{ flex: '0 0 auto', fontSize: 15, lineHeight: 1, padding: '3px 3px', background: 'none', color: it.highlight ? '#D98A12' : '#c2cad3' }}>
                             {it.highlight ? '★' : '☆'}
                           </button>
@@ -316,7 +372,7 @@ export default function ChecklistTab({ p, pkgIdx, onExport, onPkg }: {
                             width: '100%', minHeight: 30, resize: 'vertical', lineHeight: 1.5, whiteSpace: 'pre-wrap',
                             ...(it.highlight ? { background: '#fff6e2', borderColor: '#e6b657', color: '#8a5a0f', fontWeight: 600 } : {}),
                           }}
-                          onBlur={(e) => { if (fe && e.target.value !== it.remark) dispatch(p.id, { type: 'editCl', pkg: pkgIdx, gi, ii, field: 'remark', value: e.target.value }); }} />
+                          onBlur={(e) => { if (fe && e.target.value !== it.remark) dispatch(p.id, { type: 'editCl', item: it.id!, field: 'remark', value: e.target.value }).then((ok) => ok && synced(it)); }} />
                       </div>
                     </div>
 
@@ -332,7 +388,7 @@ export default function ChecklistTab({ p, pkgIdx, onExport, onPkg }: {
                               onClick={() => setLightbox(s)} />
                             {fe && (
                               <button title={t('删除此图', 'Remove image')}
-                                onClick={() => dispatch(p.id, { type: 'removeShot', pkg: pkgIdx, gi, ii, shotIdx: si })}
+                                onClick={() => dispatch(p.id, { type: 'removeShot', item: it.id!, shotIdx: si })}
                                 style={{ position: 'absolute', top: -6, right: -6, width: 16, height: 16, borderRadius: 8, background: 'var(--danger)', color: '#fff', fontSize: 10, lineHeight: '16px', textAlign: 'center' }}>✕</button>
                             )}
                           </span>
@@ -345,10 +401,10 @@ export default function ChecklistTab({ p, pkgIdx, onExport, onPkg }: {
                           style={{ fontSize: 11, color: '#234f97', background: '#e7eefb', borderRadius: 6, padding: '4px 8px', cursor: 'pointer', outline: 'none', textAlign: 'center' }}
                           onDragOver={(e) => { e.preventDefault(); (e.currentTarget as HTMLElement).style.background = '#c9dcff'; }}
                           onDragLeave={(e) => { (e.currentTarget as HTMLElement).style.background = '#e7eefb'; }}
-                          onDrop={(e) => { e.preventDefault(); (e.currentTarget as HTMLElement).style.background = '#e7eefb'; processImageFile(gi, ii, imageFromDataTransfer(e.dataTransfer)); }}
-                          onPaste={(e) => { const f = imageFromDataTransfer(e.clipboardData); if (f) { e.preventDefault(); processImageFile(gi, ii, f); } }}>
+                          onDrop={(e) => { e.preventDefault(); (e.currentTarget as HTMLElement).style.background = '#e7eefb'; processImageFile(it.id!, imageFromDataTransfer(e.dataTransfer)); }}
+                          onPaste={(e) => { const f = imageFromDataTransfer(e.clipboardData); if (f) { e.preventDefault(); processImageFile(it.id!, f); } }}>
                           📎 {shots.length ? t('加图', 'Add') : t('上传 / 拖入 / 粘贴', 'Upload / drag / paste')}
-                          <input type="file" accept="image/*" multiple style={{ display: 'none' }} onChange={(e) => attachShot(gi, ii, e.target)} />
+                          <input type="file" accept="image/*" multiple style={{ display: 'none' }} onChange={(e) => attachShot(it.id!, e.target)} />
                         </label>
                       ) : shots.length === 0 ? (
                         <span style={{ fontSize: 11.5, color: '#b6bfc9' }}>{t('暂无参考图', 'No reference')}</span>
@@ -360,7 +416,7 @@ export default function ChecklistTab({ p, pkgIdx, onExport, onPkg }: {
                       <div style={{ minWidth: 0 }}>
                         {editMode && ed ? (
                           <input className="in sm" list="cl-owner-names" defaultValue={it.owner || ''} placeholder={t('负责人', 'Owner')}
-                            onBlur={(e) => e.target.value !== (it.owner || '') && dispatch(p.id, { type: 'editCl', pkg: pkgIdx, gi, ii, field: 'owner', value: e.target.value })} />
+                            onBlur={(e) => e.target.value !== (it.owner || '') && dispatch(p.id, { type: 'editCl', item: it.id!, field: 'owner', value: e.target.value })} />
                         ) : it.owner ? (
                           <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7, fontSize: 13, fontWeight: 700, color: 'var(--navy900)' }}>
                             <Avatar name={it.owner} size={24} />{it.owner}
@@ -375,7 +431,8 @@ export default function ChecklistTab({ p, pkgIdx, onExport, onPkg }: {
                     <div style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: 6 }}>
                       {fe ? (
                         <button title={t('点击推进状态,右键选择', 'Click to advance, right-click to pick')} style={{ padding: 0, background: 'none', alignSelf: 'flex-start' }}
-                          onClick={() => dispatch(p.id, { type: 'setClStatus', pkg: pkgIdx, gi, ii, value: CYCLE[it.status] })}
+                          data-testid={`cl-status-${it.id}`}
+                          onClick={() => dispatch(p.id, { type: 'setClStatus', item: it.id!, value: CYCLE[it.status] }).then((ok) => ok && synced(it))}
                           onContextMenu={(e) => {
                             e.preventDefault();
                             const pick = prompt(
@@ -383,7 +440,7 @@ export default function ChecklistTab({ p, pkgIdx, onExport, onPkg }: {
                                 `Status (enter number):\n${CL_OPTIONS.map((o, k) => `${k + 1}. ${o[2]}`).join('\n')}`),
                               String(CL_OPTIONS.findIndex((o) => o[0] === it.status) + 1));
                             const k = parseInt(pick || '') - 1;
-                            if (k >= 0 && k < CL_OPTIONS.length) dispatch(p.id, { type: 'setClStatus', pkg: pkgIdx, gi, ii, value: CL_OPTIONS[k][0] });
+                            if (k >= 0 && k < CL_OPTIONS.length) dispatch(p.id, { type: 'setClStatus', item: it.id!, value: CL_OPTIONS[k][0] }).then((ok) => ok && synced(it));
                           }}>
                           <Pill m={CM[it.status]} />
                         </button>
@@ -394,7 +451,7 @@ export default function ChecklistTab({ p, pkgIdx, onExport, onPkg }: {
                         <input className="in sm" defaultValue={it.received || ''} key={`rcv-${it.id || ii}-${it.received || ''}`}
                           placeholder={t('收到内容 / 文件名…', 'Received content / file name…')}
                           title={t('填入后自动标记「已收到」并填今天的日期', 'Filling this auto-sets Received + today’s date')}
-                          onBlur={(e) => e.target.value !== (it.received || '') && dispatch(p.id, { type: 'editCl', pkg: pkgIdx, gi, ii, field: 'received', value: e.target.value })} />
+                          onBlur={(e) => e.target.value !== (it.received || '') && dispatch(p.id, { type: 'editCl', item: it.id!, field: 'received', value: e.target.value }).then((ok) => ok && synced(it))} />
                       ) : it.received ? (
                         <span style={{ fontSize: 12, color: 'var(--text)', wordBreak: 'break-word' }}>📄 {it.received}</span>
                       ) : null}
@@ -402,7 +459,7 @@ export default function ChecklistTab({ p, pkgIdx, onExport, onPkg }: {
                       <button className="btn-line sm" style={{ alignSelf: 'flex-start', marginTop: 2 }}
                         title={t('查看 / 追加这一项的收料记录(多次收料不会互相覆盖)',
                                  'View / append this item’s receiving records — versions never overwrite each other')}
-                        onClick={() => setOpenRec(openRec === `${gi}:${ii}` ? null : `${gi}:${ii}`)}>
+                        onClick={() => setOpenRec(openRec === it.id ? null : it.id || null)}>
                         🗂 {t('记录', 'Records')} ({(it.receipts || []).length})
                         {(it.receipts || []).length > 1 && (
                           <span className="badge" style={{ background: 'var(--navy900)', color: '#fff', marginLeft: 5 }}>
@@ -415,7 +472,7 @@ export default function ChecklistTab({ p, pkgIdx, onExport, onPkg }: {
                     {/* ── Date received ── */}
                     <div>
                       <input type="date" className="in sm" style={{ width: '100%', ...(overdue ? { borderColor: '#e7a19b', color: '#b23a32' } : {}) }} value={it.date} disabled={!fe}
-                        onChange={(e) => dispatch(p.id, { type: 'editCl', pkg: pkgIdx, gi, ii, field: 'date', value: e.target.value })} />
+                        onChange={(e) => dispatch(p.id, { type: 'editCl', item: it.id!, field: 'date', value: e.target.value })} />
                       <div style={{ fontSize: 10.5, color: 'var(--text2)', marginTop: 3 }}>{relTime(it.updatedAt, lang === 'zh')}</div>
                     </div>
 
@@ -424,22 +481,23 @@ export default function ChecklistTab({ p, pkgIdx, onExport, onPkg }: {
                       <div style={{ display: 'flex', flexDirection: 'column', gap: 2, alignItems: 'center' }}>
                         {/* REQ-012: drag handle — reorder inside this category */}
                         <span draggable
-                          onDragStart={(e) => { setDrag({ gi, ii }); e.dataTransfer.effectAllowed = 'move'; }}
+                          onDragStart={(e) => { setDrag({ gi, id: it.id! }); e.dataTransfer.effectAllowed = 'move'; }}
                           onDragEnd={() => { setDrag(null); setDragOver(null); }}
                           title={t('拖动调整顺序（同一分类内）', 'Drag to reorder within this category')}
                           style={{ cursor: 'grab', color: 'var(--text2)', userSelect: 'none', fontSize: 14, lineHeight: 1 }}>⠿</span>
                         <button title={t('上移', 'Move up')} disabled={ii === 0} style={{ opacity: ii === 0 ? 0.3 : 1, fontSize: 12, lineHeight: 1 }}
-                          onClick={() => dispatch(p.id, { type: 'moveItem', pkg: pkgIdx, gi, ii, dir: -1 })}>▲</button>
-                        <button style={{ color: 'var(--danger)', fontWeight: 700 }} title={t('删除', 'Delete')}
-                          onClick={() => dispatch(p.id, { type: 'removeItem', pkg: pkgIdx, gi, ii })}>✕</button>
-                        <button title={t('下移', 'Move down')} disabled={ii === g.items.length - 1} style={{ opacity: ii === g.items.length - 1 ? 0.3 : 1, fontSize: 12, lineHeight: 1 }}
-                          onClick={() => dispatch(p.id, { type: 'moveItem', pkg: pkgIdx, gi, ii, dir: 1 })}>▼</button>
+                          onClick={() => dispatch(p.id, { type: 'moveItem', item: it.id!, dir: -1, scope })}>▲</button>
+                        <button style={{ color: 'var(--danger)', fontWeight: 700 }} data-testid={`cl-remove-${it.id}`}
+                          title={shared ? t('移除(多个服务共用,移到「已移除的项」可恢复;只想不给这个服务用,勾掉上面的服务即可)', 'Remove (shared — restorable from “Removed”; to drop just one service, untick it above)') : t('移除(可在「已移除的项」恢复)', 'Remove (restorable from “Removed”)')}
+                          onClick={() => dispatch(p.id, { type: 'removeItem', item: it.id! })}>✕</button>
+                        <button title={t('下移', 'Move down')} disabled={ii === vis.length - 1} style={{ opacity: ii === vis.length - 1 ? 0.3 : 1, fontSize: 12, lineHeight: 1 }}
+                          onClick={() => dispatch(p.id, { type: 'moveItem', item: it.id!, dir: 1, scope })}>▼</button>
                       </div>
                     )}
                   </div>
                   {/* REQ-042: 展开这一项的全部收料记录(Item History) */}
-                  {openRec === `${gi}:${ii}` && (
-                    <ItemReceipts p={p} pkgIdx={pkgIdx} gi={gi} ii={ii}
+                  {openRec === it.id && (
+                    <ItemReceipts p={p} item={it.id!}
                       receipts={it.receipts || []} canEd={ed}
                       onClose={() => setOpenRec(null)} />
                   )}
@@ -451,8 +509,9 @@ export default function ChecklistTab({ p, pkgIdx, onExport, onPkg }: {
                 <AddItemPanel
                   defaults={defaultsForGroup(g.group, g.groupEn)}
                   present={g.items.map((it) => it.zh)}
-                  onAdd={(items) => dispatch(p.id, { type: 'addItem', pkg: pkgIdx, gi, items })}
-                  onBlank={() => dispatch(p.id, { type: 'addItem', pkg: pkgIdx, gi })}
+                  svcs={svcs} initial={scope === ALL ? svcs : [scope]} short={short}
+                  onAdd={(items, sv) => dispatch(p.id, { type: 'addItem', gi, items, svcs: sv })}
+                  onBlank={(sv) => dispatch(p.id, { type: 'addItem', gi, svcs: sv })}
                 />
               )}
             </div>
@@ -464,9 +523,12 @@ export default function ChecklistTab({ p, pkgIdx, onExport, onPkg }: {
         <button className="btn-line" style={{ width: '100%', marginTop: 16, justifyContent: 'center', borderStyle: 'dashed' }}
           onClick={() => {
             const nm = prompt(t('新栏目名称(中文):', 'New section name:'), t('特殊需求', 'Special requirements'));
-            if (nm) dispatch(p.id, { type: 'addGroup', pkg: pkgIdx, name: nm });
+            if (nm) dispatch(p.id, { type: 'addGroup', name: nm, svcs: scope === ALL ? svcs : [scope] });
           }}>+ {t('添加新栏目', 'Add section')}</button>
       )}
+
+      {/* REQ-044: 删服务包 / 删分类 / 删项 / 套用模板换下来的项都在这里,可恢复 */}
+      {editMode && ed && (p.checklistRemoved || []).length > 0 && <RemovedItems p={p} scope={scope} />}
 
       </>
       )}
@@ -496,22 +558,24 @@ function Ring({ pct }: { pct: number }) {
 }
 
 /* B3: add-item panel — pick from the service's default library, or a blank item. */
-function AddItemPanel({ defaults, present, onAdd, onBlank }: {
+function AddItemPanel({ defaults, present, svcs, initial, short, onAdd, onBlank }: {
   defaults: { zh: string; en: string }[];
   present: string[];
-  onAdd: (items: { zh: string; en: string }[]) => void;
-  onBlank: () => void;
+  svcs: string[]; initial: string[]; short: (k: string) => string;   // REQ-044: 新项挂哪些服务
+  onAdd: (items: { zh: string; en: string }[], svcs: string[]) => void;
+  onBlank: (svcs: string[]) => void;
 }) {
   const { lang, t } = useLang();
   const [open, setOpen] = useState(false);
   const [picked, setPicked] = useState<Record<string, boolean>>({});
+  const [sv, setSv] = useState<string[]>(initial);
   const presentSet = new Set(present);
   const avail = defaults.filter((d) => !presentSet.has(d.zh));
 
   if (!open) {
     return (
       <div style={{ padding: '12px 20px' }}>
-        <button className="btn-line sm" onClick={() => { setPicked({}); setOpen(true); }}>+ {t('添加信息项', 'Add item')}</button>
+        <button className="btn-line sm" onClick={() => { setPicked({}); setSv(initial); setOpen(true); }}>+ {t('添加信息项', 'Add item')}</button>
       </div>
     );
   }
@@ -539,14 +603,58 @@ function AddItemPanel({ defaults, present, onAdd, onBlank }: {
       ) : (
         <div style={{ fontSize: 12, color: 'var(--text2)', marginBottom: 10 }}>{t('默认项已全部添加。', 'All default items are already added.')}</div>
       )}
+      {svcs.length > 1 && (
+        <div data-testid="cl-add-svcs" style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center', fontSize: 12.5, marginBottom: 10 }}>
+          <span style={{ color: 'var(--text2)', fontSize: 11.5 }}>{t('适用服务', 'Applies to')}:</span>
+          {svcs.map((k) => (
+            <label key={k} style={{ display: 'inline-flex', gap: 4, alignItems: 'center', cursor: 'pointer' }}>
+              <input type="checkbox" checked={sv.includes(k)} data-svc={k}
+                onChange={() => setSv((x) => (x.includes(k) ? x.filter((y) => y !== k) : [...x, k]))} />
+              {short(k)}
+            </label>
+          ))}
+        </div>
+      )}
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-        <button className="btn-navy sm" disabled={!chosen.length}
-          onClick={() => { onAdd(chosen); setOpen(false); }}>
+        <button className="btn-navy sm" disabled={!chosen.length || !sv.length}
+          onClick={() => { onAdd(chosen, sv); setOpen(false); }}>
           + {t('添加所选', 'Add selected')}{chosen.length ? ` (${chosen.length})` : ''}
         </button>
-        <button className="btn-line sm" onClick={() => { onBlank(); setOpen(false); }}>+ {t('自定义空白项', 'Blank custom item')}</button>
+        <button className="btn-line sm" disabled={!sv.length} onClick={() => { onBlank(sv); setOpen(false); }}>+ {t('自定义空白项', 'Blank custom item')}</button>
         <button className="btn-line sm" onClick={() => setOpen(false)}>{t('取消', 'Cancel')}</button>
       </div>
+    </div>
+  );
+}
+
+/* REQ-044: 已移除的项(可恢复)。删服务包、删分类、删项、套用模板 / 恢复默认换下来的都在这 */
+function RemovedItems({ p, scope }: { p: Project; scope: ClScope }) {
+  const { dispatch } = useStore();
+  const { lang, t } = useLang();
+  const [open, setOpen] = useState(false);
+  const list = p.checklistRemoved || [];
+  const why = (r: string) => (r.startsWith('svc:') ? t(`删了业务 ${svcName(r.slice(4), 'zh')}`, `service ${svcName(r.slice(4), 'en')} removed`)
+    : r === 'group' ? t('删了分类', 'section deleted') : r === 'reset' ? t('套用模板 / 恢复默认', 'template applied') : t('移除', 'removed'));
+  return (
+    <div className="panel" data-testid="cl-removed" style={{ marginTop: 16, padding: '12px 18px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <b style={{ fontSize: 13 }}>{t('已移除的项', 'Removed items')} ({list.length})</b>
+        <span style={{ fontSize: 11.5, color: 'var(--text2)' }}>{t('不会真的删掉,随时可以恢复', 'Nothing is deleted — restore any time')}</span>
+        <div style={{ flex: 1 }} />
+        <button className="btn-line sm" data-testid="cl-removed-toggle" onClick={() => setOpen(!open)}>{open ? t('收起', 'Collapse') : t('展开', 'Show')}</button>
+      </div>
+      {open && (
+        <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 4 }}>
+          {list.slice(0, 200).map((r) => (
+            <div key={r.item.id} data-testid="cl-removed-row" style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 12.5, borderTop: '1px solid var(--row-line)', paddingTop: 5 }}>
+              <span style={{ fontWeight: 600 }}>{lang === 'zh' ? r.item.zh : r.item.en || r.item.zh}</span>
+              <span style={{ color: 'var(--text2)' }}>{lang === 'zh' ? r.group : r.groupEn || r.group} · {why(r.reason)} · {r.by}</span>
+              <div style={{ flex: 1 }} />
+              <button className="btn-line sm" data-testid="cl-restore" onClick={() => dispatch(p.id, { type: 'restoreClItem', item: r.item.id!, scope })}>{t('恢复', 'Restore')}</button>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

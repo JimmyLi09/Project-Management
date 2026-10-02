@@ -35,6 +35,8 @@ export default function ProjectDetail() {
   const [renaming, setRenaming] = useState(false);   // REQ-028
   const [quoting, setQuoting] = useState(false);     // REQ-031
   const [clienting, setClienting] = useState(false); // REQ-039
+  /* REQ-044: 信息清单的服务标签(筛选),默认「全部」 */
+  const [clScope, setClScope] = useState<string>('all');
   const p = projects.find((x) => x.id === view.pid);
   if (!p) {
     return <div className="panel" style={{ padding: 40, textAlign: 'center', color: 'var(--text2)' }}>{t('项目加载中…', 'Loading project…')}</div>;
@@ -318,12 +320,12 @@ export default function ProjectDetail() {
       )}
       {tab === 'checklist' && (
         <ChecklistTab
-          key={`${p.id}:${pkgIdx}`}
-          p={p} pkgIdx={pkgIdx} onExport={() => setExportScope('checklist')} onPkg={(i) => setView({ ...view, pkg: i })}
+          key={p.id}
+          p={p} scope={clScope} onScope={setClScope} onExport={() => setExportScope('checklist')}
         />
       )}
       {tab === 'jobrecord' && <JobRecordTab key={p.id} p={p} />}
-      {exportScope && <ExportOverlay p={p} scope={exportScope} onClose={() => setExportScope(null)} />}
+      {exportScope && <ExportOverlay p={p} scope={exportScope} clScope={exportScope === 'checklist' ? clScope : 'all'} onClose={() => setExportScope(null)} />}
       {transferFrom && (
         <TransferModal from={transferFrom} pid={p.id} onClose={() => setTransferFrom(null)} />
       )}

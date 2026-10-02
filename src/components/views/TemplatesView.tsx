@@ -48,7 +48,59 @@ export default function TemplatesView() {
           </div>
         ))}
       </div>
+      <SynonymsPanel />
     </>
+  );
+}
+
+/* ===== REQ-044 信息清单「同义项」=====
+   一个项目一张信息清单,加服务包 / 合并时同名的项只出现一次。名字不完全一样、说的却是
+   同一份资料的(如「最终 CAD + 3D 模型」和「最终 CAD + SKP」),在这里写成一组。
+   一行一组,用 ≈ 隔开。只影响之后的合并,已经合好的清单不回头改。 */
+function SynonymsPanel() {
+  const { t } = useLang();
+  const [text, setText] = useState('');
+  const [custom, setCustom] = useState(false);
+  const [msg, setMsg] = useState('');
+  const [busy, setBusy] = useState(false);
+  const toText = (list: string[][]) => list.map((g) => g.join(' ≈ ')).join('\n');
+  const load = async () => {
+    const r = await fetch('/api/templates/synonyms');
+    if (r.ok) { const d = await r.json(); setText(toText(d.list || [])); setCustom(!!d.custom); }
+  };
+  useEffect(() => { load(); }, []);
+  async function save() {
+    setBusy(true); setMsg('');
+    const list = text.split('\n').map((l) => l.split(/≈|~=/).map((x) => x.trim()).filter(Boolean)).filter((g) => g.length);
+    const bad = list.filter((g) => g.length < 2).length;
+    const r = await fetch('/api/templates/synonyms', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ list }) });
+    setBusy(false);
+    if (!r.ok) { setMsg(t('保存失败', 'Save failed')); return; }
+    const d = await r.json(); setText(toText(d.list || [])); setCustom(true);
+    setMsg(bad ? t(`✓ 已保存(${bad} 行只有一个名字,已忽略)`, `✓ Saved (${bad} line(s) with a single name were ignored)`) : t('✓ 已保存', '✓ Saved'));
+  }
+  async function reset() {
+    if (!confirm(t('恢复为默认的同义项?', 'Reset to the default synonyms?'))) return;
+    const r = await fetch('/api/templates/synonyms', { method: 'DELETE' });
+    if (r.ok) { const d = await r.json(); setText(toText(d.list || [])); setCustom(false); setMsg(t('✓ 已恢复默认', '✓ Reset to default')); }
+  }
+  return (
+    <div className="panel" data-testid="synonyms-panel" style={{ padding: 16, marginTop: 18, display: 'flex', flexDirection: 'column', gap: 9 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
+        <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--navy900)' }}>{t('信息清单 · 同义项', 'Checklist · synonyms')}</span>
+        {custom && <span className="badge" style={{ background: '#fff3e4', color: '#8f5b1d' }}>{t('已定制', 'Customized')}</span>}
+      </div>
+      <div style={{ fontSize: 12, color: 'var(--text2)', lineHeight: 1.6 }}>
+        {t('同一个项目的各个业务共用一张信息清单。加服务包时,名字相同(不计空格、标点、大小写)或写在同一行的项算同一项,只加服务标签、不重复。一行一组,用 ≈ 隔开。只影响之后的合并。',
+          'Every service in a project shares one checklist. When a service is added, items with the same name (ignoring spaces, punctuation and case) — or listed on the same line here — count as one item and just get the extra service tag. One group per line, separated by ≈. Affects future merges only.')}
+      </div>
+      <textarea className="in sm" data-testid="synonyms-text" value={text} onChange={(e) => setText(e.target.value)} rows={8} style={{ fontFamily: 'inherit', lineHeight: 1.6 }} />
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+        <button className="btn-navy sm" data-testid="synonyms-save" disabled={busy} onClick={save}>{t('保存', 'Save')}</button>
+        {custom && <button className="btn-line sm" onClick={reset}>{t('恢复默认', 'Reset to default')}</button>}
+        <span style={{ fontSize: 12, color: 'var(--text2)' }}>{msg}</span>
+      </div>
+    </div>
   );
 }
 

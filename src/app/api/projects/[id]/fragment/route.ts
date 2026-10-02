@@ -2,7 +2,11 @@ import { NextRequest, NextResponse } from 'next/server';
 import { appendAudit, getProject, getUserTemplate, saveProjectCAS } from '@/server/db';
 import { currentUser } from '@/server/session';
 import { canEdit, canSeeProject, identityOf } from '@/lib/permissions';
-import { applyFragment, matchPackage, extractFragment, statFragment, type Fragment, type FragmentKind } from '@/server/fragments';
+import {
+  applyChecklist, applySchedule, extractChecklist, extractSchedule, matchPackage, statFragment,
+  type ChecklistFragment, type Fragment, type FragmentKind, type ScheduleFragment,
+} from '@/server/fragments';
+import { ALL, projectSvcs } from '@/lib/sharedChecklist';
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -24,7 +28,7 @@ export async function POST(req: NextRequest, { params }: Params) {
   if (!canEdit(identityOf(user), p)) return NextResponse.json({ error: '无编辑权限' }, { status: 403 });
 
   const body = (await req.json().catch(() => null)) as {
-    pkg?: number; kind?: string; mode?: string; sourceId?: string; templateId?: number;
+    pkg?: number; scope?: string; kind?: string; mode?: string; sourceId?: string; templateId?: number;
     baseVersion?: number; withContent?: boolean; preview?: boolean;
   } | null;
   const withContent = !!body?.withContent;
@@ -33,9 +37,12 @@ export async function POST(req: NextRequest, { params }: Params) {
   const mode = (String(body?.mode || 'replace') === 'append' ? 'append' : 'replace') as 'replace' | 'append';
   if (kind !== 'schedule' && kind !== 'checklist') return NextResponse.json({ error: '无效的内容类型' }, { status: 400 });
 
+  /* 排期按服务包(pkg);REQ-044 起清单在项目上,按标签(scope = 'all' 或某个服务) */
   const pkgIdx = Number(body?.pkg ?? 0);
   const dest = p.packages[pkgIdx];
-  if (!dest) return NextResponse.json({ error: '无效的服务包' }, { status: 400 });
+  if (kind === 'schedule' && !dest) return NextResponse.json({ error: '无效的服务包' }, { status: 400 });
+  const scope = String(body?.scope || ALL);
+  if (kind === 'checklist' && scope !== ALL && !projectSvcs(p).includes(scope)) return NextResponse.json({ error: '这个项目没有这项服务' }, { status: 400 });
 
   /* strict optimistic lock, same contract as PATCH /api/projects/:id.
      预览不写库,所以不参与版本校验。 */
@@ -58,11 +65,15 @@ export async function POST(req: NextRequest, { params }: Params) {
     /* REQ-043: 「从别的项目抄一段」也是一种读。看不到那个项目的人,不能靠
        给个 id 就把它的排期 / 信息清单(带内容时还有日期和路径)抄进自己这边。 */
     if (!canSeeProject(identityOf(user), src)) return NextResponse.json({ error: '非你管理 / 参与的项目' }, { status: 403 });
-    /* 目标包在本项目同类业务里排第几 —— 用它去源项目找对应的那一份 */
-    const ordinal = p.packages.filter((x, i) => x.svc === dest.svc && i < pkgIdx).length;
-    const srcPkg = matchPackage(src, dest.svc, ordinal);
-    if (!srcPkg) return NextResponse.json({ error: '源项目没有可用的服务包' }, { status: 400 });
-    frag = extractFragment(srcPkg, kind, src.schedStyle, withContent);
+    if (kind === 'checklist') {
+      frag = extractChecklist(src, scope, withContent);
+    } else {
+      /* 目标包在本项目同类业务里排第几 —— 用它去源项目找对应的那一份 */
+      const ordinal = p.packages.filter((x, i) => x.svc === dest.svc && i < pkgIdx).length;
+      const srcPkg = matchPackage(src, dest.svc, ordinal);
+      if (!srcPkg) return NextResponse.json({ error: '源项目没有可用的服务包' }, { status: 400 });
+      frag = extractSchedule(srcPkg, src.schedStyle, withContent);
+    }
     label = `项目「${src.name}」`;
   } else {
     return NextResponse.json({ error: '请指定来源项目或模板' }, { status: 400 });
@@ -71,7 +82,8 @@ export async function POST(req: NextRequest, { params }: Params) {
   /* 预览:数完就返回,一个字节都不写 */
   if (preview) return NextResponse.json({ preview: statFragment(frag, kind), label });
 
-  applyFragment(dest, kind, frag, mode, withContent);
+  if (kind === 'schedule') applySchedule(dest, frag as ScheduleFragment, mode, withContent);
+  else applyChecklist(p, scope, frag as ChecklistFragment, mode, withContent, user.name);
   const now = Date.now();
   const text = `${mode === 'replace' ? '覆盖' : '追加'}导入${kind === 'schedule' ? '排期' : '信息清单'}${withContent ? '(含内容)' : ''} ← ${label}`;
   p.log = [{ at: now, by: user.name, text }, ...(p.log || [])].slice(0, 200);

@@ -48,6 +48,7 @@ test('REQ-044 CGI + 沙盘:同义项合成一条,已确认不降级,备注都留
   assert.match(cad.remark, /^\[cgi\] CGI 用 v01\n\[scale\] 沙盘以 SKP 为准$/);
   assert.equal(cad.receipts!.length, 2, '完全相同的那条只留一份');
   assert.equal(cad.receipts![0].fileName, 'CAD_v02.dwg', '按时间倒序');
+  assert.equal(cad.received, 'CAD_v02.dwg', '收到内容跟最新一条记录(否则下次改状态会把文件名写进别人的记录)');
   assert.equal(cad.shots!.length, 1);
   assert.deepEqual(r.merged.map((m) => m.name), ['最终 CAD + 3D 模型']);
   assert.deepEqual(verifyMerge(pkgs, r.checklist), []);
