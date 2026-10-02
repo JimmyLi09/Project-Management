@@ -8,6 +8,7 @@
    用法:node --import ./scripts/ts-register.mjs 某个脚本.ts
    只转译、不做类型检查(类型检查是 next build 的事)。 */
 
+import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 
@@ -20,6 +21,24 @@ async function typescript() {
     }
   }
   return ts;
+}
+
+/* 让脚本能直接复用 src/lib 里的代码(和网站跑的是同一份):
+     ./xxx(没扩展名)→ 有 ./xxx.ts / ./xxx.tsx 就用它(Next 打包时的写法);
+     @/xxx → 项目根的 src/xxx(tsconfig 里的路径别名)。 */
+const SRC = new URL('../src/', import.meta.url);
+export async function resolve(specifier, context, next) {
+  let base = null, rest = specifier;
+  if (specifier.startsWith('@/')) { base = SRC; rest = './' + specifier.slice(2); }
+  else if ((specifier.startsWith('./') || specifier.startsWith('../')) && context.parentURL?.startsWith('file:')) base = context.parentURL;
+  if (base && !/\.[cm]?[jt]sx?$|\.json$/.test(rest)) {
+    for (const ext of ['.ts', '.tsx', '/index.ts']) {
+      const candidate = new URL(rest + ext, base);
+      if (existsSync(fileURLToPath(candidate))) return { url: candidate.href, shortCircuit: true };
+    }
+  }
+  if (base && specifier.startsWith('@/')) return next(new URL(rest, base).href, context);
+  return next(specifier, context);
 }
 
 export async function load(url, context, next) {
