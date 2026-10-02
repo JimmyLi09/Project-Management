@@ -6,6 +6,7 @@ import { useLang } from '@/lib/i18n';
 import { fmtDate, parseISO } from '@/lib/project';
 import { CM } from '../ui';
 import { RECEIVE_VIA, viaName } from '@/lib/receipts';
+import { inScope } from '@/lib/sharedChecklist';
 import type { ChecklistStatus, Project, ReceiptRecord } from '@/lib/types';
 
 /* ===== REQ-042: 收料记录 =====
@@ -25,8 +26,8 @@ export function StatusBadge({ s, lang }: { s: string; lang: 'zh' | 'en' }) {
 }
 
 /* ---------- ① 单项历史 ---------- */
-export function ItemReceipts({ p, pkgIdx, gi, ii, receipts, canEd, onClose }: {
-  p: Project; pkgIdx: number; gi: number; ii: number;
+export function ItemReceipts({ p, item, receipts, canEd, onClose }: {
+  p: Project; item: string;   // REQ-044: 按项 id
   receipts: ReceiptRecord[]; canEd: boolean; onClose: () => void;
 }) {
   const { dispatch } = useStore();
@@ -50,7 +51,7 @@ export function ItemReceipts({ p, pkgIdx, gi, ii, receipts, canEd, onClose }: {
 
       {adding && canEd && (
         <ReceiptForm lang={lang} onCancel={() => setAdding(false)}
-          onSave={async (rec) => { await dispatch(p.id, { type: 'addReceipt', pkg: pkgIdx, gi, ii, rec }); setAdding(false); }} />
+          onSave={async (rec) => { await dispatch(p.id, { type: 'addReceipt', item, rec }); setAdding(false); }} />
       )}
 
       {receipts.length === 0 && !adding && (
@@ -60,7 +61,7 @@ export function ItemReceipts({ p, pkgIdx, gi, ii, receipts, canEd, onClose }: {
       <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
         {receipts.map((r, i) => editId === r.id && canEd ? (
           <ReceiptForm key={r.id} lang={lang} init={r} onCancel={() => setEditId(null)}
-            onSave={async (rec) => { await dispatch(p.id, { type: 'editReceipt', pkg: pkgIdx, gi, ii, id: r.id, rec }); setEditId(null); }} />
+            onSave={async (rec) => { await dispatch(p.id, { type: 'editReceipt', item, id: r.id, rec }); setEditId(null); }} />
         ) : (
           <div key={r.id} style={{
             border: '1px solid var(--border)', borderRadius: 9, padding: '9px 12px',
@@ -82,7 +83,7 @@ export function ItemReceipts({ p, pkgIdx, gi, ii, receipts, canEd, onClose }: {
                   <button className="btn-line sm danger" onClick={() => {
                     if (!confirm(t(`删除这条收料记录(${r.fileName || r.date || '无文件名'})?不能撤销。`,
                                    `Delete this record (${r.fileName || r.date || 'unnamed'})? This cannot be undone.`))) return;
-                    dispatch(p.id, { type: 'removeReceipt', pkg: pkgIdx, gi, ii, id: r.id });
+                    dispatch(p.id, { type: 'removeReceipt', item, id: r.id });
                   }}>✕</button>
                 </>
               )}
@@ -160,28 +161,28 @@ function ReceiptForm({ init, lang, onSave, onCancel }: {
 }
 
 /* ---------- ② 内部收料记录(整表) ---------- */
-export function ReceivingLog({ p, pkgIdx, canEd, onOpenItem }: {
-  p: Project; pkgIdx: number; canEd: boolean;
-  onOpenItem: (gi: number, ii: number) => void;
+export function ReceivingLog({ p, scope, canEd, onOpenItem }: {
+  p: Project; scope: string; canEd: boolean;   // REQ-044: 随清单的服务标签筛选,记录本身只有一份
+  onOpenItem: (id: string) => void;
 }) {
   const { lang, t } = useLang();
   const [q, setQ] = useState('');
   const [st, setSt] = useState('');
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
-  const pkg = p.packages[pkgIdx];
 
   /* 全部项的全部记录摊平成一张表 —— 这是「谁什么时候给了什么」的流水账,
      所以按时间倒序排,而不是按清单顺序。 */
   const rows = useMemo(() => {
-    const out: { gi: number; ii: number; item: string; group: string; r: ReceiptRecord; isLatest: boolean }[] = [];
-    pkg.checklist.forEach((g, gi) => g.items.forEach((it, ii) => {
+    const out: { id: string; item: string; group: string; r: ReceiptRecord; isLatest: boolean }[] = [];
+    (p.checklist || []).forEach((g) => g.items.forEach((it) => {
+      if (!inScope(it, scope)) return;
       (it.receipts || []).forEach((r, k) => {
-        out.push({ gi, ii, item: lang === 'zh' ? it.zh : (it.en || it.zh), group: lang === 'zh' ? g.group : (g.groupEn || g.group), r, isLatest: k === 0 });
+        out.push({ id: it.id || '', item: lang === 'zh' ? it.zh : (it.en || it.zh), group: lang === 'zh' ? g.group : (g.groupEn || g.group), r, isLatest: k === 0 });
       });
     }));
     return out.sort((a, b) => (b.r.date || '').localeCompare(a.r.date || '') || (b.r.at || 0) - (a.r.at || 0));
-  }, [pkg, lang]);
+  }, [p.checklist, scope, lang]);
 
   const shown = rows.filter((x) => {
     if (st && x.r.status !== st) return false;
@@ -252,7 +253,7 @@ export function ReceivingLog({ p, pkgIdx, canEd, onOpenItem }: {
                     {x.isLatest && <span className="badge" style={{ background: 'var(--navy900)', color: '#fff', marginLeft: 6 }}>Latest</span>}
                   </td>
                   <td style={cell}>
-                    <button style={{ color: 'var(--info)', textAlign: 'left' }} onClick={() => onOpenItem(x.gi, x.ii)}
+                    <button style={{ color: 'var(--info)', textAlign: 'left' }} onClick={() => onOpenItem(x.id)}
                       title={t('回清单页看这一项的全部记录', 'Open this item’s history in the checklist')}>{x.item}</button>
                     <span style={{ display: 'block', fontSize: 11, color: 'var(--text2)' }}>{x.group}</span>
                   </td>

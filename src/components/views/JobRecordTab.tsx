@@ -362,10 +362,14 @@ function RecordCard({ p, pk, pkgIdx, def: baseDef, canEd, register }: {
           <button className="btn-line sm danger" title={t('删除这份业务', 'Remove this service')}
             onClick={async () => {
               const name = svcName(pk.svc, lang) + (pkgSuffix(p, pkgIdx) ? ' ' + pkgSuffix(p, pkgIdx) : '');
-              const sched = pk.schedule.length, items = pk.checklist.reduce((n, g) => n + g.items.length, 0);
+              const sched = pk.schedule.length;
+              /* REQ-044: 信息清单是项目共用的 —— 删业务只去掉这个服务的标签;只属于它的项
+                 移到「已移除的项」(可恢复),和别的服务共用的项留着 */
+              const sameLeft = p.packages.some((x, i) => i !== pkgIdx && x.svc === pk.svc);
+              const own = sameLeft ? 0 : (p.checklist || []).reduce((n, g) => n + g.items.filter((it) => (it.svcs || []).length === 1 && it.svcs![0] === pk.svc).length, 0);
               if (!confirm(t(
-                `删除业务「${name}」?\n它的 ${sched} 个排期阶段、${items} 个信息项和这张资料卡会一起删掉,不能撤销。`,
-                `Remove "${name}"? Its ${sched} schedule phases, ${items} checklist items and this record card go with it. This cannot be undone.`))) return;
+                `删除业务「${name}」?\n它的 ${sched} 个排期阶段和这张资料卡会一起删掉,不能撤销。\n信息清单里只属于它的 ${own} 项移到「已移除的项」(可恢复),共用的项保留。`,
+                `Remove "${name}"? Its ${sched} schedule phases and this record card go with it. This cannot be undone.\nIts ${own} checklist-only items move to “Removed” (restorable); shared items stay.`))) return;
               await dispatch(p.id, { type: 'removeServicePackage', pkg: pkgIdx });
             }}>✕ {t('删除业务', 'Remove')}</button>
         )}

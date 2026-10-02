@@ -1,8 +1,9 @@
 /* ===== Isomorphic domain logic (used by both server and client) ===== */
 
-import { GENERIC, TPL, diffPoints, STAGES, stageIdx, type Template } from './templates';
+import { GENERIC, TPL, diffPoints, STAGES, stageIdx, svcName, type Template } from './templates';
 import { rulePoints, type PointRules } from './points';
 import { seedReceipt } from './receipts';
+import { mergeChecklists, migrateProjectChecklist, type ProjectMigration } from './checklistMerge';
 import { canSeeProject } from './permissions';
 import type {
   ChecklistGroup,
@@ -90,9 +91,16 @@ export const projLabel = (p: { serial?: number; name: string }): string => {
   return c ? `${c} · ${p.name}` : p.name;
 };
 
+/* REQ-044: 合并报告 / 来源标注里服务的叫法(「CGI 静帧 · 户外 LED」) */
+export const clTagOf = (svc: string, label?: string) => svcName(svc, 'zh') + (label ? ` · ${label}` : '');
+
 export function newProject(o: NewProjectInput, tplLookup?: (svc: string) => Template): Project {
   const services = o.services && o.services.length ? o.services : ['others'];
   const difficulty = (o.difficulty || 'medium') as Project['difficulty'];
+  const packages = services.map((svc) => buildPackage(svc, o.start || '', tplLookup ? tplLookup(svc) : undefined));
+  /* REQ-044: 各服务模板的清单并成一张(同名 / 同义项只出现一次,挂上所有用到它的服务) */
+  const merged = mergeChecklists(packages, { tagOf: clTagOf });
+  packages.forEach((pk) => { delete pk.checklist; });
   return {
     id: uid(),
     name: o.name,
@@ -133,7 +141,8 @@ export function newProject(o: NewProjectInput, tplLookup?: (svc: string) => Temp
       ...(o.companies || []).map((c) => ({ role: c.role || '', company: c.company || '', person: c.person || '', phone: c.phone || '', email: c.email || '' })),
     ].filter((c) => c.company || c.person || c.phone || c.email),
     log: [],
-    packages: services.map((svc) => buildPackage(svc, o.start || '', tplLookup ? tplLookup(svc) : undefined)),
+    packages,
+    checklist: merged.checklist,
   };
 }
 
@@ -176,7 +185,26 @@ export function newId(): string {
   return 'i' + Date.now().toString(36) + _idc.toString(36) + Math.random().toString(36).slice(2, 6);
 }
 
-export function migrate(p: any): Project {
+function normalizeClItem(it: any) {
+  if (!it.id) it.id = newId();
+  if (it.owner === undefined) it.owner = '';
+  /* fold a legacy single shot into the shots[] array */
+  if (!Array.isArray(it.shots)) it.shots = it.shot ? [it.shot] : [];
+  if (it.shot) delete it.shot;
+  /* REQ-042: 老数据里那一条收料信息搬成 receipts 的第一条(Latest)。
+     真收到过东西才生成 —— 空项凭空多一条什么都没有的记录更难看。 */
+  /* 空数组也要再看一眼 —— 项目是「先建(那时什么都没收到,种子为空)、
+     后填收到内容」的,如果只判 undefined,这些项就永远补不上第一条。 */
+  if (!Array.isArray(it.receipts)) it.receipts = [];
+  if (it.receipts.length === 0) {
+    const seed = seedReceipt(it as ChecklistItem);
+    if (seed) it.receipts = [seed];
+  }
+}
+
+/* onChecklistMigrated:REQ-044 把老结构(每个服务包一份清单)合成项目一张时回调,
+   上线迁移用它收集报告。读项目时也会顺手合(兜底),不传就不报告。 */
+export function migrate(p: any, opts: { onChecklistMigrated?: (m: ProjectMigration) => void } = {}): Project {
   if (!p.packages) {
     p.packages = [{ svc: (p.services && p.services[0]) || 'others', schedule: p.schedule || [], checklist: p.checklist || [] }];
   }
@@ -190,22 +218,22 @@ export function migrate(p: any): Project {
       if (r.assignee === undefined) r.assignee = '';
       if (!r.id) r.id = newId();
     });
-    (pk.checklist || []).forEach((g: any) => (g.items || []).forEach((it: any) => {
-      if (!it.id) it.id = newId();
-      if (it.owner === undefined) it.owner = '';
-      /* fold a legacy single shot into the shots[] array */
-      if (!Array.isArray(it.shots)) it.shots = it.shot ? [it.shot] : [];
-      if (it.shot) delete it.shot;
-      /* REQ-042: 老数据里那一条收料信息搬成 receipts 的第一条(Latest)。
-         真收到过东西才生成 —— 空项凭空多一条什么都没有的记录更难看。 */
-      /* 空数组也要再看一眼 —— 项目是「先建(那时什么都没收到,种子为空)、
-         后填收到内容」的,如果只判 undefined,这些项就永远补不上第一条。 */
-      if (!Array.isArray(it.receipts)) it.receipts = [];
-      if (it.receipts.length === 0) {
-        const seed = seedReceipt(it as ChecklistItem);
-        if (seed) it.receipts = [seed];
-      }
-    }));
+    (pk.checklist || []).forEach((g: any) => (g.items || []).forEach(normalizeClItem));
+  });
+  /* REQ-044: 一个项目一张清单。老数据(清单还挂在服务包上)在这里合成一张,原样备份进
+     checklistLegacy。上线时服务端会先整体跑一遍并写报告,这里只是兜底。 */
+  if (!Array.isArray(p.checklist)) {
+    const m = migrateProjectChecklist(p, { tagOf: clTagOf });
+    if (m && opts.onChecklistMigrated) opts.onChecklistMigrated(m);
+  }
+  const svcsNow: string[] = [];
+  p.packages.forEach((pk: any) => { if (!svcsNow.includes(pk.svc)) svcsNow.push(pk.svc); });
+  (p.checklist || []).forEach((g: any) => {
+    if (!Array.isArray(g.items)) g.items = [];
+    g.items.forEach((it: any) => {
+      normalizeClItem(it);
+      if (!Array.isArray(it.svcs)) it.svcs = [...svcsNow];   // 没标服务的(手工导入等)算全部服务都要
+    });
   });
   if (!p.update) p.update = {};
   (['done', 'nextNodes', 'risks', 'needDirector', 'clientPending', 'budget'] as const).forEach((f) => {
@@ -411,14 +439,10 @@ export function schedProgress(p: Project) {
   p.packages.forEach((pk) => { const pr = pkgProgress(pk); done += pr.done; total += pr.total; });
   return { done, total, pct: total ? Math.round((done / total) * 100) : 0 };
 }
-export function pkgInfo(pkg: ServicePackage) {
-  let c = 0, t = 0;
-  pkg.checklist.forEach((g) => g.items.forEach((i) => { if (i.status === 'na') return; t++; if (i.status === 'confirmed') c++; }));
-  return { done: c, total: t, pct: t ? Math.round((c / t) * 100) : 0 };
-}
+/* REQ-044: 整张清单算一次 —— 共用项以前在每个服务包里各算一遍 */
 export function infoProgress(p: Project) {
   let c = 0, t = 0;
-  p.packages.forEach((pk) => { const ip = pkgInfo(pk); c += ip.done; t += ip.total; });
+  (p.checklist || []).forEach((g) => g.items.forEach((i) => { if (i.status === 'na') return; t++; if (i.status === 'confirmed') c++; }));
   return { done: c, total: t, pct: t ? Math.round((c / t) * 100) : 0 };
 }
 

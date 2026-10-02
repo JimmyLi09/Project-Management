@@ -10,6 +10,9 @@ import { getBuiltinTemplate, SVC, type Template } from '@/lib/templates';
 import { stagesFromTemplate } from '@/lib/calendarStages';
 import { isLegacyCgiStages, type LocalDate } from '@/features/schedule-planner/domain/schedule';
 import { distributeByWeights, layoutFromStart } from '@/features/schedule-planner/domain/duration';
+import {
+  ALL, clGroups, dropSvc, findClItem, inScope, instOf, mergeIntoProject, moveToRemoved, projectSvcs, replaceSection, restoreRemoved,
+} from '@/lib/sharedChecklist';
 import type { CalendarSchedule, CalendarStage, ChecklistStatus, Project, ReceiptRecord, ScheduleStatus } from '@/lib/types';
 import { cleanReceipt, sortReceipts, syncFromLatest, syncToLatest } from '@/lib/receipts';
 import { applyProjField, projSourceOf } from '@/lib/records';
@@ -33,27 +36,30 @@ export type ProjectAction =
   | { type: 'reorderRow'; pkg: number; from: number; to: number }
   | { type: 'setSchedStyle'; value: 'classic' | 'weeks' | 'dates' }
   | { type: 'addSpecialRow'; pkg: number; kind: 'milestone' | 'holiday'; text: string; date: string }
-  | { type: 'setClStatus'; pkg: number; gi: number; ii: number; value: ChecklistStatus }
-  | { type: 'editCl'; pkg: number; gi: number; ii: number; field: 'date' | 'remark' | 'zh' | 'en' | 'owner' | 'received'; value: string }
+  /* REQ-044: 信息清单在项目上(一张),项按 id 定位,分组按它在整张清单里的序号 */
+  | { type: 'setClStatus'; item: string; value: ChecklistStatus }
+  | { type: 'editCl'; item: string; field: 'date' | 'remark' | 'zh' | 'en' | 'owner' | 'received'; value: string }
   /* REQ-042: 收料记录(多条、不覆盖) */
-  | { type: 'addReceipt'; pkg: number; gi: number; ii: number; rec: Partial<ReceiptRecord> }
-  | { type: 'editReceipt'; pkg: number; gi: number; ii: number; id: string; rec: Partial<ReceiptRecord> }
-  | { type: 'removeReceipt'; pkg: number; gi: number; ii: number; id: string }
-  | { type: 'renameGroup'; pkg: number; gi: number; name: string; nameEn?: string }
+  | { type: 'addReceipt'; item: string; rec: Partial<ReceiptRecord> }
+  | { type: 'editReceipt'; item: string; id: string; rec: Partial<ReceiptRecord> }
+  | { type: 'removeReceipt'; item: string; id: string }
+  | { type: 'renameGroup'; gi: number; name: string; nameEn?: string }
   | { type: 'renameProject'; name: string }
   | { type: 'setQuotationNo'; value: string }
   | { type: 'setClient'; value: string }
-  | { type: 'removeGroup'; pkg: number; gi: number }
-  | { type: 'setNoCategories'; pkg: number; value: boolean }
-  | { type: 'toggleHighlight'; pkg: number; gi: number; ii: number }
-  | { type: 'addItem'; pkg: number; gi: number; items?: { zh: string; en: string }[] }
-  | { type: 'removeItem'; pkg: number; gi: number; ii: number }
-  | { type: 'moveItem'; pkg: number; gi: number; ii: number; dir: -1 | 1 }
-  | { type: 'reorderItem'; pkg: number; gi: number; from: number; to: number }
-  | { type: 'addGroup'; pkg: number; name: string }
-  | { type: 'resetChecklist'; pkg: number }
-  | { type: 'attachShot'; pkg: number; gi: number; ii: number; data: string }
-  | { type: 'removeShot'; pkg: number; gi: number; ii: number; shotIdx?: number }
+  | { type: 'removeGroup'; gi: number }
+  | { type: 'setNoCategories'; value: boolean }
+  | { type: 'toggleHighlight'; item: string }
+  | { type: 'addItem'; gi: number; items?: { zh: string; en: string }[]; svcs?: string[] }
+  | { type: 'removeItem'; item: string }
+  | { type: 'moveItem'; item: string; dir: -1 | 1; scope?: string }
+  | { type: 'reorderItem'; item: string; to: string }
+  | { type: 'addGroup'; name: string; svcs?: string[] }
+  | { type: 'resetChecklist'; scope: string }
+  | { type: 'attachShot'; item: string; data: string }
+  | { type: 'removeShot'; item: string; shotIdx?: number }
+  | { type: 'setItemSvcs'; item: string; svcs: string[] }
+  | { type: 'restoreClItem'; item: string; scope?: string }
   | { type: 'setPkgField'; pkg: number; field: 'start' | 'delivery' | 'owner' | 'resourceLinks'; value: string }
   | { type: 'setPkgBuffer'; pkg: number; value: number }
   | { type: 'reversePkg'; pkg: number }
@@ -183,15 +189,26 @@ function getRow(p: Project, pkg: number, idx: number) {
   if (!r) throw new ValidationError('无效的排期行');
   return { pk, r };
 }
-function getItem(p: Project, pkg: number, gi: number, ii: number) {
-  const pk = p.packages[pkg];
-  if (!pk) throw new ValidationError('无效的服务包');
-  const g = pk.checklist[gi];
-  if (!g) throw new ValidationError('无效的清单栏目');
-  const it = g.items[ii];
-  if (!it) throw new ValidationError('无效的清单项');
-  return { pk, g, it };
+/* REQ-044: 清单项按 id 找(筛选之后序号会错位)。旧页面还发 pkg/gi/ii 的,提示刷新 */
+function getItem(p: Project, id: unknown) {
+  if (typeof id !== 'string' || !id) throw new ValidationError('信息清单已改为各业务共用一张,请刷新页面后再操作');
+  const hit = findClItem(p, id);
+  if (!hit) throw new ValidationError('找不到这个信息项(可能刚被别人移除),请刷新');
+  return hit;
 }
+function getGroup(p: Project, gi: unknown) {
+  const g = typeof gi === 'number' ? clGroups(p)[gi] : undefined;
+  if (!g) throw new ValidationError('无效的清单栏目');
+  return g;
+}
+/* 只收项目里有的服务;一个都不剩就报错 */
+function pickSvcs(p: Project, list: unknown, fallback: string[]): string[] {
+  const have = projectSvcs(p);
+  const out = Array.isArray(list) ? [...new Set(list.map(String))].filter((s) => have.includes(s)) : fallback;
+  if (!out.length) throw new ValidationError('至少选一个适用的服务');
+  return out;
+}
+const svcsText = (svcs: string[]) => svcs.map((s) => SVC[s]?.label || s).join('、');
 
 /* Mutates p in place. Throws PermissionError / ValidationError. */
 export function applyAction(u: Identity, p: Project, a: ProjectAction, ctx: ActionCtx = {}): void {
@@ -279,7 +296,7 @@ export function applyAction(u: Identity, p: Project, a: ProjectAction, ctx: Acti
     }
     case 'setClStatus': {
       if (!canEdit(u, p)) throw new PermissionError('无编辑权限');
-      const { it } = getItem(p, a.pkg, a.gi, a.ii);
+      const { it } = getItem(p, a.item);
       const was = it.status;
       it.status = a.value;
       syncToLatest(it, u.name);   // REQ-042: 行上改状态 = 改 Latest 那条
@@ -293,7 +310,7 @@ export function applyAction(u: Identity, p: Project, a: ProjectAction, ctx: Acti
        导出、KPI、进度统计读的都还是那几个字段,这样它们一行都不用改。 */
     case 'addReceipt': {
       if (!canEdit(u, p)) throw new PermissionError('无编辑权限');
-      const { it } = getItem(p, a.pkg, a.gi, a.ii);
+      const { it } = getItem(p, a.item);
       if (!Array.isArray(it.receipts)) it.receipts = [];
       if (it.receipts.length >= 60) throw new ValidationError('一个信息项最多 60 条收料记录');
       const fresh = cleanReceipt(a.rec || {}, u.name);
@@ -309,7 +326,7 @@ export function applyAction(u: Identity, p: Project, a: ProjectAction, ctx: Acti
     }
     case 'editReceipt': {
       if (!canEdit(u, p)) throw new PermissionError('无编辑权限');
-      const { it } = getItem(p, a.pkg, a.gi, a.ii);
+      const { it } = getItem(p, a.item);
       const list = it.receipts || [];
       const cur = list.find((r) => r.id === a.id);
       if (!cur) throw new ValidationError('找不到这条收料记录');
@@ -323,7 +340,7 @@ export function applyAction(u: Identity, p: Project, a: ProjectAction, ctx: Acti
     }
     case 'removeReceipt': {
       if (!canEdit(u, p)) throw new PermissionError('无编辑权限');
-      const { it } = getItem(p, a.pkg, a.gi, a.ii);
+      const { it } = getItem(p, a.item);
       const list = it.receipts || [];
       if (!list.some((r) => r.id === a.id)) throw new ValidationError('找不到这条收料记录');
       it.receipts = list.filter((r) => r.id !== a.id);
@@ -336,7 +353,7 @@ export function applyAction(u: Identity, p: Project, a: ProjectAction, ctx: Acti
     }
     case 'editCl': {
       if (!canEdit(u, p)) throw new PermissionError('无编辑权限');
-      const { it } = getItem(p, a.pkg, a.gi, a.ii);
+      const { it } = getItem(p, a.item);
       const was = (it as any)[a.field];
       (it as any)[a.field] = a.value;
       /* REQ-013: filling in "received content / file name" auto-advances the
@@ -391,9 +408,7 @@ export function applyAction(u: Identity, p: Project, a: ProjectAction, ctx: Acti
     case 'renameGroup': {
       // REQ-014: rename a checklist category
       if (!canEdit(u, p)) throw new PermissionError('无编辑权限');
-      const pk = p.packages[a.pkg];
-      if (!pk || !pk.checklist[a.gi]) throw new ValidationError('无效的分类');
-      const g = pk.checklist[a.gi];
+      const g = getGroup(p, a.gi);
       const name = String(a.name || '').slice(0, 120).trim();
       if (!name) throw new ValidationError('分类名不能为空');
       const old = g.group;
@@ -403,98 +418,122 @@ export function applyAction(u: Identity, p: Project, a: ProjectAction, ctx: Acti
       break;
     }
     case 'removeGroup': {
-      // REQ-014: delete a checklist category (with its items)
+      /* REQ-014: delete a checklist category. REQ-044: 分类里的项先进「已移除的项」(可恢复),
+         整张清单各业务共用,不能一点就把别的业务也要的资料删没 */
       if (!canEdit(u, p)) throw new PermissionError('无编辑权限');
-      const pk = p.packages[a.pkg];
-      if (!pk || !pk.checklist[a.gi]) throw new ValidationError('无效的分类');
-      const [g] = pk.checklist.splice(a.gi, 1);
+      const g = getGroup(p, a.gi);
+      const gi = clGroups(p).indexOf(g);
+      for (let ii = g.items.length - 1; ii >= 0; ii--) moveToRemoved(p, gi, ii, u.name, 'group');
+      p.checklist = clGroups(p).filter((x) => x !== g);
       logIt(p, u.name, 'cl.removeGroup', { group: g.group });
       break;
     }
     case 'setNoCategories': {
-      // REQ-014: flat mode — no fixed categories for this package
+      // REQ-014: flat mode — no fixed categories. REQ-044: 项目级开关
       if (!canEdit(u, p)) throw new PermissionError('无编辑权限');
-      const pk = p.packages[a.pkg];
-      if (!pk) throw new ValidationError('无效的服务包');
-      pk.noCategories = !!a.value;
-      logIt(p, u.name, pk.noCategories ? 'cl.flat' : 'cl.grouped');
+      p.noCategories = !!a.value;
+      logIt(p, u.name, p.noCategories ? 'cl.flat' : 'cl.grouped');
       break;
     }
     case 'toggleHighlight': {
       if (!canEdit(u, p)) throw new PermissionError('无编辑权限');
-      const { it } = getItem(p, a.pkg, a.gi, a.ii);
+      const { it } = getItem(p, a.item);
       it.highlight = !it.highlight;
       it.updatedAt = Date.now();
       break;
     }
     case 'addItem': {
       if (!canEdit(u, p)) throw new PermissionError('无编辑权限');
-      const pk = p.packages[a.pkg];
-      const g = pk?.checklist[a.gi];
-      if (!g) throw new ValidationError('无效的清单栏目');
+      const g = getGroup(p, a.gi);
+      /* REQ-044: 新项挂哪些服务 —— 界面默认 = 当前标签;「全部」下默认全部服务 */
+      const svcs = pickSvcs(p, a.svcs, projectSvcs(p));
       /* B3: add one or more preset items chosen from the default library,
          or a single blank item when none are supplied */
       const toAdd = (a.items && a.items.length ? a.items : [{ zh: '新信息项', en: 'New item' }])
         .map((x) => ({ zh: String(x.zh || '').slice(0, 200), en: String(x.en || '').slice(0, 200) }))
         .filter((x) => x.zh || x.en);
       if (!toAdd.length) toAdd.push({ zh: '新信息项', en: 'New item' });
-      for (const x of toAdd) g.items.push({ id: newId(), zh: x.zh, en: x.en, status: 'pending', date: '', remark: '', owner: '', shots: [] });
+      for (const x of toAdd) g.items.push({ id: newId(), zh: x.zh, en: x.en, status: 'pending', date: '', remark: '', owner: '', shots: [], receipts: [], svcs: [...svcs] });
       break;
     }
     case 'removeItem': {
+      /* REQ-044: 不直接删,进「已移除的项」—— 这一项可能别的业务也在用 */
       if (!canEdit(u, p)) throw new PermissionError('无编辑权限');
-      const { g } = getItem(p, a.pkg, a.gi, a.ii);
-      g.items.splice(a.ii, 1);
+      const { gi, ii, it } = getItem(p, a.item);
+      moveToRemoved(p, gi, ii, u.name, 'item');
+      logIt(p, u.name, 'cl.removeItem', { item: it.zh });
       break;
     }
     case 'moveItem': {
+      /* 和筛选后看到的上 / 下一项换位置(中间被筛掉的不动) */
       if (!canEdit(u, p)) throw new PermissionError('无编辑权限');
-      const { g } = getItem(p, a.pkg, a.gi, a.ii);
-      const j = a.ii + (a.dir === 1 ? 1 : -1);
+      const { g, ii } = getItem(p, a.item);
+      const scope = String(a.scope || ALL);
+      const step = a.dir === 1 ? 1 : -1;
+      let j = ii + step;
+      while (j >= 0 && j < g.items.length && !inScope(g.items[j], scope)) j += step;
       if (j < 0 || j >= g.items.length) break; // at an edge, no-op
-      [g.items[a.ii], g.items[j]] = [g.items[j], g.items[a.ii]];
+      [g.items[ii], g.items[j]] = [g.items[j], g.items[ii]];
       break;
     }
     case 'reorderItem': {
       /* REQ-012: drag-to-reorder checklist items inside a category. The array
          order IS the persisted order (same as the schedule), so there's no
-         second `order` field to drift out of sync. */
+         second `order` field to drift out of sync. REQ-044: 按 id 指定拖哪一项、放到哪一项的位置 */
       if (!canEdit(u, p)) throw new PermissionError('无编辑权限');
-      const pk = p.packages[a.pkg];
-      const g = pk && pk.checklist[a.gi];
-      if (!g) throw new ValidationError('无效的分类');
-      const n = g.items.length;
-      if (a.from < 0 || a.from >= n || a.to < 0 || a.to >= n || a.from === a.to) break;
-      const [moved] = g.items.splice(a.from, 1);
-      g.items.splice(a.to, 0, moved);
+      const from = getItem(p, a.item), to = getItem(p, a.to);
+      if (from.g !== to.g || from.ii === to.ii) break;
+      const [moved] = from.g.items.splice(from.ii, 1);
+      from.g.items.splice(to.ii, 0, moved);
       break;
     }
     case 'addGroup': {
       if (!canEdit(u, p)) throw new PermissionError('无编辑权限');
-      const pk = p.packages[a.pkg];
-      if (!pk) throw new ValidationError('无效的服务包');
-      pk.checklist.push({
-        group: a.name || '特殊需求', groupEn: 'Custom', color: '#607080',
-        items: [{ id: newId(), zh: '新信息项', en: 'New item', status: 'pending', date: '', remark: '', owner: '', shots: [] }],
+      const svcs = pickSvcs(p, a.svcs, projectSvcs(p));
+      if (!p.checklist) p.checklist = [];
+      p.checklist.push({
+        group: String(a.name || '').slice(0, 120).trim() || '特殊需求', groupEn: 'Custom', color: '#607080',
+        items: [{ id: newId(), zh: '新信息项', en: 'New item', status: 'pending', date: '', remark: '', owner: '', shots: [], receipts: [], svcs }],
       });
       break;
     }
     case 'resetChecklist': {
+      /* 用默认模板恢复 —— REQ-044: 作用于当前标签对应的服务(「全部」= 整张清单)。
+         被换掉的项进「已移除的项」(可恢复);同名的共用项保留内容,只是重新挂上标签 */
       if (!canEdit(u, p)) throw new PermissionError('无编辑权限');
-      const pk = p.packages[a.pkg];
-      if (!pk) throw new ValidationError('无效的服务包');
-      /* rebuild this package's checklist from the effective template for its
-         service, discarding edits — status/dates/remarks are reset too */
-      const fresh = buildPackage(pk.svc, pk.start, tplForSvc?.(pk.svc));
-      pk.checklist = fresh.checklist;
-      logIt(p, u.name, 'cl.reset');
+      const scope = String(a.scope || ALL);
+      const svcs = scope === ALL ? projectSvcs(p) : pickSvcs(p, [scope], []);
+      const tplGroups = svcs.map((svc) => ({ svc, groups: buildPackage(svc, '', tplForSvc?.(svc)).checklist || [] }));
+      if (scope === ALL) {
+        replaceSection(p, ALL, [], () => [], { by: u.name, reason: 'reset' });
+        tplGroups.forEach(({ svc, groups }) => mergeIntoProject(p, groups, () => [svc]));
+      } else {
+        replaceSection(p, scope, tplGroups[0].groups, () => [scope], { by: u.name, reason: 'reset' });
+      }
+      logIt(p, u.name, 'cl.resetScope', { scope: scope === ALL ? '全部' : svcsText([scope]) });
+      break;
+    }
+    case 'setItemSvcs': {
+      if (!canEdit(u, p)) throw new PermissionError('无编辑权限');
+      const { it } = getItem(p, a.item);
+      it.svcs = pickSvcs(p, a.svcs, []);
+      it.updatedAt = Date.now();
+      logIt(p, u.name, 'cl.svcs', { item: it.zh, svcs: svcsText(it.svcs) });
+      break;
+    }
+    case 'restoreClItem': {
+      if (!canEdit(u, p)) throw new PermissionError('无编辑权限');
+      const idx = (p.checklistRemoved || []).findIndex((r) => r.item.id === a.item);
+      const it = idx >= 0 ? restoreRemoved(p, idx, String(a.scope || ALL)) : null;
+      if (!it) throw new ValidationError('找不到这一项(可能已经恢复过了)');
+      logIt(p, u.name, 'cl.restore', { item: it.zh });
       break;
     }
     case 'attachShot': {
       if (!canEdit(u, p)) throw new PermissionError('无编辑权限');
       if (!/^data:image\/(jpeg|png|webp);base64,/.test(a.data)) throw new ValidationError('无效的图片数据');
       if (a.data.length > 800_000) throw new ValidationError('图片过大,请压缩后上传');
-      const { it } = getItem(p, a.pkg, a.gi, a.ii);
+      const { it } = getItem(p, a.item);
       if (!Array.isArray(it.shots)) it.shots = it.shot ? [it.shot] : [];
       if (it.shots.length >= 8) throw new ValidationError('每项最多 8 张图片');
       it.shots.push(a.data);
@@ -507,7 +546,7 @@ export function applyAction(u: Identity, p: Project, a: ProjectAction, ctx: Acti
     }
     case 'removeShot': {
       if (!canEdit(u, p)) throw new PermissionError('无编辑权限');
-      const { it } = getItem(p, a.pkg, a.gi, a.ii);
+      const { it } = getItem(p, a.item);
       if (!Array.isArray(it.shots)) it.shots = it.shot ? [it.shot] : [];
       if (typeof a.shotIdx === 'number' && a.shotIdx >= 0 && a.shotIdx < it.shots.length) it.shots.splice(a.shotIdx, 1);
       else it.shots = []; // no index → clear all (back-compat)
@@ -1065,13 +1104,21 @@ export function applyAction(u: Identity, p: Project, a: ProjectAction, ctx: Acti
       let pk = a.asNew ? undefined : p.packages.find((x) => x.svc === svc);
       if (!pk) {
         if (p.packages.length >= 24) throw new ValidationError('一个项目最多 24 份业务');
-        pk = { svc, start: '', delivery: '', buffer: 0, owner: '', status: 'active', schedule: [], checklist: [] };
+        pk = { svc, start: '', delivery: '', buffer: 0, owner: '', status: 'active', schedule: [] };
         const label = String(a.label || '').slice(0, 40).trim();
         if (label) pk.label = label;
         /* 新实例带上该业务的默认排期与信息清单,和建项目时一致 */
         const tpl = tplForSvc?.(svc);
-        if (tpl) { const built = buildPackage(svc, '', tpl); pk.schedule = built.schedule; pk.checklist = built.checklist; }
         p.packages.push(pk);
+        if (tpl) {
+          const built = buildPackage(svc, '', tpl);
+          pk.schedule = built.schedule;
+          /* REQ-044: 模板清单并进项目的共用清单 —— 同名项不重复,只多一个服务标签。
+             同一种服务的第二份起,只属于它的项单独一条(名字后加实例名) */
+          const inst = instOf(p, p.packages.length - 1);
+          const r = mergeIntoProject(p, built.checklist || [], () => [svc], { inst: inst || undefined });
+          logIt(p, u.name, 'cl.pkgMerge', { svc: svcsText([svc]) + (inst ? ' · ' + inst : ''), added: r.added, tagged: r.tagged });
+        }
         if (!Array.isArray(p.services)) p.services = [];
         if (!p.services.includes(svc)) p.services.push(svc);   // services 是类型清单,仍然去重
       }
@@ -1093,7 +1140,11 @@ export function applyAction(u: Identity, p: Project, a: ProjectAction, ctx: Acti
       const pk = p.packages[a.pkg];
       if (!pk) throw new ValidationError('无效的服务包');
       if (p.packages.length <= 1) throw new ValidationError('至少要保留一份业务');
+      const inst = instOf(p, a.pkg);
       p.packages.splice(a.pkg, 1);
+      /* REQ-044: 只去掉这个服务标签;不再属于任何服务的项进「已移除的项」(可恢复),不直接删 */
+      const moved = dropSvc(p, pk.svc, { by: u.name, reason: `svc:${pk.svc}`, keepSvc: p.packages.some((x) => x.svc === pk.svc), inst: inst || undefined });
+      if (moved) logIt(p, u.name, 'cl.pkgDrop', { svc: svcsText([pk.svc]) + (inst ? ' · ' + inst : ''), moved });
       /* services 是类型清单:只有该类型一份不剩时才从清单里摘掉 */
       if (!p.packages.some((x) => x.svc === pk.svc)) {
         p.services = (p.services || []).filter((x) => x !== pk.svc);

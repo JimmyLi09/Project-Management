@@ -38,7 +38,7 @@ export function seedDemo(d: Database.Database) {
   p1.packages[0].schedule[1].status = 'done';
   p1.packages[0].schedule[2].status = 'wip';
   p1.packages[0].schedule[2].assignee = 'Kevin Lee';
-  p1.packages[0].checklist[0].items.forEach((it, i) => { if (i < 4) { it.status = 'confirmed'; it.date = iso(-15); } });
+  p1.checklist![0].items.forEach((it, i) => { if (i < 4) { it.status = 'confirmed'; it.date = iso(-15); } });
   p1.update.done = '完成建模与两轮角度草图';
   p1.update.nextNodes = '锁定角度,进入灯光材质';
   p1.update.needDirector = 'Confirm final angle set — for print production';

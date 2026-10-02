@@ -3,7 +3,7 @@ import { appendAudit, getProject, insertProject, nextProjectSerial } from '@/ser
 import { currentUser } from '@/server/session';
 import { canCreate, canSeeProject, identityOf } from '@/lib/permissions';
 import { emptyUpdate, migrate, uid } from '@/lib/project';
-import { trimPackage } from '@/server/fragments';
+import { freshChecklist, trimPackage } from '@/server/fragments';
 import type { Project } from '@/lib/types';
 import { logZh } from '@/lib/logmsg';
 
@@ -53,6 +53,11 @@ export async function POST(req: NextRequest) {
   copy.paymentRisk = { depositRequired: false, depositStatus: 'none', level: 'none', resolvedAt: 0 };
   copy.contacts = (src.contacts || []).map((c) => ({ ...c }));
   copy.packages = (src.packages || []).map((pk) => trimPackage(pk, mode));
+  /* REQ-044: 清单在项目上 —— 只带骨架(分类、信息项、服务标签),状态和内容清空;
+     迁移备份、已移除的项都不跟着走 */
+  copy.checklist = mode === 'schedule' ? [] : freshChecklist(src.checklist || []);
+  delete copy.checklistLegacy;
+  delete copy.checklistRemoved;
   if (mode !== 'entire') copy.schedStyle = src.schedStyle; // template style still travels
 
   const fresh = migrate(copy); // re-derive statuses / fill any defaults
