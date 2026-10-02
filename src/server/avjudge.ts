@@ -13,8 +13,8 @@ import os from 'os';
 import path from 'path';
 
 import {
-  defaultPitch, emptyReview, finalOf, gate, isCurved, itemOf, manualResult, pitchOptions, settle, similarCases, toConfirm,
-  type Engine, type Intent, type ItemKey, type JudgeResult, type JudgeReview, type PitchOption,
+  defaultPitch, emptyReview, finalOf, gate, isCurved, itemOf, manualResult, pitchOptions, progressOf, settle, similarCases, toConfirm,
+  type Engine, type Intent, type ItemKey, type JudgeProgress, type JudgeResult, type JudgeReview, type PitchOption,
 } from '@/av/core/imagejudge';
 import type { DrawingElement, DrawingExtra, IngestRecord, IngestResult } from '@/av/core/handoff';
 import { getRulePack, LATEST_LED_PACK } from '@/av/core/rulepack';
@@ -135,9 +135,19 @@ export async function readPage(id: number, page: number): Promise<{ data: Buffer
 /* ── running ── */
 
 function finish(id: number, o: Outcome, ms: number, by: string) {
+  /* AV-018:「重新识别 / 改读第 N 页」不清掉已经答的。用途、改过的值、「还缺什么」的回答、点间距都留着;
+     只有这次读到的值变了的那几项,原来的「已确认」作废(要人重新看一眼) */
+  const before = getRow(id);
+  const oldResult = before?.result ? JSON.parse(before.result) as JudgeResult : null;
+  const oldReview = before?.review ? JSON.parse(before.review) as JudgeReview : null;
+  const review = oldReview ? {
+    ...oldReview,
+    confirmed: Object.fromEntries(Object.entries(oldReview.confirmed).filter(([k]) =>
+      itemOf(o.result, k as ItemKey)?.value === (oldResult ? itemOf(oldResult, k as ItemKey)?.value : undefined))),
+  } : emptyReview();
   db().prepare(`UPDATE av_judge SET status = 'done', phase = '', engine = ?, model = ?, fallback = ?, detail = ?, result = ?,
     review = ?, ms = ? WHERE id = ?`)
-    .run(o.engine, o.model, o.fallback ?? '', o.detail, JSON.stringify(o.result), JSON.stringify(emptyReview()), ms, id);
+    .run(o.engine, o.model, o.fallback ?? '', o.detail, JSON.stringify(o.result), JSON.stringify(review), ms, id);
   const row = getRow(id);
   if (!row) return;   // 识别期间项目被删了:没有可写的地方,也别让队列断掉
   const w = itemOf(o.result, 'led_opening_w')?.value;
@@ -287,6 +297,7 @@ export interface JudgeView {
   pitchOptions: PitchOption[];
   suggestedPitch: number | null;
   gate: ReturnType<typeof gate> | null;
+  progress: JudgeProgress | null;     // AV-018:已答 x/y、还差哪几项
   mod: [number, number];              // module size 05 will tile with (snap suggestions)
   cases: { name: string; client: string | null; widthMm: number | null; heightMm: number | null; pitch: number | null; status: string; curved: boolean }[];
   drawingId: number;
@@ -296,12 +307,28 @@ export interface JudgeView {
   handedAt: number;
 }
 
-export interface JudgeSummary { id: number; fileName: string; status: string; engine: string; drawingId: number; createdBy: string; createdAt: number }
+export interface JudgeSummary {
+  id: number; fileName: string; status: string; engine: string; drawingId: number; createdBy: string; createdAt: number;
+  progress: JudgeProgress | null;   // AV-018:答到哪了(识别完、还没带入 05 的才有)
+}
 
-export function listJudges(projectId: string): JudgeSummary[] {
-  return (db().prepare('SELECT id, file_name, status, engine, drawing_id, created_by, created_at FROM av_judge WHERE project_id = ? ORDER BY created_at DESC, id DESC')
-    .all(projectId) as Pick<Row, 'id' | 'file_name' | 'status' | 'engine' | 'drawing_id' | 'created_by' | 'created_at'>[])
-    .map((r) => ({ id: r.id, fileName: r.file_name, status: r.status, engine: r.engine, drawingId: r.drawing_id, createdBy: r.created_by, createdAt: r.created_at }));
+export function listJudges(projectId: string, withProgress = false): JudgeSummary[] {
+  const rows = db().prepare('SELECT * FROM av_judge WHERE project_id = ? ORDER BY created_at DESC, id DESC').all(projectId) as Row[];
+  const lib = withProgress && rows.some((r) => r.status === 'done' && !r.drawing_id) ? listPriceItems('led') : [];
+  return rows.map((r) => ({ id: r.id, fileName: r.file_name, status: r.status, engine: r.engine, drawingId: r.drawing_id, createdBy: r.created_by, createdAt: r.created_at,
+    progress: withProgress && r.status === 'done' && !r.drawing_id && r.result ? progressFor(r, lib) : null }));
+}
+
+/* 进度只要点间距候选和闸门,不查历史案例(列表、步骤条每次都要算) */
+function progressFor(row: Row, lib: ReturnType<typeof listPriceItems>): JudgeProgress {
+  const result = JSON.parse(row.result!) as JudgeResult;
+  const review = row.review ? JSON.parse(row.review) as JudgeReview : emptyReview();
+  const drawn = finalOf(result, review, 'pitch_hint');
+  const view = settle(result, review).view;
+  const suggested = defaultPitch(pitchOptions(lib, result.env === 'outdoor' ? 'outdoor' : 'indoor', view), view, typeof drawn === 'number' ? drawn : null);
+  const pack = getRulePack(getInquiry(row.project_id)?.packs.led ?? LATEST_LED_PACK);
+  const prof = pack.profiles[result.env === 'outdoor' ? 'out_fixed' : 'in_fixed'];
+  return progressOf(result, review, suggested, [prof.modW, prof.modH]);
 }
 
 const CURVE = /curve|curved|arc|弧|曲/i;
@@ -309,9 +336,10 @@ const CURVE = /curve|curved|arc|弧|曲/i;
 /* The kernel's side of the screen: pitch candidates, the default, the gate and
    similar cases, all from the stored reading + review. */
 function derive(result: JudgeResult, review: JudgeReview, projectId: string) {
-  const options = pitchOptions(listPriceItems('led'), result.env === 'outdoor' ? 'outdoor' : 'indoor');
   const drawn = finalOf(result, review, 'pitch_hint');
   const view = settle(result, review).view;
+  /* AV-018:候选 = 价格库型号 ∪ 满足 LED-VD-01 的标准档位(价格库里没有的标「待报价」) */
+  const options = pitchOptions(listPriceItems('led'), result.env === 'outdoor' ? 'outdoor' : 'indoor', view);
   const suggested = defaultPitch(options, view, typeof drawn === 'number' ? drawn : null);
   const pack = getRulePack(getInquiry(projectId)?.packs.led ?? LATEST_LED_PACK);
   const prof = pack.profiles[result.env === 'outdoor' ? 'out_fixed' : 'in_fixed'];
@@ -338,6 +366,7 @@ export async function getJudgeView(id: number, admin: boolean): Promise<JudgeVie
     engine: row.engine as Engine | '', model: row.model, fallback: row.fallback as FallbackCode | '',
     ...(admin ? { detail: row.detail } : {}),
     ms: row.ms, result, review, pitchOptions: d?.options ?? [], suggestedPitch: d?.suggested ?? null, gate: d?.gate ?? null,
+    progress: result && d ? progressOf(result, review, d.suggested, d.mod) : null,
     mod: d?.mod ?? [320, 160], cases: d?.cases ?? [], drawingId: row.drawing_id, createdBy: row.created_by, createdAt: row.created_at,
     handedBy: row.handed_by, handedAt: row.handed_at,
   };
@@ -364,18 +393,28 @@ export function saveReview(id: number, input: Partial<JudgeReview>): JudgeReview
     next.intent = (input.intent ?? null) as Intent | null;
   }
   const confirmable = new Set<ItemKey>(toConfirm(result));
+  /* AV-018:按字段合并,不整体覆盖 —— 页面只发改动的那一项。连着快速改几处时,
+     后一次不会把前一次冲掉(原来每次发整份 answers / confirmed,后到的旧整份会盖掉新的) */
   if (input.confirmed) {
-    next.confirmed = {};
+    next.confirmed = { ...cur.confirmed };
     for (const [k, v] of Object.entries(input.confirmed)) {
       if (!confirmable.has(k as ItemKey)) throw new Error(`没有要确认的「${k}」`);
       if (v) next.confirmed[k as ItemKey] = true;
+      else delete next.confirmed[k as ItemKey];
     }
   }
+  /* 「改用模型读到的值」:去掉人改过的值 */
+  const reset = (input as { reset?: unknown }).reset;
+  if (Array.isArray(reset)) {
+    next.values = { ...(next.values ?? cur.values) };
+    for (const k of reset) delete next.values[String(k) as ItemKey];
+  }
   if (input.values) {
-    next.values = {};
+    next.values = { ...(next.values ?? cur.values) };
     for (const [k, v] of Object.entries(input.values)) {
       const it = itemOf(result, k as ItemKey);
-      if (!it) throw new Error(`没有「${k}」这一项`);
+      /* AV-018:模型没读到点间距时,「图上读到的点间距」也可以人手填 */
+      if (!it && k !== 'pitch_hint') throw new Error(`没有「${k}」这一项`);
       if (k === 'shape') { if (!SHAPES.has(String(v))) throw new Error('形状无效'); next.values.shape = String(v); continue; }
       if (k === 'mount') { if (!MOUNTS.has(String(v))) throw new Error('安装方式无效'); next.values.mount = String(v); continue; }
       if (k === 'ratio') continue;
@@ -386,27 +425,31 @@ export function saveReview(id: number, input: Partial<JudgeReview>): JudgeReview
     }
   }
   if (input.answers) {
-    next.answers = {};
+    next.answers = { ...cur.answers };
     for (const [k, v] of Object.entries(input.answers)) {
       if (!ANSWER_KEYS.has(k)) continue;
-      const sv = String(v ?? '').slice(0, 20);
+      const sv = String(v ?? '').trim().slice(0, 20);
       if (sv && ['rad', 'view', 'mountH', 'ctrl', 'pwr', 'size_w', 'size_h', 'snapW', 'snapH'].includes(k) && !(Number(sv) >= 0)) throw new Error('请填数字');
       if (sv) (next.answers as Record<string, string>)[k] = sv;
+      else delete (next.answers as Record<string, string>)[k];   // 清空 = 删掉这个回答
     }
   }
   if ('pitch' in input) {
-    if (input.pitch === null) next.pitch = null;
+    if (input.pitch === null) { next.pitch = null; next.pitchFrom = null; }
     else {
       const p = Number(input.pitch);
       const d = derive(result, next, row.project_id);
       const drawn = finalOf(result, next, 'pitch_hint');
-      const known = d.options.some((o) => Math.abs(o.pitch - p) < 1e-9) || (typeof drawn === 'number' && Math.abs(drawn - p) < 1e-9);
+      const fromCase = typeof input.pitchFrom === 'string' && input.pitchFrom
+        ? d.cases.find((c) => c.name === input.pitchFrom && c.pitch !== null && Math.abs(c.pitch - p) < 1e-9) : undefined;
+      const known = d.options.some((o) => Math.abs(o.pitch - p) < 1e-9) || (typeof drawn === 'number' && Math.abs(drawn - p) < 1e-9) || !!fromCase;
       if (!known) throw new Error('点间距须从候选里选');
       const view = d.settled.view;
       if (view !== null && p > view + 1e-9 && !(typeof drawn === 'number' && Math.abs(drawn - p) < 1e-9)) {
         throw new Error(`P${p} 不满足 LED-VD-01（最近观看距离 ${view} m）`);
       }
       next.pitch = p;
+      next.pitchFrom = fromCase ? fromCase.name : null;   // 点历史案例套用的:记下是哪一个
     }
   }
   db().prepare('UPDATE av_judge SET review = ? WHERE id = ?').run(JSON.stringify(next), id);
@@ -505,6 +548,19 @@ export async function handoff(id: number, by: string): Promise<number> {
   const p = { file: row.file_name, w: s.tileWidth ?? '', h: s.height ?? '', pitch: s.pitch ?? '', jchg: changed.join(';') };
   appendAudit(row.project_id, [{ at: Date.now(), by, text: logZh('av.judgeConfirm', p), k: 'av.judgeConfirm', p }]);
   return drawingId;
+}
+
+/* AV-018:删一份没带入 05 的图片判读(重复上传的那一份),连同它的留档和原件。PD / BD 才能删(路由里查),写日志 */
+export async function removeJudge(id: number, by: string): Promise<'ok' | 'missing' | 'handed' | 'busy'> {
+  const row = getRow(id);
+  if (!row) return 'missing';
+  if (row.drawing_id) return 'handed';
+  if (row.status === 'running' || Q.live.has(id)) return 'busy';
+  db().prepare('DELETE FROM av_judge WHERE id = ?').run(id);
+  await rm(imageDir(id), { recursive: true, force: true });
+  const p = { file: row.file_name };
+  appendAudit(row.project_id, [{ at: Date.now(), by, text: logZh('av.judgeDel', p), k: 'av.judgeDel', p }]);
+  return 'ok';
 }
 
 export async function deleteProjectJudges(projectId: string): Promise<void> {

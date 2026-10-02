@@ -31,7 +31,27 @@ export interface FlowGuard {
   save: () => Promise<boolean>;
 }
 
-const Ctx = createContext<{ setGuard: (g: FlowGuard | null) => void; refresh: () => void; flow: ProjectFlow | null } | null>(null);
+/* AV-018:02–04 当前这张图片能不能带入 05 —— 「下一步」= 带入 + 跳 05;还不能带入时先问 */
+export interface IngestGuard {
+  id: number;                       // 判读 id(换了一张图就是新的)
+  ready: boolean;
+  missing: [string, string][];      // 还差哪几项(中 / 英)
+  carry: () => Promise<boolean>;    // 带入 05 并跳过去
+}
+
+const Ctx = createContext<{ setGuard: (g: FlowGuard | null) => void; setIngest: (g: IngestGuard | null) => void; refresh: () => void; flow: ProjectFlow | null } | null>(null);
+
+export function useIngestGuard(g: IngestGuard | null) {
+  const c = useContext(Ctx);
+  const ref = useRef(g);
+  ref.current = g;
+  const key = g ? `${g.id}|${g.ready}|${g.missing.map((m) => m[0]).join(',')}` : '';
+  useEffect(() => {
+    if (!c) return;
+    c.setIngest(ref.current ? { ...ref.current, carry: () => ref.current!.carry() } : null);
+  }, [c, key]);
+  useEffect(() => () => c?.setIngest(null), [c]);
+}
 
 /* 05 的业务线页面调用:每次渲染把最新的状态交给外框 */
 export function useFlowGuard(g: FlowGuard | null) {
@@ -84,6 +104,8 @@ export default function AvFlow({ children }: { children: React.ReactNode }) {
   const step = stepOf(view)!;
   const [flow, setFlow] = useState<ProjectFlow | null>(null);
   const [guard, setGuard] = useState<FlowGuard | null>(null);
+  const [ingest, setIngest] = useState<IngestGuard | null>(null);
+  const [askIngest, setAskIngest] = useState(false);
   const [asking, setAsking] = useState(false);
   const [busy, setBusy] = useState(false);
   const [tick, setTick] = useState(0);
@@ -137,6 +159,14 @@ export default function AvFlow({ children }: { children: React.ReactNode }) {
       if (guard.blocked) { setToast(guard.blocked); return; }
       if (guard.dirty) { setAsking(true); return; }
     }
+    /* AV-018:02–04 的「下一步」和「带入 05 方案配置」是同一个动作 */
+    if (step === 's2' && ingest) {
+      if (!ingest.ready) { setAskIngest(true); return; }
+      setBusy(true);
+      const ok = await ingest.carry().catch(() => false);
+      setBusy(false);
+      if (ok) return;   // carry 自己会跳到 05
+    }
     if (locked(next.key)) { setToast(tt(status(next.key)!)); return; }
     setView(target(next.key));
   }
@@ -163,6 +193,10 @@ export default function AvFlow({ children }: { children: React.ReactNode }) {
         : t('还没有保存正式版本', 'No saved version yet');
       return t(`正式版本 v${guard.nextVersion - 1} 已保存`, `Version v${guard.nextVersion - 1} saved`);
     }
+    if (step === 's2' && ingest) {
+      return ingest.ready ? t('图片已答完：点「下一步」带入 05', 'Picture ready: Next carries it into 05')
+        : t(`图片还差 ${ingest.missing.length} 项：${ingest.missing.map((m) => m[0]).join('、')}`, `Picture: ${ingest.missing.length} left — ${ingest.missing.map((m) => m[1]).join(', ')}`);
+    }
     if (!next) return t('最后一步', 'Last step');
     const nx = status(next.key);
     if (nx?.state === 'lock') return tt(nx);
@@ -171,7 +205,7 @@ export default function AvFlow({ children }: { children: React.ReactNode }) {
   })();
 
   /* 必须 memo:useFlowGuard 的 effect 依赖它,每次渲染换一个新对象就会来回触发 */
-  const ctx = useMemo(() => ({ setGuard, refresh, flow }), [refresh, flow]);
+  const ctx = useMemo(() => ({ setGuard, setIngest, refresh, flow }), [refresh, flow]);
 
   return (
     <Ctx.Provider value={ctx}>
@@ -234,6 +268,22 @@ export default function AvFlow({ children }: { children: React.ReactNode }) {
           )}
         </div>
       </div>
+
+      {askIngest && ingest && (
+        <div className="overlay" onClick={(e) => { if (e.target === e.currentTarget) setAskIngest(false); }}>
+          <div className="modal" style={{ maxWidth: 440 }} data-testid="flow-ingest-modal">
+            <h2>{t(`图片还差 ${ingest.missing.length} 项没答`, `${ingest.missing.length} item(s) not answered yet`)}</h2>
+            <div className="msub">
+              {t(`还差：${ingest.missing.map((m) => m[0]).join('、')}。现在进 05 的话，这张图片不会带过去，05 会用默认值（或上次保存的方案）。`,
+                `Missing: ${ingest.missing.map((m) => m[1]).join(', ')}. If you go to 05 now this picture is not carried over; 05 uses defaults (or the last saved design).`)}
+            </div>
+            <div className="modal-actions">
+              <button className="btn-navy" onClick={() => setAskIngest(false)} data-testid="flow-ingest-back">{t('回去补', 'Go back and answer')}</button>
+              <button className="btn-line" onClick={() => { setAskIngest(false); setView(target('s5')); }} data-testid="flow-ingest-go">{t('先进 05', 'Go to 05 anyway')}</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {asking && guard && (
         <div className="overlay" onClick={(e) => { if (e.target === e.currentTarget && !busy) setAsking(false); }}>

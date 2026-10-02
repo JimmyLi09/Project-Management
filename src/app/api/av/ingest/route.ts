@@ -47,7 +47,10 @@ export async function POST(req: NextRequest) {
   if (scale !== null && !(scale > 0)) return NextResponse.json({ error: '比例尺须为正数，如 1:50 填 50' }, { status: 400 });
 
   /* AV-016 ①:先留档再解析 —— 解析失败原件也在,可以重新解析、下载 */
-  const uploadId = await archiveUpload(projectId, name, Buffer.from(await file.arrayBuffer()), user.name);
+  /* AV-018:同一项目里已经有这份文件 → 409 + 已有的那一份;页面问「要打开它吗？」,选「仍然再传一份」时带 force=1 */
+  const archived = await archiveUpload(projectId, name, Buffer.from(await file.arrayBuffer()), user.name, form?.get('force') === '1');
+  if (typeof archived !== 'number') return NextResponse.json({ error: '这份文件已经在列表里', duplicate: archived.duplicate }, { status: 409 });
+  const uploadId = archived;
   const out = await parseUpload(uploadId, scale, user.name, isFull(identityOf(user)));
   if (out.kind === 'judge') return NextResponse.json({ judge: out.judge, uploadId });
   if (out.kind === 'drawing') return NextResponse.json({ ...out.drawing, uploadId });

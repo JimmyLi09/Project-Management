@@ -48,6 +48,22 @@ const BRIEF: Record<string, string> = {
 };
 const st = (state: StepState, zh: string, en: string): StepStatus => ({ state, zh, en });
 
+/* AV-018:图片判读这一步写真实进度,不再笼统「还有 2 张图片待确认」 */
+function judgeStep(open: ReturnType<typeof listJudges>): StepStatus {
+  const busy = open.filter((j) => j.status !== 'done');
+  if (busy.length) return st('pending', `${busy.length} 张图片识别中`, `${busy.length} picture(s) being read`);
+  if (open.length > 1) {
+    const ready = open.filter((j) => j.progress?.ready).length;
+    return st('pending', ready ? `${open.length} 张图片待处理（${ready} 张可带入 05）` : `${open.length} 张图片待作答`,
+      ready ? `${open.length} pictures open (${ready} ready for 05)` : `${open.length} pictures to answer`);
+  }
+  const g = open[0].progress;
+  if (!g) return st('pending', '图片待确认', 'Picture to confirm');
+  if (g.ready) return st('pending', '图片可带入 05', 'Picture ready for 05');
+  return st('pending', `图片还差 ${g.missing.length} 项：${g.missing.map((m) => m[0]).join('、')}`,
+    `Picture: ${g.missing.length} left — ${g.missing.map((m) => m[1]).join(', ')}`);
+}
+
 /* null = 不是 AV 项目(没有 AV 业务线也没走过 01) */
 export function projectFlow(p: Project, me: Identity): ProjectFlow | null {
   const inquiry = getInquiry(p.id);
@@ -56,7 +72,7 @@ export function projectFlow(p: Project, me: Identity): ProjectFlow | null {
   const money = canViewPrices(me);
   const keys = lines.map((l) => l.line).filter((l) => COSTED.includes(l));
   const drawings = listDrawings(p.id);
-  const judges = listJudges(p.id);
+  const judges = listJudges(p.id, true);
   const quotes = listQuotes(p.id);
   const configs = new Map(keys.map((l) => [l, latestConfig(p.id, l)]));
   const sheets = new Map(keys.map((l) => [l, latestCostSheet(p.id, l)]));
@@ -109,7 +125,7 @@ export function projectFlow(p: Project, me: Identity): ProjectFlow | null {
       ? st('pending', `还有 ${pendingDrawings} 张待确认`, `${pendingDrawings} to confirm`)
       : reviewed > 0
         ? (loose ? st('done', `已完成（另有 ${loose} 份未用）`, `Done (${loose} unused)`) : st('done', '已完成', 'Done'))
-        : openJudges > 0 ? st('pending', `还有 ${openJudges} 张图片待确认`, `${openJudges} picture(s) to confirm`)
+        : openJudges > 0 ? judgeStep(judges.filter((j) => !j.drawingId))
           : failedUploads > 0 ? st('pending', `${failedUploads} 份解析失败，原件已留档`, `${failedUploads} failed to parse (kept)`)
             : st('todo', '待做 · 也可直接去 05 手填', 'To do · or fill in 05 by hand');
 

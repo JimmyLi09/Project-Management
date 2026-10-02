@@ -201,8 +201,11 @@ export const LOG_MSG: Record<string, [string, string]> = {
   'av.uploadFail': ['图纸已留档,解析失败:{file}({err})', 'Drawing archived, parsing failed: {file} ({err})'],
   /* AV-016:草稿自动保存(同一人同一页 10 分钟内合并成一条)、01 编辑自动保存、留档删除 / 改手填 */
   'av.draft': ['05 {svc} 方案草稿自动保存', '05 {svc} design draft saved automatically'],
+  /* AV-018:项目页新建 / 复制的 AV 项目没有立项记录,第一次用到时按服务包补建 */
+  'av.inquiryAuto': ['补建立项记录:{lines}', 'Inquiry record created: {lines}'],
   'av.inquiryEdit': ['01 立项信息自动保存:{fields}', '01 inquiry details saved automatically: {fields}'],
   'av.uploadDel': ['删除解析失败的留档:{file}', 'Failed upload removed: {file}'],
+  'av.judgeDel': ['删除图片判读(重复上传等):{file}', 'Picture reading deleted (duplicate upload etc.): {file}'],
   'av.uploadManual': ['解析失败的留档改为手填:{file}', 'Failed upload switched to manual entry: {file}'],
   /* 工作台 / 步骤条「最近更新」只要一句话:带金额、毛利的那几条换成不带数字的说法(谁都一样) */
   'av.costBrief': ['{line} 成本已确认', '{line} cost confirmed'],

@@ -7,7 +7,7 @@
    to the project as it happens (spec §10), and passing the gate locks the
    drawing. §1: this is the only quality gate; past it, everything is deterministic. */
 
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import {
   finalValue, isPending, REQUIRED_ELEMENTS, toHandoff,
@@ -21,7 +21,7 @@ import type { UploadSummary } from '@/server/avupload';
 import { useStore } from '../store';
 import { Icon } from '../ui';
 import ImageJudgePanel from './ImageJudgePanel';
-import { useFlowRefresh } from './AvFlow';
+import { useFlowRefresh, useIngestGuard } from './AvFlow';
 
 const ELEMENT_LABEL: Record<DrawingElement, [string, string]> = {
   led_opening_w: ['屏体开口宽', 'Opening width'],
@@ -140,22 +140,34 @@ export default function LedIngestView() {
 
   const updateJudge = useCallback((j: JudgeView) => {
     setJudge(j);
-    setJudges((cur) => cur.map((x) => (x.id === j.id ? { ...x, status: j.status, engine: j.engine, drawingId: j.drawingId } : x)));
+    setJudges((cur) => cur.map((x) => (x.id === j.id ? { ...x, status: j.status, engine: j.engine, drawingId: j.drawingId, progress: j.progress } : x)));
   }, []);
 
-  async function upload() {
-    if (!file || !project) return;
+  /* AV-018:同一文件再传时,服务器返回已有的那一份,这里问「要打开它吗？」 */
+  const [dup, setDup] = useState<{ info: { id: number; fileName: string; uploadedBy: string; uploadedAt: number; judgeId: number; drawingId: number }; file: File } | null>(null);
+  const fileInput = useRef<HTMLInputElement>(null);
+  async function upload(force = false) {
+    const f = force && dup ? dup.file : file;
+    if (!f || !project || busy) return;
     setBusy(true);
     setError('');
+    setDup(null);
     const form = new FormData();
     form.append('project', project.id);
-    form.append('file', file);
+    form.append('file', f);
+    if (force) form.append('force', '1');
     if (isPdf && scale.trim()) form.append('scale', scale.trim());
+    /* 上传一开始就清空文件框:同一个文件不会因为再点一次又传一份 */
+    setFile(null);
+    if (fileInput.current) fileInput.current.value = '';
     try {
       setDraft({});
-      const res = await call<StoredDrawing | { judge: JudgeView }>('/api/av/ingest', { method: 'POST', body: form });
-      if ('judge' in res) { setLedIngest(null); setJudge(res.judge); }
-      else { setJudge(null); setLedIngest(res); }
+      const res = await fetch('/api/av/ingest', { method: 'POST', body: form }).catch(() => null);
+      const body = res ? await res.json().catch(() => ({})) : { error: '网络错误' };
+      if (res?.status === 409 && body.duplicate) { setDup({ info: body.duplicate, file: f }); setBusy(false); return; }
+      if (!res?.ok || body.error) throw Object.assign(new Error(body.error || '请求失败'), { reason: body.reason as string | undefined, archived: !!body.archived });
+      if ('judge' in body) { setLedIngest(null); setJudge(body.judge); }
+      else { setJudge(null); setLedIngest(body as StoredDrawing); }
     } catch (e) {
       const r = (e as { reason?: string }).reason;
       setError(!(e as { archived?: boolean }).archived ? (e as Error).message
@@ -195,6 +207,24 @@ export default function LedIngestView() {
     setBusy(false);
   }
   const mayRemove = isFull(me);   // 删除留档只给 PD / BD
+
+  /* AV-018:步骤条「下一步」= 带入 05(打开着的那张图;没打开就是最近一张还没带入的) */
+  const openJudgeRow = judge && project && judge.projectId === project.id && judge.status === 'done' && !judge.drawingId
+    ? { id: judge.id, progress: judge.progress }
+    : judges.find((j) => j.status === 'done' && !j.drawingId && j.progress) ?? null;
+  useIngestGuard(openJudgeRow && project && mayReview && openJudgeRow.progress ? {
+    id: openJudgeRow.id, ready: openJudgeRow.progress.ready, missing: openJudgeRow.progress.missing,
+    carry: async () => {
+      try {
+        const res = await call<{ drawing: StoredDrawing; pack: string | null; judge: JudgeView }>(`/api/av/judge/${openJudgeRow.id}/handoff`, { method: 'POST' });
+        if (judge?.id === res.judge.id) updateJudge(res.judge);
+        refreshList();
+        setLedHandoff({ ...toHandoff(res.drawing, project.name, res.pack ?? undefined), projectId: res.drawing.project_id, drawingId: res.drawing.id });
+        go('ledstudio');
+        return true;
+      } catch (e) { setError((e as Error).message); return false; }
+    },
+  } : null);
   const failed = uploads.filter((u) => u.status === 'failed');
   /* 正在解析的也列出来(原来看不见,以为没传上) */
   const parsing = uploads.filter((u) => u.status === 'parsing');
@@ -335,15 +365,34 @@ export default function LedIngestView() {
                       <td style={td}><span style={{ ...chip, background: GRADE.C.bg, color: GRADE.C.fg }}>{t('图', 'Pic')}</span></td>
                       <td style={{ ...td, color: 'var(--text2)' }}>{j.createdBy} · {fmtDate(new Date(j.createdAt))}</td>
                       <td style={td}>
+                        {/* AV-018:真实进度,不再一律「待确认」 */}
+                        <span data-testid={`judge-status-${j.id}`}>
                         {j.drawingId
-                          ? <span style={{ color: 'var(--success)' }}>{t('已确认，已带入 05', 'Confirmed into 05')}</span>
+                          ? <span style={{ color: 'var(--success)' }}>{t('已带入 05 ✓', 'Carried into 05 ✓')}</span>
                           : j.status === 'running'
                             ? <span style={{ color: 'var(--navy700)' }}>{t('识别中…', 'Recognising…')}</span>
-                            : <span style={{ color: 'var(--warning)' }}>{j.engine === 'vision' ? t('待确认', 'To confirm') : t('待手填', 'To fill in')}</span>}
+                            : j.progress?.ready
+                              ? <span style={{ color: 'var(--success)' }}>{t('可带入 05', 'Ready for 05')}</span>
+                              : <span style={{ color: 'var(--warning)' }}>
+                                {j.engine === 'manual' ? t('待手填', 'To fill in') : t('待作答', 'To answer')}
+                                {j.progress ? t(` · 已答 ${j.progress.done}/${j.progress.total}`, ` · ${j.progress.done}/${j.progress.total} answered`) : ''}
+                              </span>}
+                        </span>
                       </td>
                       <td style={{ ...td, textAlign: 'right', whiteSpace: 'nowrap' }}>
                         {origLink(originalOf('judgeId', j.id))}
                         <button className="btn-line" onClick={() => openJudge(j.id)}>{j.drawingId ? t('查看', 'View') : t('打开', 'Open')}</button>
+                        {/* AV-018:重复上传的那一份由 PD / BD 删(不自动删) */}
+                        {mayRemove && !j.drawingId && j.status !== 'running' && (
+                          <button style={{ marginLeft: 8, fontSize: 12, color: 'var(--text2)', textDecoration: 'underline' }} disabled={busy} data-testid={`judge-remove-${j.id}`}
+                            onClick={async () => {
+                              if (!window.confirm(t(`删除「${j.fileName}」这份图片判读？原件和已填的答案会一起删掉，并记入操作日志。`, `Delete the picture "${j.fileName}" with its answers? This is written to the log.`))) return;
+                              const res = await fetch(`/api/av/judge/${j.id}`, { method: 'DELETE' }).catch(() => null);
+                              if (!res?.ok) setError((res && (await res.json().catch(() => ({}))).error) || t('删除失败', 'Delete failed'));
+                              if (judge?.id === j.id) setJudge(null);
+                              refreshList();
+                            }}>{t('删除', 'Delete')}</button>
+                        )}
                       </td>
                     </tr>
                   ))}
@@ -386,8 +435,8 @@ export default function LedIngestView() {
               <div style={{ display: 'flex', gap: 12, alignItems: 'flex-end', flexWrap: 'wrap' }}>
                 <div className="field" style={{ marginBottom: 0, flex: '1 1 320px' }}>
                   <label htmlFor="led-file">{t('图纸文件', 'Drawing file')}</label>
-                  <input id="led-file" type="file" accept=".dxf,.pdf,.png,.jpg,.jpeg,.webp,.bmp,.tif,.tiff"
-                    onChange={(e) => { setFile(e.target.files?.[0] ?? null); setError(''); }} />
+                  <input id="led-file" type="file" accept=".dxf,.pdf,.png,.jpg,.jpeg,.webp,.bmp,.tif,.tiff" ref={fileInput}
+                    onChange={(e) => { setFile(e.target.files?.[0] ?? null); setError(''); setDup(null); }} />
                 </div>
                 {isPdf && (
                   <div className="field" style={{ marginBottom: 0, width: 190 }}>
@@ -395,12 +444,28 @@ export default function LedIngestView() {
                     <input id="led-scale" type="number" min="1" placeholder="50" value={scale} onChange={(e) => setScale(e.target.value)} />
                   </div>
                 )}
-                <button className="btn-navy" disabled={!file || busy} onClick={upload} style={dim(!file || busy)}>
+                <button className="btn-navy" disabled={!file || busy} onClick={() => upload()} style={dim(!file || busy)} data-testid="upload-go">
                   {busy ? t('上传中…', 'Uploading…') : t('上传并解析', 'Upload & extract')}
                 </button>
               </div>
             ) : (
               <p style={{ fontSize: 13, color: 'var(--text2)' }}>{t('你不是该项目的负责人，不能为它上传图纸。', 'You cannot upload drawings for this project.')}</p>
+            )}
+            {dup && (
+              <div style={{ padding: '10px 12px', borderRadius: 8, background: 'var(--warning-bg, #FDF7F1)', fontSize: 13 }} data-testid="upload-dup">
+                {t(`这张图已经在列表里（${fmtDate(new Date(dup.info.uploadedAt)).slice(0, 6)} ${new Date(dup.info.uploadedAt).toTimeString().slice(0, 5)} · ${dup.info.uploadedBy}），要打开它吗？`,
+                  `This file is already in the list (${fmtDate(new Date(dup.info.uploadedAt)).slice(0, 6)} ${new Date(dup.info.uploadedAt).toTimeString().slice(0, 5)} · ${dup.info.uploadedBy}). Open it?`)}
+                <div style={{ display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
+                  {(dup.info.judgeId > 0 || dup.info.drawingId > 0) && (
+                    <button className="btn-navy" data-testid="upload-dup-open" onClick={() => {
+                      const d = dup.info; setDup(null);
+                      if (d.judgeId) openJudge(d.judgeId); else open(d.drawingId);
+                    }}>{t('打开它', 'Open it')}</button>
+                  )}
+                  <button className="btn-line" data-testid="upload-dup-force" onClick={() => upload(true)}>{t('仍然再传一份', 'Upload another copy')}</button>
+                  <button className="btn-line" onClick={() => setDup(null)}>{t('取消', 'Cancel')}</button>
+                </div>
+              </div>
             )}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(220px,1fr))', gap: 10 }}>
               {(['A', 'B', 'C'] as const).map((g) => (

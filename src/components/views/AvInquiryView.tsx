@@ -218,7 +218,7 @@ function EditInquiry({ project }: { project: Project }) {
           /* 没存上:基准退回去,下次改动连这几项一起再发;关页面时也会再试一次 */
           base.current = { ...(base.current ?? b0), ...Object.fromEntries(diff.map((k) => [k, b0[k]])) };
           pending.current = pending.current ?? body;
-          setSt({ saving: false, at: 0, error: r.error || t('没存上', 'Not saved') });
+          setSt({ saving: false, at: 0, error: r.error || t('没保存上，请重试', 'Not saved — please try again') });
         }
       });
     }, 1500);

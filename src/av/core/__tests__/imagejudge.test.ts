@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
 import {
-  annotationKey, arcFromRadius, arcFromRise, asks, C_GRADE_CAP, defaultPitch, emptyReview, ESTIMATE_CAP, gate, manualResult, normalise,
+  annotationKey, progressOf, STANDARD_PITCHES, arcFromRadius, arcFromRise, asks, C_GRADE_CAP, defaultPitch, emptyReview, ESTIMATE_CAP, gate, manualResult, normalise,
   ocrNumbers, parseLength, parsePitch, pitchOptions, settle, similarCases, snapOptions, toConfirm,
   type JudgeRaw, type JudgeReview, type PriceLike, type RawReading,
 } from '../imagejudge.ts';
@@ -142,13 +142,13 @@ const LIB: PriceLike[] = [
 
 test('点间距候选：只出 LED-VD-01 满足的型号，默认最省；图上写明的点间距优先', () => {
   const opts = pitchOptions(LIB, 'indoor');
-  assert.deepEqual(opts.map((o) => o.pitch), [1.25, 1.86, 2.5, 3], '全息 / 海报不算墙面候选');
+  assert.deepEqual(opts.filter((o) => o.items > 0).map((o) => o.pitch), [1.25, 1.86, 2.5, 3], '全息 / 海报不算墙面候选');
   assert.equal(opts.find((o) => o.pitch === 1.86)!.items, 2);
   assert.equal(defaultPitch(opts, 2.5, null), 2.5, '≤ 2.5 m 里最省的是 P2.5');
   assert.equal(defaultPitch(opts, 2, null), 1.86);
   assert.equal(defaultPitch(opts, null, null), null, '没有观看距离不给默认');
   assert.equal(defaultPitch(opts, 1.5, 1.86), 1.86, '以图为准（是否满足另行告警）');
-  assert.deepEqual(pitchOptions(LIB, 'outdoor'), [], '价格库里没有室外型号');
+  assert.ok(pitchOptions(LIB, 'outdoor').every((o) => o.items === 0), '价格库里没有室外型号:只有标准档位(待报价)');
 });
 
 test('类似案例：面积 ±50%，弧形优先', () => {
@@ -313,4 +313,42 @@ test('复查:看图判断不收引用标注的说法(各种引号)', () => {
   const r = normalise({ ...PHOTO, shape_source: '依据”宽度”标注判断', mount_source: '见『立面』' });
   assert.equal(r.items.find((i) => i.key === 'shape')!.source, '看图判断');
   assert.equal(r.items.find((i) => i.key === 'mount')!.source, '看图判断');
+});
+
+/* ── AV-018 ── */
+test('AV-018:价格库一个 LED 型号都没有,观看距离 3 m → 列出 P1.2–P3.0(待报价),默认 P3.0,能过闸门', () => {
+  const opts = pitchOptions([], 'indoor', 3);
+  assert.deepEqual(opts.map((o) => o.pitch), [1.2, 1.5, 1.8, 2.0, 2.5, 3.0]);
+  assert.ok(opts.every((o) => o.items === 0), '全是待报价');
+  assert.equal(defaultPitch(opts, 3, null), 3, '没价格时粗一点的当作省的');
+  assert.equal(pitchOptions([], 'indoor', null).length, STANDARD_PITCHES.length, '还没填观看距离:全列出来');
+  const r = normalise(PHOTO);
+  const rv: JudgeReview = { ...emptyReview(), intent: 'site', confirmed: Object.fromEntries(toConfirm(r).map((k) => [k, true])),
+    answers: { arc: 'arc', view: '3', maint: 'rear', snapW: '2560', snapH: '1920', ctrl: '50', pwr: '50' } };
+  const g = gate(r, rv, defaultPitch(pitchOptions([], 'indoor', 3), 3, null), [320, 160]);
+  assert.ok(!g.reasons.some((x) => /点间距/.test(x)), `不再卡在「请选一个点间距」 (${g.reasons.join('|')})`);
+});
+
+test('AV-018:价格库条目单位写 m² / sqm、分类写「LED」也认', () => {
+  const mk = (id: number, pitch: string, unit: string, category: string, categoryLabel: string): PriceLike =>
+    ({ id, category, categoryLabel, model: 'X', pitch, unit, costPrice: 1000, active: true });
+  const opts = pitchOptions([mk(1, 'P2.5', 'm²', 'LED', 'LED'), mk(2, 'P1.86', 'sqm', 'LED 显示屏', 'LED 显示屏'), mk(3, 'P3', 'm2', '透明屏', '透明 LED')], 'indoor');
+  assert.equal(opts.find((o) => o.pitch === 2.5)!.items, 1, 'm² + 分类 LED');
+  assert.equal(opts.find((o) => o.pitch === 1.86)!.items, 1, 'sqm + LED 显示屏');
+  assert.equal(opts.find((o) => o.pitch === 3)!.items, 0, '透明屏不算墙面:P3 只是标准档位');
+  assert.equal(defaultPitch(opts, 3, null), 2.5, '有价格的型号优先于标准档位');
+});
+
+test('AV-018:进度 —— 已答 x/y、还差哪几项、可带入', () => {
+  const r = normalise(PHOTO);
+  const p0 = progressOf(r, emptyReview(), null, [320, 160]);
+  assert.equal(p0.ready, false);
+  assert.ok(p0.missing.some((m) => m[0] === '用途') && p0.missing.some((m) => m[0] === '点间距'));
+  assert.ok(p0.done < p0.total);
+  const rv: JudgeReview = { ...emptyReview(), intent: 'site', confirmed: Object.fromEntries(toConfirm(r).map((k) => [k, true])),
+    answers: { arc: 'arc', view: '3', maint: 'rear', snapW: '2560', snapH: '1920', ctrl: '50', pwr: '50', mountH: '700' } };
+  const p1 = progressOf(r, rv, 3, [320, 160]);
+  assert.equal(p1.ready, true, `答完可带入 (${p1.missing.map((m) => m[0]).join('、')})`);
+  assert.equal(p1.missing.length, 0);
+  assert.equal(p1.done, p1.total);
 });

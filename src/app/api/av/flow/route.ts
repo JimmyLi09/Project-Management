@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { identityOf } from '@/lib/permissions';
 import { denyUnlessVisible } from '@/server/avguard';
+import { backfillInquiries, ensureInquiry } from '@/server/avdb';
 import { projectFlow } from '@/server/avflow';
 import { getProject } from '@/server/db';
 import { currentUser } from '@/server/session';
@@ -13,5 +14,8 @@ export async function GET(req: NextRequest) {
   if (!project) return NextResponse.json({ error: '项目不存在' }, { status: 404 });
   const denied = denyUnlessVisible(user, project);
   if (denied) return denied;
+  /* AV-018:02–07 任一步打开时,缺立项记录就补建(否则 02 提示「未经 01 立项询价」、01 填不了说明) */
+  backfillInquiries();
+  ensureInquiry(project);
   return NextResponse.json({ flow: projectFlow(project, identityOf(user)) });
 }
