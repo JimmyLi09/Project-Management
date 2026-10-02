@@ -10,7 +10,7 @@
 
    合并规则(文档 §3.4):
    - 同名:去掉空格、标点、大小写后中文名或英文名相同;或在「同义项」对照里属于同一组。
-   - 状态取最靠后的:已确认 > 已收到 > 待处理;N/A 只有所有来源都是 N/A 时才保留。
+   - 状态取最靠后的:已确认 > 已收到 > 需修订 > 退回 > 待处理;N/A 只有所有来源都是 N/A 时才保留。
    - 收到日期取最新;负责人取第一个非空。
    - 备注不同时都保留,前面标来源服务「[CGI 静帧] …」。
    - 参考图、收料记录合并,按时间排序,去掉完全相同的。
@@ -56,8 +56,10 @@ export function itemKeys(it: { zh?: string; en?: string }, syn: Map<string, numb
 export const groupKeys = (g: { group?: string; groupEn?: string }): string[] =>
   [normName(g.group) && 'zh:' + normName(g.group), normName(g.groupEn) && 'en:' + normName(g.groupEn)].filter(Boolean) as string[];
 
-const RANK: Record<string, number> = { na: -1, pending: 0, received: 1, confirmed: 2 };
-const ST_ZH: Record<string, string> = { pending: '待处理', received: '已收到', confirmed: '已确认', na: 'N/A' };
+/* 已确认 > 已收到 > 需修订 > 退回 > 待处理。需修订 / 退回说明东西来过但不能用,
+   比「没来」靠后、比「已收到」靠前不合适 —— 两个服务里有一个已经收到能用的,就按已收到算 */
+const RANK: Record<string, number> = { na: -1, pending: 0, rejected: 0.5, revision: 0.7, received: 1, confirmed: 2 };
+const ST_ZH: Record<string, string> = { pending: '待处理', received: '已收到', confirmed: '已确认', na: 'N/A', revision: '需修订', rejected: '退回' };
 const stZh = (s: string | undefined) => ST_ZH[s || 'pending'] || s || '待处理';
 const rankOf = (s: string) => (s in RANK ? RANK[s] : 0);
 

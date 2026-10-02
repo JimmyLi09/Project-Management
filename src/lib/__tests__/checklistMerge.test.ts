@@ -19,6 +19,8 @@ test('REQ-044 状态取最靠后的,N/A 只在全是 N/A 时保留', () => {
   assert.equal(mergeStatus(['received', 'confirmed', 'pending']), 'confirmed');
   assert.equal(mergeStatus(['na', 'pending']), 'pending');
   assert.equal(mergeStatus(['na', 'na']), 'na');
+  assert.equal(mergeStatus(['revision', 'received']), 'received');
+  assert.equal(mergeStatus(['rejected', 'pending']), 'rejected');
 });
 
 test('REQ-044 CGI + 沙盘:同义项合成一条,已确认不降级,备注都留,记录合并去重', () => {
