@@ -11,8 +11,9 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 
 import { bomCsv } from '@/av/core/bom';
 import { compute } from '@/av/core/compute';
-import { assertExportable, buildDrawing } from '@/av/core/drawing';
-import { getRulePack, LATEST_LED_PACK, listRulePacks } from '@/av/core/rulepack';
+import { calcBasis, type CalcRow } from '@/av/core/calc';
+import { assertExportable, buildDrawing, LAYER_TOGGLES } from '@/av/core/drawing';
+import { getRulePack, LATEST_LED_PACK, ledPackUpgradable, listRulePacks } from '@/av/core/rulepack';
 import { toSvg } from '@/av/core/svg';
 import { toHandoff, type DrawingElement, type DrawingSummary, type Handoff, type StoredDrawing } from '@/av/core/handoff';
 import type { LedConfig, ScreenType, Severity, Size, TraceNode } from '@/av/core/types';
@@ -70,6 +71,21 @@ export default function LedStudioView() {
   const project = projects.find((p) => p.id === ledProjectId && !p.archived && p.packages.some((k) => k.svc === 'led'));
   const saved = useSavedConfig<LedConfig>(project?.id, 'led');
   const maySave = !!project && canCostProject(me, project);
+
+  /* AV-019:项目立项时绑定的 LED 规则包。旧项目保持原版本;用户点「升级」后这次保存换成最新一版 */
+  const [boundOf, setBound] = useState<{ pid: string; pack: string | null }>({ pid: '', pack: null });
+  const [upgradeOf, setUpgrade] = useState('');   // 点了升级的项目 id
+  const bound = project && boundOf.pid === project.id ? boundOf.pack : null;
+  const upgrade = !!project && upgradeOf === project.id && ledPackUpgradable(bound);
+  useEffect(() => {
+    if (!project) return;
+    const pid = project.id;
+    let live = true;
+    fetch(`/api/av/inquiry?project=${encodeURIComponent(pid)}`).then((r) => r.json())
+      .then((b) => { if (live) setBound({ pid, pack: b?.inquiry?.packs?.led ?? null }); })
+      .catch(() => { if (live) setBound({ pid, pack: null }); });
+    return () => { live = false; };
+  }, [project?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /* 这个项目最新一张已校核的图纸:05 没有正式版本时自动带入它 */
   /* 记着是哪个项目的:换项目那一次渲染里,旧项目的结果不能当成新项目的 */
@@ -163,16 +179,19 @@ export default function LedStudioView() {
     setSaved('');
     const res = await fetch('/api/av/config', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ projectId: project.id, drawingId: fromDrawing?.drawingId ?? null, cfg: payload }),
+      body: JSON.stringify({ projectId: project.id, drawingId: fromDrawing?.drawingId ?? null, cfg: payload, upgradePack: upgrade }),
     }).catch(() => null);
     const body = res ? await res.json().catch(() => ({})) : { error: t('网络错误', 'Network error') };
     const ok = !!res?.ok && !body.error;
     setSaved(ok ? `ok:${body.version}` : `✕ ${body.error || t('保存失败', 'Save failed')}`);
+    if (ok && body.packVersion) { setBound({ pid: project.id, pack: body.packVersion }); setUpgrade(''); }
     if (ok) { saved.markSaved(payload, Number(body.version) || saved.version + 1); resetDraft(payload); saved.reload(); refreshFlow(); }
     return ok;
   }
 
-  const pack = getRulePack(packVersion);
+  /* 有项目时按立项绑定的规则包算(服务端保存也用它);没项目的试算才用下拉框选的 */
+  const packV = bound ? (upgrade ? LATEST_LED_PACK : bound) : packVersion;
+  const pack = getRulePack(packV);
   const profile = pack.profiles[cfg.led_screen_type];
   const lib = useMemo(() => parseLib(libText), [libText]);
   const [modW, modH] = cfg.led_mod ?? [profile.modW, profile.modH];
@@ -182,17 +201,17 @@ export default function LedStudioView() {
   const payload = useMemo(() => ({ ...cfg, led_curve: fromDrawing?.drawingId ? cfg.led_curve : undefined, led_cab_lib: lib.length ? lib : undefined }),
     [cfg, lib, fromDrawing]);
   const result = useMemo(
-    () => compute(payload, packVersion, fromDrawing?.prov),
-    [payload, packVersion, fromDrawing],
+    () => compute(payload, packV, fromDrawing?.prov),
+    [payload, packV, fromDrawing],
   );
   /* AV-017:和最新正式版本比,改没改 —— 05 的「下一步」据此决定要不要弹窗保存 */
   /* 箱体库等于参数组默认值时,存没存这一项都一样(演示数据、老方案就没存) */
   const canon = (c: LedConfig) => {
-    const def = getRulePack(packVersion).profiles[c.led_screen_type]?.cabLib;
+    const def = getRulePack(packV).profiles[c.led_screen_type]?.cabLib;
     const lib2 = c.led_cab_lib;
     return { ...c, led_cab_lib: !lib2 || (def && sameConfig(lib2, def)) ? undefined : lib2 };
   };
-  const dirty = !saved.cfg || !sameConfig(canon(payload), canon(saved.cfg));
+  const dirty = !saved.cfg || !sameConfig(canon(payload), canon(saved.cfg)) || upgrade;
   useFlowGuard(project && saved.loaded ? {
     line: 'led', dirty, canSave: maySave, nextVersion: saved.version + 1,
     blocked: result.layout ? null : t('排布无解，不能保存：先按右边的阻断提示调整屏体尺寸或箱体库', 'No layout — fix the blocking findings before saving'),
@@ -226,10 +245,27 @@ export default function LedStudioView() {
   const newerDrawing = !!reviewed.d && (origin === 'saved' || origin === 'draft')
     && (fromDrawing?.drawingId ? reviewed.d.id !== fromDrawing.drawingId || reviewed.d.reviewedAt > baseAt : reviewed.d.reviewedAt > baseAt);
   const drawing = useMemo(
-    () => buildDrawing(result, { project: fromDrawing?.project ?? fromDrawing?.drawing ?? t('方案配置', 'Configuration') }),
-    [result, t, fromDrawing],
+    () => buildDrawing(result, { project: fromDrawing?.project ?? project?.name ?? fromDrawing?.drawing ?? t('方案配置', 'Configuration') }),
+    [result, t, fromDrawing, project?.name],
   );
-  const svg = useMemo(() => (drawing ? toSvg(drawing) : ''), [drawing]);
+  /* AV-019 §2.1:图层开关 + 适应宽度 / 100%(记在这台浏览器上) */
+  const [hidden, setHidden] = useState<string[]>(() => {
+    try { return JSON.parse(localStorage.getItem('led.hiddenLayers') || '[]'); } catch { return []; }
+  });
+  const [zoom, setZoom] = useState<'fit' | 'full'>('fit');
+  const toggleLayer = (key: string) => setHidden((prev) => {
+    const next = prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key];
+    try { localStorage.setItem('led.hiddenLayers', JSON.stringify(next)); } catch { /* 无痕模式等 */ }
+    return next;
+  });
+  const svg = useMemo(() => {
+    if (!drawing) return '';
+    const off = new Set<string>(LAYER_TOGGLES.filter((x) => hidden.includes(x.key)).flatMap((x) => x.layers));
+    return toSvg({ ...drawing, layers: drawing.layers.map((l) => (off.has(l.name) ? { ...l, entities: [] } : l)) }, { fit: zoom === 'fit' });
+  }, [drawing, hidden, zoom]);
+  const fullSvg = useMemo(() => (drawing ? toSvg(drawing) : ''), [drawing]);
+  const calc = useMemo(() => calcBasis(result, lang === 'en' ? 'en' : 'zh'), [result, lang]);
+  const [openCalc, setOpenCalc] = useState<string | null>(null);
 
   const set = <K extends keyof LedConfig>(key: K, value: LedConfig[K]) =>
     setCfg((prev) => ({ ...prev, [key]: value }));
@@ -258,14 +294,14 @@ export default function LedStudioView() {
       return;
     }
     if (!drawing || !result.layout) return;
-    if (kind === 'svg') download('led-layout.svg', svg, 'image/svg+xml');
+    if (kind === 'svg') download('led-layout.svg', fullSvg, 'image/svg+xml');
     else if (kind === 'bom') download('led-cabinets.csv', bomCsv(result.layout), 'text/csv;charset=utf-8');
     else {
       /* DXF and the Word proposal are rendered by the drawing service; the server recomputes and re-applies the export gate */
       const title = fromDrawing?.project ?? fromDrawing?.drawing ?? '';   // the server names an untitled export in the document's language
       const res = await fetch('/api/av/export', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ kind, lang, cfg: { ...cfg, led_cab_lib: lib.length ? lib : undefined }, packVersion, title, client: project?.client ?? '' }),
+        body: JSON.stringify({ kind, lang, cfg: { ...cfg, led_cab_lib: lib.length ? lib : undefined }, packVersion: packV, title, client: project?.client ?? '' }),
       }).catch(() => null);
       if (!res?.ok) {
         const body = res ? await res.json().catch(() => ({})) : {};
@@ -367,10 +403,10 @@ export default function LedStudioView() {
           </div>
 
           <Field label={t('规则包', 'Rule pack')}>
-            <select value={packVersion} onChange={(e) => setPackVersion(e.target.value)} disabled={!!fromDrawing?.packVersion}>
+            <select value={packV} onChange={(e) => setPackVersion(e.target.value)} disabled={!!bound || !!fromDrawing?.packVersion} data-testid="led-pack">
               {listRulePacks().map((p) => <option key={p.version} value={p.version}>{p.version}</option>)}
             </select>
-            {fromDrawing?.packVersion && (
+            {(bound || fromDrawing?.packVersion) && (
               <div style={{ fontSize: 11, color: 'var(--text2)', marginTop: 4 }}>
                 {t('立项时绑定，锁定不可改（历史项目按创建时版本计算）', 'Bound at inquiry; locked')}
               </div>
@@ -505,6 +541,24 @@ export default function LedStudioView() {
             </span>
           </div>
           <div style={{ padding: '16px 18px' }}>
+            {ledPackUpgradable(bound) && (
+              <div data-testid="led-upgrade" style={{ fontSize: 12.5, lineHeight: 1.75, padding: '9px 12px', borderRadius: 6, marginBottom: 14,
+                background: upgrade ? 'var(--hover-bg)' : SEVERITY.warn.bg, color: upgrade ? 'var(--text)' : SEVERITY.warn.fg }}>
+                {upgrade ? (
+                  <>
+                    {t(`正在按规则包 ${LATEST_LED_PACK} 预览。保存后本项目改用 ${LATEST_LED_PACK}，存为新版本；历史版本仍按 ${bound} 不变。`,
+                      `Previewing on rule pack ${LATEST_LED_PACK}. Saving switches this project to ${LATEST_LED_PACK} as a new version; earlier versions stay on ${bound}.`)}{' '}
+                    <button style={{ textDecoration: 'underline', fontSize: 12 }} onClick={() => setUpgrade('')} data-testid="led-upgrade-undo">{t('不升级', 'Keep current pack')}</button>
+                  </>
+                ) : (
+                  <>
+                    {t(`本项目按规则包 ${bound} 计算（立项时绑定）：电源按整列分组、分完不逐路校核，可能超过单回路上限。${LATEST_LED_PACK} 按箱体逐路分配并加了计算依据，可以在重新保存时升级。`,
+                      `This project is computed on rule pack ${bound} (bound at inquiry): circuits are grouped by whole column and not checked one by one, so a circuit may exceed the limit. ${LATEST_LED_PACK} assigns cabinets circuit by circuit and shows the calculation basis — you can upgrade when you save again.`)}{' '}
+                    {maySave && <button style={{ textDecoration: 'underline', color: 'var(--navy700)', fontSize: 12 }} onClick={() => setUpgrade(project!.id)} data-testid="led-upgrade-go">{t(`预览并升级到 ${LATEST_LED_PACK}`, `Preview and upgrade to ${LATEST_LED_PACK}`)}</button>}
+                  </>
+                )}
+              </div>
+            )}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(170px,1fr))', gap: 11 }}>
               {tile('sqm', ['面积 ㎡', 'Area ㎡'], (n) => n.value.toFixed(2))}
               {tile('mods', ['模组', 'Modules'], (n) => `${n.value}`)}
@@ -551,12 +605,29 @@ export default function LedStudioView() {
           <div style={{ padding: '14px 18px' }}>
             {result.layout ? (
               <>
-                <div style={{ overflowX: 'auto', background: '#0E1013', borderRadius: 6, padding: 8 }}
-                  dangerouslySetInnerHTML={{ __html: svg }} />
+                <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', alignItems: 'center', fontSize: 12, marginBottom: 10 }} data-testid="led-layers">
+                  <span style={{ color: 'var(--text2)' }}>{t('图层', 'Layers')}</span>
+                  {LAYER_TOGGLES.map((x) => (
+                    <label key={x.key} style={{ display: 'inline-flex', gap: 5, alignItems: 'center', cursor: 'pointer' }}>
+                      <input type="checkbox" checked={!hidden.includes(x.key)} onChange={() => toggleLayer(x.key)} data-testid={`led-layer-${x.key}`} />
+                      {lang === 'en' ? x.en : x.zh}
+                    </label>
+                  ))}
+                  <span style={{ marginLeft: 'auto', display: 'inline-flex', gap: 6 }}>
+                    {(['fit', 'full'] as const).map((z) => (
+                      <button key={z} className={zoom === z ? 'btn-navy sm' : 'btn-line sm'} onClick={() => setZoom(z)} data-testid={`led-zoom-${z}`}>
+                        {z === 'fit' ? t('适应宽度', 'Fit width') : '100%'}
+                      </button>
+                    ))}
+                  </span>
+                </div>
+                <div style={{ overflow: 'auto', maxHeight: zoom === 'full' ? 640 : undefined, background: '#0E1013', borderRadius: 6, padding: 8 }}
+                  data-testid="led-svg" dangerouslySetInnerHTML={{ __html: svg }} />
+                <CalcTable rows={calc} open={openCalc} setOpen={setOpenCalc} />
                 {canExportLed(me) && (
                   <p style={{ fontSize: 11.5, color: 'var(--text2)', lineHeight: 1.8, marginTop: 10 }}>
-                    {t('DXF 由服务端制图服务渲染：R2010 / 单位 mm / 八图层，可直接在 AutoCAD 中打开。',
-                      'DXF is rendered on the server: R2010, mm, eight layers.')}
+                    {t('DXF 由服务端制图服务渲染：R2010 / 单位 mm / 十个图层（箱体编号、箱体尺寸单独成层），可直接在 AutoCAD 中打开；说明栏带同一份计算依据。',
+                      'DXF is rendered on the server: R2010, mm, ten layers (cabinet IDs and sizes on their own layers); the notes panel carries the same calculation basis.')}
                   </p>
                 )}
               </>
@@ -606,6 +677,45 @@ export default function LedStudioView() {
 }
 
 const cellStyle: React.CSSProperties = { padding: '10px 18px', borderTop: '1px solid var(--row-line)' };
+
+/* AV-019 §2.2 计算依据表:和技术方案、DXF 说明栏同一份数据(src/av/core/calc.ts) */
+function CalcTable({ rows, open, setOpen }: { rows: CalcRow[]; open: string | null; setOpen: (k: string | null) => void }) {
+  const { t } = useLang();
+  if (!rows.length) return null;
+  const th: React.CSSProperties = { padding: '8px 10px', fontSize: 11, fontWeight: 700, color: 'var(--text2)', textAlign: 'left', background: 'var(--hover-bg)' };
+  const td: React.CSSProperties = { padding: '8px 10px', borderTop: '1px solid var(--row-line)', verticalAlign: 'top' };
+  return (
+    <div style={{ marginTop: 14 }} data-testid="led-calc">
+      <div className="section-label">{t('计算依据', 'Calculation basis')}
+        <span style={{ fontWeight: 400, color: 'var(--text2)', marginLeft: 8, textTransform: 'none', letterSpacing: 0 }}>
+          {t('点一行看用到的参数 · 技术方案和 DXF 说明栏是同一份', 'Click a row for its parameters · same table as the proposal and the DXF notes')}
+        </span>
+      </div>
+      <div style={{ overflowX: 'auto' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5 }}>
+          <tbody>
+            <tr>{[t('项目', 'Item'), t('计算', 'Calculation'), t('结果', 'Result'), t('来源', 'Source')].map((h) => <th key={h} style={th}>{h}</th>)}</tr>
+            {rows.map((r) => (
+              <React.Fragment key={r.key}>
+                <tr onClick={() => r.params?.length && setOpen(open === r.key ? null : r.key)} style={{ cursor: r.params?.length ? 'pointer' : undefined }} data-testid={`led-calc-${r.key}`}>
+                  <td style={{ ...td, whiteSpace: 'nowrap', fontWeight: 600 }}>{r.params?.length ? (open === r.key ? '▾ ' : '▸ ') : ''}{r.item}</td>
+                  <td style={{ ...td, fontFamily: 'ui-monospace, Menlo, Consolas, monospace', fontSize: 12 }}>{r.formula}</td>
+                  <td style={{ ...td, fontWeight: 600, color: r.ok === false ? 'var(--danger)' : r.ok ? 'var(--success)' : undefined }} className="tnum">{r.result}</td>
+                  <td style={{ ...td, color: 'var(--text2)', fontSize: 11.5 }}>{r.source}</td>
+                </tr>
+                {open === r.key && r.params && (
+                  <tr><td colSpan={4} style={{ ...td, borderTop: 'none', paddingTop: 0, fontSize: 11.5, color: 'var(--text2)' }}>
+                    {r.params.map((p) => <div key={p}>· {p}</div>)}
+                  </td></tr>
+                )}
+              </React.Fragment>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
 
 /* The app's own .field styling: label above, full-width input / select. */
 export function Field({ label, children }: { label: string; children: React.ReactNode }) {

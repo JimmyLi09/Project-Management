@@ -86,13 +86,30 @@ export function compute(
       continue;
     }
     if (f.id === 'F10') continue; // F10's aggregation is produced with the layout
+    /* AV-019 led@1.1:F6 / F8 是算法 —— 按箱体成链分回路、逐路校核;数据线按走法逐只累加 */
+    if (f.kind === 'algorithm' && (f.id === 'F6' || f.id === 'F8')) {
+      if (!layout) continue;
+      if (!wiring) {
+        wiring = solveWiring({
+          widths: layout.widths, heights: layout.heights, H: cfg.led_opening_h, cells: layout.cells,
+          algo: 'chain', dataMode: cfg.led_data_mode ?? 'row', voltage: pack.company.voltage ?? null,
+          pitch: cfg.led_pitch, wSqm: profile.wSqm, circuitKw: pack.company.circuitKw,
+          dataPx: pack.control.dataPx, pxW: env.px_w, kw: env.kw,
+          rowRunOf: () => 0,
+        });
+      }
+      if (f.id === 'F6') emit('n_circuit', wiring.nCircuit, f.id, ['kw', 'circuit_kw']);
+      else emit('n_data_run', wiring.nDataRun, f.id, ['px', 'p', 'data_px']);
+      continue;
+    }
     if (f.kind !== 'expr' || !f.exprs) continue;
 
     if (f.scope === 'row') {
       if (!layout) continue;
       const src = f.exprs.row_runs;
       wiring = solveWiring({
-        widths: layout.widths, heights: layout.heights, H: cfg.led_opening_h,
+        widths: layout.widths, heights: layout.heights, H: cfg.led_opening_h, cells: layout.cells,
+        voltage: pack.company.voltage ?? null,
         pitch: cfg.led_pitch, wSqm: profile.wSqm, circuitKw: pack.company.circuitKw,
         dataPx: pack.control.dataPx, pxW: env.px_w, kw: env.kw,
         rowRunOf: (row_h) => evalExpr(src, { ...env, row_h }),
@@ -122,7 +139,45 @@ export function compute(
     });
   }
 
+  if (wiring) findings.push(...powerFindings(wiring, pack, cfg));
+
   return { pack, profile, cfg, trace, layout, wiring, findings, exportable: !blocksExport(findings) };
+}
+
+/* AV-019 §2.2:逐路校核。led@1.0 的分组也照样查 —— 数字不改,但要让人看见超限。 */
+function powerFindings(w: WiringResult, pack: RulePack, cfg: LedConfig): Finding[] {
+  const out: Finding[] = [];
+  const over = w.power.map((pc, k) => ({ k, pc })).filter(({ pc }) => pc.w > w.limitW + 1e-6);
+  if (over.length) {
+    out.push({
+      code: 'LED-PWR-09', severity: 'warn', gate: 'compute',
+      message: `回路 ${over.map(({ k, pc }) => `${k + 1}（${Math.round(pc.w)} W）`).join('、')} 超过单回路上限 ${pack.company.circuitKw} kW`
+        + (w.algo === 'columns' ? `：${pack.version} 按整列分组、分完不校核，升级到新版规则包会按箱体重新分配。` : '。'),
+    });
+  }
+  const spec = cfg.led_power_cable;
+  const amp = pack.company.cableAmps?.[spec];
+  if (w.voltage && pack.company.cableAmps) {
+    if (amp == null) {
+      out.push({ code: 'LED-PWR-10', severity: 'info', gate: 'compute', message: `电源线 ${spec} 的载流上限还没填（公司参数 · 线径表），每路电流照算，暂不核对。` });
+    } else {
+      const hot = w.power.map((pc, k) => ({ k, a: pc.amps ?? 0 })).filter((x) => x.a > amp + 1e-9);
+      if (hot.length) {
+        out.push({ code: 'LED-PWR-10', severity: 'warn', gate: 'compute',
+          message: `回路 ${hot.map((x) => `${x.k + 1}（${x.a.toFixed(1)} A）`).join('、')} 电流超过电源线 ${spec} 的载流上限 ${amp} A：加大线径或加回路。` });
+      }
+    }
+  }
+  if (pack.company.cascadeMax === null) {
+    out.push({ code: 'LED-PWR-11', severity: 'info', gate: 'compute', message: '箱体电源级联上限：待填，按厂家规格（公司参数）。' });
+  } else if (typeof pack.company.cascadeMax === 'number') {
+    const max = pack.company.cascadeMax;
+    const long = w.power.map((pc, k) => ({ k, n: pc.cells.length })).filter((x) => x.n > max);
+    if (long.length) out.push({ code: 'LED-PWR-11', severity: 'warn', gate: 'compute', message: `回路 ${long.map((x) => `${x.k + 1}（${x.n} 只）`).join('、')} 一条电源链串的箱体超过级联上限 ${max} 只。` });
+  }
+  const fat = w.runs.map((r, k) => ({ k, r })).filter(({ r }) => r.px > (pack.control.dataPx + 1e-6));
+  if (fat.length) out.push({ code: 'LED-DATA-01', severity: 'warn', gate: 'compute', message: `数据线 ${fat.map(({ k, r }) => `${k + 1}（${r.px.toLocaleString('en-US')} px）`).join('、')} 超过单线带载 ${pack.control.dataPx.toLocaleString('en-US')} px。` });
+  return out;
 }
 
 /* Which axis failed, so LED-FIT-01 and -02 can be reported separately. */

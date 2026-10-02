@@ -6,6 +6,7 @@
    letterhead and logo; the test bench previews the same content.
    Template ported from avcost-phase1 (2026-09-28), English added 2026-09-28. */
 
+import { calcBasis } from './calc.ts';
 import type { ComputeResult } from './compute.ts';
 import type { CtrlBrand, ScreenType } from './types.ts';
 
@@ -96,8 +97,14 @@ export function proposalDoc(r: ComputeResult, meta: { title: string; client?: st
     'LED-CAB-01': 'The layout uses cabinet sizes outside the library; they must be custom-made or added to the library.',
     'LED-PWR-07': `The electrical riser is ${n(c.led_pwr_dist ?? 0)} m away, beyond 30 m; a local distribution board is recommended.`,
     'LED-PWR-08': `${w.nCircuit} circuits exceed the ${lay.widths.length} cabinet columns; some columns carry more than one circuit and the grouping diagram is indicative only.`,
+    'LED-PWR-09': `Circuit(s) ${w.power.map((pc, k) => ({ k, pc })).filter(({ pc }) => pc.w > w.limitW + 1e-6).map(({ k, pc }) => `${k + 1} (${Math.round(pc.w)} W)`).join(', ')} exceed the ${n(r.pack.company.circuitKw)} kW circuit limit`
+      + (w.algo === 'columns' ? `: ${r.pack.version} groups whole columns without checking each circuit; a newer rule pack reassigns cabinets circuit by circuit.` : '.'),
+    'LED-PWR-10': `The current on one or more circuits exceeds the rating of the ${c.led_power_cable} power cable; upsize the cable or add circuits.`,
+    'LED-PWR-11': 'One or more power chains exceed the cabinet power-cascade limit.',
+    'LED-DATA-01': `One or more data runs exceed ${px(r.pack.control.dataPx, lang)} pixels per port.`,
   };
-  const items = r.findings.map((f) => ({ text: `[${f.code}] ${zh ? f.message : EN[f.code] ?? f.message}`, severity: f.severity }));
+  /* AV-019:「线径待填」「级联上限待填」是公司内部参数没填,不写进给客户的方案书(计算依据表里照样显示) */
+  const items = r.findings.filter((f) => !(f.severity === 'info' && (f.code === 'LED-PWR-10' || f.code === 'LED-PWR-11'))).map((f) => ({ text: `[${f.code}] ${zh ? f.message : EN[f.code] ?? f.message}`, severity: f.severity }));
 
   const pcs = (k: number, zhUnit: string) => (zh ? `${k} ${zhUnit}` : `${k}`);
   const sections: ProposalSection[] = [
@@ -131,7 +138,10 @@ export function proposalDoc(r: ComputeResult, meta: { title: string; client?: st
         header: zh ? ['项目', '配置', '依据'] : ['Item', 'Configuration', 'Basis'],
         rows: [
           [zh ? '供电回路' : 'Power circuits', pcs(w.nCircuit, '路'), 'F6'],
-          [zh ? '回路分配' : 'Circuit loads', w.circuits.map((x) => `${Math.round(x.kw * 1000)}W`).join(' / '), zh ? '按列均衡' : 'Balanced by column'],
+          [zh ? '回路分配' : 'Circuit loads', w.power.map((x) => `${Math.round(x.w)}W`).join(' / '),
+            w.algo === 'chain'
+              ? (zh ? `按箱体逐路分配，每路 ≤ ${n(r.pack.company.circuitKw)} kW` : `Cabinet by cabinet, each ≤ ${n(r.pack.company.circuitKw)} kW`)
+              : (zh ? '按列均衡' : 'Balanced by column')],
           [zh ? '电源线（含备用）' : 'Power cables (incl. spare)', pcs(w.nPowerCable, '根'), 'F7'],
           [zh ? '数据线' : 'Data runs', pcs(w.nDataRun, '条'), 'F8'],
           [zh ? '数据线（含备用）' : 'Data cables (incl. spare)', pcs(w.nDataCable, '根'), 'F9'],
@@ -139,7 +149,15 @@ export function proposalDoc(r: ComputeResult, meta: { title: string; client?: st
       },
     },
     {
-      heading: zh ? '五、说明与限制' : '5. Notes and Limitations',
+      /* AV-019 §2.2:和 05 图下方、DXF 说明栏同一份计算依据 */
+      heading: zh ? '五、计算依据' : '5. Calculation Basis',
+      table: {
+        header: zh ? ['项目', '计算', '结果', '来源'] : ['Item', 'Calculation', 'Result', 'Source'],
+        rows: calcBasis(r, lang).map((x) => [x.item, x.formula, x.result, x.source]),
+      },
+    },
+    {
+      heading: zh ? '六、说明与限制' : '6. Notes and Limitations',
       notes: zh ? [
         '本方案数值由规则引擎确定性计算，未使用生成式模型，每项结果均可追溯至公式编号。',
         `计算依据规则包 ${r.pack.version}，参数组「${profile}」。`,
@@ -153,7 +171,7 @@ export function proposalDoc(r: ComputeResult, meta: { title: string; client?: st
       ],
     },
   ];
-  if (items.length) sections.push({ heading: zh ? '六、待确认事项' : '6. Items to Confirm', items });
+  if (items.length) sections.push({ heading: zh ? '七、待确认事项' : '7. Items to Confirm', items });
 
   const title = zh ? 'LED 显示屏系统技术方案' : 'LED Display System Technical Proposal';
   return {

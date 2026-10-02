@@ -37,6 +37,8 @@ export interface LedConfig {
   led_redundancy: Redundancy;
   led_ctrl_brand: CtrlBrand;
   led_power_cable: string;         // e.g. "3*2.5"
+  /* AV-019(led@1.1):网线走法,按项目定义。缺省 = 每行一条 */
+  led_data_mode?: 'row' | 'snake';
 
   /* Project-level overrides of the profile defaults (§3.1). A product with a
      different module pitch — 128-C&K T1 runs 300×168.75 — needs these; without

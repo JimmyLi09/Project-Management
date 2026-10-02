@@ -11,12 +11,13 @@ import { toSvg } from '../svg.ts';
 const r144 = compute(fixtureConfig(FIXTURES[0]), 'led@1.0');
 const d144 = buildDrawing(r144, { project: '144-Chuan Grove' })!;
 
-test('§8.1 · 八个图层齐全、ACI 色号正确、各自有内容', () => {
+test('§8.1 · 图层齐全（AV-019 加箱体编号 / 箱体尺寸两层）、ACI 色号正确、各自有内容', () => {
   assert.deepEqual(d144.layers.map((l) => l.name), [
     'LED-01-屏体轮廓', 'LED-02-箱体', 'LED-02B-定制箱体', 'LED-03-模组',
     'LED-04-电源回路', 'LED-05-数据线', 'LED-06-标注', 'LED-07-文字',
+    'LED-08-箱体编号', 'LED-09-箱体尺寸',
   ]);
-  assert.deepEqual(d144.layers.map((l) => l.aci), [7, 1, 6, 8, 2, 3, 4, 7]);
+  assert.deepEqual(d144.layers.map((l) => l.aci), [7, 1, 6, 8, 2, 3, 4, 7, 8, 7]);
   /* 144 has no custom cabinets, so LED-02B is legitimately empty. */
   for (const l of d144.layers) {
     if (l.name === 'LED-02B-定制箱体') assert.equal(l.entities.length, 0);
@@ -41,7 +42,9 @@ test('§8.1 · 定制箱体单独成层，便于筛选', () => {
 
 test('§7.2 · 数据线自上而下编号，备用线单独编号并标 FOR SPARE', () => {
   const data = d144.layers.find((l) => l.name === 'LED-05-数据线')!;
-  const circles = data.entities.filter((e) => e.k === 'circle');
+  /* 左侧编号圈(线上每只箱体的小圆点不算) */
+  const minX = Math.min(...data.entities.filter((e) => e.k === 'circle').map((e) => (e as { cx: number }).cx));
+  const circles = data.entities.filter((e) => e.k === 'circle' && e.cx === minX);
   assert.equal(circles.length, r144.wiring!.nDataRun + 1, '每条线一个编号圈，另加备用');
   /* Numbered runs, excluding the spare, must descend in Y as the number grows. */
   const numbered = data.entities.filter((e) => e.k === 'text' && /^\d+$/.test(e.s)) as Extract<typeof data.entities[number], { k: 'text' }>[];

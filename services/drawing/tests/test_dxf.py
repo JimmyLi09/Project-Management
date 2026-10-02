@@ -22,6 +22,8 @@ EXPECTED_LAYERS = {
     "LED-05-数据线": 3,
     "LED-06-标注": 4,
     "LED-07-文字": 7,
+    "LED-08-箱体编号": 8,
+    "LED-09-箱体尺寸": 7,
 }
 
 
@@ -42,8 +44,8 @@ def test_file_settings(doc) -> None:
     assert doc.header["$INSUNITS"] == INSUNITS_MM == 4
 
 
-def test_eight_layers_present_and_independently_switchable(doc) -> None:
-    """A7 — 八个图层齐全可独立开关."""
+def test_all_layers_present_and_independently_switchable(doc) -> None:
+    """A7 — 图层齐全可独立开关(AV-019 加箱体编号 / 箱体尺寸两层)."""
     for name, aci in EXPECTED_LAYERS.items():
         assert name in doc.layers, f"缺少图层 {name}"
         layer = doc.layers.get(name)
@@ -67,9 +69,31 @@ def test_origin_at_screen_bottom_left(doc) -> None:
 
 
 def test_cabinets_carry_their_numbering(doc) -> None:
-    texts = {t.dxf.text for t in doc.modelspace().query('TEXT[layer=="LED-02-箱体"]')}
-    assert "R1C1" in texts and "R5C7" in texts
-    assert "640×480" in texts and "640×640" in texts
+    """AV-019 — 编号、尺寸各自成层,可以单独关掉."""
+    ids = {t.dxf.text for t in doc.modelspace().query('TEXT[layer=="LED-08-箱体编号"]')}
+    sizes = {t.dxf.text for t in doc.modelspace().query('TEXT[layer=="LED-09-箱体尺寸"]')}
+    assert "R1C1" in ids and "R5C7" in ids
+    assert {"A 640×480", "B 640×640"} <= sizes
+
+
+def test_circuits_and_runs_keep_their_colours(doc, payload) -> None:
+    """AV-019 — 每路电源 / 每条网线各一色,DXF 里用真彩色保留."""
+    colours = {e.dxf.true_color for e in doc.modelspace().query('LINE[layer=="LED-04-电源回路"]') if e.dxf.hasattr("true_color")}
+    assert len(colours) >= 3
+    power = next(x for x in payload["layers"] if x["name"] == "LED-04-电源回路")
+    first = next(e for e in power["entities"] if e.get("c"))
+    assert ezdxf.colors.int2rgb(sorted(colours)[0]) is not None
+    assert int(first["c"][1:], 16) in colours
+
+
+def test_information_panel_carries_the_calc_basis(doc) -> None:
+    """AV-019 §2.2 — 说明栏带计算依据,回路都在上限以内."""
+    lines = [t.dxf.text for t in doc.modelspace().query('TEXT[layer=="LED-07-文字"]')]
+    assert "计算依据" in lines
+    # 长行折行(续行缩进两格),拼回去再看
+    joined = "\n".join(lines).replace("\n  ", "")
+    assert any(x.startswith("每路负载 / 电流：") and "✓" in x for x in joined.split("\n"))
+    assert any("单回路 ≤ 2.5 kW" in x for x in lines)
 
 
 def test_information_panel_carries_the_disclaimer(doc) -> None:

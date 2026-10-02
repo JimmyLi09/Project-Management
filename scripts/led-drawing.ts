@@ -3,7 +3,7 @@
    SVG. The JSON is the cross-language contract between src/av/core and
    services/drawing, so both renderers stay on one geometry source (§8.2).
 
-   Run: npm run led:drawing -- <fixture-id> <out-dir> */
+   Run: npm run led:drawing -- <fixture-id> <out-dir> [rule-pack, default = latest] */
 
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -12,6 +12,7 @@ import { assertExportable, buildDrawing } from '../src/av/core/drawing.ts';
 import { bomCsv } from '../src/av/core/bom.ts';
 import { compute } from '../src/av/core/compute.ts';
 import { FIXTURES, fixtureConfig } from '../src/av/core/fixtures.ts';
+import { LATEST_LED_PACK } from '../src/av/core/rulepack.ts';
 import { toSvg } from '../src/av/core/svg.ts';
 
 const id = process.argv[2] ?? '144';
@@ -19,7 +20,7 @@ const dir = process.argv[3] ?? 'out';
 const fixture = FIXTURES.find((f) => f.id === id);
 if (!fixture) throw new Error(`unknown fixture "${id}" — one of ${FIXTURES.map((f) => f.id).join(', ')}`);
 
-const result = compute(fixtureConfig(fixture), process.argv[4] ?? 'led@1.0');
+const result = compute(fixtureConfig(fixture), process.argv[4] ?? LATEST_LED_PACK);
 assertExportable(result);
 const drawing = buildDrawing(result, { project: fixture.name });
 if (!drawing) throw new Error(`${fixture.name} 排布无解：${result.findings.map((f) => f.code).join(', ')}`);

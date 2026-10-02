@@ -44,9 +44,12 @@ def build(drawing: Drawing) -> ezdxf.document.Drawing:
         # Every layer is created even when empty, so all eight can be switched
         # independently in AutoCAD (A7).
         doc.layers.add(name=layer.name, color=layer.aci)
-        attribs = {"layer": layer.name}
+        base = {"layer": layer.name}
         for e in layer.entities:
             kind = e["k"]
+            # AV-019: an entity may carry its own colour (one per power circuit /
+            # data run). Written as true colour; the layer keeps its ACI.
+            attribs = {**base, "true_color": _rgb(e["c"])} if isinstance(e.get("c"), str) and _rgb(e["c"]) is not None else base
             if kind == "line":
                 msp.add_line((e["x1"], e["y1"]), (e["x2"], e["y2"]), dxfattribs=attribs)
             elif kind == "rect":
@@ -66,6 +69,17 @@ def build(drawing: Drawing) -> ezdxf.document.Drawing:
                 )
                 text.set_placement((e["x"], e["y"]), align=_ALIGN[e["anchor"]])
     return doc
+
+
+def _rgb(value: str) -> int | None:
+    """'#RRGGBB' -> 0xRRGGBB for DXF true colour; anything else is ignored."""
+    v = value.lstrip("#")
+    if len(v) != 6:
+        return None
+    try:
+        return int(v, 16)
+    except ValueError:
+        return None
 
 
 def render(payload: dict, out: Path) -> Path:
