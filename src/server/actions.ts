@@ -4,7 +4,7 @@
 
 import type { Identity } from '@/lib/permissions';
 import {
-  canAssign, canCommercial, canDecide, canEdit, canEditFinance, canRowEdit, isFull, canDelete , canMeta } from '@/lib/permissions';
+  canAssign, canCommercial, canDecide, canEdit, canEditFinance, canRowEdit, isFull, canDelete , canMeta, canMarkInvoice } from '@/lib/permissions';
 import { buildPackage, deriveStatuses, fitWindow, newId, parseISO, isoDate, totalDays } from '@/lib/project';
 import { getBuiltinTemplate, SVC, type Template } from '@/lib/templates';
 import { stagesFromTemplate } from '@/lib/calendarStages';
@@ -97,7 +97,10 @@ export type ProjectAction =
   | { type: 'addServicePackage'; svc: string; patch: Record<string, string>; asNew?: boolean; label?: string }
   | { type: 'removeServicePackage'; pkg: number }
   | { type: 'addCustomNode'; pkg: number; name: string; date: string; owner: string; atIdx?: number }
-  | { type: 'toggleInvoiced' };
+  | { type: 'toggleInvoiced' }
+  /* REQ-045 */
+  | { type: 'markInvoiced'; invoiceRef: string; issuedDate: string; dueDate?: string; note?: string }
+  | { type: 'undoInvoice'; reason?: string };
 
 export class PermissionError extends Error {}
 export class ValidationError extends Error {}
@@ -138,6 +141,27 @@ function logIt(p: Project, by: string, k: string, params?: LogParams) {
   p.log.unshift({ at: Date.now(), by, text: logZh(k, params), k, p: params });
   if (p.log.length > 200) p.log.length = 200;
 }
+
+/* ===== REQ-045 开 Invoice 自动归档 =====
+   归档只是「不出现在工作视图」,开票 / 收款信息原样留着 —— 财务页按开票状态显示,
+   不看 archived。 */
+export function archiveForInvoice(p: Project, by: string, at = Date.now()) {
+  /* 已经被 PD / BD 手动归档的(含没有原因的老归档)不改原因 —— 否则以后撤回开票会把它带出来 */
+  if (p.archived) return;
+  p.archived = true;
+  p.archivedAt = at;
+  p.archivedBy = by;
+  p.archiveReason = 'invoiced';
+}
+/* 撤回开票时:只有「因开票自动归档」的才跟着取消;PD / BD 手动归档的不动 */
+function unarchiveForInvoice(p: Project): boolean {
+  if (!p.archived || p.archiveReason !== 'invoiced') return false;
+  p.archived = false;
+  delete p.archivedAt; delete p.archivedBy; delete p.archiveReason;
+  return true;
+}
+const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/;
+const validDay = (s: string) => ISO_DAY.test(s) && !!parseISO(s) && isoDate(parseISO(s)!) === s;
 
 /* 0922 变更单:资料 patch 里如果有与项目同源的 key(Project detail / Client
    Contact / Handover Date),把它写到项目字段上并记一条日志,返回 true 表示
@@ -741,9 +765,48 @@ export function applyAction(u: Identity, p: Project, a: ProjectAction, ctx: Acti
       break;
     }
     case 'toggleInvoiced': {
-      if (!canCommercial(u, p)) throw new PermissionError('仅 PD/BD/销售可标记开票收尾');
-      p.invoiced = !p.invoiced;
-      logIt(p, u.name, p.invoiced ? 'proj.invoiced' : 'proj.uninvoiced');
+      /* REQ-045: 旧开关并进「已开 Invoice」—— 不再单独存在(没刷新的旧页面点到这里时给句人话) */
+      throw new ValidationError('「标记开票」已改为「已开 Invoice」,请刷新页面后在阶段 5 填 Invoice 号');
+    }
+    case 'markInvoiced': {
+      if (!canMarkInvoice(u, p)) throw new PermissionError('仅 Finance / Sales / PD / BD 可标记已开 Invoice');
+      const inv = p.invoiceClose!;
+      if (inv.invoiceStatus === 'issued') throw new ValidationError('这个项目已开 Invoice');
+      const ref = String(a.invoiceRef || '').trim().slice(0, 60);
+      const day = String(a.issuedDate || '').trim();
+      if (!ref) throw new ValidationError('请填写 Invoice 号');
+      if (!validDay(day)) throw new ValidationError('请填写开票日期');
+      const due = String(a.dueDate || '').trim();
+      if (due && !validDay(due)) throw new ValidationError('到期日格式不对');
+      inv.invoiceRef = ref;
+      inv.issuedDate = day;
+      if (due) inv.dueDate = due;
+      const note = String(a.note || '').trim().slice(0, 300);
+      if (note) inv.financeNote = inv.financeNote ? `${inv.financeNote}\n${note}` : note;
+      inv.invoiceStatus = 'issued';
+      inv.issuedBy = u.name;
+      p.invoiced = true;
+      archiveForInvoice(p, u.name);
+      logIt(p, u.name, 'proj.invoiceArchive', { ref });
+      break;
+    }
+    case 'undoInvoice': {
+      if (!canMarkInvoice(u, p)) throw new PermissionError('仅 Finance / Sales / PD / BD 可撤回开票');
+      const inv = p.invoiceClose!;
+      if (inv.invoiceStatus !== 'issued' && !p.invoiced) throw new ValidationError('这个项目还没开 Invoice');
+      if (inv.paymentStatus === 'partial' || inv.paymentStatus === 'received') {
+        throw new ValidationError('已登记收款,不能撤回开票;请 Finance 先核对收款记录');
+      }
+      const ref = inv.invoiceRef || '—';
+      inv.invoiceStatus = 'pending_finance';
+      inv.invoiceRef = '';
+      inv.issuedDate = '';
+      inv.paymentStatus = 'pending';
+      delete inv.issuedBy;
+      p.invoiced = false;
+      const reason = String(a.reason || '').trim().slice(0, 200);
+      const back = unarchiveForInvoice(p);
+      logIt(p, u.name, back ? 'proj.invoiceUndoUnarchive' : 'proj.invoiceUndo', { ref, note: reason ? ' — ' + reason : '' });
       break;
     }
     /* ===== v2.2 Version 1A · S2 — Sales → PM handover ===== */
@@ -890,6 +953,17 @@ export function applyAction(u: Identity, p: Project, a: ProjectAction, ctx: Acti
       if (a.value === 'issued' && !inv.issuedDate) inv.issuedDate = isoDate(new Date());
       inv.invoiceStatus = a.value;
       logIt(p, u.name, 'fin.invoiceStatus', { from, to: a.value, note: a.reason ? ' — ' + a.reason : '' });
+      /* REQ-045: Finance 在 ④ 里点「开票」和「已开 Invoice」是同一件事 → 一样自动归档;
+         作废则一样取消(只取消因开票而归档的) */
+      if (from !== 'issued' && a.value === 'issued') {
+        inv.issuedBy = u.name;
+        p.invoiced = true;
+        archiveForInvoice(p, u.name);
+        logIt(p, u.name, 'proj.invoiceArchive', { ref: inv.invoiceRef });
+      } else if (from === 'issued' && a.value !== 'issued') {
+        p.invoiced = false;
+        if (unarchiveForInvoice(p)) logIt(p, u.name, 'proj.unarchive');
+      }
       break;
     }
     case 'setPaymentStatus': {
@@ -1071,6 +1145,9 @@ export function applyAction(u: Identity, p: Project, a: ProjectAction, ctx: Acti
     case 'setArchived': {
       if (!canAssign(u, p)) throw new PermissionError('仅 PD/BD 可归档项目');
       p.archived = !!a.value;
+      /* REQ-045: 记下谁、何时、为什么;手动取消归档后,撤回开票也不会再动它 */
+      if (p.archived) { p.archivedAt = Date.now(); p.archivedBy = u.name; p.archiveReason = 'manual'; }
+      else { delete p.archivedAt; delete p.archivedBy; delete p.archiveReason; }
       logIt(p, u.name, p.archived ? 'proj.archive' : 'proj.unarchive');
       break;
     }

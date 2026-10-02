@@ -49,6 +49,7 @@ export interface InvoiceClose {
   invoiceStatus: InvoiceStatus;
   paymentStatus: PaymentStatus;
   financeNote: string;
+  issuedBy?: string; // REQ-045: 谁点的「已开 Invoice」
 }
 
 export type RiskLevel = 'none' | 'watch' | 'high';
@@ -299,8 +300,13 @@ export interface Project {
   delivery: string;
   buffer: number;
   created: number;
-  invoiced?: boolean;
+  invoiced?: boolean; // 旧「已开票」开关;REQ-045 起只由「已开 Invoice」/「撤回开票」带着改
   archived?: boolean; // hidden from working views, kept for records/stats
+  /* REQ-045: 谁、什么时候、为什么归档。invoiced = 开 Invoice 自动归档(撤回开票时
+     自动取消);manual = PD / BD 手动归档。旧项目没有这几个字段。 */
+  archivedAt?: number;
+  archivedBy?: string;
+  archiveReason?: 'invoiced' | 'manual';
   dismissedRisks?: string[]; // risk keys the team has marked handled/ignored
   updatedAt?: number; // server-injected on read; used for conflict detection
   update: DirectorUpdate;

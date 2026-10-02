@@ -85,8 +85,8 @@ export const TPL: Record<string, Template> = {
        默认周数是建议值,PD / BD 可在模板管理里改(排期日历的默认阶段同步用这一份)。 */
     schedule: [
       ['0', '信息 Info', '信息收集：收到模型资料（见信息清单）', 'Information gathering: model files received', 'Client / All', 0, '—', '★ 排期从此起算 Schedule starts here', true, '—', '★ Schedule starts here'],
-      ['1', '白膜', '白膜角度小样', 'Clay-model angle previews', 'Audax', 1, '1 周', '客户看各角度小样', false, '1 week', 'Client reviews the angle previews'],
-      ['2', '角度 + AI', '角度 shortlist + AI 效果图，确定角度与大效果（含 1–2 轮）', 'Angle shortlist + AI mood renders: lock angles and overall look (1–2 rounds)', 'Audax / Client', 1, '1 周', '★ 冻结：角度和大效果 Lock angles & overall look', true, '1 week', '★ Freeze: angles and overall look'],
+      ['1', '白膜', '白膜角度小样', 'Clay-model angle previews', 'Audax', 2, '2 周', '客户看各角度小样', false, '2 weeks', 'Client reviews the angle previews'],
+      ['2', '角度 + AI', '角度 shortlist + AI 效果图，确定角度与大效果（含 1–2 轮）', 'Angle shortlist + AI mood renders: lock angles and overall look (1–2 rounds)', 'Audax / Client', 2, '2 周', '★ 冻结：角度和大效果 Lock angles & overall look', true, '2 weeks', '★ Freeze: angles and overall look'],
       ['3', '后期', '带材质、模型的后期图（参考大效果，含 2–3 轮）', 'Final renders with materials and model detail, following the approved look (2–3 rounds)', 'Audax / Client', 2, '2 周', '此后不接受重建模 / 大改', false, '2 weeks', 'No remodelling / major changes after this'],
       ['4', '交付', '导出成品格式，客户签收', 'Export final formats, client sign-off', 'Audax / PM', 1, '1 周', '★ 交付 · 对照信息清单逐项 QC', true, '1 week', '★ Delivery · QC against the checklist'],
     ],

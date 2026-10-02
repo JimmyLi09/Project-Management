@@ -52,8 +52,8 @@ export function createStage(name: string, index: number): StageDefinition {
  */
 export const STAGES: readonly StageDefinition[] = [
   { id: 'brief', name: '信息收集：收到模型资料（见信息清单）', nameEn: 'Information gathering: model files received', tone: 'coral', weeks: 0 },
-  { id: 'clay', name: '白膜角度小样', nameEn: 'Clay-model angle previews', tone: 'peach', weeks: 1 },
-  { id: 'shortlist', name: '角度 shortlist + AI 效果图，确定角度与大效果（含 1–2 轮）', nameEn: 'Angle shortlist + AI mood renders: lock angles and overall look (1–2 rounds)', tone: 'sage', weeks: 1 },
+  { id: 'clay', name: '白膜角度小样', nameEn: 'Clay-model angle previews', tone: 'peach', weeks: 2 },
+  { id: 'shortlist', name: '角度 shortlist + AI 效果图，确定角度与大效果（含 1–2 轮）', nameEn: 'Angle shortlist + AI mood renders: lock angles and overall look (1–2 rounds)', tone: 'sage', weeks: 2 },
   { id: 'final', name: '带材质、模型的后期图（参考大效果，含 2–3 轮）', nameEn: 'Final renders with materials and model detail, following the approved look (2–3 rounds)', tone: 'sky', weeks: 2 },
   { id: 'handover', name: '导出成品格式，客户签收', nameEn: 'Export final formats, client sign-off', tone: 'lavender', weeks: 1 }
 ]

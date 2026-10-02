@@ -29,7 +29,8 @@ export default function MyTasksView() {
 
   const workflowTodos = useMemo(() => {
     const out: { p: Project; label: string; labelEn: string }[] = [];
-    projects.forEach((p) => { if (p.archived) return; const a = pendingWorkflowAction(p, me); if (a) out.push({ p, label: a.label, labelEn: a.labelEn }); });
+    /* 归档项目由 pendingWorkflowAction 自己判断(REQ-045:开票后自动归档的,Finance 仍要跟收款) */
+    projects.forEach((p) => { const a = pendingWorkflowAction(p, me); if (a) out.push({ p, label: a.label, labelEn: a.labelEn }); });
     return out;
   }, [projects, me]);
 

@@ -2,8 +2,9 @@
 
 import React, { useMemo, useState } from 'react';
 import { useStore } from '../store';
-import { fmtDate, isoDate, parseISO, projectHealth, projPoints, projStage, schedProgress } from '@/lib/project';
-import { canCreate, isScopedRole } from '@/lib/permissions';
+import { fmtDate, isoDate, missingInvoiceRef, parseISO, projectHealth, projPoints, projStage, schedProgress } from '@/lib/project';
+import { canAssign, canCreate, isScopedRole } from '@/lib/permissions';
+import InvoiceModal, { invoiceTag } from '../InvoiceModal';
 import { focusLabel, focusWantsArchived, matchFocus } from '@/lib/focus';
 import { DIFF, SVC, stageIdx, svcColor, svcName } from '@/lib/templates';
 import { diffTerm } from '@/lib/terms';
@@ -24,6 +25,10 @@ export default function ProjectsView({ search = '' }: { search?: string }) {
   const scoped = isScopedRole(me);   // REQ-043: 只看得到自己项目的角色
   const [showArchived, setShowArchived] = useState(false);
   const [q, setQ] = useState(search);
+  /* REQ-045: 搜索默认不搜已归档;底部「另有 N 个已归档项目」点了才并进来。换了关键词就收回去 */
+  const [withArch, setWithArch] = useState<string | null>(null);
+  const [missOpen, setMissOpen] = useState(false);
+  const [fillFor, setFillFor] = useState<Project | null>(null);
   /* R5-1: view/density switcher (大卡片 / 紧凑 / 列表) — persisted per browser */
   const [viewMode, setViewMode] = useState<ViewMode>(() => {
     if (typeof window === 'undefined') return 'cards';
@@ -47,16 +52,24 @@ export default function ProjectsView({ search = '' }: { search?: string }) {
 
   /* 「项目总数」那一格点进来时,归档的也在这组里 —— 这时不按归档拆两拨,
      否则列表条数会比卡上的数字少。其余情况照旧:归档是单独一拨。 */
-  const mixArchived = focusWantsArchived(focus);
-  const list = projects.filter((p) => {
-    if (!mixArchived && !!p.archived !== showArchived) return false; // archived tab is separate
+  const needle = q.trim().toLowerCase();
+  const searchArch = !!needle && withArch === needle && !showArchived;
+  const mixArchived = focusWantsArchived(focus) || searchArch;
+  const matches = (p: Project) => {
     if (focus && !matchFocus(p, focus)) return false;
     if (typeFilter !== 'all' && !p.services.includes(typeFilter)) return false;
     if (pmFilter !== 'all' && !(p.owners || []).includes(pmFilter)) return false;
-    const needle = q.trim().toLowerCase();
-    if (needle && !(p.name + ' ' + p.client + ' ' + (p.owners || []).join(' ')).toLowerCase().includes(needle)) return false;
+    if (needle && !(p.name + ' ' + p.client + ' ' + (p.owners || []).join(' ') + ' ' + (p.invoiceClose?.invoiceRef || '')).toLowerCase().includes(needle)) return false;
     return true;
+  };
+  const list = projects.filter((p) => {
+    if (!mixArchived && !!p.archived !== showArchived) return false; // archived tab is separate
+    return matches(p);
   });
+  /* 搜索时,被「默认不看归档」挡掉的有几个 */
+  const hiddenArch = needle && !mixArchived && !showArchived ? projects.filter((p) => p.archived && matches(p)).length : 0;
+  /* REQ-045: 旧「已开票」开关标过、没有 Invoice 号的 —— 交给 PD / BD 补号 */
+  const missing = canAssign(me) ? projects.filter(missingInvoiceRef) : [];
   const archivedInList = list.filter((p) => p.archived).length;
   /* 「总积分」那一格点进来,想看的是谁分最多 —— 只有这一种口径自带排序 */
   if (focus && focus.kind === 'points') {
@@ -84,6 +97,32 @@ export default function ProjectsView({ search = '' }: { search?: string }) {
             onClick={() => setView({ name: 'projects' })}>✕ {t('清除筛选', 'Clear')}</button>
         </div>
       )}
+      {missing.length > 0 && !showArchived && (
+        <div className="panel" data-testid="missing-invoice-bar"
+          style={{ padding: '10px 16px', marginBottom: 16, fontSize: 12.5, borderColor: 'var(--warning)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+            <span>⚠ {t(`有 ${missing.length} 个项目已标开票但缺 Invoice 号`, `${missing.length} project${missing.length === 1 ? ' is' : 's are'} marked invoiced but missing an invoice number`)}</span>
+            <span style={{ color: 'var(--text2)' }}>{t('补号后自动归档', 'adding the number archives them')}</span>
+            <div style={{ flex: 1 }} />
+            <button className="btn-line sm" data-testid="missing-invoice-toggle" onClick={() => setMissOpen(!missOpen)}>
+              {missOpen ? t('收起', 'Collapse') : t('逐个补号', 'Fill in')}
+            </button>
+          </div>
+          {missOpen && (
+            <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {missing.map((p) => (
+                <div key={p.id} data-testid="missing-invoice-row" style={{ display: 'flex', alignItems: 'center', gap: 10, borderTop: '1px solid var(--row-line)', paddingTop: 6 }}>
+                  <button style={{ fontWeight: 600, color: 'var(--navy900)', padding: 0 }} onClick={() => openProject(p.id)}>{p.name}</button>
+                  <span style={{ color: 'var(--text2)' }}>{p.client || '—'}</span>
+                  <div style={{ flex: 1 }} />
+                  <button className="btn-navy sm" data-testid="missing-invoice-fill" onClick={() => setFillFor(p)}>{t('补 Invoice 号', 'Add invoice number')}</button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+      {fillFor && <InvoiceModal p={fillFor} onClose={() => setFillFor(null)} />}
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginBottom: 22 }}>
         <div className="searchbox" style={{ background: 'var(--card)', width: 260 }}>
           <Icon name="search" size={16} />
@@ -111,8 +150,8 @@ export default function ProjectsView({ search = '' }: { search?: string }) {
             </>
           )}
           {/* 这一组本来就含归档,再给一个「只看归档」的开关只会互相打架 */}
-          {!mixArchived && (
-            <button className={`chip ${showArchived ? 'active' : ''}`} onClick={() => setShowArchived(!showArchived)} title={t('查看已归档项目', 'View archived projects')}>
+          {!focusWantsArchived(focus) && (
+            <button data-testid="archived-chip" className={`chip ${showArchived ? 'active' : ''}`} onClick={() => { setShowArchived(!showArchived); setWithArch(null); }} title={t('查看已归档项目', 'View archived projects')}>
               📦 {t('已归档', 'Archived')}{archivedCount ? ` ${archivedCount}` : ''}
             </button>
           )}
@@ -142,6 +181,13 @@ export default function ProjectsView({ search = '' }: { search?: string }) {
             : <ProjectCard key={p.id} p={p} onOpen={() => openProject(p.id)} />)}
         </div>
       )}
+      {hiddenArch > 0 && (
+        <div style={{ textAlign: 'center', marginTop: 16, fontSize: 12.5, color: 'var(--text2)' }}>
+          <button className="btn-line sm" data-testid="search-more-archived" onClick={() => setWithArch(needle)}>
+            📦 {t(`另有 ${hiddenArch} 个已归档项目`, `${hiddenArch} more in Archived`)}
+          </button>
+        </div>
+      )}
     </>
   );
 }
@@ -165,6 +211,7 @@ function CompactCard({ p, onOpen }: { p: Project; onOpen: () => void }) {
             {p.archived && <span data-testid="archived-tag" className="badge" style={{ background: 'var(--hover-bg)', color: 'var(--text2)', marginRight: 5 }}>📦 {t('已归档', 'Archived')}</span>}{p.name}
           </Ell>
           <Ell style={{ fontSize: 11.5, color: 'var(--text2)' }}>{p.client || '—'}</Ell>
+          <InvTag p={p} />
         </div>
         <Pill m={HM[h]} />
       </div>
@@ -258,6 +305,7 @@ function ProjectList({ list, onOpen }: { list: Project[]; onOpen: (id: string) =
                 {p.archived && <span data-testid="archived-tag" className="badge" style={{ background: 'var(--hover-bg)', color: 'var(--text2)', marginRight: 5 }}>📦 {t('已归档', 'Archived')}</span>}{p.name}
               </Ell>
               <Ell style={{ fontSize: 11.5, color: 'var(--text2)' }}>{p.client || '—'}</Ell>
+              <InvTag p={p} />
             </div>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, minWidth: 0 }}>
               {p.services.slice(0, 2).map((k) => <span key={k} className="svc-chip" style={{ color: svcColor(k), fontSize: 10.5 }}>{svcName(k, lang)}</span>)}
@@ -273,6 +321,13 @@ function ProjectList({ list, onOpen }: { list: Project[]; onOpen: (id: string) =
       })}
     </div>
   );
+}
+
+/* REQ-045: 「已开 Invoice · INV-xxxx · 01-Oct」 */
+function InvTag({ p }: { p: Project }) {
+  const { lang } = useLang();
+  const s = invoiceTag(p, lang);
+  return s ? <div data-testid="invoice-tag" title={s} style={{ fontSize: 11.5, color: 'var(--success)', marginTop: 2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{s}</div> : null;
 }
 
 /* deterministic navy-toned cover gradient per project */
@@ -315,6 +370,7 @@ function ProjectCard({ p, onOpen }: { p: Project; onOpen: () => void }) {
         <div>
           <div style={{ fontSize: 16, fontWeight: 600, color: 'var(--navy900)' }}>{p.archived && <span data-testid="archived-tag" className="badge" style={{ background: 'var(--hover-bg)', color: 'var(--text2)', marginRight: 5 }}>📦 {t('已归档', 'Archived')}</span>}{p.name}</div>
           <div style={{ fontSize: 12.5, color: 'var(--text2)', marginTop: 2 }}>{p.client || '—'}</div>
+          <InvTag p={p} />
         </div>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
           {p.services.map((k) => <span key={k} className="svc-chip" style={{ color: svcColor(k) }}>{svcName(k, lang)}</span>)}

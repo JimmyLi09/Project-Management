@@ -20,7 +20,7 @@ import {
 const SIX = Array.from({ length: 6 }, (_, i) => ({ id: `s${i}`, name: `S${i}`, tone: 'coral' }))
 
 describe('schedule date primitives', () => {
-  it('REQ-047: the standalone default is the new CGI flow (5 stages, weeks 0/1/1/2/1)', () => {
+  it('REQ-047: the standalone default is the new CGI flow (5 stages, weeks 0/2/2/2/1 — 1002 Jimmy 确认)', () => {
     expect(STAGES.map((stage) => stage.name)).toEqual([
       '信息收集：收到模型资料（见信息清单）',
       '白膜角度小样',
@@ -28,7 +28,7 @@ describe('schedule date primitives', () => {
       '带材质、模型的后期图（参考大效果，含 2–3 轮）',
       '导出成品格式，客户签收'
     ])
-    expect(STAGES.map((stage) => stage.weeks)).toEqual([0, 1, 1, 2, 1])
+    expect(STAGES.map((stage) => stage.weeks)).toEqual([0, 2, 2, 2, 1])
   })
 
   it('adds calendar days without shifting across month boundaries', () => {

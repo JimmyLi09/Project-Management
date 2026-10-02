@@ -92,7 +92,9 @@ export interface WorkflowMetrics {
 }
 
 export function workflowMetrics(projects: Project[]): WorkflowMetrics {
-  const live = projects.filter((p) => !p.archived);
+  /* REQ-045: 开 Invoice 会自动归档 —— 这些恰恰是走完流程的样本,时效统计要留着它们;
+     PD / BD 手动归档的(作废、搁置)照旧不算 */
+  const live = projects.filter((p) => !p.archived || p.archiveReason === 'invoiced');
   const steps: StepStat[] = STEPS.map((s) => {
     const target = SLA_TARGETS[s.key] ?? null;
     const durations: number[] = [];
