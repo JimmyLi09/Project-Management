@@ -236,6 +236,7 @@ export const LOG_MSG: Record<string, [string, string]> = {
     'Picture confirmed into 05: {file} · {w} × {h} mm · P{pitch} (changed by hand: {jchg})'],
   'av.cfgLed': ['保存 LED 方案:P{pitch} · {sqm} ㎡ · 箱体 {cabinets} 只(规则包 {pack})',
     'LED design saved: P{pitch} · {sqm} m² · {cabinets} cabinets (pack {pack})'],
+  'av.packUpgrade': ['{line} 规则包升级:{from} → {to}(历史版本不变)', '{line} rule pack upgraded: {from} → {to} (earlier versions unchanged)'],
   'av.cfgPrj': ['保存投影方案:{size} mm · {n} 台 × {lm} lm(规则包 {pack})',
     'Projection design saved: {size} mm · {n} × {lm} lm (pack {pack})'],
   'av.cfgElv': ['保存弱电方案:{area} ㎡ · 端口 {ports} · 摄像机 {cams} · 扬声器 {spk}(规则包 {pack})',

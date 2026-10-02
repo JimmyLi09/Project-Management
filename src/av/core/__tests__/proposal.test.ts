@@ -22,7 +22,8 @@ test('中文：数值与段落与出图、验收用例一致', () => {
   assert.match(text, /需数据线 6 条，另预留 1 条备用，合计 7 根/);
   assert.match(text, /与 P2 的点间距配置相匹配/);
   assert.deepEqual(d.sections[2].table!.rows, [['640 × 480', '28 只', '库内标准'], ['640 × 640', '7 只', '库内标准']]);
-  assert.equal(d.sections.length, 5, '无校验提示时没有待确认事项');
+  assert.equal(d.sections.length, 6, '无校验提示时没有待确认事项');
+  assert.equal(d.sections[4].heading, '五、计算依据');
   assert.deepEqual(d.cover.map((c) => c.label), ['项目', '客户', '日期']);
   assert.match(d.copyright.paragraphs[0], /© 2026 AUDAX/);
   assert.match(d.copyright.paragraphs[1], /仅供海晟置业就「144 Chuan Grove」项目评估使用/);
@@ -50,7 +51,7 @@ test('叙述与待确认事项跟随校验结果', () => {
   const en = all(proposalDoc(warn, { ...meta, lang: 'en' })!);
   assert.match(zh, /小于 P2 的推荐最小观看距离/);
   assert.match(zh, /强电井距屏体 35 m/);
-  assert.match(zh, /六、待确认事项/);
+  assert.match(zh, /七、待确认事项/);
   assert.match(en, /\[LED-VD-01\] The nearest viewing distance of 1\.5 m is less than 2 m/);
   assert.match(en, /\[LED-PWR-07\] The electrical riser is 35 m away/);
 });
@@ -60,4 +61,24 @@ test('没有客户名时封面与版权页不留空位；排布无解时没有�
   assert.deepEqual(d.cover.map((c) => c.label), ['项目', '日期']);
   assert.match(d.copyright.paragraphs[1], /仅供「X」项目评估使用/);
   assert.equal(proposalDoc(compute({ ...cfg, led_opening_w: 4500 }, 'led@1.0'), { ...meta, lang: 'zh' }), null);
+});
+
+test('AV-019 · 计算依据一节与 05 / DXF 同一份;1.1 的回路分配按箱体逐路', async () => {
+  const { calcBasis } = await import('../calc.ts');
+  const boc = compute(fixtureConfig(FIXTURES.find((f) => f.id === '148')!), 'led@1.1');
+  for (const lang of ['zh', 'en'] as const) {
+    const d = proposalDoc(boc, { ...meta, lang })!;
+    const sec = d.sections[4];
+    assert.equal(sec.heading, lang === 'zh' ? '五、计算依据' : '5. Calculation Basis');
+    assert.deepEqual(sec.table!.rows, calcBasis(boc, lang).map((x) => [x.item, x.formula, x.result, x.source]));
+    const loads = d.sections[3].table!.rows[1];
+    assert.equal(loads[1], '2458W / 2458W / 2458W');
+    assert.equal(loads[2], lang === 'zh' ? '按箱体逐路分配，每路 ≤ 2.5 kW' : 'Cabinet by cabinet, each ≤ 2.5 kW');
+    /* 「级联上限待填」是内部参数,不进给客户的待确认事项 */
+    assert.ok(!all(d).includes('LED-PWR-11'));
+    if (lang === 'en') assert.doesNotMatch(all(d), /[一-鿿]/, '英文版不含中文');
+  }
+  /* 1.0 的超限在英文版也有英文说明 */
+  const old = proposalDoc(compute(fixtureConfig(FIXTURES.find((f) => f.id === '148')!), 'led@1.0'), { ...meta, lang: 'en' })!;
+  assert.match(all(old), /\[LED-PWR-09\] Circuit\(s\) 1 \(2765 W\), 2 \(2765 W\) exceed the 2\.5 kW circuit limit/);
 });

@@ -38,11 +38,21 @@ export interface ScreenProfile {
   note: string;
 }
 
+/* AV-019(led@1.1)起的配电公司参数。led@1.0 只有 circuitKw。 */
+export interface CompanyPower {
+  circuitKw: number;                    // 单回路上限 kW
+  voltage?: number;                     // V,每路电流 = 功率 ÷ 电压
+  /* 电源线规格 → 载流上限 A(按线径表)。表里没有的规格:算电流照算,载流核对标「待填」 */
+  cableAmps?: Record<string, number>;
+  /* 一条箱体电源链最多串几只(按箱体规格书)。null = 还没填,提示「待填,按厂家规格」 */
+  cascadeMax?: number | null;
+}
+
 export interface RulePack {
   line: BusinessLine;
   version: string;
   issued: string;
-  company: { circuitKw: number };                                  // 公司级电气常量
+  company: CompanyPower;                                           // 公司级电气常量
   control: { brand: string; model: string; dataPx: number };       // 控制系统参数
   profiles: Record<ScreenType, ScreenProfile>;                     // 屏体类型参数组
   formulas: Formula[];
@@ -98,9 +108,42 @@ const LED_V1: RulePack = {
   formulas: LED_FORMULAS,
 };
 
-const PACKS: Record<string, RulePack> = { [LED_V1.version]: LED_V1 };
+/* ===== led@1.1(AV-019,2026-10-02)=====
+   只改电源回路和数据线两步,其它参数、公式与 led@1.0 一致:
+   - F6 改为算法:按列竖向蛇形成链(第 1 列自下而上、第 2 列自上而下……),按箱体逐只分给
+     回路、允许一列中途换回路,每路负载尽量相等;**逐路校核**,任何一路超过单回路上限就
+     n + 1 重新分配。led@1.0 先按整列均衡分组、分完不校核,BOC 5120 × 2880 会分成
+     2765 / 2765 / 1843 W,前两路超过 2.5 kW。
+   - F8 改为算法:数据线按项目选的走法(每行一条 / 蛇形按带载),逐只箱体累加像素,
+     到单线带载上限就换下一条 —— 网线不能把一只箱体拆开。
+   - 公司参数加电压、电源线载流上限、箱体电源级联上限。
+   已有项目绑定的仍是 led@1.0,结果不变;重新保存时提示可升级。 */
+const LED_V11_FORMULAS: Formula[] = LED_FORMULAS.map((f) => {
+  if (f.id === 'F6') return { id: 'F6', name: '电源回路', unit: '路', source: 'AV-019（按箱体逐路校核）', kind: 'algorithm', ref: 'AV-019 §2.2 按列蛇形成链 · 逐路校核' };
+  if (f.id === 'F8') return { id: 'F8', name: '数据线条数', unit: '条', source: 'AV-019（按走法逐只累加带载）', kind: 'algorithm', ref: 'AV-019 §2.2 每行一条 / 蛇形按带载' };
+  return f;
+});
 
-export const LATEST_LED_PACK = LED_V1.version;
+const LED_V11: RulePack = {
+  ...LED_V1,
+  version: 'led@1.1',
+  issued: '2026-10-02',
+  company: {
+    circuitKw: 2.5,
+    voltage: 230,
+    /* 公司参数(线径表):3 × 2.5 mm² 按 16 A 开关计。其它规格待填 */
+    cableAmps: { '3*2.5': 16 },
+    cascadeMax: null,
+  },
+  formulas: LED_V11_FORMULAS,
+};
+
+const PACKS: Record<string, RulePack> = { [LED_V1.version]: LED_V1, [LED_V11.version]: LED_V11 };
+
+export const LATEST_LED_PACK = LED_V11.version;
+
+/* 比 latest 旧的 LED 包 —— 05 提示「可升级」 */
+export const ledPackUpgradable = (version: string | null | undefined) => !!version && version !== LATEST_LED_PACK && version.startsWith('led@');
 
 export function getRulePack(version: string): RulePack {
   const pack = PACKS[version];

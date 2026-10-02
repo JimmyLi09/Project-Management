@@ -14,20 +14,24 @@ export interface SvgOptions {
   /* Rendered size, px per mm. The default keeps a 5 m screen near 1200 px. */
   pxPerMm?: number;
   background?: string;
+  /* AV-019:05 页「适应宽度」—— 宽度 100%,高度按比例,不再被面板裁掉右侧 */
+  fit?: boolean;
 }
 
 export function toSvg(d: Drawing, opt: SvgOptions = {}): string {
   const w = d.bbox.maxX - d.bbox.minX + PAD * 2;
   const h = d.bbox.maxY - d.bbox.minY + PAD * 2;
-  const k = opt.pxPerMm ?? Math.min(0.2, 1200 / w);
+  const k = opt.pxPerMm ?? 0.2;
   const bg = opt.background ?? '#0E1013';
 
   const X = (x: number) => round(x - d.bbox.minX + PAD);
   const Y = (y: number) => round(d.bbox.maxY + PAD - y);
 
   const out: string[] = [
-    `<svg xmlns="http://www.w3.org/2000/svg" width="${round(w * k)}" height="${round(h * k)}"`,
-    ` viewBox="0 0 ${round(w)} ${round(h)}" font-family="Arial, Helvetica, sans-serif">`,
+    opt.fit
+      ? `<svg xmlns="http://www.w3.org/2000/svg" width="100%" preserveAspectRatio="xMinYMin meet" style="display:block;height:auto"`
+      : `<svg xmlns="http://www.w3.org/2000/svg" width="${round(w * k)}" height="${round(h * k)}"`,
+    ` viewBox="0 0 ${round(w)} ${round(h)}" font-family="Arial, 'Microsoft YaHei', 'PingFang SC', Helvetica, sans-serif">`,
     `<title>${esc(d.title)}</title>`,
     `<rect width="${round(w)}" height="${round(h)}" fill="${bg}"/>`,
   ];
@@ -43,16 +47,18 @@ export function toSvg(d: Drawing, opt: SvgOptions = {}): string {
 }
 
 function entity(e: Entity, rgb: string, X: (n: number) => number, Y: (n: number) => number): string {
+  /* AV-019:图元自带颜色(回路 / 网线各一色)时覆盖图层色 */
+  const st = (e.k !== 'text' && e.c) ? ` stroke="${e.c}"` : '';
   switch (e.k) {
     case 'line':
-      return `<line x1="${X(e.x1)}" y1="${Y(e.y1)}" x2="${X(e.x2)}" y2="${Y(e.y2)}"/>`;
+      return `<line x1="${X(e.x1)}" y1="${Y(e.y1)}" x2="${X(e.x2)}" y2="${Y(e.y2)}"${st}${e.sw ? ` stroke-width="${e.sw}"` : ''}/>`;
     case 'rect':
-      return `<rect x="${X(e.x)}" y="${Y(e.y + e.h)}" width="${round(e.w)}" height="${round(e.h)}"/>`;
+      return `<rect x="${X(e.x)}" y="${Y(e.y + e.h)}" width="${round(e.w)}" height="${round(e.h)}"${st}${e.fill ? ` fill="${e.fill}"` : ''}/>`;
     case 'circle':
-      return `<circle cx="${X(e.cx)}" cy="${Y(e.cy)}" r="${round(e.r)}"/>`;
+      return `<circle cx="${X(e.cx)}" cy="${Y(e.cy)}" r="${round(e.r)}"${st}${e.fill ? ` fill="${e.fill}"` : ''}/>`;
     case 'text':
-      return `<text x="${X(e.x)}" y="${Y(e.y)}" font-size="${round(e.h)}" fill="${rgb}" stroke="none"`
-        + ` text-anchor="${e.anchor}">${esc(e.s)}</text>`;
+      return `<text x="${X(e.x)}" y="${Y(e.y)}" font-size="${round(e.h)}" fill="${e.c ?? rgb}" stroke="none"`
+        + `${e.bold ? ' font-weight="700"' : ''} text-anchor="${e.anchor}">${esc(e.s)}</text>`;
   }
 }
 

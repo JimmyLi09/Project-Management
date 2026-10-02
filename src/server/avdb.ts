@@ -470,6 +470,15 @@ export function updateInquiry(projectId: string, f: { location: string; notes: s
   return db().prepare('UPDATE av_inquiry SET location = ?, notes = ? WHERE project_id = ?').run(f.location, f.notes, projectId).changes > 0;
 }
 
+/* AV-019:已有项目重新保存时,用户确认后把 LED 规则包升级到最新一版(只改立项记录上的绑定;
+   历史正式版本各自记着当时用的规则包,不动) */
+export function setInquiryPack(projectId: string, line: BusinessLine, pack: string): boolean {
+  const cur = getInquiry(projectId);
+  if (!cur) return false;
+  const packs = { ...cur.packs, [line]: pack };
+  return db().prepare('UPDATE av_inquiry SET packs = ? WHERE project_id = ?').run(JSON.stringify(packs), projectId).changes > 0;
+}
+
 /* ===== AV-018 · 立项记录一定存在 =====
    av_inquiry 原来只在「01 新建询价」时建。项目页新建的、复制的、在 01 选已有项目的都没有,
    于是 01 的「项目地点」「需求补充说明」是灰的、改了也存不进去,02 还提示「未经 01 立项询价」。

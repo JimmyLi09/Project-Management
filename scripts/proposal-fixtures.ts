@@ -5,10 +5,11 @@ import { writeFileSync } from 'node:fs';
 import { compute } from '../src/av/core/compute.ts';
 import { FIXTURES, fixtureConfig } from '../src/av/core/fixtures.ts';
 import { proposalDoc } from '../src/av/core/proposal.ts';
+import { LATEST_LED_PACK } from '../src/av/core/rulepack.ts';
 
 const OUT = 'services/drawing/tests/fixtures/proposal';
-const plain = compute({ ...fixtureConfig(FIXTURES[0]), led_view_min: 3 }, 'led@1.0');
-const warn = compute({ ...fixtureConfig(FIXTURES[0]), led_view_min: 1.5, led_pwr_dist: 35 }, 'led@1.0');
+const plain = compute({ ...fixtureConfig(FIXTURES[0]), led_view_min: 3 }, LATEST_LED_PACK);
+const warn = compute({ ...fixtureConfig(FIXTURES[0]), led_view_min: 1.5, led_pwr_dist: 35 }, LATEST_LED_PACK);
 for (const lang of ['zh', 'en'] as const) {
   writeFileSync(`${OUT}/doc-${lang}.json`, JSON.stringify(proposalDoc(plain, { title: '144 Chuan Grove', client: '海晟置业', lang, date: '2026-09-28' })));
   writeFileSync(`${OUT}/doc-${lang}-warn.json`, JSON.stringify(proposalDoc(warn, { title: '144 Chuan Grove', client: '', lang, date: '2026-09-28' })));

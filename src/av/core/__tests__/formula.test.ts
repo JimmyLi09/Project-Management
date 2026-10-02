@@ -40,13 +40,13 @@ test('A8 · 修改系数生成新版本，历史项目结果不变', () => {
   const v1 = getRulePack('led@1.0');
   const bumped: RulePack = {
     ...v1,
-    version: 'led@1.1',
+    version: 'led@1.0-bump',
     profiles: { ...v1.profiles, in_fixed: { ...v1.profiles.in_fixed, wSqm: 560 } },
   };
   registerRulePack(bumped);
 
   assert.equal(compute(fixtureConfig(f), 'led@1.0').trace.kw.value, before, '锁定 v1.0 的项目结果不变');
-  assert.ok(compute(fixtureConfig(f), 'led@1.1').trace.kw.value > before, '新版本按新系数计算');
+  assert.ok(compute(fixtureConfig(f), 'led@1.0-bump').trace.kw.value > before, '新版本按新系数计算');
   assert.throws(() => registerRulePack(bumped), /already exists/, '同版本号不得覆盖');
   assert.throws(() => getRulePack('led@9.9'), /unknown rule pack/);
 });

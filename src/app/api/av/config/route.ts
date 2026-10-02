@@ -8,10 +8,10 @@ import { computePrj, type PrjConfig } from '@/av/core/prj/compute';
 import { LATEST_PRJ_PACK } from '@/av/core/prj/rulepack';
 import { computePv, type PvConfig } from '@/av/core/pv/compute';
 import { LATEST_PV_PACK } from '@/av/core/pv/rulepack';
-import { LATEST_LED_PACK } from '@/av/core/rulepack';
+import { LATEST_LED_PACK, ledPackUpgradable } from '@/av/core/rulepack';
 import type { LedConfig } from '@/av/core/types';
 import { canCostProject, identityOf } from '@/lib/permissions';
-import { clearDraft, configCount, draftOwners, getDraft, getDrawing, getInquiry, latestConfig, saveConfig } from '@/server/avdb';
+import { clearDraft, configCount, draftOwners, getDraft, getDrawing, getInquiry, latestConfig, saveConfig, setInquiryPack } from '@/server/avdb';
 import { lineProjectError } from '@/server/avdrawing';
 import { appendAudit, getProject } from '@/server/db';
 import { currentUser } from '@/server/session';
@@ -51,7 +51,7 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   const user = await currentUser();
   if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
-  const body = (await req.json().catch(() => ({}))) as { projectId?: string; line?: string; drawingId?: number | null; cfg?: unknown };
+  const body = (await req.json().catch(() => ({}))) as { projectId?: string; line?: string; drawingId?: number | null; cfg?: unknown; upgradePack?: boolean };
   const line = body.line === 'projector' || body.line === 'elv' || body.line === 'pv' ? body.line : 'led';
   const project = getProject(String(body.projectId || ''));
   const denied = denyUnlessVisible(user, project);   // REQ-043
@@ -139,7 +139,10 @@ export async function POST(req: NextRequest) {
   return NextResponse.json({ config: saved, version: configCount(project!.id, line) });
   }
 
-  const packVersion = inquiry?.packs.led ?? LATEST_LED_PACK;
+  /* AV-019:旧项目保持立项时的规则包;用户在 05 点了「升级」才在这次保存时换成最新一版 */
+  const boundPack = inquiry?.packs.led ?? LATEST_LED_PACK;
+  const upgrading = !!body.upgradePack && ledPackUpgradable(boundPack);
+  const packVersion = upgrading ? LATEST_LED_PACK : boundPack;
   let cfg = body.cfg as LedConfig;
   let prov = {};
   let drawingId: number | null = null;
@@ -173,10 +176,13 @@ export async function POST(req: NextRequest) {
       ...(cfg.led_curve ? { curve: cfg.led_curve } : {}),
     },
   }, cfg);
-  appendAudit(project!.id, [{
+  if (upgrading) setInquiryPack(project!.id, 'led', packVersion);
+  appendAudit(project!.id, [...(upgrading ? [{
+    at: Date.now(), by: user.name, ...auditOf('av.packUpgrade', { line: 'LED', from: boundPack, to: packVersion }),
+  }] : []), {
     at: Date.now(), by: user.name,
     ...auditOf('av.cfgLed', { pitch: cfg.led_pitch, sqm: t.sqm.value.toFixed(2), cabinets: r.layout.cells.length, pack: packVersion }),
   }]);
   clearDraft(project!.id, line, user.id);
-  return NextResponse.json({ config: saved, version: configCount(project!.id, line) });
+  return NextResponse.json({ config: saved, version: configCount(project!.id, line), packVersion });
 }
