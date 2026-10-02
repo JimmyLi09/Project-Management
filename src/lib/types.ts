@@ -145,6 +145,11 @@ export interface ChecklistItem {
      remark)继续保留并跟着 Latest 走 —— 导出、KPI、看板那些地方读的还是它们,
      不需要跟着一起改。 */
   receipts?: ReceiptRecord[];
+  /* REQ-044: 这一项哪些服务需要(如 ['cgi','scale'])。项目级共用清单靠它筛选;
+     老的「每个服务包一份」结构里没有这一位。 */
+  svcs?: string[];
+  /* REQ-044: 同一种服务有两份(大堂 LED / 户外 LED)时,只属于其中一份的项记下是哪一份 */
+  inst?: string;
 }
 
 /* REQ-040: 日历式排期的落库形态。boundaries 是 N+1 个本地日期
