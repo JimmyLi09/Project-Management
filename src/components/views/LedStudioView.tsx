@@ -18,6 +18,7 @@ import { toHandoff, type DrawingElement, type DrawingSummary, type Handoff, type
 import type { LedConfig, ScreenType, Severity, Size, TraceNode } from '@/av/core/types';
 import { canCostProject, canExportLed } from '@/lib/permissions';
 import { useLang } from '@/lib/i18n';
+import { fmtDate } from '@/lib/project';
 import { useStore } from '../store';
 import { Icon } from '../ui';
 import { useFlowGuard, useFlowRefresh } from './AvFlow';
@@ -216,9 +217,14 @@ export default function LedStudioView() {
     refreshFlow();
     setReady(true);
   }
-  const srcLabel = fromDrawing?.notes ? t('来自图片 · 已人工确认', 'From picture · confirmed') : t('来自图纸 · 04 已确认', 'From drawing · 04 confirmed');
+  /* AV-018:带入的字段下写「来自图片判读 · 01-Oct」(日期 = 那张图校核 / 带入的日子) */
+  const srcDay = reviewed.d && fromDrawing?.drawingId === reviewed.d.id && reviewed.d.reviewedAt ? ` · ${fmtDate(new Date(reviewed.d.reviewedAt)).slice(0, 6)}` : '';
+  const srcLabel = fromDrawing?.notes ? t(`来自图片判读${srcDay}`, `From the picture reading${srcDay}`) : t(`来自图纸 · 04 已确认${srcDay}`, `From drawing · 04 confirmed${srcDay}`);
   const src = (k: DrawingElement) => locked(k) && <span style={{ display: 'block', fontSize: 11, color: 'var(--success)', marginTop: 3 }} data-testid={`led-src-${k}`}>{srcLabel}</span>;
-  const newerDrawing = !!reviewed.d && !!fromDrawing?.drawingId && reviewed.d.id !== fromDrawing.drawingId && origin === 'saved';
+  /* 图纸校核有更新:换了一张图、或同一张图之后又校核过。AV-018:有草稿时也要提示(原来只看正式版本) */
+  const baseAt = origin === 'draft' ? (saved.draft?.updatedAt ?? 0) : saved.savedAt;
+  const newerDrawing = !!reviewed.d && (origin === 'saved' || origin === 'draft')
+    && (fromDrawing?.drawingId ? reviewed.d.id !== fromDrawing.drawingId || reviewed.d.reviewedAt > baseAt : reviewed.d.reviewedAt > baseAt);
   const drawing = useMemo(
     () => buildDrawing(result, { project: fromDrawing?.project ?? fromDrawing?.drawing ?? t('方案配置', 'Configuration') }),
     [result, t, fromDrawing],

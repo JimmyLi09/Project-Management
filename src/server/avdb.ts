@@ -15,6 +15,8 @@ import { compute } from '@/av/core/compute';
 import { buildLedLines, displayCandidates, totals } from '@/av/core/pricing';
 import { GST_RATE, quoteNo, quoteTotals, toSection } from '@/av/core/quote';
 import { LATEST_LED_PACK } from '@/av/core/rulepack';
+import { isAvailable, projectLines } from '@/av/core/lines';
+import { categoryCode } from './avprice';
 import type { LedConfig } from '@/av/core/types';
 import { logZh } from '@/lib/logmsg';
 import type { DrawingElement, DrawingExtra, DrawingSummary, IngestRecord, IngestResult, StoredDrawing } from '@/av/core/handoff';
@@ -468,6 +470,38 @@ export function updateInquiry(projectId: string, f: { location: string; notes: s
   return db().prepare('UPDATE av_inquiry SET location = ?, notes = ? WHERE project_id = ?').run(f.location, f.notes, projectId).changes > 0;
 }
 
+/* ===== AV-018 · 立项记录一定存在 =====
+   av_inquiry 原来只在「01 新建询价」时建。项目页新建的、复制的、在 01 选已有项目的都没有,
+   于是 01 的「项目地点」「需求补充说明」是灰的、改了也存不进去,02 还提示「未经 01 立项询价」。
+   现在缺了就补建一条:业务线按项目已有的服务包推断;每条线的规则包取这条线最新正式方案用的
+   那一版(没有方案就取当前最新)—— 和原来「没有记录就按最新算」的结果一致,只是从此记下来。 */
+export function ensureInquiry(p: { id: string; packages: { svc: string }[] }, by = '系统补建'): Inquiry | null {
+  const cur = getInquiry(p.id);
+  if (cur) return cur;
+  const lines = projectLines(p.packages.map((k) => k.svc)).filter(isAvailable);
+  if (!lines.length) return null;
+  const packs = Object.fromEntries(lines.map((l) => [l.line, latestConfig(p.id, l.line)?.packVersion || l.pack!])) as Partial<Record<BusinessLine, string>>;
+  const now = Date.now();
+  const made = db().prepare(`INSERT OR IGNORE INTO av_inquiry (project_id, location, notes, lines, packs, created_by, created_at)
+    VALUES (?, '', '', ?, ?, ?, ?)`).run(p.id, JSON.stringify(lines.map((l) => l.line)), JSON.stringify(packs), by, now).changes;
+  if (made) {
+    const lp = { lines: lines.map((l) => `${l.label}（${packs[l.line]}）`).join('、') };
+    appendAudit(p.id, [{ at: now, by, text: logZh('av.inquiryAuto', lp), k: 'av.inquiryAuto', p: lp }]);
+  }
+  return getInquiry(p.id);
+}
+
+/* 上线后第一次用到 AV 时,把所有「有 AV 服务包、却没有立项记录」的项目一次补齐(每个进程只扫一遍) */
+let backfilled = false;
+export function backfillInquiries(): number {
+  if (backfilled) return 0;
+  backfilled = true;
+  let n = 0;
+  for (const p of listProjects()) if (!getInquiry(p.id) && ensureInquiry(p)) n++;
+  if (n) console.log(`[AV-018] 已为 ${n} 个 AV 项目补建立项记录`);
+  return n;
+}
+
 export function getInquiry(projectId: string): Inquiry | null {
   const r = db().prepare('SELECT * FROM av_inquiry WHERE project_id = ?').get(projectId) as {
     project_id: string; location: string; notes: string; lines: string; packs: string; created_by: string; created_at: number;
@@ -508,7 +542,25 @@ const toItem = (r: PriceRow): PriceItem => ({
   updatedBy: r.updated_by, updatedAt: r.updated_at,
 });
 
+/* AV-018:以前手工新增的 LED 条目,分类代码存的是中文标签(和标签一模一样)—— 映射一次成内部代码。
+   只动「代码 = 标签」且能认出来的行,导入的条目(代码本来就对)不受影响;每个进程只跑一次 */
+let categoriesFixed = false;
+function fixPriceCategories() {
+  if (categoriesFixed) return;
+  categoriesFixed = true;
+  const d = db();
+  const rows = d.prepare('SELECT id, category, category_label FROM av_price_item WHERE category = category_label').all() as { id: number; category: string; category_label: string }[];
+  const up = d.prepare('UPDATE av_price_item SET category = ? WHERE id = ?');
+  let n = 0;
+  for (const r of rows) {
+    const code = categoryCode(r.category_label);
+    if (code !== r.category) { up.run(code, r.id); n++; }
+  }
+  if (n) console.log(`[AV-018] 价格库:${n} 条手工条目的分类映射为内部代码`);
+}
+
 export function listPriceItems(line?: BusinessLine): PriceItem[] {
+  fixPriceCategories();
   const rows = (line
     ? db().prepare('SELECT * FROM av_price_item WHERE line = ? ORDER BY id').all(line)
     : db().prepare('SELECT * FROM av_price_item ORDER BY line, id').all()) as PriceRow[];

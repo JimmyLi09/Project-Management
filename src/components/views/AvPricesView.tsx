@@ -100,14 +100,17 @@ export default function AvPricesView() {
     catch (e) { setError((e as Error).message); }
   }
 
-  const field = (k: keyof Draft, w: number, type = 'text', ph = '') => (
+  const field = (k: keyof Draft, w: number, type = 'text', ph = '', list?: string) => (
     <input className="in sm" type={type} style={{ width: w }} placeholder={ph} value={(draft[k] as string | number | null | undefined) ?? ''}
-      onChange={(e) => setDraft({ ...draft, [k]: e.target.value })} aria-label={String(k)} />
+      onChange={(e) => setDraft({ ...draft, [k]: e.target.value })} aria-label={String(k)} list={list} />
   );
 
   const editRow = (key: string) => (
     <tr key={key} style={{ background: 'var(--hover-bg)' }}>
-      <td style={td}>{field('categoryLabel', 130, 'text', t('类别 *', 'Category *'))}</td>
+      <td style={td}>{field('categoryLabel', 130, 'text', t('类别 *', 'Category *'), 'price-categories')}
+        {/* AV-018:LED 显示屏选「LED」就能进 02–04 的点间距候选(存成内部代码);也可以选已有的类别 */}
+        <datalist id="price-categories">{[...new Set([...(line === 'led' ? ['LED', '户外 LED'] : []), ...categories])].map((c) => <option key={c} value={c} />)}</datalist>
+      </td>
       <td style={td}>{field('model', 110, 'text', t('型号', 'Model'))}</td>
       <td style={td}>{field('pitch', 90, 'text', ({ led: 'P2', projector: '12000 lm', elv: '650 W', pv: '550 Wp' })[line])}</td>
       <td style={td}>{field('moduleSize', 100)}</td>

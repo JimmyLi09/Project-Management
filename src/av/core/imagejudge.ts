@@ -16,6 +16,7 @@
 
 import type { DrawingElement } from './handoff.ts';
 import type { LedCurve, Maintain } from './types.ts';
+import { sqmUnit } from './pricing.ts';
 
 /* ── what the model is asked to return (Ollama `format`, JSON Schema) ── */
 
@@ -392,6 +393,7 @@ export interface JudgeReview {
   values: Partial<Record<ItemKey, number | string | null>>;   // corrections, same unit as the item
   answers: Partial<Record<AskAnswerKey, string>>;
   pitch: number | null;
+  pitchFrom?: string | null;   // AV-018:点间距是从哪个历史案例套用的(卡片高亮、写「已套用 … 的 P2.5」)
 }
 
 export type AskAnswerKey = 'arc' | 'radKind' | 'rad' | 'view' | 'mountH' | 'maint' | 'ctrl' | 'pwr' | 'size_w' | 'size_h' | 'snapW' | 'snapH';
@@ -527,9 +529,14 @@ export function curveOf(r: JudgeResult, rv: JudgeReview, width: number | null): 
 export interface PitchOption {
   pitch: number;
   label: string;           // as printed in the library, e.g. "P1.86"
-  items: number;           // how many library entries carry it
+  items: number;           // how many library entries carry it (0 = a standard step only: 待报价)
   rank: number;            // 0 = cheapest per ㎡; ties and unpriced entries go by pitch
 }
+
+/* AV-018:标准点间距档位。价格库里一个 LED 型号都没有时,02–04 原来没有可选的点间距、
+   「带入 05」永远是灰的。现在候选 = 价格库型号 ∪ 这些档位(按 LED-VD-01 只列合格的),
+   档位里价格库没有的标「待报价」,照样能选、能带入 05,到 06 再补价格。 */
+export const STANDARD_PITCHES = [1.2, 1.5, 1.8, 2.0, 2.5, 3.0, 4.0, 5.0, 6.0, 8.0, 10];
 
 export interface PriceLike { id: number; category: string; categoryLabel: string; model: string; pitch: string; unit: string; costPrice: number | null; active: boolean }
 
@@ -537,10 +544,15 @@ export interface PriceLike { id: number; category: string; categoryLabel: string
    and poster products are different products, not candidates for a wall. */
 const DIRECT_VIEW = /^(hard_smd|gob|cob|soft|smd|outdoor.*|.*_outdoor)$/i;
 const OUTDOOR = /outdoor|户外|室外/i;
+/* 手工录入的条目,分类原来存的是填写的文字(「LED」「LED 显示屏」…),对不上内部代码 —— 也认 */
+const LED_WORDS = /led|显示屏|smd|小间距/i;
+const NOT_WALL = /hologram|全息|transparent|透明|poster|海报/i;
+export const isDirectView = (i: Pick<PriceLike, 'category' | 'categoryLabel'>) =>
+  DIRECT_VIEW.test(i.category) || (LED_WORDS.test(`${i.category} ${i.categoryLabel}`) && !NOT_WALL.test(`${i.category} ${i.categoryLabel}`));
 
-export function pitchOptions(items: PriceLike[], env: Env): PitchOption[] {
+export function pitchOptions(items: PriceLike[], env: Env, viewM: number | null = null): PitchOption[] {
   const firstNum = (s: string) => { const m = /(\d+(?:\.\d+)?)/.exec(s); return m ? Number(m[1]) : null; };
-  const pool = items.filter((i) => i.active && i.unit === '㎡' && DIRECT_VIEW.test(i.category)
+  const pool = items.filter((i) => i.active && sqmUnit(i.unit) && isDirectView(i)
     && (env === 'outdoor') === OUTDOOR.test(`${i.category} ${i.categoryLabel} ${i.model}`));
   const by = new Map<number, { label: string; n: number; cost: number | null }>();
   for (const i of pool) {
@@ -552,8 +564,13 @@ export function pitchOptions(items: PriceLike[], env: Env): PitchOption[] {
     by.set(p, cur);
   }
   const rows = [...by.entries()].map(([pitch, v]) => ({ pitch, label: v.label, items: v.n, cost: v.cost }));
-  /* cheapest first; without a price, a coarser pitch is the cheaper guess */
-  const order = [...rows].sort((a, b) => (a.cost ?? Infinity) - (b.cost ?? Infinity) || b.pitch - a.pitch);
+  for (const p of STANDARD_PITCHES) {
+    if (rows.some((r) => Math.abs(r.pitch - p) < 1e-9)) continue;
+    if (viewM !== null && !meetsVd01(p, viewM)) continue;   // 标准档位只列满足 LED-VD-01 的
+    rows.push({ pitch: p, label: `P${p.toFixed(1)}`, items: 0, cost: null });
+  }
+  /* cheapest first; without a price, a coarser pitch is the cheaper guess; a library model before a bare standard step */
+  const order = [...rows].sort((a, b) => (a.cost ?? Infinity) - (b.cost ?? Infinity) || (b.items > 0 ? 1 : 0) - (a.items > 0 ? 1 : 0) || b.pitch - a.pitch);
   return rows.sort((a, b) => a.pitch - b.pitch)
     .map((r) => ({ pitch: r.pitch, label: r.label, items: r.items, rank: order.indexOf(r) }));
 }
@@ -667,6 +684,46 @@ function mountHOf(r: JudgeResult, rv: JudgeReview): number | null {
 }
 
 export interface GateState { ok: boolean; pending: number; reasons: string[] }
+
+/* ===== AV-018 · 一张图答到哪了 =====
+   列表原来只认「带没带入 05」,答了多少都写「待确认」,看起来像没保存。现在按真实进度:
+   要做的事 = 用途 + 每个要确认的读数 + 点间距 + 「还缺什么」里的每一问;
+   ready = 闸门已通过(可带入 05);missing = 挡住闸门的那几项(底部提示「还差 2 项：点间距、观看距离」)。 */
+export interface JudgeProgress { done: number; total: number; ready: boolean; missing: [string, string][] }
+const ITEM_NAME: Record<ItemKey, [string, string]> = {
+  led_opening_w: ['屏宽', 'width'], led_opening_h: ['屏高', 'height'], led_mount_h: ['离地高度', 'mounting height'],
+  led_view_min: ['观看距离', 'viewing distance'], led_ctrl_dist: ['控制室距离', 'control room distance'],
+  led_pwr_dist: ['配电箱距离', 'power board distance'], shape: ['形状', 'shape'], mount: ['安装方式', 'mounting'],
+  pitch_hint: ['图上点间距', 'pitch on the picture'], ratio: ['画面比例', 'aspect ratio'],
+};
+const ASK_NAME: Record<Ask['id'], [string, string]> = {
+  size: ['屏宽屏高', 'width and height'], arc: ['弧长还是弦长', 'arc or chord'], rad: ['弧半径 / 弧高', 'radius / rise'],
+  view: ['观看距离', 'viewing distance'], mount_h: ['离地高度', 'mounting height'], maint: ['前 / 后维护', 'front / rear service'],
+  dist: ['控制室 / 配电箱距离', 'control room / power board distance'], dxf: ['要 DXF 原件', 'ask for the DXF'],
+};
+export function progressOf(r: JudgeResult, rv: JudgeReview, suggested: number | null = null, mod: [number, number] | null = null): JudgeProgress {
+  const a = rv.answers;
+  const g = gate(r, rv, suggested, mod);
+  const s = settle(r, rv, suggested, mod);
+  const has = (k: DrawingElement) => finalOf(r, rv, k) !== null;
+  const answered: Record<Ask['id'], boolean> = {
+    size: s.width !== null && s.height !== null, arc: !!a.arc, rad: !!a.rad || a.arc === 'arc' || a.arc === 'unknown',
+    view: !!a.view || has('led_view_min'), mount_h: !!a.mountH || has('led_mount_h'), maint: !!a.maint,
+    dist: (!!a.ctrl || has('led_ctrl_dist')) && (!!a.pwr || has('led_pwr_dist')), dxf: true,
+  };
+  /* 挡住闸门的(必答):用途、未确认的读数、点间距、屏宽屏高、弧长 / 半径 */
+  const required: Ask['id'][] = ['size', 'arc', 'rad'];
+  const checks: { ok: boolean; name: [string, string]; required: boolean }[] = [
+    { ok: !!rv.intent && rv.intent !== 'other', name: ['用途', 'purpose'], required: true },
+    ...toConfirm(r).map((k) => ({ ok: !!rv.confirmed[k], name: ITEM_NAME[k], required: true })),
+    { ok: s.pitch !== null, name: ['点间距', 'pitch'], required: true },
+    ...asks(r, rv).filter((q) => q.id !== 'dxf').map((q) => ({ ok: answered[q.id], name: ASK_NAME[q.id], required: required.includes(q.id) })),
+  ];
+  const missing = checks.filter((c) => !c.ok && c.required).map((c) => c.name);
+  /* 闸门还有别的原因(按模组取整、点间距不满足观看距离…)又没落在上面几项里 */
+  if (!g.ok && !missing.length) missing.push(s.snap.w.length || s.snap.h.length ? ['按模组取整', 'round to whole modules'] : ['其他（见下方提示）', 'other (see below)']);
+  return { done: checks.filter((c) => c.ok).length, total: checks.length, ready: g.ok, missing };
+}
 
 export function gate(r: JudgeResult, rv: JudgeReview, suggested: number | null = null, mod: [number, number] | null = null): GateState {
   const reasons: string[] = [];

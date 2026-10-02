@@ -135,9 +135,13 @@ export interface CostLine {
 export const itemLabel = (i: PriceItem) =>
   [i.categoryLabel, i.model, i.pitch, i.cabinetSize].filter(Boolean).join(' · ');
 
+/* AV-018:按面积计价的单位,几种写法都认(手工录入常写 m² / m2 / sqm) */
+export const sqmUnit = (u: string) => /^(㎡|m²|m\^?2|sqm|sq\.?\s*m|平方米?)$/i.test(u.trim());
+const sameUnit = (a: string, b: string) => a.trim() === b.trim() || (sqmUnit(a) && sqmUnit(b));
+
 /* Display items that fit the configured pitch come first; the rest follow. */
 export function displayCandidates(items: PriceItem[], pitch: number): PriceItem[] {
-  const sqm = items.filter((i) => i.active && i.unit === '㎡');
+  const sqm = items.filter((i) => i.active && sqmUnit(i.unit));
   /* 与 06 的阻断检查(ledChecks)同一条规则:区间型号落在区间里也算合适 */
   const fits = (i: PriceItem) => pitchFits(i.pitch, pitch) === true;
   return [...sqm.filter(fits), ...sqm.filter((i) => !fits(i))];
@@ -197,8 +201,9 @@ export function checkSheet(
       out.push({ code: 'COST-CURVE', severity: 'block', message: '弧形箱体 / 柔性模组 / 弧形钢结构待询价：询到价后在价格库建一条（单位「项」），再在这里选上。' });
       continue;
     }
+    if (!it && l.key === 'display' && extra.some((c) => c.code === 'LED-COST-QUOTE')) continue;   // 已经写成「待报价」
     if (!it) { out.push({ code: 'COST-ITEM', severity: 'block', message: `「${l.name}」未选择价格库条目。` }); continue; }
-    if (it.unit !== l.unit) out.push({ code: 'COST-UNIT', severity: 'block', message: `「${l.name}」按 ${l.unit} 计，所选条目按 ${it.unit} 计价。` });
+    if (!sameUnit(it.unit, l.unit)) out.push({ code: 'COST-UNIT', severity: 'block', message: `「${l.name}」按 ${l.unit} 计，所选条目按 ${it.unit} 计价。` });
     if (l.unitCost === null || l.unitList === null) out.push({ code: 'COST-PRICE', severity: 'block', message: `「${it.model || it.pitch || it.categoryLabel}」缺少成本价或售价，需在价格库补全。` });
     if (!it.active) out.push({ code: 'COST-INACTIVE', severity: 'warn', message: `「${itemLabel(it)}」已在价格库停用。` });
     if (it.validUntil && it.validUntil < today) out.push({ code: 'COST-EXPIRED', severity: 'warn', message: `「${itemLabel(it)}」价格已于 ${it.validUntil} 过期，需更新后重算。` });
@@ -260,6 +265,12 @@ export function pitchFits(label: string, pitch: number): boolean | null {
 export function ledChecks(lines: CostLine[], cfg: SavedConfig<LedSummary>, items: PriceItem[]): CostCheck[] {
   const l = lines.find((x) => x.key === 'display');
   const it = l?.itemId == null ? undefined : items.find((i) => i.id === l.itemId);
+  /* AV-018:05 选的是价格库里还没有的点间距(标准档位,02–04 标「待报价」):不报「未选择条目」,
+     说清楚是待报价、要先在价格库补这一款 —— 和弧形的「待询价」一样,补上之前不能确认成本 */
+  if (!it && l && !items.some((i) => i.active && sqmUnit(i.unit) && pitchFits(i.pitch, cfg.summary.pitch) === true)) {
+    return [{ code: 'LED-COST-QUOTE', severity: 'block',
+      message: `LED 显示屏 P${cfg.summary.pitch} 待报价：价格库里还没有这个点间距的型号，先在价格库补这款（单位 ㎡），再在这里选上。` }];
+  }
   if (!it) return [];
   const fits = pitchFits(it.pitch, cfg.summary.pitch);
   if (fits === null) return [{ code: 'LED-COST-PITCH', severity: 'warn', message: `「${itemLabel(it)}」没写点间距，无法核对是否就是方案的 P${cfg.summary.pitch}。` }];
