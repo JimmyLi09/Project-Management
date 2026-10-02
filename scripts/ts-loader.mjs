@@ -8,8 +8,9 @@
    用法:node --import ./scripts/ts-register.mjs 某个脚本.ts
    只转译、不做类型检查(类型检查是 next build 的事)。 */
 
+import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 let ts;
 async function typescript() {
@@ -21,6 +22,23 @@ async function typescript() {
   }
   return ts;
 }
+
+/* 排期日历(src/features/schedule-planner)是按 vitest + 打包器的写法来的:相对路径不带 .ts,
+   测试从 'vitest' 引 describe / it / expect。这里补两件事,好让 npm test 在 Node 20 上
+   直接跑它们、不用另装 vitest:
+     ./xxx(没扩展名)→ 有 ./xxx.ts / ./xxx.tsx 就用它;
+     'vitest' → scripts/vitest-shim.mjs(基于 node:test 的最小实现) */
+export async function resolve(specifier, context, next) {
+  if (specifier === 'vitest') return { url: new URL('./vitest-shim.mjs', import.meta.url).href, shortCircuit: true };
+  if ((specifier.startsWith('./') || specifier.startsWith('../')) && !/\.[cm]?[jt]sx?$|\.json$/.test(specifier) && context.parentURL?.startsWith('file:')) {
+    for (const ext of ['.ts', '.tsx']) {
+      const candidate = new URL(specifier + ext, context.parentURL);
+      if (existsSync(fileURLToPath(candidate))) return { url: candidate.href, shortCircuit: true };
+    }
+  }
+  return next(specifier, context);
+}
+void pathToFileURL;
 
 export async function load(url, context, next) {
   if (!/\.(ts|mts|tsx)$/.test(new URL(url).pathname)) return next(url, context);

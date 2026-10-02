@@ -6,7 +6,10 @@ import type { Identity } from '@/lib/permissions';
 import {
   canAssign, canCommercial, canDecide, canEdit, canEditFinance, canRowEdit, isFull, canDelete , canMeta } from '@/lib/permissions';
 import { buildPackage, deriveStatuses, fitWindow, newId, parseISO, isoDate, totalDays } from '@/lib/project';
-import { SVC, type Template } from '@/lib/templates';
+import { getBuiltinTemplate, SVC, type Template } from '@/lib/templates';
+import { stagesFromTemplate } from '@/lib/calendarStages';
+import { isLegacyCgiStages, type LocalDate } from '@/features/schedule-planner/domain/schedule';
+import { distributeByWeights, layoutFromStart } from '@/features/schedule-planner/domain/duration';
 import type { CalendarSchedule, CalendarStage, ChecklistStatus, Project, ReceiptRecord, ScheduleStatus } from '@/lib/types';
 import { cleanReceipt, sortReceipts, syncFromLatest, syncToLatest } from '@/lib/receipts';
 import { applyProjField, projSourceOf } from '@/lib/records';
@@ -61,7 +64,8 @@ export type ProjectAction =
   | { type: 'setPoints'; value: number | null }
   | { type: 'setPkgTier'; pkg: number; id: string; value?: number | null }
   /* REQ-040: 日历排期存回项目 */
-  | { type: 'saveCalendar'; pkg: number; stages: CalendarStage[]; boundaries: string[]; syncDelivery?: boolean }
+  | { type: 'saveCalendar'; pkg: number; stages: CalendarStage[]; boundaries: string[]; syncDelivery?: boolean; excludeHolidays?: boolean }
+  | { type: 'calendarFlow'; pkg: number; choice: 'switch' | 'keep' | 'undo' }
   | { type: 'saveCalendarArchives'; pkg: number; archives: NonNullable<CalendarSchedule['archives']> }
   | { type: 'addOwner'; name: string }
   | { type: 'removeOwner'; name: string }
@@ -586,6 +590,7 @@ export function applyAction(u: Identity, p: Project, a: ProjectAction, ctx: Acti
         ...(x?.nameEn ? { nameEn: String(x.nameEn).slice(0, 120) } : {}),
         tone: String(x?.tone || 'coral').slice(0, 20),
         note: String(x?.note || '').slice(0, 200),
+        ...(typeof x?.weeks === 'number' && Number.isFinite(x.weeks) && x.weeks >= 0 ? { weeks: Math.min(x.weeks, 52) } : {}),
       }));
       if (!stages.length) throw new ValidationError('至少要有一个阶段');
       const boundaries = (Array.isArray(a.boundaries) ? a.boundaries : [])
@@ -600,6 +605,9 @@ export function applyAction(u: Identity, p: Project, a: ProjectAction, ctx: Acti
         version: (prev?.version || 0) + 1,
         updatedAt: Date.now(), updatedBy: u.name,
         archives: prev?.archives || [],
+        excludeHolidays: a.excludeHolidays !== false,
+        /* 已经提示过的选择留着;再存一次之后「撤销换阶段」就不再提供 */
+        ...(prev?.flow047 ? { flow047: prev.flow047 } : {}),
       };
       /* 打通交付日:最后一个分界点就是这份业务排到的交付日。
          只在用户勾了同步时才动项目的交付日 —— 不声不响改掉交付日太吓人。 */
@@ -613,6 +621,50 @@ export function applyAction(u: Identity, p: Project, a: ProjectAction, ctx: Acti
         }
       }
       logIt(p, u.name, 'cal.save', { svc: pk.svc, version: pk.calendar.version, stages: stages.length });
+      break;
+    }
+    /* REQ-047:已有 CGI 项目的日历排期还是老流程 → 提示一次。
+       switch:换成当前 CGI 模板的阶段,把原来的整段日期(首日 → 末日)按新阶段的默认周数重新分配,
+               原来的阶段和日期留在 flowUndo,可撤销;keep:保持不变,不再提示;undo:换回原来的。 */
+    case 'calendarFlow': {
+      if (!canEdit(u, p)) throw new PermissionError('无编辑权限');
+      const pk = p.packages[a.pkg];
+      if (!pk) throw new ValidationError('无效的服务包');
+      const cal = pk.calendar;
+      if (!cal) throw new ValidationError('还没有日历排期');
+      if (a.choice === 'keep') {
+        cal.flow047 = 'kept';
+        logIt(p, u.name, 'cal.flowKeep', { svc: pk.svc });
+        break;
+      }
+      if (a.choice === 'undo') {
+        if (!cal.flowUndo) throw new ValidationError('没有可撤销的更换');
+        cal.stages = cal.flowUndo.stages;
+        cal.boundaries = cal.flowUndo.boundaries;
+        delete cal.flowUndo;
+        cal.flow047 = 'kept';
+        cal.version += 1; cal.updatedAt = Date.now(); cal.updatedBy = u.name;
+        logIt(p, u.name, 'cal.flowUndo', { svc: pk.svc });
+        break;
+      }
+      if (pk.svc !== 'cgi' || !isLegacyCgiStages(cal.stages)) throw new ValidationError('这份排期不是老的效果图流程');
+      const next = stagesFromTemplate(pk.svc, (tplForSvc ?? getBuiltinTemplate)(pk.svc));
+      const ex = cal.excludeHolidays !== false;
+      const b = cal.boundaries as LocalDate[];
+      let boundaries: string[] = [];
+      if (b.length === cal.stages.length + 1) {
+        boundaries = distributeByWeights(b[0], b[b.length - 1], next.map((x) => x.weeks ?? 1), ex)
+          ?? distributeByWeights(b[0], b[b.length - 1], next.map((x) => x.weeks ?? 1), false)
+          ?? layoutFromStart(b[0], next.map((x) => x.weeks), ex);
+      } else if (b.length) {
+        boundaries = layoutFromStart(b[0], next.map((x) => x.weeks), ex);
+      }
+      cal.flowUndo = { stages: cal.stages, boundaries: cal.boundaries };
+      cal.stages = next.map((x) => ({ id: x.id, name: x.name, ...(x.nameEn ? { nameEn: x.nameEn } : {}), tone: x.tone, note: '', ...(x.weeks !== undefined ? { weeks: x.weeks } : {}) }));
+      cal.boundaries = boundaries;
+      cal.flow047 = 'switched';
+      cal.version += 1; cal.updatedAt = Date.now(); cal.updatedBy = u.name;
+      logIt(p, u.name, 'cal.flowSwitch', { svc: pk.svc, stages: next.length });
       break;
     }
     case 'saveCalendarArchives': {

@@ -9,7 +9,7 @@ import {
   monthFromDate,
   shiftMonth,
   todayLocalDate
-} from './calendar'
+} from '../domain/calendar'
 
 describe('calendar month helpers', () => {
   it('returns the current local month cursor for today', () => {

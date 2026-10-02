@@ -7,8 +7,9 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const dir = path.join(root, 'src', 'av', 'core', '__tests__');
-const files = readdirSync(dir).filter((f) => f.endsWith('.test.ts')).sort().map((f) => path.join(dir, f));
+/* AV 计算内核 + 排期日历(REQ-046:原来是 vitest 写法、从没跑过,现在一起跑) */
+const dirs = [path.join(root, 'src', 'av', 'core', '__tests__'), path.join(root, 'src', 'features', 'schedule-planner', '__tests__')];
+const files = dirs.flatMap((dir) => readdirSync(dir).filter((f) => f.endsWith('.test.ts')).sort().map((f) => path.join(dir, f)));
 const reg = pathToFileURL(path.join(root, 'scripts', 'ts-register.mjs')).href;
 const r = spawnSync(process.execPath, ['--import', reg, '--test', ...files], { stdio: 'inherit', cwd: root });
 process.exit(r.status ?? 1);

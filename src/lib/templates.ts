@@ -80,13 +80,15 @@ export const GENERIC: Template = {
 
 export const TPL: Record<string, Template> = {
   cgi: {
+    /* REQ-047(1001 Jimmy):CGI 静帧新流程 —— 收到模型资料 → 白膜角度小样 → 角度 shortlist + AI 效果图
+       定角度与大效果 → 带材质、模型的后期图 → 导出签收。原「搭建 3D 建筑模型」并入白膜一步。
+       默认周数是建议值,PD / BD 可在模板管理里改(排期日历的默认阶段同步用这一份)。 */
     schedule: [
-      ['0', '信息 Info', '信息收集(见信息清单)', 'Collect all info — clock starts when complete', 'Client / All', 0, '—', '★ 排期从此起算 Schedule starts here', true],
-      ['1', '建模', '搭建 3D 建筑模型', 'Build 3D architectural model', 'Audax', 2, '1–2 周', ' ', false],
-      ['2', '角度', '出角度草图,客户审阅(含2–3轮)', 'Angle drafts (incl. 2–3 rounds)', 'Audax / Client', 4, '3–4 周', '★ 冻结①:出细节前先锁角度 Lock angles', true],
-      ['3', '灯光材质', '灯光/材质渲染草图(含2–3轮)', 'Lighting & material draft (2–3 rounds)', 'Audax / Client', 3, '2–3 周', '★ 冻结②:全渲染前发「公司政策」邮件', true],
-      ['4', '后期', '合成/调色/配景(含2–3轮)', 'Compositing, grading, entourage', 'Audax', 3, '2–3 周', '此后不接受重建模/大改', false],
-      ['5', '交付', '导出成品格式,客户签收', 'Final export + sign-off', 'Audax / PM', 1, '—', '★ 对照信息清单逐项 QC', true],
+      ['0', '信息 Info', '信息收集：收到模型资料（见信息清单）', 'Information gathering: model files received', 'Client / All', 0, '—', '★ 排期从此起算 Schedule starts here', true, '—', '★ Schedule starts here'],
+      ['1', '白膜', '白膜角度小样', 'Clay-model angle previews', 'Audax', 1, '1 周', '客户看各角度小样', false, '1 week', 'Client reviews the angle previews'],
+      ['2', '角度 + AI', '角度 shortlist + AI 效果图，确定角度与大效果（含 1–2 轮）', 'Angle shortlist + AI mood renders: lock angles and overall look (1–2 rounds)', 'Audax / Client', 1, '1 周', '★ 冻结：角度和大效果 Lock angles & overall look', true, '1 week', '★ Freeze: angles and overall look'],
+      ['3', '后期', '带材质、模型的后期图（参考大效果，含 2–3 轮）', 'Final renders with materials and model detail, following the approved look (2–3 rounds)', 'Audax / Client', 2, '2 周', '此后不接受重建模 / 大改', false, '2 weeks', 'No remodelling / major changes after this'],
+      ['4', '交付', '导出成品格式，客户签收', 'Export final formats, client sign-off', 'Audax / PM', 1, '1 周', '★ 交付 · 对照信息清单逐项 QC', true, '1 week', '★ Delivery · QC against the checklist'],
     ],
     checklist: [
       ['建筑方 · 外观', 'From Architect (Exterior)', '#D98A2B', [
