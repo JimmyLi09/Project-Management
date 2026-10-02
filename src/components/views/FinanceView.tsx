@@ -2,7 +2,7 @@
 
 import React, { useMemo, useState } from 'react';
 import { useStore } from '../store';
-import { fmtDate, todayMid } from '@/lib/project';
+import { awaitingPayment, fmtDate, todayMid } from '@/lib/project';
 import { canEditFinance } from '@/lib/permissions';
 import { useLang } from '@/lib/i18n';
 import { Ell, Icon } from '../ui';
@@ -43,7 +43,8 @@ export default function FinanceView() {
   /* the collection pipeline = every project that has entered commercial flow */
   const rows = useMemo(() => {
     return projects
-      .filter((p) => !p.archived && p.commercialStatus && p.commercialStatus !== 'not_ready')
+      /* REQ-045: 开了 Invoice 会自动归档,但钱还没收齐的照常留在这里,直到「已收款」 */
+      .filter((p) => (!p.archived || awaitingPayment(p)) && p.commercialStatus && p.commercialStatus !== 'not_ready')
       .sort((a, b) => {
         const rank = (s?: string) => (s === 'overdue' ? 0 : s === 'pending_invoice' ? 1 : s === 'payment_pending' ? 2 : s === 'invoiced' ? 3 : 4);
         const r = rank(a.commercialStatus) - rank(b.commercialStatus);
@@ -52,20 +53,25 @@ export default function FinanceView() {
       });
   }, [projects]);
 
+  /* REQ-045: 开票自动归档、钱也收齐的 —— 不再占「全部」,但「已收款」那一格照算、点开看得到 */
+  const paidArchived = useMemo(
+    () => projects.filter((p) => p.archived && p.archiveReason === 'invoiced' && p.commercialStatus === 'payment_received'),
+    [projects],
+  );
+
   const count = (fn: (p: Project) => boolean) => rows.filter(fn).length;
   const kpis = {
     pending_invoice: count((p) => p.commercialStatus === 'pending_invoice'),
     awaiting: count((p) => p.commercialStatus === 'invoiced' || p.commercialStatus === 'payment_pending'),
     overdue: count((p) => p.commercialStatus === 'overdue'),
-    received: count((p) => p.commercialStatus === 'payment_received'),
+    received: count((p) => p.commercialStatus === 'payment_received') + paidArchived.length,
   };
 
-  const shown = rows.filter((p) => {
+  const shown = filter === 'received' ? [...rows.filter((p) => p.commercialStatus === 'payment_received'), ...paidArchived] : rows.filter((p) => {
     if (filter === 'all') return true;
     if (filter === 'awaiting') return p.commercialStatus === 'invoiced' || p.commercialStatus === 'payment_pending';
     if (filter === 'pending_invoice') return p.commercialStatus === 'pending_invoice';
     if (filter === 'overdue') return p.commercialStatus === 'overdue';
-    if (filter === 'received') return p.commercialStatus === 'payment_received';
     return true;
   });
 
@@ -149,6 +155,7 @@ export default function FinanceView() {
             }}>
               <div style={{ minWidth: 0, cursor: 'pointer' }} onClick={() => openProject(p.id)}>
                 <Ell style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--navy900)' }}>{p.name}</Ell>
+                {p.archived && <span data-testid="fin-archived" style={{ fontSize: 11, color: 'var(--text2)' }}>📦 {awaitingPayment(p) ? t('已归档 · 等收款', 'Archived · awaiting payment') : t('已归档', 'Archived')}</span>}
               </div>
               <Ell style={{ fontSize: 12.5, color: 'var(--text2)' }}>{p.client || '—'}</Ell>
               <Ell className="tnum" style={{ fontSize: 12.5 }}>{inv?.invoiceRef || <span style={{ color: '#b6bfc9' }}>—</span>}</Ell>

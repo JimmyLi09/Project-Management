@@ -114,6 +114,11 @@ export const LOG_MSG: Record<string, [string, string]> = {
   'proj.transferTasks': ['项目转交(含任务指派):{from} → {to}', 'Handover incl. task assignments: {from} → {to}'],
   'proj.invoiced': ['标记开票 / 收尾', 'Marked invoiced / closing'],
   'proj.uninvoiced': ['撤销开票', 'Invoiced mark removed'],
+  /* REQ-045 */
+  'proj.invoiceArchive': ['已开 Invoice {ref} · 自动归档', 'Invoice {ref} issued · archived automatically'],
+  'proj.invoiceUndo': ['撤回开票 {ref}{note}', 'Invoice {ref} withdrawn{note}'],
+  'proj.invoiceUndoUnarchive': ['撤回开票 {ref} · 取消归档{note}', 'Invoice {ref} withdrawn · unarchived{note}'],
+  'proj.invoiceArchiveMig': ['上线整理:已有 Invoice {ref},自动归档', 'Go-live tidy-up: invoice {ref} already issued, archived automatically'],
 
   /* 人员 */
   'owner.add': ['指派 PM:{name}', 'PM assigned: {name}'],

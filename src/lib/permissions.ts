@@ -54,6 +54,9 @@ export const visibleProjects = <T extends Project>(u: Identity, ps: T[]): T[] =>
    PD/BD can view finance info but only Finance may change it (§7.2). */
 export const isFinance = (u: Identity) => u.role === 'finance';
 export const canEditFinance = (u: Identity) => u.role === 'finance';
+/* REQ-045: 「已开 Invoice」/「撤回开票」—— Finance、Sales、PD / BD(= 原来能改开票
+   信息或点「已开票」的人)。PM / Engineer 没有。 */
+export const canMarkInvoice = (u: Identity, _p?: Project) => isFinance(u) || canCommercial(u);
 
 export const canAssign = (u: Identity, _p?: Project) => isFull(u);
 
