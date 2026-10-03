@@ -118,11 +118,15 @@ const LED_V1: RulePack = {
      到单线带载上限就换下一条 —— 网线不能把一只箱体拆开。
    - 公司参数加电压、电源线载流上限、箱体电源级联上限。
    已有项目绑定的仍是 led@1.0,结果不变;重新保存时提示可升级。 */
-const LED_V11_FORMULAS: Formula[] = LED_FORMULAS.map((f) => {
+const LED_V11_FORMULAS: Formula[] = LED_FORMULAS.map((f): Formula => {
   if (f.id === 'F6') return { id: 'F6', name: '电源回路', unit: '路', source: 'AV-019（按箱体逐路校核）', kind: 'algorithm', ref: 'AV-019 §2.2 按列蛇形成链 · 逐路校核' };
   if (f.id === 'F8') return { id: 'F8', name: '数据线条数', unit: '条', source: 'AV-019（按走法逐只累加带载）', kind: 'algorithm', ref: 'AV-019 §2.2 每行一条 / 蛇形按带载' };
   return f;
-});
+}).concat(<Formula[]>[
+  /* AV-019 §2.5:控制器 / 播放盒选型。按设备库(价格库「控制系统」)和 01 的回答,在 src/av/core/controller.ts;
+     不出数量,compute 跳过它,保存方案时由服务端算好写进汇总 */
+  { id: 'F11', name: '控制器与信号源', unit: '台', source: 'AV-019（按设备库选型）', kind: 'algorithm', ref: 'AV-019 §2.5 网口 ≥ 网线、带载 ≥ 像素、宽高够,价格最低' },
+]);
 
 const LED_V11: RulePack = {
   ...LED_V1,

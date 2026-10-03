@@ -1,3 +1,4 @@
+import { CTRL_LINE_KEYS } from '@/av/core/pricing';
 import { NextRequest, NextResponse } from 'next/server';
 import { lineInfo, projectLines } from '@/av/core/lines';
 import {
@@ -51,6 +52,8 @@ function price(line: BusinessLine, config: SavedConfig<AnySummary>, picks: Recor
     return { items, lines, extra: prjChecks(lines, cfg, items) };
   }
   const p: Picks = { display: num(picks.display), power_cable: num(picks.power_cable), data_cable: num(picks.data_cable), curve: num(picks.curve) };
+  /* AV-019:设备行没传就用保存方案时 F11 选好的那一项 */
+  for (const k of CTRL_LINE_KEYS) if (picks[k] !== undefined) p[k] = num(picks[k]);
   const lines = buildLedLines(config as SavedConfig<LedSummary>, p, manual, items);
   return { items, lines, extra: ledChecks(lines, config as SavedConfig<LedSummary>, items) };
 }

@@ -4,6 +4,7 @@
    keeps a snapshot of the unit prices it was computed with: a saved sheet never
    moves on its own, and the checks say when the library has moved under it. */
 
+import type { CtrlKind } from './controller.ts';
 import type { BusinessLine } from './types.ts';
 import type { SharedTag } from './xline.ts';
 
@@ -25,7 +26,22 @@ export interface PriceItem {
   active: boolean;
   updatedBy: string;
   updatedAt: number;
+  /* AV-019:设备库(LED「控制系统」分类)的规格 —— 网口、带载、最大宽高、输入、能否独立播放 */
+  spec?: CtrlSpec | null;
 }
+
+export interface CtrlSpec {
+  kind: CtrlKind;
+  brand?: string;
+  ports: number;
+  loadPx: number;
+  maxW: number;
+  maxH: number;
+  inputs: string[];
+  standalone: boolean;
+}
+/* 设备库的分类代码 */
+export const CTRL_CATEGORY = 'control';
 
 /* First number in the printed pitch: "P1.875" → 1.875, "2.8-5.6mm" → 2.8. */
 export function pitchOf(label: string): number | null {
@@ -49,8 +65,23 @@ export interface LedSummary extends SummaryBase {
   nPowerCable: number;       // F7, spare included
   nDataCable: number;        // F9, spare included
   powerCableSpec: string;
+  /* AV-019 F11:控制器 / 播放盒、媒体播放器、播控电脑(保存时按设备库和 01 的回答选好) */
+  ctrl?: LedCtrlSummary;
   /* AV-015: a curved screen, tiled along its arc; 06 adds the curved build as a line to be quoted */
   curve?: { shape: 'concave' | 'convex'; arc: number; width: number; given: 'arc' | 'chord' | 'unknown'; radius: number | null; rise: number | null };
+}
+
+export interface LedCtrlSummary {
+  model: string | null;           // null = 单台都不满足
+  kind: CtrlKind | null;
+  itemId: number | null;
+  needMedia: boolean;
+  mediaItemId: number | null;
+  needPc: boolean;
+  pcItemId: number | null;
+  pending: boolean;               // 01 还没定播放内容,按会议 / 演示先给的
+  manual: boolean;                // 05 里人工改选
+  use: string;
 }
 
 export interface PrjSummary extends SummaryBase {
@@ -149,7 +180,14 @@ export function displayCandidates(items: PriceItem[], pitch: number): PriceItem[
 
 export interface ManualLine { key: string; name: string; qty: number; unit: string; itemId: number | null; shared?: SharedTag }
 const tagged = (l: CostLine, shared?: SharedTag): CostLine => (shared ? { ...l, shared } : l);
-export interface Picks { display: number | null; power_cable: number | null; data_cable: number | null; curve?: number | null }
+export interface Picks {
+  display: number | null; power_cable: number | null; data_cable: number | null; curve?: number | null;
+  /* AV-019:缺省用保存方案时 F11 选好的那一项 */
+  controller?: number | null; media_player?: number | null; playback_pc?: number | null;
+}
+/* AV-019:设备行 —— 没价格写「待报价」,不阻断确认成本 */
+export const CTRL_LINE_KEYS = ['controller', 'media_player', 'playback_pc'] as const;
+const KIND_ZH: Record<string, string> = { player: '多媒体播放盒', video: '视频控制器', large: '大型控制器' };
 
 /* AV-015 §4.4: the core has no curvature, so the curved build is a line of its own until it is quoted. */
 export const CURVE_LINE_NAME = '弧形箱体 / 柔性模组 / 弧形钢结构 —— 待询价';
@@ -169,6 +207,12 @@ export function buildLedLines(cfg: SavedConfig, picks: Picks, manual: ManualLine
     priced('power_cable', `电源线 ${s.powerCableSpec}（含 1 备用）`, s.nPowerCable, '根', 'F7', picks.power_cable),
     priced('data_cable', '数据线（含 1 备用）', s.nDataCable, '根', 'F9', picks.data_cable),
     ...(s.curve ? [priced('curve', CURVE_LINE_NAME, 1, '项', '待询价', picks.curve ?? null)] : []),
+    ...(s.ctrl ? [
+      priced('controller', s.ctrl.model ? `${KIND_ZH[s.ctrl.kind ?? ''] ?? '控制器'} ${s.ctrl.model}${s.ctrl.manual ? '（人工选择）' : ''}${s.ctrl.pending ? '（待确认）' : ''}` : '控制器（超出单台能力，待定）',
+        1, '台', 'F11', picks.controller !== undefined ? picks.controller : s.ctrl.itemId),
+      ...(s.ctrl.needMedia ? [priced('media_player', '媒体播放器（HDMI 输出）', 1, '台', 'F11', picks.media_player !== undefined ? picks.media_player : s.ctrl.mediaItemId)] : []),
+      ...(s.ctrl.needPc ? [priced('playback_pc', '播控电脑', 1, '台', 'F11', picks.playback_pc !== undefined ? picks.playback_pc : s.ctrl.pcItemId)] : []),
+    ] : []),
     ...manual.map((m) => tagged(priced(m.key, m.name, m.qty, m.unit, '人工', m.itemId), m.shared)),
   ];
 }
@@ -202,9 +246,14 @@ export function checkSheet(
       continue;
     }
     if (!it && l.key === 'display' && extra.some((c) => c.code === 'LED-COST-QUOTE')) continue;   // 已经写成「待报价」
+    /* AV-019:控制器 / 媒体播放器 / 播控电脑没选上或没价格 —— 标「待报价」,不阻断 */
+    if ((CTRL_LINE_KEYS as readonly string[]).includes(l.key) && (!it || l.unitCost === null || l.unitList === null)) {
+      out.push({ code: 'COST-CTRL-QUOTE', severity: 'warn', message: `「${l.name}」待报价：${it ? '设备库里这一项还没有成本价 / 售价' : '设备库里还没有这一项'}，不影响确认成本，报价前补上。` });
+      if (!it) continue;
+    }
     if (!it) { out.push({ code: 'COST-ITEM', severity: 'block', message: `「${l.name}」未选择价格库条目。` }); continue; }
     if (!sameUnit(it.unit, l.unit)) out.push({ code: 'COST-UNIT', severity: 'block', message: `「${l.name}」按 ${l.unit} 计，所选条目按 ${it.unit} 计价。` });
-    if (l.unitCost === null || l.unitList === null) out.push({ code: 'COST-PRICE', severity: 'block', message: `「${it.model || it.pitch || it.categoryLabel}」缺少成本价或售价，需在价格库补全。` });
+    if ((l.unitCost === null || l.unitList === null) && !(CTRL_LINE_KEYS as readonly string[]).includes(l.key)) out.push({ code: 'COST-PRICE', severity: 'block', message: `「${it.model || it.pitch || it.categoryLabel}」缺少成本价或售价，需在价格库补全。` });
     if (!it.active) out.push({ code: 'COST-INACTIVE', severity: 'warn', message: `「${itemLabel(it)}」已在价格库停用。` });
     if (it.validUntil && it.validUntil < today) out.push({ code: 'COST-EXPIRED', severity: 'warn', message: `「${itemLabel(it)}」价格已于 ${it.validUntil} 过期，需更新后重算。` });
     if (it.costPrice !== l.unitCost || it.listPrice !== l.unitList) {
@@ -263,6 +312,15 @@ export function pitchFits(label: string, pitch: number): boolean | null {
 }
 
 export function ledChecks(lines: CostLine[], cfg: SavedConfig<LedSummary>, items: PriceItem[]): CostCheck[] {
+  /* AV-019:控制与信号源的提示(不阻断) */
+  const ctrl: CostCheck[] = [];
+  const c = cfg.summary.ctrl;
+  if (c?.pending) ctrl.push({ code: 'LED-COST-CTRL', severity: 'warn', message: '控制与信号源：01「这块屏主要播放什么」还没定，先按会议 / 演示给的建议，待确认。' });
+  if (c && !c.model) ctrl.push({ code: 'LED-COST-CTRL', severity: 'warn', message: '控制器：超出单台能力，需多台拼接或大型控制器，请在这一行选上或手动加行。' });
+  return [...ctrl, ...ledDisplayChecks(lines, cfg, items)];
+}
+
+function ledDisplayChecks(lines: CostLine[], cfg: SavedConfig<LedSummary>, items: PriceItem[]): CostCheck[] {
   const l = lines.find((x) => x.key === 'display');
   const it = l?.itemId == null ? undefined : items.find((i) => i.id === l.itemId);
   /* AV-018:05 选的是价格库里还没有的点间距(标准档位,02–04 标「待报价」):不报「未选择条目」,

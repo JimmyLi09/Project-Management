@@ -48,11 +48,14 @@ export interface LedConfig {
   led_nits: number;
   led_install: Install;
   led_maintain: Maintain;
-  led_redundancy: Redundancy;
+  /* AV-019:不做控制器备份,05 去掉了「冗余策略」;旧方案里的值忽略 */
+  led_redundancy?: Redundancy;
   led_ctrl_brand: CtrlBrand;
   led_power_cable: string;         // e.g. "3*2.5"
   /* AV-019(led@1.1):网线走法,按项目定义。缺省 = 每行一条 */
   led_data_mode?: 'row' | 'snake';
+  /* AV-019 §2.5:05 里人工改选的控制器 / 播放盒型号(设备库里的型号);不填 = 按 F11 推荐 */
+  led_ctrl_model?: string;
   /* AV-019 §2.3:人工调整电源回路 / 网线,随版本保存。只在 led@1.1 生效 */
   led_wiring_override?: WiringOverride;
 

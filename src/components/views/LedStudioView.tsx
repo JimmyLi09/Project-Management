@@ -26,6 +26,7 @@ import { Icon } from '../ui';
 import { useFlowGuard, useFlowRefresh } from './AvFlow';
 import DraftNotice from './DraftNotice';
 import LedWiringPanel from './LedWiringPanel';
+import LedCtrlCard from './LedCtrlCard';
 import { sameConfig, useAutoDraft, useSavedConfig } from './useSavedConfig';
 
 const SEVERITY: Record<Severity, { bg: string; fg: string; zh: string; en: string }> = {
@@ -40,7 +41,7 @@ function defaultConfig(packVersion: string, type: ScreenType): LedConfig {
     led_opening_w: 4480, led_opening_h: 2560,
     led_screen_type: type, led_pitch: 2, led_cabinet: p.primary,
     led_refresh: 3840, led_nits: type === 'out_fixed' ? 5000 : 800,
-    led_install: 'steel', led_maintain: 'front', led_redundancy: 'sender_1plus1',
+    led_install: 'steel', led_maintain: 'front',
     led_ctrl_brand: 'novastar', led_power_cable: '3*2.5',
   };
 }
@@ -328,7 +329,7 @@ export default function LedStudioView() {
       const title = fromDrawing?.project ?? fromDrawing?.drawing ?? '';   // the server names an untitled export in the document's language
       const res = await fetch('/api/av/export', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ kind, lang, cfg: { ...cfg, led_cab_lib: lib.length ? lib : undefined }, packVersion: packV, title, client: project?.client ?? '' }),
+        body: JSON.stringify({ kind, lang, cfg: { ...cfg, led_cab_lib: lib.length ? lib : undefined }, packVersion: packV, title, client: project?.client ?? '', projectId: project?.id }),
       }).catch(() => null);
       if (!res?.ok) {
         const body = res ? await res.json().catch(() => ({})) : {};
@@ -528,12 +529,6 @@ export default function LedStudioView() {
                 <option value="other">{t('其他', 'Other')}</option>
               </select>
             </Field>
-            <Field label={t('冗余策略', 'Redundancy')}>
-              <select value={cfg.led_redundancy} onChange={(e) => set('led_redundancy', e.target.value as LedConfig['led_redundancy'])}>
-                <option value="sender_1plus1">{t('发送卡 1+1', 'Sender 1+1')}</option>
-                <option value="none">{t('无', 'None')}</option>
-              </select>
-            </Field>
           </Two>
 
           <div className="section-label" style={{ marginTop: 4 }}>{t('图纸带入（04 校核后只读）', 'From 04 review')}</div>
@@ -625,6 +620,13 @@ export default function LedStudioView() {
             )}
           </div>
         </div>
+
+        {/* AV-019 §2.5 控制与信号源建议 */}
+        {result.layout && (
+          <LedCtrlCard projectId={project?.id ?? null} payload={payload} packVersion={packV} model={cfg.led_ctrl_model}
+            onModel={(m) => setCfg((prev) => { const { led_ctrl_model: _old, ...rest } = prev; return m ? { ...rest, led_ctrl_model: m } : rest; })}
+            onInquiry={project ? () => go('avinquiry') : null} />
+        )}
 
         <div className="panel" style={{ padding: 0 }}>
           <div className="panel-head">
