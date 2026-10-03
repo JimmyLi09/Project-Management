@@ -10,13 +10,14 @@
 
 import type { ComputeResult } from './compute.ts';
 import { cabLetter, calcBasis } from './calc.ts';
+import { manualLabel } from './override.ts';
 import { overlap, textBox, textWidth, type Box } from './textfit.ts';
 
 /* c = 单个图元的颜色(回路 / 网线各一色;DXF 写成 true colour,SVG 直接用);
    fill = 矩形 / 圆的底色(只给 SVG,DXF 里不填充) */
 export type Entity =
   | { k: 'line'; x1: number; y1: number; x2: number; y2: number; c?: string; sw?: number }
-  | { k: 'rect'; x: number; y: number; w: number; h: number; c?: string; fill?: string }
+  | { k: 'rect'; x: number; y: number; w: number; h: number; c?: string; fill?: string; sw?: number }
   | { k: 'circle'; cx: number; cy: number; r: number; c?: string; fill?: string }
   | { k: 'text'; x: number; y: number; h: number; s: string; anchor: 'start' | 'middle' | 'end'; c?: string; bold?: boolean };
 
@@ -78,9 +79,11 @@ export interface DrawingMeta {
    ③ 配电区(屏体下方的母线、回路标注错开排列)④⑤ 图例 + 说明栏(屏体右侧单独一栏)。
    每个区各占各的位置,文字按实际字宽排;最后做一次碰撞检查,能挪的(回路标注、说明栏)
    往下挪,画框跟着内容走 —— 不裁切。 */
-export function buildDrawing(r: ComputeResult, meta: DrawingMeta): Drawing | null {
+export function buildDrawing(r: ComputeResult, meta0: DrawingMeta): Drawing | null {
   const { layout, wiring, cfg, trace, profile } = r;
   if (!layout || !wiring) return null;
+  /* 人工调整过就在说明栏、计算依据里写「人工调整 · 谁 · 何时」 */
+  const meta = { ...meta0, manual: meta0.manual ?? (manualLabel(r.manual) || undefined) };
 
   const L = cfg.led_opening_w;
   const H = cfg.led_opening_h;
@@ -216,13 +219,20 @@ export function buildDrawing(r: ComputeResult, meta: DrawingMeta): Drawing | nul
     }
     pts.forEach(([x, y]) => put('LED-05-数据线', { k: 'circle', cx: x, cy: y, r: fs * 0.18, c: col, fill: col }));
     put('LED-05-数据线', { k: 'circle', cx: startX, cy: my, r: markR, c: col });
-    text('LED-05-数据线', { k: 'text', x: startX, y: my - markR * 0.45, h: markR * 1.13, s: String(k + 1), anchor: 'middle', c: col });
+    text('LED-05-数据线', { k: 'text', x: startX, y: my - markR * 0.45, h: markR * 1.13, s: String(wiring.ports[k] ?? k + 1), anchor: 'middle', c: col });
     text('LED-05-数据线', { k: 'text', x: startX - markR * 1.4, y: my - markR * 0.4, h: Math.min(fs * 0.6, markR * 0.9), s: `${(run.px / 1e4).toFixed(1)}万`, anchor: 'end', c: col }, true, 'runs');
   });
   /* 备用网线:最下面一个圈的下方 */
   const spareY = Math.min(prevY === Infinity ? 0 : prevY - markR * 3, busY + markR);
   put('LED-05-数据线', { k: 'circle', cx: startX, cy: spareY, r: markR });
-  text('LED-05-数据线', { k: 'text', x: startX, y: spareY - markR * 0.45, h: markR * 1.13, s: String(wiring.nDataRun + 1), anchor: 'middle' });
+  text('LED-05-数据线', { k: 'text', x: startX, y: spareY - markR * 0.45, h: markR * 1.13, s: String(Math.max(wiring.nDataRun, ...wiring.ports) + 1), anchor: 'middle' });
+  /* 人工调整时还没分配的箱体:回路 / 网线层各画一圈红框 */
+  const miss = (layer: LayerName, list: number[]) => list.forEach((i) => {
+    const c = cell[i], m = Math.min(c.w, c.h) * 0.05;
+    put(layer, { k: 'rect', x: c.x + m, y: c.y + m, w: c.w - 2 * m, h: c.h - 2 * m, c: '#FF6B6B', sw: 18 });
+  });
+  miss('LED-04-电源回路', wiring.unassigned.power);
+  miss('LED-05-数据线', wiring.unassigned.data);
   text('LED-05-数据线', { k: 'text', x: startX - markR * 1.4, y: spareY - markR * 0.4, h: Math.min(fs * 0.6, markR * 0.9), s: 'FOR SPARE', anchor: 'end' }, true, 'runs');
 
   /* ② 尺寸区:上方逐列宽 + 总宽,右侧逐行高 + 总高 */
@@ -265,7 +275,7 @@ export function buildDrawing(r: ComputeResult, meta: DrawingMeta): Drawing | nul
   add(`屏体 ${L} × ${H} mm   ${trace.sqm.value.toFixed(2)} ㎡   P${cfg.led_pitch}   模组 ${modW}×${modH} 共 ${trace.mods.value} 块`);
   add(`箱体：${bomTxt}   合计 ${layout.cells.length} 只${layout.custom ? '   含库外定制规格' : ''}`);
   add(`分辨率 ${trace.px_w.value} × ${trace.px_h.value} = ${(trace.px.value / 1e6).toFixed(2)} MPx   功耗 ${trace.kw.value.toFixed(2)} kW @ ${profile.wSqm} W/㎡`);
-  add(`电源 ${wiring.nCircuit} 回路 + 1 备用（单回路 ≤ ${trace.circuit_kw.value} kW，报价 ${wiring.nPowerCable} 根）   数据线 ${wiring.nDataRun} 条 + 1 备用（${wiring.dataMode === 'snake' ? '蛇形按带载' : '每行一条'}，报价 ${wiring.nDataCable} 根）`);
+  add(`电源 ${wiring.nCircuit} 回路 + 1 备用（单回路 ≤ ${trace.circuit_kw.value} kW，报价 ${wiring.nPowerCable} 根）   数据线 ${wiring.nDataRun} 条 + 1 备用（${wiring.manual.data ? '人工串接' : wiring.dataMode === 'snake' ? '蛇形按带载' : '每行一条'}，报价 ${wiring.nDataCable} 根）`);
   add(`规则包 ${r.pack.version}   参数组 ${profile.label}${profile.calibrated ? '' : '（待校准）'}${meta.manual ? `   人工调整 · ${meta.manual}` : ''}`);
   add('图例', 0.85, '#FFFFFF', true);
   layout.bom.forEach((b, i) => add(`${cabLetter(i)} ${b.w} × ${b.h} × ${b.count} 只${b.inLib ? '' : '（库外定制）'}`, 0.72));

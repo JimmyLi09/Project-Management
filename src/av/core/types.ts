@@ -17,6 +17,20 @@ export type Maintain = 'front' | 'rear';
 export type Redundancy = 'none' | 'sender_1plus1';
 export type CtrlBrand = 'novastar' | 'colorlight' | 'other';
 
+/* AV-019 §2.3 人工调整:每只箱体的回路号、网线号和网线上的序号。
+   sig = 排布指纹(箱体行列和尺寸),输入变了对不上就失效、回到自动结果。
+   power / data 表示哪一部分是人改的(另一部分照旧自动)。 */
+export interface WiringOverride {
+  sig: string;
+  power: boolean;
+  data: boolean;
+  cells: { id: string; circuit: number | null; run: number | null; seq: number | null }[];
+  /* 网线号 → 控制器网口号(没写就等于网线号) */
+  ports?: Record<string, number>;
+  by: string;
+  at: number;
+}
+
 export interface LedConfig {
   /* 4.1 carried in from 04 校核 — read-only downstream */
   led_opening_w: number;   // mm, must be a whole multiple of mod_w
@@ -39,6 +53,8 @@ export interface LedConfig {
   led_power_cable: string;         // e.g. "3*2.5"
   /* AV-019(led@1.1):网线走法,按项目定义。缺省 = 每行一条 */
   led_data_mode?: 'row' | 'snake';
+  /* AV-019 §2.3:人工调整电源回路 / 网线,随版本保存。只在 led@1.1 生效 */
+  led_wiring_override?: WiringOverride;
 
   /* Project-level overrides of the profile defaults (§3.1). A product with a
      different module pitch — 128-C&K T1 runs 300×168.75 — needs these; without

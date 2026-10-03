@@ -16,7 +16,8 @@ import { assertExportable, buildDrawing, LAYER_TOGGLES } from '@/av/core/drawing
 import { getRulePack, LATEST_LED_PACK, ledPackUpgradable, listRulePacks } from '@/av/core/rulepack';
 import { toSvg } from '@/av/core/svg';
 import { toHandoff, type DrawingElement, type DrawingSummary, type Handoff, type StoredDrawing } from '@/av/core/handoff';
-import type { LedConfig, ScreenType, Severity, Size, TraceNode } from '@/av/core/types';
+import { manualLabel } from '@/av/core/override';
+import type { LedConfig, ScreenType, Severity, Size, TraceNode, WiringOverride } from '@/av/core/types';
 import { canCostProject, canExportLed } from '@/lib/permissions';
 import { useLang } from '@/lib/i18n';
 import { fmtDate } from '@/lib/project';
@@ -24,6 +25,7 @@ import { useStore } from '../store';
 import { Icon } from '../ui';
 import { useFlowGuard, useFlowRefresh } from './AvFlow';
 import DraftNotice from './DraftNotice';
+import LedWiringPanel from './LedWiringPanel';
 import { sameConfig, useAutoDraft, useSavedConfig } from './useSavedConfig';
 
 const SEVERITY: Record<Severity, { bg: string; fg: string; zh: string; en: string }> = {
@@ -214,7 +216,8 @@ export default function LedStudioView() {
   const dirty = !saved.cfg || !sameConfig(canon(payload), canon(saved.cfg)) || upgrade;
   useFlowGuard(project && saved.loaded ? {
     line: 'led', dirty, canSave: maySave, nextVersion: saved.version + 1,
-    blocked: result.layout ? null : t('排布无解，不能保存：先按右边的阻断提示调整屏体尺寸或箱体库', 'No layout — fix the blocking findings before saving'),
+    blocked: !result.layout ? t('排布无解，不能保存：先按右边的阻断提示调整屏体尺寸或箱体库', 'No layout — fix the blocking findings before saving')
+      : result.manualBlock ? (lang === 'en' ? result.manualBlock.en : result.manualBlock.zh) : null,
     save: saveToProject,
   } : null);
   const { draftState, draftSaving, draftCleared, cancelDraft, resetDraft } = useAutoDraft({
@@ -269,6 +272,30 @@ export default function LedStudioView() {
 
   const set = <K extends keyof LedConfig>(key: K, value: LedConfig[K]) =>
     setCfg((prev) => ({ ...prev, [key]: value }));
+
+  /* AV-019 §2.3 人工调整 */
+  const setOverride = (f: (prev: WiringOverride | undefined) => WiringOverride | undefined) => setCfg((prev) => {
+    const { led_wiring_override: old, ...rest } = prev;
+    const ov = f(old);
+    return ov ? { ...rest, led_wiring_override: ov } : rest;
+  });
+  /* 输入变了对不上:去掉这份调整、回到自动结果,并提示(已存的历史版本里还留着) */
+  const [staleNote, setStaleNote] = useState('');
+  useEffect(() => {
+    if (!result.manualStale) return;
+    setStaleNote(manualLabel(result.manualStale));
+    setOverride(() => undefined);
+  }, [result.manualStale]); // eslint-disable-line react-hooks/exhaustive-deps
+  /* 换走法:网线的人工调整不再适用,去掉网线那一半(电源的保留) */
+  function setDataMode(m: 'row' | 'snake') {
+    setCfg((prev) => {
+      const ov = prev.led_wiring_override;
+      const next = { ...prev, led_data_mode: m };
+      if (!ov?.data) return next;
+      if (!ov.power) { const { led_wiring_override: _drop, ...rest } = next; return rest; }
+      return { ...next, led_wiring_override: { ...ov, data: false, ports: undefined } };
+    });
+  }
 
   /* Switching the screen type reloads that parameter group's defaults (§3.1). */
   function switchType(type: ScreenType) {
@@ -386,10 +413,12 @@ export default function LedStudioView() {
             )}
             {maySave && (
               <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-                <button className="btn-navy sm" disabled={!result.layout} onClick={saveToProject}
-                  style={!result.layout ? { opacity: 0.45, cursor: 'not-allowed' } : undefined}>
+                <button className="btn-navy sm" disabled={!result.layout || !!result.manualBlock} onClick={saveToProject} data-testid="led-save"
+                  title={result.manualBlock ? (lang === 'en' ? result.manualBlock.en : result.manualBlock.zh) : undefined}
+                  style={!result.layout || result.manualBlock ? { opacity: 0.45, cursor: 'not-allowed' } : undefined}>
                   {t('保存方案到项目', 'Save to project')}
                 </button>
+                {result.manualBlock && <span style={{ color: 'var(--danger)' }}>{t('人工调整有违规：已自动存草稿，改好后才能存正式版本', 'Manual wiring breaks the rules: kept as a draft; fix it to save a version')}</span>}
                 {savedMsg.startsWith('ok') && (
                   <span style={{ color: 'var(--success)' }}>
                     {t(`已保存为正式版本 v${savedMsg.slice(3)}。`, `Saved as v${savedMsg.slice(3)}. `)}
@@ -470,6 +499,14 @@ export default function LedStudioView() {
             </Field>
             <Field label={t('电源线规格', 'Power cable')}>
               <input value={cfg.led_power_cable} onChange={(e) => set('led_power_cable', e.target.value)} />
+            </Field>
+            <Field label={t('网线走法', 'Data cabling')}>
+              <select value={cfg.led_data_mode ?? 'row'} onChange={(e) => setDataMode(e.target.value as 'row' | 'snake')}
+                disabled={result.wiring?.algo === 'columns'} data-testid="led-data-mode">
+                <option value="row">{t('每行一条', 'One run per row')}</option>
+                <option value="snake">{t('蛇形按带载', 'Serpentine by load')}</option>
+              </select>
+              {result.wiring?.algo === 'columns' && <span style={{ display: 'block', fontSize: 11, color: 'var(--text2)', marginTop: 3 }}>{t('led@1.0 按每行条数公式，升级后可选', 'led@1.0 uses the per-row formula; upgrade to choose')}</span>}
             </Field>
             <Field label={t('安装方式', 'Installation')}>
               <select value={cfg.led_install} onChange={(e) => set('led_install', e.target.value as LedConfig['led_install'])}>
@@ -621,8 +658,22 @@ export default function LedStudioView() {
                     ))}
                   </span>
                 </div>
-                <div style={{ overflow: 'auto', maxHeight: zoom === 'full' ? 640 : undefined, background: '#0E1013', borderRadius: 6, padding: 8 }}
-                  data-testid="led-svg" dangerouslySetInnerHTML={{ __html: svg }} />
+                {staleNote && (
+                  <div data-testid="led-manual-stale" style={{ fontSize: 12.5, lineHeight: 1.7, padding: '8px 12px', borderRadius: 6, marginBottom: 10, background: SEVERITY.warn.bg, color: SEVERITY.warn.fg }}>
+                    {t(`输入已变，人工调整（${staleNote}）已失效，已回到自动结果；原调整留在历史版本里。`,
+                      `The inputs changed, so the manual wiring (${staleNote}) no longer fits; back to the automatic result. Saved versions keep the old adjustment.`)}{' '}
+                    <button style={{ textDecoration: 'underline', fontSize: 12 }} onClick={() => setStaleNote('')}>{t('知道了', 'OK')}</button>
+                  </div>
+                )}
+                {result.manualBlock && (
+                  <div data-testid="led-manual-block" style={{ fontSize: 12.5, lineHeight: 1.7, padding: '8px 12px', borderRadius: 6, marginBottom: 10, background: SEVERITY.block.bg, color: SEVERITY.block.fg }}>
+                    {lang === 'en' ? result.manualBlock.en : result.manualBlock.zh}
+                  </div>
+                )}
+                {drawing && (
+                  <LedWiringPanel result={result} drawing={drawing} svg={svg} zoom={zoom} by={me?.name ?? ''}
+                    override={cfg.led_wiring_override} onOverride={setOverride} />
+                )}
                 <CalcTable rows={calc} open={openCalc} setOpen={setOpenCalc} />
                 {canExportLed(me) && (
                   <p style={{ fontSize: 11.5, color: 'var(--text2)', lineHeight: 1.8, marginTop: 10 }}>
