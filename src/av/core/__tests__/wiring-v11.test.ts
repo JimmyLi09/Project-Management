@@ -101,9 +101,10 @@ test('AV-019 · led@1.0 不改:BOC 仍是 2765 / 2765 / 1843 W,但标出超限�
   const f = r.findings.find((x) => x.code === 'LED-PWR-09');
   assert.ok(f, '超限要标出来');
   assert.match(f!.message, /升级到新版规则包/);
-  assert.equal(LATEST_LED_PACK, 'led@1.1');
+  assert.equal(LATEST_LED_PACK, 'led@1.2');
   assert.ok(ledPackUpgradable('led@1.0'));
-  assert.ok(!ledPackUpgradable('led@1.1'));
+  assert.ok(ledPackUpgradable('led@1.1'), '1.1 也可以升级到 1.2');
+  assert.ok(!ledPackUpgradable('led@1.2'));
   assert.ok(!ledPackUpgradable(undefined));
   /* led@1.0 的公式表原样 */
   assert.equal(getRulePack('led@1.0').formulas.find((x) => x.id === 'F6')!.source.includes('AV-019'), false);
@@ -162,7 +163,7 @@ test('AV-019 · DXF 说明栏 = 计算依据表(同一份数据)', () => {
 
 test('AV-019 · 线路图:文字不重叠,电源 / 网线不穿过箱体编号与尺寸(全部项目 × 两版 × 两种走法)', () => {
   let drawn = 0;
-  for (const f of FIXTURES) for (const v of ['led@1.0', 'led@1.1']) for (const mode of ['row', 'snake'] as const) {
+  for (const f of FIXTURES) for (const v of ['led@1.0', 'led@1.1', 'led@1.2']) for (const mode of ['row', 'snake'] as const) {
     if (v === 'led@1.0' && mode === 'snake') continue;
     const r = compute({ ...fixtureConfig(f), led_data_mode: mode }, v);
     const d = buildDrawing(r, { project: f.name });

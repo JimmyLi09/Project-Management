@@ -65,7 +65,9 @@ export function proposalDoc(r: ComputeResult, meta: { title: string; client?: st
       + `显示面积 ${n(v('sqm'))} ㎡，实际物理分辨率 ${v('px_w')} × ${v('px_h')} 像素。`,
     `屏体由 ${lay.cells.length} 只箱体拼装而成，共计 ${v('mods')} 块模组。`
       + (lay.custom ? '部分箱体为库外规格，需向厂家定制，交期与价格另行确认。' : '箱体规格全部取自公司标准箱体库，无需定制。'),
-    `整屏最大功耗 ${kw2(v('kw'))} kW，按单回路 ${n(r.pack.company.circuitKw)} kW 配置，共需 ${w.nCircuit} 个供电回路，`
+    (r.trace.kw_max
+      ? `整屏平均功耗 ${kw2(v('kw'))} kW、最大功耗 ${kw2(v('kw_max'))} kW，按单箱最大功率、单回路 ${n(r.pack.company.circuitKw)} kW 配置，共需 ${w.nCircuit} 个供电回路，`
+      : `整屏最大功耗 ${kw2(v('kw'))} kW，按单回路 ${n(r.pack.company.circuitKw)} kW 配置，共需 ${w.nCircuit} 个供电回路，`)
       + `另预留 ${spareP} 路备用，合计电源线 ${w.nPowerCable} 根。`,
     `控制系统采用${ctrl}，按单网口带载 ${px(r.pack.control.dataPx, lang)} 像素计算，需数据线 ${w.nDataRun} 条，`
       + `另预留 ${spareD} 条备用，合计 ${w.nDataCable} 根。`,
@@ -75,7 +77,9 @@ export function proposalDoc(r: ComputeResult, meta: { title: string; client?: st
     `The screen is assembled from ${lay.cells.length} cabinets with ${v('mods')} modules in total. `
       + (lay.custom ? 'Some cabinet sizes are outside the standard library and must be custom-made; lead time and price to be confirmed.'
         : 'All cabinet sizes come from the company\'s standard cabinet library; no custom cabinets are required.'),
-    `Maximum power consumption is ${kw2(v('kw'))} kW. At ${n(r.pack.company.circuitKw)} kW per circuit, ${w.nCircuit} power circuits are required, `
+    (r.trace.kw_max
+      ? `Average power consumption is ${kw2(v('kw'))} kW and maximum ${kw2(v('kw_max'))} kW. Sized on each cabinet's maximum power at ${n(r.pack.company.circuitKw)} kW per circuit, ${w.nCircuit} power circuits are required, `
+      : `Maximum power consumption is ${kw2(v('kw'))} kW. At ${n(r.pack.company.circuitKw)} kW per circuit, ${w.nCircuit} power circuits are required, `)
       + `plus ${spareP} spare, for a total of ${w.nPowerCable} power cables.`,
     `The control system is ${ctrl}. At ${px(r.pack.control.dataPx, lang)} pixels per network port, ${w.nDataRun} data runs are required, `
       + `plus ${spareD} spare, for a total of ${w.nDataCable} data cables.`,
@@ -103,6 +107,7 @@ export function proposalDoc(r: ComputeResult, meta: { title: string; client?: st
       + (w.algo === 'columns' ? `: ${r.pack.version} groups whole columns without checking each circuit; a newer rule pack reassigns cabinets circuit by circuit.` : '.'),
     'LED-PWR-10': `The current on one or more circuits exceeds the rating of the ${c.led_power_cable} power cable; upsize the cable or add circuits.`,
     'LED-PWR-11': 'One or more power chains exceed the cabinet power-cascade limit.',
+    'LED-PWR-12': `The maximum power density of this profile is not set yet; circuits are checked at the average ${r.profile.wSqm} W/m² and may be overloaded — measure before installation.`,
     'LED-MAN-01': 'The inputs changed, so the manual wiring no longer fits and the automatic result is used.',
     'LED-MAN-02': 'The manual wiring breaks the rules (over-limit or unassigned cabinets).',
     'LED-DATA-01': `One or more data runs exceed ${px(r.pack.control.dataPx, lang)} pixels per port.`,
@@ -124,7 +129,9 @@ export function proposalDoc(r: ComputeResult, meta: { title: string; client?: st
           [zh ? '物理分辨率' : 'Native resolution', `${v('px_w')} × ${v('px_h')}`, 'F4'],
           [zh ? '模组数量' : 'Modules', pcs(v('mods'), '块'), 'F2'],
           [zh ? '箱体数量' : 'Cabinets', pcs(lay.cells.length, '只'), 'F3'],
-          [zh ? '最大功耗' : 'Max. power', `${kw2(v('kw'))} kW`, 'F5'],
+          ...(r.trace.kw_max
+            ? [[zh ? '平均功耗' : 'Average power', `${kw2(v('kw'))} kW`, 'F5'], [zh ? '最大功耗' : 'Max. power', `${kw2(v('kw_max'))} kW`, 'F5']]
+            : [[zh ? '最大功耗' : 'Max. power', `${kw2(v('kw'))} kW`, 'F5']]),
         ],
       },
     },

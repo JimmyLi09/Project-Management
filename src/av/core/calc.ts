@@ -4,6 +4,7 @@
 
 import type { ComputeResult } from './compute.ts';
 import { manualLabel } from './override.ts';
+import { circuitDensity, hasMaxPower } from './rulepack.ts';
 
 export interface CalcRow {
   key: string;
@@ -27,7 +28,10 @@ export function calcBasis(r: ComputeResult, lang: 'zh' | 'en' = 'zh', opt: { man
   if (!lay || !w) return [];
   const en = lang === 'en';
   const T = (zh: string, e: string) => (en ? e : zh);
-  const wSqm = profile.wSqm;
+  /* led@1.2:单箱功率按最大功耗密度(回路校核用);平均值只算整屏平均功耗 */
+  const maxMode = hasMaxPower(profile);
+  const wSqm = circuitDensity(profile);
+  const dens = (x: number) => String(Math.round(x * 100) / 100);
   const p = cfg.led_pitch;
   const types = lay.bom.map((b, i) => ({ ...b, L: cabLetter(i), W: (b.w * b.h / 1e6) * wSqm, px: Math.round(b.w / p) * Math.round(b.h / p) }));
   const total = w.cellW.reduce((a, b) => a + b, 0);
@@ -42,17 +46,24 @@ export function calcBasis(r: ComputeResult, lang: 'zh' | 'en' = 'zh', opt: { man
   const srcScreen = T('屏体参数', 'Screen parameters');
   const rows: CalcRow[] = [];
 
+  const maxPending = maxMode && profile.wSqmMax == null;
   rows.push({
-    key: 'cab_w', item: T('单箱功率', 'Power per cabinet'),
-    formula: types.map((t) => `${types.length > 1 ? t.L + ' ' : ''}${m(t.w)} × ${m(t.h)} × ${wSqm}`).join('；'),
-    result: types.map((t) => `${types.length > 1 ? t.L + ' ' : ''}${n1(t.W)} W`).join('；'),
-    ok: null, source: `${srcScreen} · ${en ? profile.code : profile.label}`,
-    params: [T(`功耗密度 ${wSqm} W/㎡（参数组 ${profile.label}${profile.calibrated ? '' : '，待校准'}）`, `Power density ${wSqm} W/m² (profile ${profile.code}${profile.calibrated ? '' : ', uncalibrated'})`)],
+    key: 'cab_w', item: maxMode ? T('单箱最大功率', 'Max power per cabinet') : T('单箱功率', 'Power per cabinet'),
+    formula: types.map((t) => `${types.length > 1 ? t.L + ' ' : ''}${m(t.w)} × ${m(t.h)} × ${dens(wSqm)}`).join('；'),
+    result: types.map((t) => `${types.length > 1 ? t.L + ' ' : ''}${n1(t.W)} W`).join('；') + (maxPending ? T('（最大功耗密度待填，暂按平均）', ' (max density to be set; average used)') : ''),
+    ok: maxPending ? false : null, source: `${srcScreen} · ${en ? profile.code : profile.label}`,
+    params: maxMode
+      ? [maxPending
+          ? T(`最大功耗密度待填，暂按平均 ${profile.wSqm} W/㎡（参数组 ${profile.label}）`, `Max power density to be set; average ${profile.wSqm} W/m² used (profile ${profile.code})`)
+          : T(`最大功耗密度 ${dens(wSqm)} W/㎡（${profile.wSqmMaxNote ?? '参数组'}；参数组 ${profile.label}）`, `Max power density ${dens(wSqm)} W/m² (profile ${profile.code}${profile.code === 'in_fixed' ? ', from 640 × 640 measured 240 W' : ''})`),
+        T(`平均功耗密度 ${profile.wSqm} W/㎡，只用来算整屏平均功耗`, `Average ${profile.wSqm} W/m², used only for the average screen power`)]
+      : [T(`功耗密度 ${wSqm} W/㎡（参数组 ${profile.label}${profile.calibrated ? '' : '，待校准'}）`, `Power density ${wSqm} W/m² (profile ${profile.code}${profile.calibrated ? '' : ', uncalibrated'})`)],
   });
+  const avgTotal = maxMode ? lay.bom.reduce((a, b) => a + b.count * (b.w * b.h / 1e6) * profile.wSqm, 0) : total;
   rows.push({
-    key: 'total', item: T('总功率', 'Total power'),
+    key: 'total', item: maxMode ? T('总功率（最大）', 'Total power (max)') : T('总功率', 'Total power'),
     formula: types.length === 1 ? `${types[0].count} × ${n1(types[0].W)}` : types.map((t) => `${t.L} ${t.count} × ${n1(t.W)}`).join(' + '),
-    result: `${n1(total)} W`, ok: null, source: srcScreen,
+    result: `${n1(total)} W` + (maxMode ? T(`（平均 ${n1(avgTotal)} W）`, ` (average ${n1(avgTotal)} W)`) : ''), ok: null, source: srcScreen,
   });
   const nAuto = Math.ceil(total / limitW - 1e-9);
   rows.push({
