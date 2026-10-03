@@ -12,7 +12,8 @@ import { DEMO_CASES, shouldSeedDemo } from './demo';
 import { appendAudit, getDb, listProjects } from './db';
 import DEMO_PRICE_SEED from '@/av/seed/led-price-2026-04.json';
 import { compute } from '@/av/core/compute';
-import { buildLedLines, displayCandidates, totals } from '@/av/core/pricing';
+import { buildLedLines, CTRL_CATEGORY, displayCandidates, totals } from '@/av/core/pricing';
+import { NOVASTAR_SEED, type CtrlDevice, type PcBy, type PlayUse } from '@/av/core/controller';
 import { GST_RATE, quoteNo, quoteTotals, toSection } from '@/av/core/quote';
 import { LATEST_LED_PACK } from '@/av/core/rulepack';
 import { isAvailable, projectLines } from '@/av/core/lines';
@@ -20,7 +21,7 @@ import { categoryCode } from './avprice';
 import type { LedConfig } from '@/av/core/types';
 import { logZh } from '@/lib/logmsg';
 import type { DrawingElement, DrawingExtra, DrawingSummary, IngestRecord, IngestResult, StoredDrawing } from '@/av/core/handoff';
-import type { CostLine, LedSummary, PriceItem, SavedConfig, SummaryBase } from '@/av/core/pricing';
+import type { CostLine, CtrlSpec, LedSummary, PriceItem, SavedConfig, SummaryBase } from '@/av/core/pricing';
 import type { QuoteSection } from '@/av/core/quote';
 import type { Deduction } from '@/av/core/xline';
 import type { BusinessLine } from '@/av/core/types';
@@ -185,6 +186,11 @@ function db() {
        (curve, chosen pitch, maintenance, items left to fill) — JSON, '' for drawings */
     const dcols = (d.prepare('PRAGMA table_info(av_drawing)').all() as { name: string }[]).map((c) => c.name);
     if (!dcols.includes('extra')) d.exec("ALTER TABLE av_drawing ADD COLUMN extra TEXT NOT NULL DEFAULT ''");
+    /* AV-019:设备库规格(JSON,只有「控制系统」分类用)、01 的「播放什么 / 电脑由谁提供」(JSON) */
+    const pcols = (d.prepare('PRAGMA table_info(av_price_item)').all() as { name: string }[]).map((c) => c.name);
+    if (!pcols.includes('spec')) d.exec("ALTER TABLE av_price_item ADD COLUMN spec TEXT NOT NULL DEFAULT ''");
+    const icols = (d.prepare('PRAGMA table_info(av_inquiry)').all() as { name: string }[]).map((c) => c.name);
+    if (!icols.includes('answers')) d.exec("ALTER TABLE av_inquiry ADD COLUMN answers TEXT NOT NULL DEFAULT '{}'");
 
     /* ===== AV-014 · 人工修改与跨导入的身份 =====
        av_case 仍然只存统计表导入的原始值 —— 导入逻辑不变,人看到的值是
@@ -245,8 +251,44 @@ function db() {
     ready = true;
     /* 放在 ready 之后:下面用的是普通的存取函数,它们会调 db(),这时不能再进初始化 */
     if (shouldSeedDemo()) seedDemoAv(d);
+    seedControlDevices(d);
   }
   return d;
+}
+
+/* ===== AV-019 · 设备库首批诺瓦数据 =====
+   上线后第一次用到 AV 时录一次(meta 记一笔,之后 PD / BD 改了、停用了都不会再补回来)。
+   价格留空 = 待报价;规格按 2026-10 官网规格书,上线前请再核一次。 */
+const MIG_019 = 'mig.av019.ctrlSeed';
+function seedControlDevices(d: ReturnType<typeof getDb>): void {
+  if (d.prepare('SELECT 1 FROM meta WHERE key = ?').get(MIG_019)) return;
+  let added = 0;
+  d.transaction(() => {
+    for (const x of NOVASTAR_SEED) {
+      const dup = d.prepare('SELECT 1 FROM av_price_item WHERE line = ? AND category = ? AND model = ?').get('led', CTRL_CATEGORY, x.model);
+      if (dup) continue;
+      const it = createPriceItem({
+        line: 'led', category: CTRL_CATEGORY, categoryLabel: '控制系统', model: x.model, pitch: '', moduleSize: '', cabinetSize: '',
+        unit: '台', costPrice: null, listPrice: null, currency: 'SGD',
+        source: `${x.brand ? `${x.brand} 官网规格书 2026-10（上线前再核）` : 'AV-019 默认项'}${x.note ? ` · ${x.note}` : ''}`,
+        validUntil: '', active: true,
+        spec: { kind: x.kind, brand: x.brand, ports: x.ports, loadPx: x.loadPx, maxW: x.maxW, maxH: x.maxH, inputs: x.inputs, standalone: x.standalone },
+      }, 'AV-019 首批数据');
+      if (it) added++;
+    }
+    d.prepare('INSERT INTO meta (key, value) VALUES (?, ?)').run(MIG_019, JSON.stringify({ at: Date.now(), added }));
+  })();
+  if (added) console.log(`[AV-019] 设备库:录入首批诺瓦控制系统 ${added} 条(价格待报)`);
+}
+
+/* F11 用的设备:「控制系统」分类里启用、填了规格的条目 */
+export function controllerDevices(): CtrlDevice[] {
+  return listPriceItems('led')
+    .filter((i) => i.active && i.category === CTRL_CATEGORY && i.spec)
+    .map((i) => ({
+      id: i.id, model: i.model, brand: i.spec!.brand ?? '', kind: i.spec!.kind, ports: i.spec!.ports, loadPx: i.spec!.loadPx,
+      maxW: i.spec!.maxW, maxH: i.spec!.maxH, inputs: i.spec!.inputs, standalone: i.spec!.standalone, price: i.costPrice,
+    }));
 }
 
 /* ===== 演示模式的 AV 成本单与报价(2026-09-30,字段级隔离验收用)=====
@@ -441,10 +483,14 @@ export function markReviewed(id: number, by: string): void {
   db().prepare('UPDATE av_drawing SET reviewed_by = ?, reviewed_at = ? WHERE id = ? AND reviewed_at = 0').run(by, Date.now(), id);
 }
 
+/* AV-019 §2.6:01 的「这块屏主要播放什么」「电脑由谁提供」 */
+export interface InquiryAnswers { play_use?: PlayUse | null; pc_by?: PcBy | null }
+
 export interface Inquiry {
   projectId: string;
   location: string;
   notes: string;
+  answers: InquiryAnswers;
   lines: BusinessLine[];
   packs: Partial<Record<BusinessLine, string>>;
   createdBy: string;
@@ -453,16 +499,22 @@ export interface Inquiry {
 
 /* Runs `createProject` and records the inquiry in one transaction, so a project
    never exists half-opened. */
-export function openInquiry(inq: Omit<Inquiry, 'createdAt'>, createProject: () => void): Inquiry {
+export function openInquiry(inq0: Omit<Inquiry, 'createdAt' | 'answers'> & { answers?: InquiryAnswers }, createProject: () => void): Inquiry {
+  const inq = { ...inq0, answers: inq0.answers ?? {} };
   const d = db();
   const createdAt = Date.now();
   d.transaction(() => {
     createProject();
-    d.prepare(`INSERT INTO av_inquiry (project_id, location, notes, lines, packs, created_by, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?)`)
-      .run(inq.projectId, inq.location, inq.notes, JSON.stringify(inq.lines), JSON.stringify(inq.packs), inq.createdBy, createdAt);
+    d.prepare(`INSERT INTO av_inquiry (project_id, location, notes, lines, packs, created_by, created_at, answers)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(inq.projectId, inq.location, inq.notes, JSON.stringify(inq.lines), JSON.stringify(inq.packs), inq.createdBy, createdAt, JSON.stringify(inq.answers));
   })();
   return { ...inq, createdAt };
+}
+
+/* AV-019:01 的两问(只存认得的值) */
+export function setInquiryAnswers(projectId: string, a: InquiryAnswers): boolean {
+  return db().prepare('UPDATE av_inquiry SET answers = ? WHERE project_id = ?').run(JSON.stringify(a), projectId).changes > 0;
 }
 
 /* AV-016:01 编辑已有项目时自动保存 —— 地点、补充说明(业务线和规则包立项后不改) */
@@ -513,11 +565,13 @@ export function backfillInquiries(): number {
 
 export function getInquiry(projectId: string): Inquiry | null {
   const r = db().prepare('SELECT * FROM av_inquiry WHERE project_id = ?').get(projectId) as {
-    project_id: string; location: string; notes: string; lines: string; packs: string; created_by: string; created_at: number;
+    project_id: string; location: string; notes: string; lines: string; packs: string; created_by: string; created_at: number; answers?: string;
   } | undefined;
   if (!r) return null;
+  let answers: InquiryAnswers = {};
+  try { answers = JSON.parse(r.answers || '{}'); } catch { /* 坏数据按没答 */ }
   return {
-    projectId: r.project_id, location: r.location, notes: r.notes,
+    projectId: r.project_id, location: r.location, notes: r.notes, answers,
     lines: JSON.parse(r.lines), packs: JSON.parse(r.packs), createdBy: r.created_by, createdAt: r.created_at,
   };
 }
@@ -542,13 +596,14 @@ export function deleteProjectDrawings(projectId: string): void {
 type PriceRow = {
   id: number; line: string; category: string; category_label: string; model: string; pitch: string;
   module_size: string; cabinet_size: string; unit: string; cost_price: number | null; list_price: number | null;
-  currency: string; source: string; valid_until: string; active: number; updated_by: string; updated_at: number;
+  currency: string; source: string; valid_until: string; active: number; updated_by: string; updated_at: number; spec?: string;
 };
+const parseSpec = (v: string | undefined) => { if (!v) return null; try { return JSON.parse(v) as CtrlSpec; } catch { return null; } };
 const toItem = (r: PriceRow): PriceItem => ({
   id: r.id, line: r.line as BusinessLine, category: r.category, categoryLabel: r.category_label, model: r.model,
   pitch: r.pitch, moduleSize: r.module_size, cabinetSize: r.cabinet_size, unit: r.unit, costPrice: r.cost_price,
   listPrice: r.list_price, currency: r.currency, source: r.source, validUntil: r.valid_until, active: !!r.active,
-  updatedBy: r.updated_by, updatedAt: r.updated_at,
+  updatedBy: r.updated_by, updatedAt: r.updated_at, spec: parseSpec(r.spec),
 });
 
 /* AV-018:以前手工新增的 LED 条目,分类代码存的是中文标签(和标签一模一样)—— 映射一次成内部代码。
@@ -583,10 +638,10 @@ export function createPriceItem(it: PriceInput, by: string): PriceItem {
   const now = Date.now();
   const { lastInsertRowid } = d.prepare(`
     INSERT INTO av_price_item (line, category, category_label, model, pitch, module_size, cabinet_size, unit,
-      cost_price, list_price, currency, source, valid_until, active, updated_by, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      cost_price, list_price, currency, source, valid_until, active, updated_by, updated_at, spec)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
     .run(it.line, it.category, it.categoryLabel, it.model, it.pitch, it.moduleSize, it.cabinetSize, it.unit,
-      it.costPrice, it.listPrice, it.currency, it.source, it.validUntil, it.active ? 1 : 0, by, now);
+      it.costPrice, it.listPrice, it.currency, it.source, it.validUntil, it.active ? 1 : 0, by, now, it.spec ? JSON.stringify(it.spec) : '');
   const id = Number(lastInsertRowid);
   d.prepare('INSERT INTO av_price_history (item_id, cost_price, list_price, valid_until, changed_by, changed_at) VALUES (?, ?, ?, ?, ?, ?)')
     .run(id, it.costPrice, it.listPrice, it.validUntil, by, now);
@@ -604,9 +659,10 @@ export function updatePriceItem(id: number, patch: Partial<PriceInput>, by: stri
   d.transaction(() => {
     d.prepare(`UPDATE av_price_item SET category = ?, category_label = ?, model = ?, pitch = ?, module_size = ?,
       cabinet_size = ?, unit = ?, cost_price = ?, list_price = ?, currency = ?, source = ?, valid_until = ?, active = ?,
-      updated_by = ?, updated_at = ? WHERE id = ?`)
+      updated_by = ?, updated_at = ?, spec = ? WHERE id = ?`)
       .run(next.category, next.categoryLabel, next.model, next.pitch, next.moduleSize, next.cabinetSize, next.unit,
-        next.costPrice, next.listPrice, next.currency, next.source, next.validUntil, next.active ? 1 : 0, by, now, id);
+        next.costPrice, next.listPrice, next.currency, next.source, next.validUntil, next.active ? 1 : 0, by, now,
+        next.spec ? JSON.stringify(next.spec) : '', id);
     if (next.costPrice !== cur.cost_price || next.listPrice !== cur.list_price || next.validUntil !== cur.valid_until) {
       d.prepare('INSERT INTO av_price_history (item_id, cost_price, list_price, valid_until, changed_by, changed_at) VALUES (?, ?, ?, ?, ?, ?)')
         .run(id, next.costPrice, next.listPrice, next.validUntil, by, now);

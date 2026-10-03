@@ -7,6 +7,7 @@
    Template ported from avcost-phase1 (2026-09-28), English added 2026-09-28. */
 
 import { calcBasis } from './calc.ts';
+import { KIND_LABEL, USE_LABEL, type CtrlAdvice } from './controller.ts';
 import { manualLabel } from './override.ts';
 import type { ComputeResult } from './compute.ts';
 import type { CtrlBrand, ScreenType } from './types.ts';
@@ -42,7 +43,7 @@ const n = (x: number) => String(Number(x.toPrecision(10)));
 const kw2 = (x: number) => x.toFixed(2);
 const px = (x: number, lang: ProposalLang) => x.toLocaleString(lang === 'zh' ? 'zh-CN' : 'en-US');
 
-export function proposalDoc(r: ComputeResult, meta: { title: string; client?: string; lang: ProposalLang; date: string }): ProposalDoc | null {
+export function proposalDoc(r: ComputeResult, meta: { title: string; client?: string; lang: ProposalLang; date: string; ctrl?: CtrlAdvice | null }): ProposalDoc | null {
   if (!r.layout || !r.wiring) return null;
   const { lang } = meta;
   const zh = lang === 'zh';
@@ -151,16 +152,17 @@ export function proposalDoc(r: ComputeResult, meta: { title: string; client?: st
         ],
       },
     },
+    ctrlSection(meta.ctrl ?? null, zh),
     {
       /* AV-019 §2.2:和 05 图下方、DXF 说明栏同一份计算依据 */
-      heading: zh ? '五、计算依据' : '5. Calculation Basis',
+      heading: zh ? '六、计算依据' : '6. Calculation Basis',
       table: {
         header: zh ? ['项目', '计算', '结果', '来源'] : ['Item', 'Calculation', 'Result', 'Source'],
         rows: calcBasis(r, lang).map((x) => [x.item, x.formula, x.result, x.source]),
       },
     },
     {
-      heading: zh ? '六、说明与限制' : '6. Notes and Limitations',
+      heading: zh ? '七、说明与限制' : '7. Notes and Limitations',
       notes: zh ? [
         '本方案数值由规则引擎确定性计算，未使用生成式模型，每项结果均可追溯至公式编号。',
         `计算依据规则包 ${r.pack.version}，参数组「${profile}」。`,
@@ -176,7 +178,7 @@ export function proposalDoc(r: ComputeResult, meta: { title: string; client?: st
       ],
     },
   ];
-  if (items.length) sections.push({ heading: zh ? '七、待确认事项' : '7. Items to Confirm', items });
+  if (items.length) sections.push({ heading: zh ? '八、待确认事项' : '8. Items to Confirm', items });
 
   const title = zh ? 'LED 显示屏系统技术方案' : 'LED Display System Technical Proposal';
   return {
@@ -207,3 +209,26 @@ export function proposalDoc(r: ComputeResult, meta: { title: string; client?: st
     footer: `${COMPANY} · ${title}`,
   };
 }
+
+/* AV-019 §2.5 / §2.6「控制与信号源」:推荐型号和理由(F11,按设备库 + 01 的回答) */
+function ctrlSection(a: CtrlAdvice | null, zh: boolean): ProposalSection {
+  const heading = zh ? '五、控制与信号源' : '5. Control and Signal Source';
+  if (!a) return { heading, paragraphs: [zh ? '设备库里还没有控制系统型号，控制器待定。' : 'The device library has no control-system models yet; the controller is to be confirmed.'] };
+  const L = (x: { zh: string; en: string }) => (zh ? x.zh : x.en);
+  const dev = (d: { model: string; kind: keyof typeof KIND_LABEL }) => (zh ? `${d.model}（${KIND_LABEL[d.kind][0]}）` : `${d.model} (${KIND_LABEL[d.kind][1]})`);
+  const rows: string[][] = [
+    [zh ? '播放内容' : 'Content', `${USE_LABEL[a.use][zh ? 0 : 1]}${a.pending ? (zh ? '（待确认）' : ' (to be confirmed)') : ''}`],
+    [zh ? '信号源' : 'Signal source', L(a.signal)],
+    [zh ? '控制器 / 播放盒' : 'Controller / player', a.primary ? `${dev(a.primary.device)}${a.manual ? (zh ? ' · 人工选择' : ' · chosen by hand') : ''}` : L(a.fail!)],
+  ];
+  if (a.primary) rows.push([zh ? '满足条件' : 'Checks', a.primary.checks.map((c) => `${c.ok ? '✓' : '✕'} ${L(c)}`).join(zh ? '；' : '; ')]);
+  if (a.needMedia) rows.push([zh ? '媒体播放器' : 'Media player', zh ? '1 台（HDMI 输出，接控制器）' : '1 (HDMI out into the controller)']);
+  if (a.needPc) rows.push([zh ? '播控电脑' : 'Playback PC', zh ? '1 台（我们报）' : '1 (quoted by us)']);
+  if (a.alternates.length) rows.push([zh ? '备选' : 'Alternatives', a.alternates.map((x) => x.device.model).join(' / ')]);
+  return {
+    heading,
+    paragraphs: a.reason.map(L),
+    table: { header: zh ? ['项目', '建议'] : ['Item', 'Recommendation'], rows },
+  };
+}
+

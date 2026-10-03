@@ -8,7 +8,8 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 
-import type { PriceItem } from '@/av/core/pricing';
+import type { CtrlSpec, PriceItem } from '@/av/core/pricing';
+import { KIND_LABEL } from '@/av/core/controller';
 import { canEditPrices, canViewPrices, type PriceView } from '@/lib/permissions';
 import { fmtDate } from '@/lib/project';
 import { useLang } from '@/lib/i18n';
@@ -105,7 +106,43 @@ export default function AvPricesView() {
       onChange={(e) => setDraft({ ...draft, [k]: e.target.value })} aria-label={String(k)} list={list} />
   );
 
-  const editRow = (key: string) => (
+  /* AV-019 设备库:「控制系统」类的条目多一行规格(F11 选型用) */
+  const isCtrl = (label?: string, spec?: CtrlSpec | null) => line === 'led' && (!!spec || /控制系统|控制器|播放盒|controller/i.test(label ?? ''));
+  const spec: CtrlSpec = draft.spec ?? { kind: 'video', brand: '', ports: 0, loadPx: 0, maxW: 0, maxH: 0, inputs: [], standalone: false };
+  const setSpec = (patch: Partial<CtrlSpec>) => setDraft({ ...draft, spec: { ...spec, ...patch } });
+  const num = (k: 'ports' | 'loadPx' | 'maxW' | 'maxH', w: number, label: string) => (
+    <label style={{ display: 'inline-flex', gap: 4, alignItems: 'center' }}>{label}
+      <input className="in sm" type="number" min={0} style={{ width: w }} value={spec[k] || ''} onChange={(e) => setSpec({ [k]: Math.max(0, Math.round(+e.target.value || 0)) })} data-testid={`spec-${k}`} />
+    </label>
+  );
+  const specRow = (key: string) => (
+    <tr key={`${key}-spec`} style={{ background: 'var(--hover-bg)' }} data-testid="price-spec">
+      <td style={{ ...td, borderTop: 'none', fontSize: 12 }} colSpan={11}>
+        <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+          <strong>{t('设备规格（F11 选型用）', 'Device spec (used by F11)')}</strong>
+          <select className="in sm" value={spec.kind} onChange={(e) => setSpec({ kind: e.target.value as CtrlSpec['kind'] })} data-testid="spec-kind">
+            {(Object.keys(KIND_LABEL) as CtrlSpec['kind'][]).map((k) => <option key={k} value={k}>{t(KIND_LABEL[k][0], KIND_LABEL[k][1])}</option>)}
+          </select>
+          <label style={{ display: 'inline-flex', gap: 4, alignItems: 'center' }}>{t('品牌', 'Brand')}
+            <input className="in sm" style={{ width: 90 }} value={spec.brand ?? ''} onChange={(e) => setSpec({ brand: e.target.value })} /></label>
+          {num('ports', 60, t('网口', 'Ports'))}
+          {num('loadPx', 110, t('总带载 px', 'Load px'))}
+          {num('maxW', 80, t('最大宽', 'Max W'))}
+          {num('maxH', 80, t('最大高', 'Max H'))}
+          <label style={{ display: 'inline-flex', gap: 4, alignItems: 'center' }}>{t('视频输入', 'Inputs')}
+            <input className="in sm" style={{ width: 200 }} placeholder="HDMI × 2, DVI, 3G-SDI" value={spec.inputs.join(', ')}
+              onChange={(e) => setSpec({ inputs: e.target.value.split(/[,，、]/).map((x) => x.trim()) })} /></label>
+          <label style={{ display: 'inline-flex', gap: 4, alignItems: 'center' }}>
+            <input type="checkbox" checked={spec.standalone} onChange={(e) => setSpec({ standalone: e.target.checked })} />{t('能独立播放（不接电脑）', 'Plays on its own (no PC)')}</label>
+        </div>
+      </td>
+    </tr>
+  );
+  const specText = (sp: CtrlSpec) => [t(KIND_LABEL[sp.kind][0], KIND_LABEL[sp.kind][1]),
+    ...(sp.ports ? [t(`${sp.ports} 口`, `${sp.ports} ports`), t(`${Math.round(sp.loadPx / 1e4)} 万`, `${(sp.loadPx / 1e6).toFixed(2)} MPx`), `${sp.maxW} × ${sp.maxH}`] : []),
+    ...(sp.inputs.length ? [sp.inputs.join('、')] : []), ...(sp.standalone ? [t('独立播放', 'standalone')] : [])].join(' · ');
+
+  const editRow = (key: string) => (<React.Fragment key={key}>
     <tr key={key} style={{ background: 'var(--hover-bg)' }}>
       <td style={td}>{field('categoryLabel', 130, 'text', t('类别 *', 'Category *'), 'price-categories')}
         {/* AV-018:LED 显示屏选「LED」就能进 02–04 的点间距候选(存成内部代码);也可以选已有的类别 */}
@@ -124,7 +161,8 @@ export default function AvPricesView() {
         <button className="btn-line" onClick={() => { setEditing(null); setAdding(false); setDraft(EMPTY); }}>{t('取消', 'Cancel')}</button>
       </td>
     </tr>
-  );
+    {isCtrl(draft.categoryLabel, draft.spec) && specRow(key)}
+  </React.Fragment>);
 
   return (
     <div style={{ display: 'grid', gap: 20 }}>
@@ -213,7 +251,8 @@ export default function AvPricesView() {
                   <React.Fragment key={i.id}>
                     <tr style={{ opacity: i.active ? 1 : 0.5 }}>
                       <td style={td}>{i.categoryLabel}</td>
-                      <td style={td}>{i.model || '—'}</td>
+                      <td style={td}>{i.model || '—'}
+                        {i.spec && <div style={{ fontSize: 11.5, color: 'var(--text2)', marginTop: 2 }} data-testid="price-spec-text">{specText(i.spec)}</div>}</td>
                       <td style={td}>{i.pitch || '—'}</td>
                       <td style={td}>{i.moduleSize || '—'}</td>
                       <td style={td}>{i.cabinetSize || '—'}</td>

@@ -17,6 +17,7 @@ import { appendAudit, getProject } from '@/server/db';
 import { currentUser } from '@/server/session';
 import { logZh, type LogParams } from '@/lib/logmsg';
 import { denyUnlessVisible } from '@/server/avguard';
+import { ctrlSummary, ledAdvice } from '@/server/avctrl';
 
 /* 一条审计记录的 text / k / p 三件套 —— 写日志的地方都是这个形状 */
 const auditOf = (k: string, p: LogParams) => ({ text: logZh(k, p), k, p });
@@ -172,12 +173,15 @@ export async function POST(req: NextRequest) {
     cfg = rest;
   }
   const t = r.trace;
+  /* AV-019 F11:按设备库和 01 的回答选好控制器 / 媒体播放器 / 播控电脑,06 据此出设备行 */
+  const ctrl = ledAdvice(project!.id, r);
   const saved = saveConfig<LedSummary>({
     projectId: project!.id, line, packVersion, drawingId, createdBy: user.name,
     summary: {
       sqm: t.sqm.value, pitch: cfg.led_pitch, screenType: cfg.led_screen_type, mods: t.mods.value,
       cabinets: r.layout.cells.length, nPowerCable: t.n_power_cable.value, nDataCable: t.n_data_cable.value,
       powerCableSpec: cfg.led_power_cable, exportable: r.exportable,
+      ...(ctrl ? { ctrl: ctrlSummary(ctrl) } : {}),
       blocking: r.findings.filter((f) => f.severity === 'block').map((f) => f.code),
       ...(cfg.led_curve ? { curve: cfg.led_curve } : {}),
     },

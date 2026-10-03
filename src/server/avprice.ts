@@ -1,6 +1,7 @@
 /* Validation for price-library writes, shared by the create and edit routes. */
 
 import type { BusinessLine } from '@/av/core/types';
+import type { CtrlSpec } from '@/av/core/pricing';
 import type { PriceInput } from './avdb';
 
 export function validate(it: Partial<PriceInput> | undefined): string | null {
@@ -21,6 +22,8 @@ export function categoryCode(label: string): string {
   const t = label.trim();
   if (/^(hard_smd|gob|cob|soft|smd|hologram(_he)?|transparent|poster)(_outdoor)?$/i.test(t)) return t;
   const out = /outdoor|户外|室外/i.test(t) ? '_outdoor' : '';
+  /* AV-019:设备库 */
+  if (/^control$|控制系统|控制器|播放盒|controller/i.test(t)) return 'control';
   if (/hologram|全息/i.test(t)) return 'hologram';
   if (/transparent|透明/i.test(t)) return 'transparent';
   if (/poster|海报/i.test(t)) return 'poster';
@@ -49,5 +52,21 @@ export function normalise(it: Partial<PriceInput>): PriceInput {
     source: String(it.source || '手工录入').trim(),
     validUntil: String(it.validUntil || ''),
     active: it.active !== false,
+    spec: normaliseSpec(it.spec),
+  };
+}
+
+/* AV-019:设备库规格。缺的数字按 0、输入按逗号拆开;认不出的种类就不存规格(F11 不会选它) */
+const KINDS = ['player', 'video', 'large', 'media', 'pc'];
+function normaliseSpec(v: unknown): CtrlSpec | null {
+  if (!v || typeof v !== 'object') return null;
+  const x = v as Record<string, unknown>;
+  if (!KINDS.includes(String(x.kind))) return null;
+  const num = (k: string) => Math.max(0, Math.round(Number(x[k]) || 0));
+  const inputs = Array.isArray(x.inputs) ? x.inputs.map(String) : String(x.inputs ?? '').split(/[,，、]/);
+  return {
+    kind: x.kind as CtrlSpec['kind'], brand: String(x.brand ?? '').trim(),
+    ports: num('ports'), loadPx: num('loadPx'), maxW: num('maxW'), maxH: num('maxH'),
+    inputs: inputs.map((s) => s.trim()).filter(Boolean), standalone: !!x.standalone,
   };
 }

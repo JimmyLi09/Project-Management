@@ -29,10 +29,11 @@ def test_封面_版权页_正文(tmp_path):
     assert "版权声明" in texts and "© 2026 AUDAX。保留所有权利。" in texts
     assert texts.index("版权声明") < texts.index("一、方案概述")
     assert "共需 3 个供电回路，另预留 1 路备用，合计电源线 4 根" in body
-    assert "七、待确认事项" not in body
+    assert "八、待确认事项" not in body
     cells = [[c.text for c in r.cells] for t in d.tables for r in t.rows]
     assert ["640 × 480", "28 只", "库内标准"] in cells
-    assert "五、计算依据" in texts
+    assert "五、控制与信号源" in texts and "六、计算依据" in texts
+    assert any(r[0] == "控制器 / 播放盒" and r[1].startswith("VX") for r in cells if len(r) == 2)
     assert ["项目", "计算", "结果", "来源"] in cells
     assert any(r[0] == "每路负载 / 电流" and "✓" in r[2] for r in cells if len(r) == 4)
     assert len(d.inline_shapes) == 1, "正文只有封面标志"
@@ -65,7 +66,7 @@ def test_英文版字体与内容(tmp_path):
 def test_待确认事项与无客户(tmp_path):
     zh = _open(tmp_path, "doc-zh-warn")
     texts = [p.text for p in zh.paragraphs]
-    assert "七、待确认事项" in texts
+    assert "八、待确认事项" in texts
     assert not any(t.startswith("客户") for t in texts), "没有客户名时封面不留空行"
     en = "\n".join(p.text for p in _open(tmp_path, "doc-en-warn").paragraphs)
-    assert "7. Items to Confirm" in en and "[LED-PWR-07] The electrical riser is 35 m away" in en
+    assert "8. Items to Confirm" in en and "[LED-PWR-07] The electrical riser is 35 m away" in en
