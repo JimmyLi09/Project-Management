@@ -9,7 +9,7 @@
 
 import { evalExpr, varsOf } from './expr.ts';
 import { layout as solveLayout, solveAxis, type LayoutResult } from './layout.ts';
-import { getRulePack, type RulePack, type ScreenProfile } from './rulepack.ts';
+import { circuitDensity, getRulePack, hasMaxPower, type RulePack, type ScreenProfile } from './rulepack.ts';
 import { blocksExport, usableLib, validate } from './rules.ts';
 import { cellId, layoutSig, wiring as solveWiring, type WiringOverrideInput, type WiringResult } from './wiring.ts';
 import type { Finding, LedConfig, Provenance, Size, TraceNode } from './types.ts';
@@ -50,7 +50,7 @@ function overrideInput(cfg: LedConfig, layout: LayoutResult): WiringOverrideInpu
 const UNITS: Record<string, string> = {
   L: 'mm', H: 'mm', mod_w: 'mm', mod_h: 'mm', p: 'mm', w_sqm: 'W/㎡',
   circuit_kw: 'kW', data_px: 'px', sqm: '㎡', mods: '块', px_w: 'px', px_h: 'px',
-  px: 'px', kw: 'kW', n_circuit: '路', n_power_cable: '根', n_data_run: '条',
+  px: 'px', kw: 'kW', kw_max: 'kW', w_sqm_max: 'W/㎡', n_circuit: '路', n_power_cable: '根', n_data_run: '条',
   n_data_cable: '根',
 };
 
@@ -86,6 +86,8 @@ export function compute(
   seed('mod_w', modW, modProv);
   seed('mod_h', modH, modProv);
   seed('w_sqm', profile.wSqm, { ...fromProfile, note: profile.calibrated ? undefined : '待校准占位值' });
+  /* led@1.2:最大功耗密度(回路按它);待填时先按平均值,并告警 */
+  if (hasMaxPower(profile)) seed('w_sqm_max', circuitDensity(profile), { ...fromProfile, note: profile.wSqmMax == null ? '最大功耗密度待填，暂按平均值' : profile.wSqmMaxNote });
   seed('circuit_kw', pack.company.circuitKw, { source: `公司参数 · ${pack.version}`, method: 'lookup', confidence: 'confirmed' });
   seed('data_px', pack.control.dataPx, { source: `控制系统 · ${pack.control.brand}`, method: 'lookup', confidence: 'confirmed' });
 
@@ -117,12 +119,12 @@ export function compute(
           override: ovInput,
           widths: layout.widths, heights: layout.heights, H: cfg.led_opening_h, cells: layout.cells,
           algo: 'chain', dataMode: cfg.led_data_mode ?? 'row', voltage: pack.company.voltage ?? null,
-          pitch: cfg.led_pitch, wSqm: profile.wSqm, circuitKw: pack.company.circuitKw,
-          dataPx: pack.control.dataPx, pxW: env.px_w, kw: env.kw,
+          pitch: cfg.led_pitch, wSqm: circuitDensity(profile), circuitKw: pack.company.circuitKw,
+          dataPx: pack.control.dataPx, pxW: env.px_w, kw: env.kw_max ?? env.kw,
           rowRunOf: () => 0,
         });
       }
-      if (f.id === 'F6') emit('n_circuit', wiring.nCircuit, f.id, ['kw', 'circuit_kw']);
+      if (f.id === 'F6') emit('n_circuit', wiring.nCircuit, f.id, [hasMaxPower(profile) ? 'kw_max' : 'kw', 'circuit_kw']);
       else emit('n_data_run', wiring.nDataRun, f.id, ['px', 'p', 'data_px']);
       continue;
     }
@@ -214,6 +216,11 @@ export function compute(
 /* AV-019 §2.2:逐路校核。led@1.0 的分组也照样查 —— 数字不改,但要让人看见超限。 */
 function powerFindings(w: WiringResult, pack: RulePack, cfg: LedConfig): Finding[] {
   const out: Finding[] = [];
+  const prof = pack.profiles[cfg.led_screen_type];
+  if (prof && hasMaxPower(prof) && prof.wSqmMax == null) {
+    out.push({ code: 'LED-PWR-12', severity: 'warn', gate: 'compute',
+      message: `参数组「${prof.label}」的最大功耗密度待填：回路暂按平均 ${prof.wSqm} W/㎡ 校核，实际可能超载，施工前补实测值。` });
+  }
   const over = w.power.map((pc, k) => ({ k, pc })).filter(({ pc }) => pc.w > w.limitW + 1e-6);
   if (over.length) {
     out.push({

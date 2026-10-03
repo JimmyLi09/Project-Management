@@ -1,4 +1,6 @@
-/* ===== AV-019 回退:把用到 led@1.1 的立项记录 / 方案版本改回 led@1.0 =====
+/* ===== AV-019 回退:把用到新规则包的立项记录 / 方案版本改回旧版本 =====
+   默认:led@1.1、led@1.2 → led@1.0(退回 AV-019 之前的代码)。
+   加 --to led@1.1:只把 led@1.2 → led@1.1(只退「单箱最大功率」这一版的代码)。
 
    什么时候用:AV-019 上线后要把**代码**退回旧版本、又不想用更新前的快照覆盖数据库
    (那样会丢掉上线之后所有的修改)。旧版本不认识规则包 led@1.1:上线后新建的 LED 项目、
@@ -22,13 +24,17 @@ import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const Database = require('better-sqlite3');
 
-const FROM = 'led@1.1';
-const TO = 'led@1.0';
+const args0 = process.argv.slice(2);
+const toArg = args0.indexOf('--to');
+const TO = toArg >= 0 ? args0[toArg + 1] : 'led@1.0';
+const ORDER = ['led@1.0', 'led@1.1', 'led@1.2'];
+if (!ORDER.includes(TO)) { console.error(`--to 只能是 ${ORDER.join(' / ')}`); process.exit(1); }
+const FROMS = ORDER.slice(ORDER.indexOf(TO) + 1);
 const pad = (n: number) => String(n).padStart(2, '0');
 const now = new Date();
 const stamp = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
 const DATA = process.env.AUDAX_DATA_DIR || path.join(process.cwd(), 'data');
-const args = process.argv.slice(2);
+const args = args0.filter((a, i) => !(a === '--to' || (toArg >= 0 && i === toArg + 1)));
 const dry = args.includes('--dry-run');
 const DB = args.find((a) => !a.startsWith('--')) || path.join(DATA, 'audax.db');
 
@@ -37,10 +43,10 @@ async function main() {
   const d = new Database(DB, dry ? { readonly: true } : {});
   const has = (t: string) => !!d.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(t);
   const inq = has('av_inquiry') ? (d.prepare('SELECT project_id, packs FROM av_inquiry').all() as { project_id: string; packs: string }[])
-    .filter((r) => { try { return JSON.parse(r.packs).led === FROM; } catch { return false; } }) : [];
-  const cfgs = has('av_config') ? d.prepare("SELECT id, project_id FROM av_config WHERE line = 'led' AND pack_version = ?").all(FROM) as { id: number; project_id: string }[] : [];
-  console.log(`立项记录 led@1.1 → led@1.0:${inq.length} 个项目`);
-  console.log(`LED 方案版本 led@1.1 → led@1.0:${cfgs.length} 个版本`);
+    .filter((r) => { try { return FROMS.includes(JSON.parse(r.packs).led); } catch { return false; } }) : [];
+  const cfgs = has('av_config') ? (d.prepare("SELECT id, project_id, pack_version FROM av_config WHERE line = 'led'").all() as { id: number; project_id: string; pack_version: string }[]).filter((c) => FROMS.includes(c.pack_version)) : [];
+  console.log(`立项记录 ${FROMS.join(' / ')} → ${TO}:${inq.length} 个项目`);
+  console.log(`LED 方案版本 ${FROMS.join(' / ')} → ${TO}:${cfgs.length} 个版本`);
   if (dry) { console.log('(--dry-run:没有写库)'); d.close(); return; }
 
   const bdir = path.join(DATA, 'backups');
@@ -57,7 +63,7 @@ async function main() {
   const mdir = path.join(DATA, 'migrations');
   fs.mkdirSync(mdir, { recursive: true });
   const log = path.join(mdir, `av019-rollback-${stamp}.json`);
-  fs.writeFileSync(log, JSON.stringify({ at: now.toISOString(), from: FROM, to: TO, inquiries: inq.map((r) => r.project_id), configs: cfgs }, null, 2));
+  fs.writeFileSync(log, JSON.stringify({ at: now.toISOString(), from: FROMS, to: TO, inquiries: inq.map((r) => r.project_id), configs: cfgs }, null, 2));
   console.log('');
   console.log(`改之前的数据库备份:${backup}`);
   console.log(`改了哪些:${log}`);

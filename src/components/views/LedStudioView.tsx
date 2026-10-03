@@ -584,8 +584,11 @@ export default function LedStudioView() {
                   </>
                 ) : (
                   <>
-                    {t(`本项目按规则包 ${bound} 计算（立项时绑定）：电源按整列分组、分完不逐路校核，可能超过单回路上限。${LATEST_LED_PACK} 按箱体逐路分配并加了计算依据，可以在重新保存时升级。`,
-                      `This project is computed on rule pack ${bound} (bound at inquiry): circuits are grouped by whole column and not checked one by one, so a circuit may exceed the limit. ${LATEST_LED_PACK} assigns cabinets circuit by circuit and shows the calculation basis — you can upgrade when you save again.`)}{' '}
+                    {bound === 'led@1.0'
+                      ? t(`本项目按规则包 ${bound} 计算（立项时绑定）：电源按整列分组、分完不逐路校核，可能超过单回路上限。${LATEST_LED_PACK} 按箱体逐路分配、按单箱最大功率校核，并加了计算依据，可以在重新保存时升级。`,
+                        `This project is computed on rule pack ${bound} (bound at inquiry): circuits are grouped by whole column and not checked one by one, so a circuit may exceed the limit. ${LATEST_LED_PACK} assigns cabinets circuit by circuit, checks them at each cabinet's maximum power and shows the calculation basis — you can upgrade when you save again.`)
+                      : t(`本项目按规则包 ${bound} 计算（立项时绑定）：回路按平均功耗密度校核，满载时可能超载。${LATEST_LED_PACK} 按单箱最大功率校核（室内固装 640 × 640 = 240 W），可以在重新保存时升级。`,
+                        `This project is computed on rule pack ${bound} (bound at inquiry): circuits are checked at the average power density and may overload at full brightness. ${LATEST_LED_PACK} checks each cabinet's maximum power (indoor fixed 640 × 640 = 240 W) — you can upgrade when you save again.`)}{' '}
                     {maySave && <button style={{ textDecoration: 'underline', color: 'var(--navy700)', fontSize: 12 }} onClick={() => setUpgrade(project!.id)} data-testid="led-upgrade-go">{t(`预览并升级到 ${LATEST_LED_PACK}`, `Preview and upgrade to ${LATEST_LED_PACK}`)}</button>}
                   </>
                 )}
@@ -595,7 +598,8 @@ export default function LedStudioView() {
               {tile('sqm', ['面积 ㎡', 'Area ㎡'], (n) => n.value.toFixed(2))}
               {tile('mods', ['模组', 'Modules'], (n) => `${n.value}`)}
               {tile('px', ['分辨率', 'Resolution'], () => `${trace.px_w?.value}×${trace.px_h?.value}`)}
-              {tile('kw', ['功耗 kW', 'Power kW'], (n) => n.value.toFixed(2))}
+              {tile('kw', trace.kw_max ? ['平均功耗 kW', 'Avg power kW'] : ['功耗 kW', 'Power kW'], (n) => n.value.toFixed(2))}
+              {tile('kw_max', ['最大功耗 kW', 'Max power kW'], (n) => n.value.toFixed(2))}
               {tile('n_power_cable', ['电源线（含备用）', 'Power cables'], (n) => `${n.value}`)}
               {tile('n_data_cable', ['数据线（含备用）', 'Data cables'], (n) => `${n.value}`)}
             </div>
