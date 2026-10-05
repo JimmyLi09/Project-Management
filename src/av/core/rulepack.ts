@@ -28,7 +28,11 @@ export interface Formula {
 export interface ScreenProfile {
   code: ScreenType;
   label: string;
-  wSqm: number;                        // 功耗密度 W/㎡
+  wSqm: number;                        // 功耗密度 W/㎡(平均,算整屏功耗)
+  /* led@1.2 起:最大功耗密度 W/㎡ —— 单箱最大功率 = 箱体面积 × 它,回路、电流按它校核(不能超载)。
+     null = 还没有实测值,回路暂按平均值算并告警;undefined = 旧规则包没有这一项 */
+  wSqmMax?: number | null;
+  wSqmMaxNote?: string;
   modW: number;
   modH: number;
   cabLib: Size[];
@@ -142,9 +146,37 @@ const LED_V11: RulePack = {
   formulas: LED_V11_FORMULAS,
 };
 
-const PACKS: Record<string, RulePack> = { [LED_V1.version]: LED_V1, [LED_V11.version]: LED_V11 };
+/* ===== led@1.2(2026-10-03)=====
+   回路按**单箱最大功率**校核,不能超载:单箱最大功率 = 箱体面积 × 最大功耗密度(W/㎡ 的公式,
+   不按型号查表)。室内固装按 640 × 640 实测 240 W 折算 = 240 ÷ 0.4096 = 585.9375 W/㎡,
+   于是 640 × 480 = 180 W。平均功耗密度(500 W/㎡)只用来算整屏平均功耗。
+   室外固装、租赁屏还没有实测值:最大功耗密度待填,回路暂按平均值算并告警(LED-PWR-12)。
+   其它与 led@1.1 一致。BOC 5120 × 2880 因此从 3 路 × 2457.6 W 变成 4 路 × 2160 W。 */
+const LED_V12_FORMULAS: Formula[] = LED_V11_FORMULAS.map((f): Formula => {
+  if (f.id === 'F5') return { ...f, name: '功耗（平均 / 最大）', source: 'AV-019 补充（最大功耗密度）', exprs: { kw: 'sqm * w_sqm / 1000', kw_max: 'sqm * w_sqm_max / 1000' } };
+  if (f.id === 'F6') return { ...f, source: 'AV-019（按单箱最大功率逐路校核）', ref: 'AV-019 §2.2 按列蛇形成链 · 单箱最大功率逐路校核' };
+  return f;
+});
+const LED_V12: RulePack = {
+  ...LED_V11,
+  version: 'led@1.2',
+  issued: '2026-10-03',
+  profiles: {
+    in_fixed: { ...LED_V11.profiles.in_fixed, wSqmMax: 585.9375, wSqmMaxNote: '按 640 × 640 实测 240 W 折算（240 ÷ 0.4096）' },
+    out_fixed: { ...LED_V11.profiles.out_fixed, wSqmMax: null, wSqmMaxNote: '待填（还没有实测值）' },
+    rental: { ...LED_V11.profiles.rental, wSqmMax: null, wSqmMaxNote: '待填（还没有实测值）' },
+  },
+  formulas: LED_V12_FORMULAS,
+};
 
-export const LATEST_LED_PACK = LED_V11.version;
+const PACKS: Record<string, RulePack> = { [LED_V1.version]: LED_V1, [LED_V11.version]: LED_V11, [LED_V12.version]: LED_V12 };
+
+export const LATEST_LED_PACK = LED_V12.version;
+
+/* 规则包有没有「最大功耗密度」这一层(led@1.2 起) */
+export const hasMaxPower = (p: ScreenProfile) => p.wSqmMax !== undefined;
+/* 回路校核用的功耗密度:有最大值用最大值,待填就先用平均值 */
+export const circuitDensity = (p: ScreenProfile) => (hasMaxPower(p) ? p.wSqmMax ?? p.wSqm : p.wSqm);
 
 /* 比 latest 旧的 LED 包 —— 05 提示「可升级」 */
 export const ledPackUpgradable = (version: string | null | undefined) => !!version && version !== LATEST_LED_PACK && version.startsWith('led@');

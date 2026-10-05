@@ -274,7 +274,8 @@ export function buildDrawing(r: ComputeResult, meta0: DrawingMeta): Drawing | nu
   add(`项目：${meta.project}`, 1.05, '#FFFFFF', true);
   add(`屏体 ${L} × ${H} mm   ${trace.sqm.value.toFixed(2)} ㎡   P${cfg.led_pitch}   模组 ${modW}×${modH} 共 ${trace.mods.value} 块`);
   add(`箱体：${bomTxt}   合计 ${layout.cells.length} 只${layout.custom ? '   含库外定制规格' : ''}`);
-  add(`分辨率 ${trace.px_w.value} × ${trace.px_h.value} = ${(trace.px.value / 1e6).toFixed(2)} MPx   功耗 ${trace.kw.value.toFixed(2)} kW @ ${profile.wSqm} W/㎡`);
+  add(`分辨率 ${trace.px_w.value} × ${trace.px_h.value} = ${(trace.px.value / 1e6).toFixed(2)} MPx   功耗 ${trace.kw.value.toFixed(2)} kW @ ${profile.wSqm} W/㎡`
+    + (trace.kw_max ? `（最大 ${trace.kw_max.value.toFixed(2)} kW @ ${Math.round(trace.w_sqm_max.value * 100) / 100} W/㎡，回路按最大）` : ''));
   add(`电源 ${wiring.nCircuit} 回路 + 1 备用（单回路 ≤ ${trace.circuit_kw.value} kW，报价 ${wiring.nPowerCable} 根）   数据线 ${wiring.nDataRun} 条 + 1 备用（${wiring.manual.data ? '人工串接' : wiring.dataMode === 'snake' ? '蛇形按带载' : '每行一条'}，报价 ${wiring.nDataCable} 根）`);
   add(`规则包 ${r.pack.version}   参数组 ${profile.label}${profile.calibrated ? '' : '（待校准）'}${meta.manual ? `   人工调整 · ${meta.manual}` : ''}`);
   add('图例', 0.85, '#FFFFFF', true);
