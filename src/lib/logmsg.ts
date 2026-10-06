@@ -239,6 +239,8 @@ export const LOG_MSG: Record<string, [string, string]> = {
   'av.packUpgrade': ['{line} 规则包升级:{from} → {to}(历史版本不变)', '{line} rule pack upgraded: {from} → {to} (earlier versions unchanged)'],
   'av.cfgPrj': ['保存投影方案:{size} mm · {n} 台 × {lm} lm(规则包 {pack})',
     'Projection design saved: {size} mm · {n} × {lm} lm (pack {pack})'],
+  'av.cfgPrj2': ['保存投影方案:{groups} 个融合组 · {n} 台 · {kw} kW(规则包 {pack})',
+    'Projection design saved: {groups} blend groups · {n} projectors · {kw} kW (pack {pack})'],
   'av.cfgElv': ['保存弱电方案:{area} ㎡ · 端口 {ports} · 摄像机 {cams} · 扬声器 {spk}(规则包 {pack})',
     'ELV design saved: {area} m² · {ports} ports · {cams} cameras · {spk} speakers (pack {pack})'],
   'av.cfgPv': ['保存光伏方案:{kwp} kWp · 组件 {mods} 块 · 逆变器 {inv}(规则包 {pack})',

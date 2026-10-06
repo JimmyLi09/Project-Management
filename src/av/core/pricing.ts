@@ -98,6 +98,9 @@ export interface PrjSummary extends SummaryBase {
   nSignalCable: number;      // P10, spare included
   profile: string;
   content: string;
+  /* prj@0.2 (AV-020): blend groups and interaction, for the 06 device rows */
+  groups?: { name: string; projector: string; lens: string; n: number; faces: number }[];
+  interact?: 'none' | 'wall' | 'floor';
 }
 
 export interface ElvSummary extends SummaryBase {
