@@ -39,6 +39,9 @@ export function prjCalcBasis(r: PrjGroupsResult, lang: 'zh' | 'en' = 'zh'): PrjC
   const near = r.cfg.prj_view_near;
   const head = K.head.value;
   const lux = K.lux.value;
+  /* AV-020 §3.4 ⑦:人工调整过的格子写「人工调整 · 谁 · 何时」 */
+  const manTag = (g: PrjGroupsResult['groups'][number], part: 'd' | 'lensH') =>
+    g.manual && g.group.manual?.[part] != null && !(part === 'lensH' && g.floor) ? T(` · 人工调整 · ${g.manual}`, ` · adjusted by hand · ${g.manual}`) : '';
   const row = (key: string, item: string, cell: (g: PrjGroupsResult['groups'][number]) => PrjCalcCell, basis: string): PrjCalcRow =>
     ({ key, item, cells: r.groups.map(cell), basis });
 
@@ -64,13 +67,13 @@ export function prjCalcBasis(r: PrjGroupsResult, lang: 'zh' | 'en' = 'zh'): PrjC
       T(`扣 ${pct(1 - K.industryDerate.value)} 老化与镜头折减（${src(K.industryDerate)}），只作参考，不参与判断`,
         `After ${pct(1 - K.industryDerate.value)} ageing and lens losses (${src(K.industryDerate)}); reference only, not judged`)),
     row('throw', T('投射距离', 'Throw distance'), (g) => ({
-      text: `${f2(g.d)} m · ${T('镜头范围', 'lens range')} ${f2(g.tMin)}–${f2(g.tMax)} m${g.floor ? '' : ` · ${T('可用', 'available')} ${g.group.dmax} m`}`, ok: g.dOk,
+      text: `${f2(g.d)} m · ${T('镜头范围', 'lens range')} ${f2(g.tMin)}–${f2(g.tMax)} m${g.floor ? '' : ` · ${T('可用', 'available')} ${g.group.dmax} m`}${manTag(g, 'd')}`, ok: g.dOk,
     }), T('投射比 × 单台画面宽，在可用距离内尽量往后', 'Throw ratio × image width, as far back as the room allows')),
     row('lens_h', T('镜头离地', 'Lens height'), (g) => ({
-      text: g.floor ? T(`${f2(g.lensH)} m（吊顶向下）`, `${f2(g.lensH)} m (hung, facing down)`)
+      text: (g.floor ? T(`${f2(g.lensH)} m（吊顶向下）`, `${f2(g.lensH)} m (hung, facing down)`)
         : g.lens.ust ? T(`${f2(g.lensH)} m（超短焦：画面顶 + ${K.ustTop.value} m）`, `${f2(g.lensH)} m (UST: image top + ${K.ustTop.value} m)`)
         : T(`${f2(g.lensH)} m · 镜头位移 ${pct(g.shift ?? 0)}（机器 +${pct(g.projector.shiftUp)} / −${pct(g.projector.shiftDown)}）`,
-          `${f2(g.lensH)} m · lens shift ${pct(g.shift ?? 0)} (unit +${pct(g.projector.shiftUp)} / −${pct(g.projector.shiftDown)})`),
+          `${f2(g.lensH)} m · lens shift ${pct(g.shift ?? 0)} (unit +${pct(g.projector.shiftUp)} / −${pct(g.projector.shiftDown)})`)) + manTag(g, 'lensH'),
       ok: g.ceilOk,
     }), T(`min(天花 − 吊装下沉 ${K.drop.value} m, 画面中心 + 最大位移 × h)（${src(K.drop)}）`,
       `min(ceiling − ${K.drop.value} m hanging drop, image centre + max shift × h) (${src(K.drop)})`)),
@@ -85,6 +88,6 @@ export function prjCalcBasis(r: PrjGroupsResult, lang: 'zh' | 'en' = 'zh'): PrjC
   ];
   const total = T(
     `合计 ${r.nProj} 台 · ${f2(r.kw)} kW → ceil(${f2(r.kw)} ÷ ${K.circuitKw.value}) = ${r.nCircuit} 路（单回路 ${K.circuitKw.value} kW，${src(K.circuitKw)}）`,
-    `Total ${r.nProj} projectors · ${f2(r.kw)} kW → ceil(${f2(r.kw)} ÷ ${K.circuitKw.value}) = ${r.nCircuit} circuits (${K.circuitKw.value} kW each, ${src(K.circuitKw)})`);
+    `Total ${r.nProj} projectors · ${f2(r.kw)} kW → ceil(${f2(r.kw)} ÷ ${K.circuitKw.value}) = ${r.nCircuit} circuit${r.nCircuit > 1 ? 's' : ''} (${K.circuitKw.value} kW each, ${src(K.circuitKw)})`);
   return { groups: r.groups.map((g) => g.group.name), rows, total };
 }

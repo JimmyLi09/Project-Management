@@ -16,7 +16,7 @@ import { getPrjGroupsPack, getPrjPack, isGroupsPack, LATEST_PRJ_PACK, PRJ_V01_PA
 import { prjSample } from '@/av/core/prj/samples';
 import { toSvg } from '@/av/core/svg';
 import type { Severity, TraceNode } from '@/av/core/types';
-import { canCostProject } from '@/lib/permissions';
+import { canCostProject, canExportLed } from '@/lib/permissions';
 import { useLang } from '@/lib/i18n';
 import { useStore } from '../store';
 import { useFlowGuard, useFlowRefresh } from './AvFlow';
@@ -24,6 +24,7 @@ import DraftNotice from './DraftNotice';
 import { sameConfig, useAutoDraft, useSavedConfig } from './useSavedConfig';
 import { Field, TraceChain, Two } from './LedStudioView';
 import { PrjGroupsEditor, PrjGroupsResults } from './PrjGroupsPanel';
+import { PrjDrawingsPanel } from './PrjDrawingsPanel';
 
 const SEVERITY: Record<Severity, { bg: string; fg: string; zh: string }> = {
   block: { bg: 'var(--danger-bg, #FDF0EC)', fg: 'var(--danger)', zh: '阻断' },
@@ -222,14 +223,17 @@ export default function PrjStudioView() {
         </div>
 
         {v2 && result2 && (
-          <div className="panel" style={{ padding: 0 }}>
-            <div className="panel-head">
-              <span className="panel-title">{t('计算结果', 'Results')}</span>
-              <span style={{ fontSize: 11, color: 'var(--text2)' }}>{t('平面机位、展开立面、剖面与系统示意图随下一版上线', 'Plan, unfolded elevation, section and schematic views come in the next release')}</span>
+          <div style={{ display: 'grid', gap: 20, minWidth: 0 }}>
+            <div className="panel" style={{ padding: 0 }}>
+              <div className="panel-head"><span className="panel-title">{t('计算结果', 'Results')}</span></div>
+              <div style={{ padding: '16px 18px' }} data-testid="prj-results">
+                <PrjGroupsResults result={result2} />
+              </div>
             </div>
-            <div style={{ padding: '16px 18px' }} data-testid="prj-results">
-              <PrjGroupsResults result={result2} />
-            </div>
+            {/* AV-020 §3.4:四个视图、拖动机位、DXF 与技术方案;没选项目时也能试算、调整,导出给 PM */}
+            <PrjDrawingsPanel result={result2} cfg={cfgV2} onChange={setCfg} by={me?.name ?? ''}
+              canAdjust={!project || canCostProject(me, project)} canExport={!!me && canExportLed(me)}
+              packVersion={packVersion} title={project?.name ?? ''} client={project?.client ?? ''} />
           </div>
         )}
         {!v2 && <div style={{ display: 'grid', gap: 20 }}>
