@@ -116,6 +116,7 @@ export interface Finding {
   code: string;         // LED-FIT-01 …
   severity: Severity;
   message: string;
+  messageEn?: string;   // AV-020: projection findings carry both languages
   /* 'compute' blocks the calculation itself; 'export' only bars producing a
      formal deliverable (LED-TYPE-01). */
   gate: 'compute' | 'export';

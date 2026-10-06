@@ -102,7 +102,101 @@ const PRJ_V01: PrjRulePack = {
 
 const PACKS: Record<string, PrjRulePack> = { [PRJ_V01.version]: PRJ_V01 };
 
-export const LATEST_PRJ_PACK = PRJ_V01.version;
+export const PRJ_V01_PACK = PRJ_V01.version;
+
+/* ===== prj@0.2 (AV-020) =====
+   Blend groups × projection faces, a projector / lens library and the company's
+   own brightness rule (lumens ÷ one projector's image area), drawn from three
+   finished projects (MY014, 114, MY016) and JM's questionnaire. Each constant
+   carries where it came from; PD confirms them one by one, and when all are
+   confirmed the pack is reissued as prj@1.0. Until then export is allowed but
+   marked「部分常数待校准」. Projects opened on prj@0.1-draft stay on it. */
+
+export type PrjConstSource = 'company' | 'sample' | 'draft' | 'industry' | 'const';
+export const PRJ_SOURCE_LABEL: Record<PrjConstSource, [string, string]> = {
+  company: ['公司填写', 'Company input'],
+  sample: ['样本反推', 'From finished projects'],
+  draft: ['草案', 'Draft'],
+  industry: ['行业常规', 'Industry practice'],
+  const: ['公司常量', 'Company constant'],
+};
+
+export interface PrjConst<T = number> {
+  value: T;
+  src: PrjConstSource;
+  confirmed: boolean;
+  note: string;        // 中文依据
+  noteEn: string;
+}
+
+export type PrjEnv = 'dark' | 'window' | 'bright';
+
+export interface PrjRulePack2 {
+  line: 'projector';
+  model: 'groups';
+  version: string;
+  issued: string;
+  calibrated: boolean;
+  note: string;
+  noteEn: string;
+  constants: {
+    overlap: PrjConst;               // blend band as a share of one projector's image width
+    drop: PrjConst;                  // m, ceiling to lens when hung
+    lux: PrjConst<Record<PrjEnv, number>>;  // target illuminance, company rule
+    maxLm: PrjConst;                 // single projector above this → yellow
+    blendMin: PrjConst;              // blend band share below this → yellow
+    head: PrjConst;                  // m, head height for the shadow check
+    ustTop: PrjConst;                // m, UST lens sits this far above the image top
+    circuitKw: PrjConst;
+    industryDerate: PrjConst;        // reference only: light left after ageing / lens losses
+    radarWall: PrjConst;             // m of wall per radar (wall interaction) — used by 06 (PR3)
+    boxPerSet: PrjConst;             // projectors per 多屏宝 — used by 06 (PR3)
+  };
+}
+
+const c = <T,>(value: T, src: PrjConstSource, note: string, noteEn: string): PrjConst<T> => ({ value, src, confirmed: false, note, noteEn });
+
+const PRJ_V02: PrjRulePack2 = {
+  line: 'projector',
+  model: 'groups',
+  version: 'prj@0.2',
+  issued: '2026-10-06',
+  calibrated: false,
+  note: '用 3 个完工样本（MY014 / 114 / MY016）反推的初值；标「待校准」的常数由 PD 逐项确认，全部确认后发布 prj@1.0。确认前可导出，文件上标「部分常数待校准」。',
+  noteEn: 'Initial values derived from three finished projects (MY014, 114, MY016). PD confirms each constant; once all are confirmed the pack is reissued as prj@1.0. Until then files can be exported but are marked "some constants not yet calibrated".',
+  constants: {
+    overlap: c(0.25, 'sample', '样本融合带 1000–3000 mm，约占单台画面 25–40%（草案 0.15 偏小）', 'Blend bands in the samples are 1000–3000 mm, about 25–40% of one image (the draft 0.15 was too small)'),
+    drop: c(0.4, 'sample', 'MY016 天花 4.3 / 机 3.9；114 天花 3.3 / 机 2.7（范围 0.4–0.65）', 'MY016 ceiling 4.3 / lens 3.9; 114 ceiling 3.3 / lens 2.7 (range 0.4–0.65)'),
+    lux: c({ dark: 150, window: 250, bright: 500 }, 'sample', 'MY016 有窗、277 lx 验收通过；暗室与明亮为草案', 'MY016 (windows, 277 lx) passed handover; dark and bright are draft values'),
+    maxLm: c(9000, 'company', '填写表 5500–8500 lm；MY016 实际用到 9000 lm', 'Questionnaire 5,500–8,500 lm; MY016 used 9,000 lm'),
+    blendMin: c(0.15, 'sample', '三个样本都有融合缝，融合带过窄最明显', 'All three samples show blend seams, worst where the band is narrow'),
+    head: c(1.8, 'industry', '人头高', 'Head height'),
+    ustTop: c(0.2, 'draft', '超短焦机装在画面顶上方 0.2 m', 'Ultra-short-throw unit sits 0.2 m above the image top'),
+    circuitKw: c(2.5, 'const', '单回路容量（与 LED 相同）', 'Capacity of one circuit (same as LED)'),
+    industryDerate: c(0.8, 'draft', '老化、镜头与校正损失（prj@0.1 草案值），仅作行业参考', 'Ageing, lens and calibration losses (prj@0.1 draft), reference only'),
+    radarWall: c(4.5, 'sample', 'MY014：4.2 m 墙 1 颗雷达', 'MY014: one radar for a 4.2 m wall'),
+    boxPerSet: c(2, 'sample', 'MY014 报价：每 2 台 1 套多屏宝（待确认）', 'MY014 quotation: one 多屏宝 per two projectors (to be confirmed)'),
+  },
+};
+
+const PACKS2: Record<string, PrjRulePack2> = { [PRJ_V02.version]: PRJ_V02 };
+
+export const LATEST_PRJ_PACK = PRJ_V02.version;
+
+export const isGroupsPack = (version: string | null | undefined): boolean => !!version && !!PACKS2[version];
+/* 05 offers「升级」only from the older single-image pack */
+export const prjPackUpgradable = (version: string | null | undefined): boolean => !!version && !isGroupsPack(version) && !!PACKS[version];
+
+export function getPrjGroupsPack(version: string): PrjRulePack2 {
+  const p = PACKS2[version];
+  if (!p) throw new Error(`unknown projection rule pack "${version}"`);
+  return p;
+}
+
+export function registerPrjGroupsPack(p: PrjRulePack2): void {
+  if (PACKS2[p.version] || PACKS[p.version]) throw new Error(`rule pack "${p.version}" already exists — bump the version`);
+  PACKS2[p.version] = p;
+}
 
 export function getPrjPack(version: string): PrjRulePack {
   const p = PACKS[version];

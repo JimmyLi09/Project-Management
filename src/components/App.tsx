@@ -65,7 +65,7 @@ const PAGE_META: Record<string, { title: [string, string]; sub: [string, string]
   avlibrary: { title: ['资料库 · 历史案例', 'Library · Past projects'], sub: ['LED 历史项目检索 · 保修与交付', 'Past LED projects · warranty and handover'] },
   avlibrary_prices: { title: ['资料库 · 价格库', 'Library · Price library'], sub: ['可编辑价格表 · 改价留痕', 'Editable prices · change history'] },
   avinquiry: { title: ['AV 立项询价', 'AV Inquiry'], sub: ['01 · 项目信息 · 业务线勾选 · 绑定规则包', '01 · Project, business lines and rule packs'] },
-  prjstudio: { title: ['投影方案配置', 'Projection Configuration'], sub: ['05 · 投影 · 草案规则包 prj@0.1-draft', '05 · Projection · draft rule pack'] },
+  prjstudio: { title: ['投影方案配置', 'Projection Configuration'], sub: ['05 · 投影 · 规则包 prj@0.2（融合组 × 投影面）', '05 · Projection · rule pack prj@0.2 (blend groups × faces)'] },
   elvstudio: { title: ['弱电方案配置', 'ELV Configuration'], sub: ['05 · 弱电 · 草案规则包 elv@0.1-draft', '05 · ELV · draft rule pack'] },
   pvstudio: { title: ['光伏方案配置', 'Solar PV Configuration'], sub: ['05 · 光伏 · 草案规则包 pv@0.1-draft', '05 · Solar PV · draft rule pack'] },
   avquote: { title: ['AV 报价审批', 'AV Quotation'], sub: ['07 · 合并报价 · PD / BD 审批', '07 · Quotation · PD / BD approval'] },

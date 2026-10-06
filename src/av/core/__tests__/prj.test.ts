@@ -6,7 +6,7 @@ import { toSvg } from '../svg.ts';
 import { buildPrjLines, checkSheet, prjChecks, totals, type PriceItem, type PrjSummary, type SavedConfig } from '../pricing.ts';
 import { computePrj, type PrjConfig } from '../prj/compute.ts';
 import { buildPrjDrawing, rasters } from '../prj/drawing.ts';
-import { getPrjPack, LATEST_PRJ_PACK, registerPrjPack } from '../prj/rulepack.ts';
+import { getPrjPack, PRJ_V01_PACK as LATEST_PRJ_PACK, registerPrjPack } from '../prj/rulepack.ts';
 
 const base: PrjConfig = {
   prj_image_w: 4000, prj_image_h: 2250, prj_throw_dist: 5, prj_ambient_lux: 100, prj_screen_gain: 1,
