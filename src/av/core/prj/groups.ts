@@ -8,6 +8,7 @@
 import type { Finding } from '../types.ts';
 import { lensOf, PRJ_LIBRARY_SEED, type PrjLens, type PrjLibrary, type PrjProjector } from './library.ts';
 import type { PrjConfig } from './compute.ts';
+import { manualLabel } from '../override.ts';
 import { getPrjGroupsPack, type PrjEnv, type PrjRulePack2 } from './rulepack.ts';
 
 export type PrjFaceKind = 'wall' | 'floor';
@@ -24,6 +25,15 @@ export interface PrjGroup {
   dmax: number;       // m, available throw distance (walls)
   bottom: number;     // m, image bottom above the floor (walls)
   faces: PrjFace[];
+  /* AV-020 §3.4 ⑦:机位人工调整(拖动机位或改数) —— 投射距离 / 镜头离地替代自动值,
+     仍按镜头范围、可用距离、镜头位移逐项检查;by / at 写进图纸和技术方案「人工调整」 */
+  manual?: PrjManual;
+}
+export interface PrjManual {
+  d?: number;         // m, throw (floor groups: hanging height)
+  lensH?: number;     // m, lens above the floor (walls)
+  by: string;
+  at: number;
 }
 export type PrjInteract = 'none' | 'wall' | 'floor';
 
@@ -64,6 +74,7 @@ export interface PrjGroupResult {
   shadow: boolean;
   pixel: number;      // mm
   kw: number;
+  manual: string | null;  // 「谁 · 何时」 when the position was adjusted by hand
 }
 
 export interface PrjGroupsResult {
@@ -80,6 +91,7 @@ export interface PrjGroupsResult {
 
 const f2 = (x: number) => x.toFixed(2);
 const mm = (m: number) => Math.round(m * 1000);
+const T2 = (zh: string, en: string): [string, string] => [zh, en];
 
 export function computePrjGroups(cfg: PrjGroupsConfig, packVersion: string, lib: PrjLibrary = PRJ_LIBRARY_SEED): PrjGroupsResult {
   const pack = getPrjGroupsPack(packVersion);
@@ -133,8 +145,12 @@ export function computePrjGroups(cfg: PrjGroupsConfig, packVersion: string, lib:
     }
     /* ⑥ throw: anywhere in the lens's range that the room allows, as far back as it allows */
     const tMin = lens.throwMin * w, tMax = lens.throwMax * w;
+    const man = g.manual && (g.manual.d != null || g.manual.lensH != null) ? g.manual : null;
     let d: number, dOk: boolean;
-    if (floor) {
+    if (man?.d != null) {
+      d = man.d;
+      dOk = d >= tMin - 1e-6 && d <= tMax + 1e-6 && (floor ? d <= cfg.prj_ceiling + 1e-6 : d <= g.dmax + 1e-6);
+    } else if (floor) {
       d = cfg.prj_ceiling - K.drop.value;
       dOk = d >= tMin - 1e-6 && d <= tMax + 1e-6;
     } else if (tMin > g.dmax + 1e-6) {
@@ -148,6 +164,13 @@ export function computePrjGroups(cfg: PrjGroupsConfig, packVersion: string, lib:
     let lensH: number, shift: number | null = null, ceilOk = true;
     if (floor) {
       lensH = d;
+    } else if (man?.lensH != null) {
+      lensH = man.lensH;
+      if (!lens.ust) {
+        const centre = bottom + h / 2;
+        shift = (lensH - centre) / h;
+        ceilOk = shift >= -p.shiftDown - 1e-6 && shift <= p.shiftUp + 1e-6 && lensH <= cfg.prj_ceiling + 1e-6;
+      } else ceilOk = lensH <= cfg.prj_ceiling + 1e-6;
     } else if (lens.ust) {
       lensH = Math.min(top + K.ustTop.value, cfg.prj_ceiling - 0.05);
       ceilOk = top + K.ustTop.value <= cfg.prj_ceiling + 1e-6;
@@ -167,23 +190,47 @@ export function computePrjGroups(cfg: PrjGroupsConfig, packVersion: string, lib:
     return {
       group: g, projector: p, lens, floor, L, H, aspect, overlap: o, n, reason, w, h, blend: o * w,
       lux, luxIndustry: lux * K.industryDerate.value, target, tMin, tMax, d, dOk, lensH, shift, ceilOk, shadowY, shadow,
-      pixel: (w * 1000) / p.resW, kw: (n * p.watts) / 1000,
+      pixel: (w * 1000) / p.resW, kw: (n * p.watts) / 1000, manual: man ? manualLabel(man) : null,
     };
   });
 
   for (const r of groups) {
     const nm = r.group.name;
-    if (!r.dOk && !r.floor) {
+    const man = r.group.manual;
+    const manD = r.manual != null && man?.d != null;
+    const manH = r.manual != null && man?.lensH != null && !r.floor;
+    if (r.manual) {
+      const what = [manD && T2(`投射 ${f2(r.d)} m`, `throw ${f2(r.d)} m`), manH && T2(`镜头离地 ${f2(r.lensH)} m`, `lens at ${f2(r.lensH)} m`)].filter(Boolean) as [string, string][];
+      push('PRJ-MAN-01', 'info', 'compute',
+        `${nm}：机位为人工调整（${what.map((x) => x[0]).join('，')} · ${r.manual}）。`,
+        `${nm}: projector position adjusted by hand (${what.map((x) => x[1]).join(', ')} · ${r.manual}).`);
+    }
+    if (manD && !r.dOk) {
+      const room = r.floor ? cfg.prj_ceiling : r.group.dmax;
+      push('PRJ-MAN-02', 'block', 'export',
+        `${nm}：人工调整的${r.floor ? '吊装高度' : '投射距离'} ${f2(r.d)} m 不行 —— 镜头「${r.lens.name}」要 ${f2(r.tMin)}–${f2(r.tMax)} m，${r.floor ? '天花' : '可用距离'} ${room} m。`,
+        `${nm}: the hand-set ${r.floor ? 'hanging height' : 'throw'} of ${f2(r.d)} m does not work — the lens "${r.lens.nameEn}" needs ${f2(r.tMin)}–${f2(r.tMax)} m and the ${r.floor ? 'ceiling is' : 'room allows'} ${room} m.`);
+    }
+    if (manH && !r.ceilOk) {
+      push('PRJ-MAN-02', 'block', 'export',
+        r.shift == null
+          ? `${nm}：人工调整的镜头离地 ${f2(r.lensH)} m 高于天花 ${cfg.prj_ceiling} m。`
+          : `${nm}：人工调整的镜头离地 ${f2(r.lensH)} m 要镜头位移 ${Math.round(r.shift * 100)}%，机器只有 +${Math.round(r.projector.shiftUp * 100)}% / −${Math.round(r.projector.shiftDown * 100)}%${r.lensH > cfg.prj_ceiling ? `，且高于天花 ${cfg.prj_ceiling} m` : ''}。`,
+        r.shift == null
+          ? `${nm}: the hand-set lens height of ${f2(r.lensH)} m is above the ${cfg.prj_ceiling} m ceiling.`
+          : `${nm}: a hand-set lens height of ${f2(r.lensH)} m needs ${Math.round(r.shift * 100)}% lens shift; the projector allows +${Math.round(r.projector.shiftUp * 100)}% / −${Math.round(r.projector.shiftDown * 100)}%${r.lensH > cfg.prj_ceiling ? ` and it is above the ${cfg.prj_ceiling} m ceiling` : ''}.`);
+    }
+    if (!r.dOk && !r.floor && !manD) {
       push('PRJ-THROW-01', 'block', 'export',
         `${nm}：镜头「${r.lens.name}」投 ${f2(r.w)} m 宽的画面至少要 ${f2(r.tMin)} m，可用距离只有 ${r.group.dmax} m —— 换短焦镜头或加台数。`,
         `${nm}: the lens "${r.lens.nameEn}" needs at least ${f2(r.tMin)} m for a ${f2(r.w)} m wide image, but only ${r.group.dmax} m is available — use a shorter-throw lens or more projectors.`);
     }
-    if (!r.dOk && r.floor) {
+    if (!r.dOk && r.floor && !manD) {
       push('PRJ-THROW-02', 'block', 'export',
         `${nm}：天花 ${cfg.prj_ceiling} m 减吊装下沉 ${K.drop.value} m 后投射距离 ${f2(r.d)} m，镜头「${r.lens.name}」需要 ${f2(r.tMin)}–${f2(r.tMax)} m —— 换镜头或调整单台画面。`,
         `${nm}: after the ${K.drop.value} m drop from a ${cfg.prj_ceiling} m ceiling the throw is ${f2(r.d)} m, but the lens "${r.lens.nameEn}" needs ${f2(r.tMin)}–${f2(r.tMax)} m — change the lens or the image size.`);
     }
-    if (!r.ceilOk) {
+    if (!r.ceilOk && !manH) {
       push('PRJ-CEIL-01', 'block', 'export',
         r.lens.ust
           ? `${nm}：天花太矮 —— 超短焦机要装在画面顶 ${f2(r.group.bottom + r.h)} m 上方 ${K.ustTop.value} m，超过天花 ${cfg.prj_ceiling} m（常见坑 3）。`

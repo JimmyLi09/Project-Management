@@ -323,7 +323,7 @@ export function wrapText(s: string, h: number, maxW: number): string[] {
   return out;
 }
 
-function resolveCollisions(list: { e: Extract<Entity, { k: 'text' }>; movable: boolean; group?: string }[], gap: number) {
+export function resolveCollisions(list: { e: Extract<Entity, { k: 'text' }>; movable: boolean; group?: string }[], gap: number) {
   for (let pass = 0; pass < 50; pass++) {
     let moved = false;
     for (let i = 0; i < list.length; i++) {
@@ -348,7 +348,7 @@ export function textBoxes(d: Drawing): { layer: string; s: string; box: Box }[] 
   return d.layers.flatMap((l) => l.entities.filter((e): e is Extract<Entity, { k: 'text' }> => e.k === 'text').map((e) => ({ layer: l.name, s: e.s, box: textBox(e) })));
 }
 
-function bboxOf(layers: { entities: Entity[] }[]) {
+export function bboxOf(layers: { entities: Entity[] }[]) {
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
   const hit = (x: number, y: number) => {
     minX = Math.min(minX, x); minY = Math.min(minY, y);
