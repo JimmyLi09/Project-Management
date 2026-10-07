@@ -113,10 +113,10 @@ const lens = (model: string, s: Omit<PrjLensSpec, 'kind'>, source: string): PrjS
   model, categoryLabel: '镜头', category: PRJ_LENS_CATEGORY, unit: '支',
   pitch: s.throwMin === s.throwMax ? String(s.throwMin) : `${s.throwMin}–${s.throwMax}`, listPrice: null, source, spec: { kind: 'lens', ...s },
 });
-/* MY014 报价里的单价(§3.6):写在售价栏,成本价待填;币种待 JM 确认 */
+/* MY014 报价里的单价(§3.6):写在售价栏,币种 SGD(JM 2026-10-07 确认);成本价由 BD 在价格库手动填 */
 const part = (model: string, role: PrjPartRole, unit: string, listPrice: number | null): PrjSeedRow => ({
   model, categoryLabel: '投影配套', category: PRJ_PART_CATEGORY, unit, pitch: '', listPrice,
-  source: listPrice == null ? 'AV-020 §3.6 配置模板（待报价）' : 'MY014 报价单价（币种待确认，成本价待填）', spec: { kind: 'part', role },
+  source: listPrice == null ? 'AV-020 §3.6 配置模板（待报价）' : 'MY014 报价单价（SGD，成本价由 BD 填）', spec: { kind: 'part', role },
 });
 
 const SEEMILE = ['PU800', 'PU900'];
