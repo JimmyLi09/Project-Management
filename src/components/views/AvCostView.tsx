@@ -13,6 +13,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { lineInfo, LINES } from '@/av/core/lines';
+import { getPrjGroupsPack, isGroupsPack } from '@/av/core/prj/rulepack';
 import {
   buildElvLines, buildLedLines, CTRL_CATEGORY, CTRL_LINE_KEYS, isPrjTplKey, buildPrjLines, buildPvLines, checkSheet, displayCandidates, elvChecks, itemLabel, ledChecks, lumensOf, pitchFits, pitchOf, prjChecks, pvChecks, totals,
   type CostCheck, type CostLine, type ElvPicks, type ElvSummary, type LedSummary, type ManualLine, type Picks, type PriceItem, type PrjPicks, type PrjSummary,
@@ -218,7 +219,7 @@ export default function AvCostView() {
                 <label htmlFor="cost-line">{t('业务线', 'Line')}</label>
                 <select id="cost-line" value={line} onChange={(e) => setLine(e.target.value as Line)}>
                   <option value="led">{t('LED 显示屏', 'LED display')}</option>
-                  <option value="projector">{t('投影系统（草案）', 'Projection (draft)')}</option>
+                  <option value="projector">{t('投影系统', 'Projection')}</option>
                   <option value="elv">{t('弱电系统（草案）', 'ELV (draft)')}</option>
                   <option value="pv">{t('太阳能光伏（草案）', 'Solar PV (draft)')}</option>
                 </select>
@@ -399,7 +400,7 @@ export default function AvCostView() {
                     return (
                       <tr key={r.line}>
                         <td style={{ ...td, fontWeight: 600 }}>{t(l.label, l.en)}</td>
-                        <td style={{ ...td, color: 'var(--text2)' }}>{r.pack ?? t('未发布', 'none')}{l.draft ? t(' · 草案', ' · draft') : ''}</td>
+                        <td style={{ ...td, color: 'var(--text2)' }}>{r.pack ?? t('未发布', 'none')}{l.draft ? t(' · 草案', ' · draft') : isGroupsPack(r.pack) && !getPrjGroupsPack(r.pack!).calibrated ? t(' · 部分常数待校准', ' · some constants not yet calibrated') : ''}</td>
                         {showCost && <td style={{ ...td, textAlign: 'right' }} className="tnum">{r.sheet && r.sheet.cost !== null ? money(r.sheet.cost) : '—'}</td>}
                         {showList && <td style={{ ...td, textAlign: 'right' }} className="tnum">{r.sheet && r.sheet.list !== null ? money(r.sheet.list) : '—'}</td>}
                         {showCost && <td style={{ ...td, textAlign: 'right' }} className="tnum">{pct(m)}</td>}
