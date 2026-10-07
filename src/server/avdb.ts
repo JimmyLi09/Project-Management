@@ -287,7 +287,7 @@ function seedControlDevices(d: ReturnType<typeof getDb>): void {
 
 /* ===== AV-020 · 投影设备库首批数据 =====
    价格库「投影」:投影机 7 款、镜头 5 支(规格书 + JM 设备清单 rev 1),配置模板的配套 10 项
-   (MY014 报价单价写在售价栏,成本价待填,币种待确认)。和 AV-019 一样只录一次。 */
+   (MY014 报价单价写在售价栏,SGD;成本价由 BD 手动填)。和 AV-019 一样只录一次。 */
 const MIG_020 = 'mig.av020.prjSeed';
 function seedProjectorDevices(d: ReturnType<typeof getDb>): void {
   if (d.prepare('SELECT 1 FROM meta WHERE key = ?').get(MIG_020)) return;
