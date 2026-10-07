@@ -179,13 +179,49 @@ const PRJ_V02: PrjRulePack2 = {
   },
 };
 
-const PACKS2: Record<string, PrjRulePack2> = { [PRJ_V02.version]: PRJ_V02 };
+/* prj@1.0:同一组常数,PD 在「投影常数」页逐项确认完、点「发布」后才启用(发布记在数据库里,
+   服务端据此把新项目绑到 1.0)。1.0 不标「部分常数待校准」,也不出 PRJ-CAL-01。
+   要改某个常数的值不在这里改 —— 改值要出新版本(prj@0.3 / 1.1),旧项目结果不变。 */
+const PRJ_V10: PrjRulePack2 = {
+  ...PRJ_V02,
+  version: 'prj@1.0',
+  issued: 'PD 确认全部常数后发布',
+  calibrated: true,
+  note: '全部常数已由 PD 确认（数值同 prj@0.2）。',
+  noteEn: 'Every constant confirmed by PD (same values as prj@0.2).',
+  constants: Object.fromEntries(Object.entries(PRJ_V02.constants).map(([k, v]) => [k, { ...v, confirmed: true }])) as PrjRulePack2['constants'],
+};
 
+const PACKS2: Record<string, PrjRulePack2> = { [PRJ_V02.version]: PRJ_V02, [PRJ_V10.version]: PRJ_V10 };
+
+/* the latest pack before prj@1.0 is published; after that the server says so (latestPrjPack) */
 export const LATEST_PRJ_PACK = PRJ_V02.version;
+export const PRJ_RELEASE_PACK = PRJ_V10.version;
+/* the pack whose constants PD confirms on the 投影常数 page */
+export const PRJ_CONFIRM_PACK = PRJ_V02.version;
 
 export const isGroupsPack = (version: string | null | undefined): boolean => !!version && !!PACKS2[version];
-/* 05 offers「升级」only from the older single-image pack */
-export const prjPackUpgradable = (version: string | null | undefined): boolean => !!version && !isGroupsPack(version) && !!PACKS[version];
+/* 05 offers「升级」from the older single-image pack, and from prj@0.2 once prj@1.0 is published */
+export const prjPackUpgradable = (version: string | null | undefined, latest: string = LATEST_PRJ_PACK): boolean =>
+  !!version && version !== latest && (isGroupsPack(version) ? latest === PRJ_RELEASE_PACK : !!PACKS[version]);
+
+/* the constants as the confirmation page lists them */
+export type PrjConstKey = keyof PrjRulePack2['constants'];
+export const PRJ_CONST_LABEL: Record<PrjConstKey, { zh: string; en: string; unit: string }> = {
+  overlap: { zh: '融合带占比', en: 'Blend band share', unit: '' },
+  drop: { zh: '吊装下沉', en: 'Hanging drop', unit: 'm' },
+  lux: { zh: '目标照度 暗室 / 有窗 / 明亮', en: 'Target illuminance dark / windows / bright', unit: 'lx' },
+  maxLm: { zh: '单机流明上限', en: 'Max lumens per projector', unit: 'lm' },
+  blendMin: { zh: '融合带最小占比', en: 'Minimum blend share', unit: '' },
+  head: { zh: '人头高', en: 'Head height', unit: 'm' },
+  ustTop: { zh: '超短焦装在画面顶上方', en: 'UST above the image top', unit: 'm' },
+  circuitKw: { zh: '单回路容量', en: 'Circuit capacity', unit: 'kW' },
+  industryDerate: { zh: '行业折减（只作参考）', en: 'Industry derate (reference only)', unit: '' },
+  radarWall: { zh: '每颗雷达覆盖墙宽', en: 'Wall width per radar', unit: 'm' },
+  boxPerSet: { zh: '多屏宝每套带几台', en: 'Projectors per multi-output box', unit: '' },
+};
+export const prjConstValue = (v: unknown): string =>
+  (typeof v === 'object' && v ? Object.values(v as Record<string, number>).join(' / ') : String(v));
 
 export function getPrjGroupsPack(version: string): PrjRulePack2 {
   const p = PACKS2[version];

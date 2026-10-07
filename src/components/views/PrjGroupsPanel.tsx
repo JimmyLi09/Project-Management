@@ -78,11 +78,12 @@ export function PrjGroupsEditor({ cfg, onChange, lib }: { cfg: PrjGroupsConfig; 
             <Two>
               <Field label={t('投影机', 'Projector')}>
                 <select value={g.projector} onChange={(e) => { const np = lib[e.target.value]; setGroup(gi, { projector: e.target.value, lens: np && np.lenses.some((l) => l.code === g.lens) ? g.lens : 'std' }); }}>
-                  {Object.values(lib).map((x) => <option key={x.code} value={x.code}>{x.name} · {x.lumens.toLocaleString('en-US')} lm</option>)}
+                  {/* AV-020:设备库里还没有镜头数据的机型列出来但不能选(在价格库补齐) */}
+                  {Object.values(lib).map((x) => <option key={x.code} value={x.code} disabled={!x.lenses.length}>{x.name} · {x.lumens.toLocaleString('en-US')} lm{x.lenses.length ? '' : t('（镜头待补）', ' (lens data missing)')}</option>)}
                 </select>
               </Field>
               <Field label={t('镜头', 'Lens')}>
-                <select value={p ? lensOf(p, g.lens).code : g.lens} onChange={(e) => setGroup(gi, { lens: e.target.value })}>
+                <select value={p?.lenses.length ? lensOf(p, g.lens).code : g.lens} onChange={(e) => setGroup(gi, { lens: e.target.value })}>
                   {p?.lenses.map((l) => <option key={l.code} value={l.code}>{en ? l.nameEn : l.name}</option>)}
                 </select>
               </Field>

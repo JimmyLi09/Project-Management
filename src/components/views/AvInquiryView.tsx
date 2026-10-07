@@ -13,6 +13,7 @@ import type { BusinessLine } from '@/av/core/types';
 import { canCreate, canEdit, canMeta } from '@/lib/permissions';
 import { useLang } from '@/lib/i18n';
 import { PC_LABEL, USE_LABEL } from '@/av/core/controller';
+import { PRJ_ENVS, PRJ_INTERACTS, PRJ_SCENES } from '@/av/core/prj/inquiry';
 import type { Project } from '@/lib/types';
 import { useStore } from '../store';
 import { useFlowRefresh } from './AvFlow';
@@ -29,7 +30,7 @@ export default function AvInquiryView() {
 function NewInquiry() {
   const { me, refresh, setLedProjectId, setLedIngest, go } = useStore();
   const { t } = useLang();
-  const [form, setForm] = useState({ name: '', client: '', location: '', delivery: '', notes: '', play_use: '', pc_by: '' });
+  const [form, setForm] = useState({ name: '', client: '', location: '', delivery: '', notes: '', play_use: '', pc_by: '', ...PRJ_EMPTY });
   const [lines, setLines] = useState<BusinessLine[]>(['led']);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -95,9 +96,10 @@ function NewInquiry() {
               <textarea id="inq-notes" rows={3} value={form.notes} onChange={set('notes')}
                 placeholder={t('如：主展厅 LED 主屏，需含控制室', 'e.g. main hall LED wall, with control room')} />
             </div>
-            {lines.includes('led') && (
-              <LedSignalQuestions value={form} onChange={(k, v) => setForm((f) => ({ ...f, [k]: v, ...(k === 'play_use' && v !== 'meeting' && v !== 'both' ? { pc_by: '' } : {}) }))} disabled={false} />
+            {(lines.includes('led') || lines.includes('projector')) && (
+              <LedSignalQuestions value={form} lines={lines} onChange={(k, v) => setForm((f) => ({ ...f, [k]: v, ...(k === 'play_use' && v !== 'meeting' && v !== 'both' ? { pc_by: '' } : {}) }))} disabled={false} />
             )}
+            {lines.includes('projector') && <PrjQuestions value={form} disabled={false} onChange={(k, v) => setForm((f) => ({ ...f, [k]: v }))} />}
           </div>
         </div>
 
@@ -155,14 +157,19 @@ function NewInquiry() {
 
 /* ===== AV-016 · 01 编辑已有项目:改了约 1.5 秒自动保存 =====
    不再需要记得点保存。业务线和规则包立项时就定了(换规则包会改变已算好的方案),这里只读。 */
-type Fields = { name: string; client: string; location: string; delivery: string; notes: string; play_use: string; pc_by: string };
+type Fields = { name: string; client: string; location: string; delivery: string; notes: string; play_use: string; pc_by: string } & PrjFields;
+/* AV-020 §3.1:投影线的五个输入(表单里都按文字存,服务端认值) */
+type PrjFields = { prj_scene: string; prj_interact: string; prj_env: string; prj_ceiling: string; prj_near: string };
+const PRJ_EMPTY: PrjFields = { prj_scene: '', prj_interact: '', prj_env: '', prj_ceiling: '', prj_near: '' };
+const prjFieldsOf = (a: Record<string, unknown> | undefined): PrjFields =>
+  Object.fromEntries((Object.keys(PRJ_EMPTY) as (keyof PrjFields)[]).map((k) => [k, a?.[k] == null ? '' : String(a[k])])) as PrjFields;
 function EditInquiry({ project }: { project: Project }) {
   const { me, refresh, setView } = useStore();
   const { t } = useLang();
   const refreshFlow = useFlowRefresh();
   const may = canMeta(me, project);
   const [inq, setInq] = useState<{ location: string; notes: string; lines: BusinessLine[]; packs: Partial<Record<BusinessLine, string>> } | null | undefined>(undefined);
-  const [form, setForm] = useState<Fields>({ name: project.name, client: project.client || '', location: '', delivery: project.delivery || '', notes: '', play_use: '', pc_by: '' });
+  const [form, setForm] = useState<Fields>({ name: project.name, client: project.client || '', location: '', delivery: project.delivery || '', notes: '', play_use: '', pc_by: '', ...PRJ_EMPTY });
   const [st, setSt] = useState<{ saving: boolean; at: number; error: string }>({ saving: false, at: 0, error: '' });
   /* 服务器上现在的值(最后一次读到 / 存上的)。只发和它不一样的字段 —— 别人在项目页刚改的
      客户名,这边没动过就不会被旧值盖回去(复查 #68) */
@@ -177,7 +184,7 @@ function EditInquiry({ project }: { project: Project }) {
       const i = b.inquiry ?? null;
       setInq(i);
       setForm((f) => {
-        const next = { ...f, location: i?.location ?? '', notes: i?.notes ?? '', play_use: i?.answers?.play_use ?? '', pc_by: i?.answers?.pc_by ?? '' };
+        const next = { ...f, location: i?.location ?? '', notes: i?.notes ?? '', play_use: i?.answers?.play_use ?? '', pc_by: i?.answers?.pc_by ?? '', ...prjFieldsOf(i?.answers) };
         base.current = next;
         return next;
       });
@@ -283,10 +290,11 @@ function EditInquiry({ project }: { project: Project }) {
               <label htmlFor="inq-notes">{t('需求补充说明', 'Requirements')}</label>
               <textarea id="inq-notes" rows={3} value={form.notes} onChange={set('notes')} disabled={ro || !inq} />
             </div>
-            {lines.some((l) => l.line === 'led') && (
-              <LedSignalQuestions value={form} disabled={ro || !inq}
+            {lines.some((l) => l.line === 'led' || l.line === 'projector') && (
+              <LedSignalQuestions value={form} disabled={ro || !inq} lines={lines.map((l) => l.line)}
                 onChange={(k, v) => setForm((f) => ({ ...f, [k]: v, ...(k === 'play_use' && v !== 'meeting' && v !== 'both' ? { pc_by: '' } : {}) }))} />
             )}
+            {lines.some((l) => l.line === 'projector') && <PrjQuestions value={form} disabled={ro || !inq} onChange={(k, v) => setForm((f) => ({ ...f, [k]: v }))} />}
           </div>
         </div>
         <div className="panel" style={{ padding: 0 }}>
@@ -311,12 +319,16 @@ function EditInquiry({ project }: { project: Project }) {
 /* ===== AV-019 §2.6 · LED 的信号源两问 =====
    「这块屏主要播放什么？」;选会议 / 演示或两者都有时再问「电脑由谁提供？」。
    05 按它推荐控制器和信号源(还没答 / 还不确定 → 先按会议 / 演示给,标「待确认」)。 */
-function LedSignalQuestions({ value, onChange, disabled }: {
+function LedSignalQuestions({ value, onChange, disabled, lines = ['led'] }: {
   value: { play_use: string; pc_by: string };
   onChange: (k: 'play_use' | 'pc_by', v: string) => void;
   disabled: boolean;
+  lines?: BusinessLine[];
 }) {
   const { t, lang } = useLang();
+  /* AV-020 §3.1:这一问投影线也用 —— 只有一条线时标出是哪条 */
+  const led = lines.includes('led'), prj = lines.includes('projector');
+  const tag = led && !prj ? 'LED · ' : prj && !led ? t('投影 · ', 'Projection · ') : '';
   const k = (pair: [string, string]) => (lang === 'en' ? pair[1] : pair[0]);
   const radio = (name: 'play_use' | 'pc_by', v: string, label: string) => (
     <label key={v} style={{ display: 'flex', gap: 8, alignItems: 'center', cursor: disabled ? 'default' : 'pointer', fontSize: 13 }}>
@@ -327,7 +339,7 @@ function LedSignalQuestions({ value, onChange, disabled }: {
   return (
     <div style={{ display: 'grid', gap: 12, borderTop: '1px solid var(--row-line)', paddingTop: 12 }} data-testid="inq-led-signal">
       <div style={{ display: 'grid', gap: 6 }}>
-        <span style={{ fontSize: 12.5, fontWeight: 600 }}>{t('LED · 这块屏主要播放什么？', 'LED · What will the screen mainly play?')}</span>
+        <span style={{ fontSize: 12.5, fontWeight: 600 }}>{tag}{t('主要播放什么？', 'What will it mainly play?')}</span>
         {(Object.keys(USE_LABEL) as (keyof typeof USE_LABEL)[]).map((u) => radio('play_use', u, k(USE_LABEL[u])))}
       </div>
       {(value.play_use === 'meeting' || value.play_use === 'both') && (
@@ -341,3 +353,37 @@ function LedSignalQuestions({ value, onChange, disabled }: {
   );
 }
 
+
+/* ===== AV-020 §3.1 · 投影线的五个输入 =====
+   05 新开投影方案时用它们预填(天花、环境光、最近观众、互动);场景先记下来,供方案和报价参考。 */
+function PrjQuestions({ value, onChange, disabled }: { value: PrjFields; onChange: (k: keyof PrjFields, v: string) => void; disabled: boolean }) {
+  const { t } = useLang();
+  const sel = (k: 'prj_scene' | 'prj_interact' | 'prj_env', label: string, opts: { key: string; zh: string; en: string }[]) => (
+    <div className="field" style={{ marginBottom: 0 }}>
+      <label htmlFor={`inq-${k}`}>{label}</label>
+      <select id={`inq-${k}`} value={value[k]} disabled={disabled} onChange={(e) => onChange(k, e.target.value)} data-testid={`inq-${k}`}>
+        <option value="">{t('— 未定 —', '— not set —')}</option>
+        {opts.map((o) => <option key={o.key} value={o.key}>{t(o.zh, o.en)}</option>)}
+      </select>
+    </div>
+  );
+  const num = (k: 'prj_ceiling' | 'prj_near', label: string) => (
+    <div className="field" style={{ marginBottom: 0 }}>
+      <label htmlFor={`inq-${k}`}>{label}</label>
+      <input id={`inq-${k}`} type="number" step="0.1" min={0} value={value[k]} disabled={disabled} onChange={(e) => onChange(k, e.target.value)} data-testid={`inq-${k}`} />
+    </div>
+  );
+  return (
+    <div style={{ display: 'grid', gap: 10, borderTop: '1px solid var(--row-line)', paddingTop: 12 }} data-testid="inq-prj">
+      <span style={{ fontSize: 12.5, fontWeight: 600 }}>{t('投影 · 现场情况', 'Projection · site')}</span>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(170px,1fr))', gap: 12 }}>
+        {sel('prj_scene', t('场景', 'Scene'), PRJ_SCENES)}
+        {sel('prj_interact', t('互动', 'Interaction'), PRJ_INTERACTS)}
+        {sel('prj_env', t('环境光', 'Ambient light'), PRJ_ENVS)}
+        {num('prj_ceiling', t('天花高度 m', 'Ceiling height m'))}
+        {num('prj_near', t('最近观众离墙 m', 'Nearest viewer m'))}
+      </div>
+      <span style={{ fontSize: 11.5, color: 'var(--text2)' }}>{t('05 新开投影方案时会按这里预填天花、环境光、观众距离和互动。', '05 prefills ceiling, ambient light, viewer distance and interaction from these when a projection design starts.')}</span>
+    </div>
+  );
+}

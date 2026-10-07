@@ -121,14 +121,14 @@ test('剖面图：光线低于人头的观众标红、否则标绿；拖动把�
   const out = buildPrjView('sect', r)!;
   const shadow = out.drawing.layers.find((l) => l.name === 'PRJ-06-遮挡检查')!.entities;
   assert.ok(shadow.some((e) => e.k === 'line' && e.c === '#FF6B6B'), 'MY016 人站 1 m 处会挡光 → 红');
-  assert.ok(texts(out.drawing).includes('光线 1.23 m'));
+  assert.ok(texts(out.drawing).includes('光线 1.22 m'));   // 3.87 × 1 ÷ 3.165
   const h = out.handles[0];
   assert.equal(h.kind, 'sect');
   if (h.kind === 'sect') {
     assert.ok(Math.abs((h.wallX - h.x) / 1000 - r.groups[0].d) < 1e-9);
     assert.ok(Math.abs(h.y / 1000 - r.groups[0].lensH) < 1e-9);
   }
-  const ok = run({ ...prjSample('MY016'), prj_view_near: 2.0 });   // 光线 3.9 × 2 ÷ 3.165 ≈ 2.46 m，高过人头
+  const ok = run({ ...prjSample('MY016'), prj_view_near: 2.0 });   // 光线 3.87 × 2 ÷ 3.165 ≈ 2.45 m，高过人头
   const okShadow = buildPrjView('sect', ok)!.drawing.layers.find((l) => l.name === 'PRJ-06-遮挡检查')!.entities;
   assert.ok(okShadow.some((e) => e.k === 'line' && e.c === '#5AD18F'));
   /* plan handles: one per wall group, on the room side of the wall at the throw distance */

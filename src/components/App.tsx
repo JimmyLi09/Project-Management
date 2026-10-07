@@ -64,6 +64,7 @@ const PAGE_META: Record<string, { title: [string, string]; sub: [string, string]
   avcostquote_quote: { title: ['成本与报价 · 报价审批', 'Cost & quotation · Quotation'], sub: ['07 · 合并报价 · PD / BD 审批', '07 · Quotation · PD / BD approval'] },
   avlibrary: { title: ['资料库 · 历史案例', 'Library · Past projects'], sub: ['LED 历史项目检索 · 保修与交付', 'Past LED projects · warranty and handover'] },
   avlibrary_prices: { title: ['资料库 · 价格库', 'Library · Price library'], sub: ['可编辑价格表 · 改价留痕', 'Editable prices · change history'] },
+  avlibrary_prjconst: { title: ['资料库 · 投影常数', 'Library · Projection constants'], sub: ['PD 逐项确认 · 发布 prj@1.0', 'PD confirms each · publishes prj@1.0'] },
   avinquiry: { title: ['AV 立项询价', 'AV Inquiry'], sub: ['01 · 项目信息 · 业务线勾选 · 绑定规则包', '01 · Project, business lines and rule packs'] },
   prjstudio: { title: ['投影方案配置', 'Projection Configuration'], sub: ['05 · 投影 · 规则包 prj@0.2（融合组 × 投影面）', '05 · Projection · rule pack prj@0.2 (blend groups × faces)'] },
   elvstudio: { title: ['弱电方案配置', 'ELV Configuration'], sub: ['05 · 弱电 · 草案规则包 elv@0.1-draft', '05 · ELV · draft rule pack'] },
@@ -120,6 +121,7 @@ function Shell() {
   /* 合并页的标题随标签变(成本核算 / 报价审批、历史案例 / 价格库) */
   const meta = (view.name === 'avcostquote' && view.sub === 'quote' && PAGE_META.avcostquote_quote)
     || (view.name === 'avlibrary' && view.sub === 'prices' && PAGE_META.avlibrary_prices)
+    || (view.name === 'avlibrary' && view.sub === 'prjconst' && PAGE_META.avlibrary_prjconst)
     || PAGE_META[view.name] || PAGE_META.overview;
   const inFlow = !!stepOf(view);
   const project = isProject ? projects.find((p) => p.id === view.pid) : undefined;

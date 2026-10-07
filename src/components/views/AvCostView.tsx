@@ -14,7 +14,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { lineInfo, LINES } from '@/av/core/lines';
 import {
-  buildElvLines, buildLedLines, CTRL_CATEGORY, CTRL_LINE_KEYS, buildPrjLines, buildPvLines, checkSheet, displayCandidates, elvChecks, itemLabel, ledChecks, lumensOf, pitchFits, pitchOf, prjChecks, pvChecks, totals,
+  buildElvLines, buildLedLines, CTRL_CATEGORY, CTRL_LINE_KEYS, isPrjTplKey, buildPrjLines, buildPvLines, checkSheet, displayCandidates, elvChecks, itemLabel, ledChecks, lumensOf, pitchFits, pitchOf, prjChecks, pvChecks, totals,
   type CostCheck, type CostLine, type ElvPicks, type ElvSummary, type LedSummary, type ManualLine, type Picks, type PriceItem, type PrjPicks, type PrjSummary,
   type PvPicks, type PvSummary, type SavedConfig,
 } from '@/av/core/pricing';
@@ -96,6 +96,10 @@ export default function AvCostView() {
     const byKey = new Map((s.sheet?.lines ?? []).map((l) => [l.key, l]));
     const next: Record<string, number | null> = {};
     for (const k of AUTO_KEYS[line]) next[k] = byKey.get(k)?.itemId ?? null;
+    /* AV-020:投影配置模板的行 —— 上一版挑过的条目沿用,没挑过的用价格库里对应那一条(不放进 picks) */
+    if (line === 'projector') {
+      for (const l of s.sheet?.lines ?? []) if (isPrjTplKey(l.key) && l.qtySource !== '人工' && l.itemId != null) next[l.key] = l.itemId;
+    }
     /* AV-019:设备行 —— 上一版成本表里同名的那一行(同一型号)才沿用;05 换了型号就用新的建议 */
     if (line === 'led' && s.config) {
       const fresh = new Map(buildLedLines(s.config as SavedConfig<LedSummary>, { display: null, power_cable: null, data_cable: null }, [], s.items).map((l) => [l.key, l]));
@@ -126,7 +130,7 @@ export default function AvCostView() {
     let extra: CostCheck[] = [];
     if (line === 'projector') {
       const cfg = state.config as SavedConfig<PrjSummary>;
-      lines = buildPrjLines(cfg, picks as unknown as PrjPicks, manual, state.items);
+      lines = buildPrjLines(cfg, picks as Partial<PrjPicks> & Record<string, number | null>, manual, state.items);
       extra = prjChecks(lines, cfg, state.items);
     } else if (line === 'elv') {
       const cfg = state.config as SavedConfig<ElvSummary>;
@@ -171,6 +175,7 @@ export default function AvCostView() {
     const items = state!.items.filter((i) => i.active || i.id === l.itemId);
     if (l.key === 'display') return displayCandidates(items, (state!.config!.summary as LedSummary).pitch);
     if ((CTRL_LINE_KEYS as readonly string[]).includes(l.key)) return [...items.filter((i) => i.category === CTRL_CATEGORY), ...items.filter((i) => i.category !== CTRL_CATEGORY && i.unit === l.unit)];
+    if (l.key.startsWith('projector:')) return [...items.filter((i) => i.category === 'projector'), ...items.filter((i) => i.category !== 'projector')];
     if (l.key === 'projector') {
       const need = (state!.config!.summary as PrjSummary).lmProj;
       const enough = (i: PriceItem) => (lumensOf(i.pitch) ?? 0) >= need;
@@ -180,7 +185,7 @@ export default function AvCostView() {
     return [...items.filter((i) => i.unit === l.unit), ...items.filter((i) => i.unit !== l.unit)];
   };
   const setPick = (key: string, id: number | null) => {
-    if (AUTO_KEYS[line].includes(key)) setPicks({ ...picks, [key]: id });
+    if (AUTO_KEYS[line].includes(key) || (line === 'projector' && isPrjTplKey(key))) setPicks({ ...picks, [key]: id });
     else setManual(manual.map((m) => (m.key === key ? { ...m, itemId: id } : m)));
   };
   const basis = () => {
@@ -320,7 +325,7 @@ export default function AvCostView() {
                           </div>
                         )}
                         {/* AV-019:设备行没价格 —— 待报价,不阻断确认成本 */}
-                        {(CTRL_LINE_KEYS as readonly string[]).includes(l.key) && (l.itemId === null || (showCost ? l.unitCost === null : l.unitList === null)) && (
+                        {((CTRL_LINE_KEYS as readonly string[]).includes(l.key) || isPrjTplKey(l.key)) && (l.itemId === null || (showCost ? l.unitCost === null : l.unitList === null)) && (
                           <div style={{ fontSize: 12, color: 'var(--warning)', marginTop: 3 }} data-testid={`cost-ctrl-pending-${l.key}`}>
                             {t('待报价 · 不影响确认成本', 'To be quoted · does not block confirming')}
                           </div>

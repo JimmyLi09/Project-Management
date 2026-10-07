@@ -72,8 +72,8 @@ export function prjCalcBasis(r: PrjGroupsResult, lang: 'zh' | 'en' = 'zh'): PrjC
     row('lens_h', T('镜头离地', 'Lens height'), (g) => ({
       text: (g.floor ? T(`${f2(g.lensH)} m（吊顶向下）`, `${f2(g.lensH)} m (hung, facing down)`)
         : g.lens.ust ? T(`${f2(g.lensH)} m（超短焦：画面顶 + ${K.ustTop.value} m）`, `${f2(g.lensH)} m (UST: image top + ${K.ustTop.value} m)`)
-        : T(`${f2(g.lensH)} m · 镜头位移 ${pct(g.shift ?? 0)}（机器 +${pct(g.projector.shiftUp)} / −${pct(g.projector.shiftDown)}）`,
-          `${f2(g.lensH)} m · lens shift ${pct(g.shift ?? 0)} (unit +${pct(g.projector.shiftUp)} / −${pct(g.projector.shiftDown)})`)) + manTag(g, 'lensH'),
+        : T(`${f2(g.lensH)} m · 镜头位移 ${pct(g.shift ?? 0)}（${g.lens.shiftUp != null ? '镜头' : '机器'} +${pct(g.shiftUp)} / −${pct(g.shiftDown)}）`,
+          `${f2(g.lensH)} m · lens shift ${pct(g.shift ?? 0)} (${g.lens.shiftUp != null ? 'lens' : 'unit'} +${pct(g.shiftUp)} / −${pct(g.shiftDown)})`)) + manTag(g, 'lensH'),
       ok: g.ceilOk,
     }), T(`min(天花 − 吊装下沉 ${K.drop.value} m, 画面中心 + 最大位移 × h)（${src(K.drop)}）`,
       `min(ceiling − ${K.drop.value} m hanging drop, image centre + max shift × h) (${src(K.drop)})`)),
@@ -83,7 +83,9 @@ export function prjCalcBasis(r: PrjGroupsResult, lang: 'zh' | 'en' = 'zh'): PrjC
     T(`光线低于人头 ${head} m 会挡光（${src(K.head)}）`, `A ray below head height ${head} m is blocked by viewers (${src(K.head)})`)),
     row('pixel', T('单像素', 'Pixel size'), (g) => ({ text: `${g.pixel.toFixed(2)} mm`, ok: near > 0 ? g.pixel <= near : null, warn: near > 0 && g.pixel > near }),
       T('单台画面宽 ÷ 1920；单像素(mm) ≤ 最近观看距离(m) 才算清晰（行业常规）', 'Image width ÷ 1920; clear when pixel (mm) ≤ nearest viewing distance (m) (industry practice)')),
-    row('power', T('用电', 'Power'), (g) => ({ text: `${g.n} × ${g.projector.watts} W = ${f2(g.kw)} kW`, ok: null }),
+    row('power', T('用电', 'Power'), (g) => (g.projector.watts == null
+      ? { text: T('功耗待录入', 'power not entered'), ok: false, warn: true }
+      : { text: `${g.n} × ${g.projector.watts} W = ${f2(g.kw)} kW`, ok: null }),
       T('规格书功耗', 'Spec-sheet power')),
   ];
   const total = T(

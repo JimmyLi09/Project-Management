@@ -8,12 +8,13 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 
-import type { CtrlSpec, PriceItem } from '@/av/core/pricing';
+import { isCtrlSpec, type CtrlSpec, type PriceItem } from '@/av/core/pricing';
 import { KIND_LABEL } from '@/av/core/controller';
 import { canEditPrices, canViewPrices, type PriceView } from '@/lib/permissions';
 import { fmtDate } from '@/lib/project';
 import { useLang } from '@/lib/i18n';
 import { useStore } from '../store';
+import { blankPrjSpec, PrjSpecFields, prjSpecKind, prjSpecText } from './PrjSpecEditor';
 
 type Draft = Partial<Omit<PriceItem, 'costPrice' | 'listPrice'>> & { costPrice?: string | number | null; listPrice?: string | number | null };
 
@@ -107,8 +108,23 @@ export default function AvPricesView() {
   );
 
   /* AV-019 设备库:「控制系统」类的条目多一行规格(F11 选型用) */
-  const isCtrl = (label?: string, spec?: CtrlSpec | null) => line === 'led' && (!!spec || /控制系统|控制器|播放盒|controller/i.test(label ?? ''));
-  const spec: CtrlSpec = draft.spec ?? { kind: 'video', brand: '', ports: 0, loadPx: 0, maxW: 0, maxH: 0, inputs: [], standalone: false };
+  const isCtrl = (label?: string, spec?: PriceItem['spec']) => line === 'led' && (isCtrlSpec(spec) || (!spec && /控制系统|控制器|播放盒|controller/i.test(label ?? '')));
+  const spec: CtrlSpec = isCtrlSpec(draft.spec) ? draft.spec : { kind: 'video', brand: '', ports: 0, loadPx: 0, maxW: 0, maxH: 0, inputs: [], standalone: false };
+  /* AV-020 投影设备库:「投影机」「镜头」「投影配套」三类条目多一行规格 */
+  const prjKind = line === 'projector' ? prjSpecKind(draft.categoryLabel, draft.spec) : null;
+  const prjRow = (key: string) => {
+    const sp = draft.spec && !isCtrlSpec(draft.spec) && draft.spec.kind === prjKind ? draft.spec : blankPrjSpec(prjKind!);
+    return (
+      <tr key={`${key}-prj`} style={{ background: 'var(--hover-bg)' }} data-testid="prj-spec">
+        <td style={{ ...td, borderTop: 'none', fontSize: 12 }} colSpan={11}>
+          <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+            <strong>{t('设备规格（05 投影计算用）', 'Device spec (used by 05 projection)')}</strong>
+            <PrjSpecFields spec={sp} onChange={(next) => setDraft({ ...draft, spec: next })} />
+          </div>
+        </td>
+      </tr>
+    );
+  };
   const setSpec = (patch: Partial<CtrlSpec>) => setDraft({ ...draft, spec: { ...spec, ...patch } });
   const num = (k: 'ports' | 'loadPx' | 'maxW' | 'maxH', w: number, label: string) => (
     <label style={{ display: 'inline-flex', gap: 4, alignItems: 'center' }}>{label}
@@ -138,15 +154,15 @@ export default function AvPricesView() {
       </td>
     </tr>
   );
-  const specText = (sp: CtrlSpec) => [t(KIND_LABEL[sp.kind][0], KIND_LABEL[sp.kind][1]),
+  const specText = (sp: NonNullable<PriceItem['spec']>) => (!isCtrlSpec(sp) ? prjSpecText(sp, t) : [t(KIND_LABEL[sp.kind][0], KIND_LABEL[sp.kind][1]),
     ...(sp.ports ? [t(`${sp.ports} 口`, `${sp.ports} ports`), t(`${Math.round(sp.loadPx / 1e4)} 万`, `${(sp.loadPx / 1e6).toFixed(2)} MPx`), `${sp.maxW} × ${sp.maxH}`] : []),
-    ...(sp.inputs.length ? [sp.inputs.join('、')] : []), ...(sp.standalone ? [t('独立播放', 'standalone')] : [])].join(' · ');
+    ...(sp.inputs.length ? [sp.inputs.join('、')] : []), ...(sp.standalone ? [t('独立播放', 'standalone')] : [])].join(' · '));
 
   const editRow = (key: string) => (<React.Fragment key={key}>
     <tr key={key} style={{ background: 'var(--hover-bg)' }}>
       <td style={td}>{field('categoryLabel', 130, 'text', t('类别 *', 'Category *'), 'price-categories')}
         {/* AV-018:LED 显示屏选「LED」就能进 02–04 的点间距候选(存成内部代码);也可以选已有的类别 */}
-        <datalist id="price-categories">{[...new Set([...(line === 'led' ? ['LED', '户外 LED'] : []), ...categories])].map((c) => <option key={c} value={c} />)}</datalist>
+        <datalist id="price-categories">{[...new Set([...(line === 'led' ? ['LED', '户外 LED'] : []), ...(line === 'projector' ? ['投影机', '镜头', '投影配套'] : []), ...categories])].map((c) => <option key={c} value={c} />)}</datalist>
       </td>
       <td style={td}>{field('model', 110, 'text', t('型号', 'Model'))}</td>
       <td style={td}>{field('pitch', 90, 'text', ({ led: 'P2', projector: '12000 lm', elv: '650 W', pv: '550 Wp' })[line])}</td>
@@ -162,6 +178,7 @@ export default function AvPricesView() {
       </td>
     </tr>
     {isCtrl(draft.categoryLabel, draft.spec) && specRow(key)}
+    {prjKind && prjRow(key)}
   </React.Fragment>);
 
   return (
@@ -216,8 +233,8 @@ export default function AvPricesView() {
               : line === 'elv'
               ? t('弱电暂无价格表，逐条录入。功放的「规格」栏填功率（如 650 W），成本核算据此核对是否满足每区负载；六类线按箱（305 m）、录像硬盘按 TB、门禁按套、其余按台 / 个 / 只计价。',
                 'No price list yet. Put amplifier power in the spec column (e.g. 650 W); Cat6 per 305 m box, storage per TB.')
-              : t('投影暂无价格表，逐条录入。投影机的「规格」栏填亮度（如 12000 lm），成本核算据此核对是否满足单机所需亮度；幕布按 ㎡、信号线按根、吊架与融合处理器按套计价。',
-                'No price list yet. Put brightness in the spec column (e.g. 12000 lm) for projectors.')}
+              : t('投影设备库（AV-020）：「投影机」「镜头」两类的规格行就是 05 投影计算用的设备库（流明、功耗、镜头投射比与位移、镜头适配哪些机型），改了下一次计算就跟着变；「投影配套」是 06 配置模板的各行。价格留空 = 待报价，不阻断确认成本。首批按规格书和 JM 设备清单 rev 1 录入，新加的 3 款功耗和镜头待补。',
+                'Projection device library (AV-020): the spec rows of Projector and Lens items are the library 05 calculates with (lumens, power, throw ratio and shift, which projectors a lens fits); edits apply to the next calculation. Projection parts are the rows of the 06 template. Blank price = to be quoted, does not block costing.')}
           </p>
           {categories.length > 0 && (
             <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
