@@ -1,8 +1,9 @@
 /* ===== AV platform · business lines (spec §2.2, §4) =====
-   One platform, several lines. LED runs on a calibrated rule pack; projection,
-   ELV and solar on draft packs (prj@0.1-draft, elv@0.1-draft, pv@0.1-draft,
-   2026-09-25/26 decisions) that can be configured and costed but not quoted
-   formally. */
+   One platform, several lines. LED runs on a calibrated rule pack; ELV and
+   solar on draft packs (elv@0.1-draft, pv@0.1-draft, 2026-09-25/26 decisions)
+   that can be configured and costed but not quoted formally. Projection left
+   draft with AV-020: prj@0.2 is costed and exported (marked「部分常数待校准」
+   until PD publishes prj@1.0). */
 
 import { LATEST_ELV_PACK } from './elv/rulepack.ts';
 import { LATEST_PRJ_PACK } from './prj/rulepack.ts';
@@ -22,7 +23,7 @@ export interface LineInfo {
 
 export const LINES: LineInfo[] = [
   { line: 'led', label: 'LED 显示屏', en: 'LED display', prefix: 'led_', svc: 'led', pack: LATEST_LED_PACK, draft: false },
-  { line: 'projector', label: '投影系统', en: 'Projection', prefix: 'prj_', svc: 'projector', pack: LATEST_PRJ_PACK, draft: true },
+  { line: 'projector', label: '投影系统', en: 'Projection', prefix: 'prj_', svc: 'projector', pack: LATEST_PRJ_PACK, draft: false },
   { line: 'elv', label: '弱电系统', en: 'ELV systems', prefix: 'elv_', svc: 'elv', pack: LATEST_ELV_PACK, draft: true },
   { line: 'pv', label: '太阳能光伏', en: 'Solar PV', prefix: 'pv_', svc: 'pv', pack: LATEST_PV_PACK, draft: true },
 ];
