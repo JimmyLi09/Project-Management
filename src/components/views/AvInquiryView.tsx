@@ -14,6 +14,7 @@ import { canCreate, canEdit, canMeta } from '@/lib/permissions';
 import { useLang } from '@/lib/i18n';
 import { PC_LABEL, USE_LABEL } from '@/av/core/controller';
 import { PRJ_ENVS, PRJ_INTERACTS, PRJ_SCENES } from '@/av/core/prj/inquiry';
+import { LATEST_PRJ_PACK } from '@/av/core/prj/rulepack';
 import type { Project } from '@/lib/types';
 import { useStore } from '../store';
 import { useFlowRefresh } from './AvFlow';
@@ -27,9 +28,19 @@ export default function AvInquiryView() {
   return project ? <EditInquiry key={project.id} project={project} /> : <NewInquiry />;
 }
 
+/* AV-020:投影的最新规则包由服务端说了算(PD 发布 prj@1.0 后就是 1.0),其它线照代码里的 */
+function useLinePack() {
+  const [prj, setPrj] = useState(LATEST_PRJ_PACK);
+  useEffect(() => {
+    fetch('/api/av/prj-library').then((r) => r.json()).then((b) => { if (b.latest) setPrj(b.latest); }).catch(() => null);
+  }, []);
+  return (l: { line: BusinessLine; pack: string | null }) => (l.line === 'projector' ? prj : l.pack);
+}
+
 function NewInquiry() {
   const { me, refresh, setLedProjectId, setLedIngest, go } = useStore();
   const { t } = useLang();
+  const packOf = useLinePack();
   const [form, setForm] = useState({ name: '', client: '', location: '', delivery: '', notes: '', play_use: '', pc_by: '', ...PRJ_EMPTY });
   const [lines, setLines] = useState<BusinessLine[]>(['led']);
   const [busy, setBusy] = useState(false);
@@ -118,7 +129,7 @@ function NewInquiry() {
                   <input type="checkbox" checked={on} disabled={!ok} onChange={() => toggle(l.line)} style={{ width: 17, height: 17 }} />
                   <span style={{ fontWeight: 500 }}>{t(l.label, l.en)}</span>
                   <span style={{ marginLeft: 'auto', fontSize: 12, color: ok ? 'var(--navy700)' : 'var(--text2)' }}>
-                    {ok ? t(`规则包 ${l.pack}${l.draft ? ' · 草案，不可正式报价' : ''}`, `pack ${l.pack}${l.draft ? ' · draft' : ''}`) : t('规则包未发布 · 架构预留', 'no rule pack yet')}
+                    {ok ? t(`规则包 ${packOf(l)}${l.draft ? ' · 草案，不可正式报价' : ''}`, `pack ${packOf(l)}${l.draft ? ' · draft' : ''}`) : t('规则包未发布 · 架构预留', 'no rule pack yet')}
                   </span>
                 </label>
               );
@@ -166,6 +177,7 @@ const prjFieldsOf = (a: Record<string, unknown> | undefined): PrjFields =>
 function EditInquiry({ project }: { project: Project }) {
   const { me, refresh, setView } = useStore();
   const { t } = useLang();
+  const packOf = useLinePack();
   const refreshFlow = useFlowRefresh();
   const may = canMeta(me, project);
   const [inq, setInq] = useState<{ location: string; notes: string; lines: BusinessLine[]; packs: Partial<Record<BusinessLine, string>> } | null | undefined>(undefined);
@@ -303,7 +315,7 @@ function EditInquiry({ project }: { project: Project }) {
             {lines.map((l) => (
               <div key={l.line} style={{ display: 'flex', gap: 10, padding: '10px 12px', border: '1px solid var(--border)', borderRadius: 6 }}>
                 <span style={{ fontWeight: 500 }}>{t(l.label, l.en)}</span>
-                <span style={{ marginLeft: 'auto', fontSize: 12, color: 'var(--text2)' }}>{t('规则包', 'pack')} {inq?.packs?.[l.line] ?? l.pack ?? '—'}</span>
+                <span style={{ marginLeft: 'auto', fontSize: 12, color: 'var(--text2)' }}>{t('规则包', 'pack')} {inq?.packs?.[l.line] ?? packOf(l) ?? '—'}</span>
               </div>
             ))}
             <p style={{ fontSize: 12, color: 'var(--text2)', lineHeight: 1.7 }}>
