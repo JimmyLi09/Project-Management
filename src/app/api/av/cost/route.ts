@@ -9,7 +9,7 @@ import type { BusinessLine } from '@/av/core/types';
 import { dedupe, isSharedTag, sharedRows } from '@/av/core/xline';
 import { canConfirmCost, canCostProject, canViewPrices, identityOf, priceView } from '@/lib/permissions';
 import { redactChecks, redactDedup, redactItem, redactSheet } from '@/server/avredact';
-import { getInquiry, getMarginFloor, latestConfig, latestCostSheet, listPriceItems, saveCostSheet } from '@/server/avdb';
+import { getInquiry, latestPackOf, getMarginFloor, latestConfig, latestCostSheet, listPriceItems, saveCostSheet } from '@/server/avdb';
 import { lineProjectError } from '@/server/avdrawing';
 import { appendAudit, getProject } from '@/server/db';
 import { currentUser } from '@/server/session';
@@ -89,7 +89,7 @@ export async function GET(req: NextRequest) {
     const s = sheets.get(l.line) ?? null;
     const c = COSTED.includes(l.line) ? latestConfig(projectId, l.line) : null;
     return {
-      line: l.line, pack: inquiry?.packs[l.line] ?? lineInfo(l.line).pack,
+      line: l.line, pack: inquiry?.packs[l.line] ?? (l.pack ? latestPackOf(l) : null),
       sheet: s && { cost: s.cost, list: s.list, status: s.status }, outdated: !!(s && c && s.configId !== c.id),
       draftPack: !!(c && !c.summary.exportable),
     };
