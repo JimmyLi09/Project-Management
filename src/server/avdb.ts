@@ -12,7 +12,10 @@ import { DEMO_CASES, shouldSeedDemo } from './demo';
 import { appendAudit, getDb, listProjects } from './db';
 import DEMO_PRICE_SEED from '@/av/seed/led-price-2026-04.json';
 import { compute } from '@/av/core/compute';
-import { buildLedLines, CTRL_CATEGORY, displayCandidates, totals } from '@/av/core/pricing';
+import { buildLedLines, CTRL_CATEGORY, displayCandidates, isCtrlSpec, totals } from '@/av/core/pricing';
+import { PRJ_DEVICE_SEED, PRJ_LIBRARY_SEED, PRJ_PROJECTOR_CATEGORY, prjLibraryFrom, type PrjLibrary } from '@/av/core/prj/library';
+import type { PrjAnswers } from '@/av/core/prj/inquiry';
+import { LATEST_PRJ_PACK, PRJ_CONFIRM_PACK, PRJ_CONST_LABEL, PRJ_RELEASE_PACK, type PrjConstKey } from '@/av/core/prj/rulepack';
 import { NOVASTAR_SEED, type CtrlDevice, type PcBy, type PlayUse } from '@/av/core/controller';
 import { GST_RATE, quoteNo, quoteTotals, toSection } from '@/av/core/quote';
 import { LATEST_LED_PACK } from '@/av/core/rulepack';
@@ -21,7 +24,7 @@ import { categoryCode } from './avprice';
 import type { LedConfig } from '@/av/core/types';
 import { logZh } from '@/lib/logmsg';
 import type { DrawingElement, DrawingExtra, DrawingSummary, IngestRecord, IngestResult, StoredDrawing } from '@/av/core/handoff';
-import type { CostLine, CtrlSpec, LedSummary, PriceItem, SavedConfig, SummaryBase } from '@/av/core/pricing';
+import type { CostLine, LedSummary, PriceItem, SavedConfig, SummaryBase } from '@/av/core/pricing';
 import type { QuoteSection } from '@/av/core/quote';
 import type { Deduction } from '@/av/core/xline';
 import type { BusinessLine } from '@/av/core/types';
@@ -252,6 +255,7 @@ function db() {
     /* 放在 ready 之后:下面用的是普通的存取函数,它们会调 db(),这时不能再进初始化 */
     if (shouldSeedDemo()) seedDemoAv(d);
     seedControlDevices(d);
+    seedProjectorDevices(d);
   }
   return d;
 }
@@ -281,10 +285,75 @@ function seedControlDevices(d: ReturnType<typeof getDb>): void {
   if (added) console.log(`[AV-019] 设备库:录入首批诺瓦控制系统 ${added} 条(价格待报)`);
 }
 
+/* ===== AV-020 · 投影设备库首批数据 =====
+   价格库「投影」:投影机 7 款、镜头 5 支(规格书 + JM 设备清单 rev 1),配置模板的配套 10 项
+   (MY014 报价单价写在售价栏,成本价待填,币种待确认)。和 AV-019 一样只录一次。 */
+const MIG_020 = 'mig.av020.prjSeed';
+function seedProjectorDevices(d: ReturnType<typeof getDb>): void {
+  if (d.prepare('SELECT 1 FROM meta WHERE key = ?').get(MIG_020)) return;
+  let added = 0;
+  d.transaction(() => {
+    for (const x of PRJ_DEVICE_SEED) {
+      if (d.prepare('SELECT 1 FROM av_price_item WHERE line = ? AND category = ? AND model = ?').get('projector', x.category, x.model)) continue;
+      createPriceItem({
+        line: 'projector', category: x.category, categoryLabel: x.categoryLabel, model: x.model, pitch: x.pitch, moduleSize: '', cabinetSize: '',
+        unit: x.unit, costPrice: null, listPrice: x.listPrice, currency: 'SGD', source: x.source, validUntil: '', active: true, spec: x.spec,
+      }, 'AV-020 首批数据');
+      added++;
+    }
+    d.prepare('INSERT INTO meta (key, value) VALUES (?, ?)').run(MIG_020, JSON.stringify({ at: Date.now(), added }));
+  })();
+  if (added) console.log(`[AV-020] 设备库:录入投影机 / 镜头 / 配套 ${added} 条(价格待报)`);
+}
+
+/* 投影计算用的设备库:价格库「投影」里启用的投影机和镜头。一条投影机都没有(首批没录进去)时退回内置那批 */
+export function prjLibrary(): PrjLibrary {
+  const items = listPriceItems('projector');
+  if (!items.some((i) => i.category === PRJ_PROJECTOR_CATEGORY && i.spec)) return PRJ_LIBRARY_SEED;
+  return prjLibraryFrom(items);
+}
+
+/* ===== AV-020 §3.7 · 投影常数确认与 prj@1.0 发布 =====
+   av_setting 里两条:prj.confirm = { 常数: { by, at } },prj.release = { pack, by, at }。
+   发布以后新项目绑 prj@1.0,prj@0.2 的项目在 05 可以升级;回退见上线操作单。 */
+export interface PrjConfirmState {
+  pack: string;
+  confirms: Partial<Record<PrjConstKey, { by: string; at: number }>>;
+  release: { pack: string; by: string; at: number } | null;
+}
+const readSetting = <T,>(key: string): T | null => {
+  const r = db().prepare('SELECT value FROM av_setting WHERE key = ?').get(key) as { value: string } | undefined;
+  if (!r) return null;
+  try { return JSON.parse(r.value) as T; } catch { return null; }
+};
+const writeSetting = (key: string, value: unknown, by: string) => db().prepare(`INSERT INTO av_setting (key, value, updated_by, updated_at) VALUES (?, ?, ?, ?)
+  ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_by = excluded.updated_by, updated_at = excluded.updated_at`)
+  .run(key, JSON.stringify(value), by, Date.now());
+
+export function prjConfirmState(): PrjConfirmState {
+  return { pack: PRJ_CONFIRM_PACK, confirms: readSetting('prj.confirm') ?? {}, release: readSetting('prj.release') };
+}
+export function setPrjConfirm(key: PrjConstKey, on: boolean, by: string): PrjConfirmState {
+  const cur = prjConfirmState().confirms;
+  const next = { ...cur };
+  if (on) next[key] = { by, at: Date.now() }; else delete next[key];
+  writeSetting('prj.confirm', next, by);
+  return prjConfirmState();
+}
+export const prjAllConfirmed = (s: PrjConfirmState) => (Object.keys(PRJ_CONST_LABEL) as PrjConstKey[]).every((k) => s.confirms[k]);
+export function publishPrjRelease(by: string): PrjConfirmState {
+  writeSetting('prj.release', { pack: PRJ_RELEASE_PACK, by, at: Date.now() }, by);
+  return prjConfirmState();
+}
+/* 投影线现在的最新规则包:prj@1.0 发布了就是 1.0,否则 0.2 */
+export const latestPrjPack = (): string => (readSetting<{ pack: string }>('prj.release')?.pack ?? LATEST_PRJ_PACK);
+/* 立项绑定用:投影按上面,其它线按代码里的最新版 */
+export const latestPackOf = (l: { line: BusinessLine; pack: string | null }): string => (l.line === 'projector' ? latestPrjPack() : l.pack!);
+
 /* F11 用的设备:「控制系统」分类里启用、填了规格的条目 */
 export function controllerDevices(): CtrlDevice[] {
   return listPriceItems('led')
-    .filter((i) => i.active && i.category === CTRL_CATEGORY && i.spec)
+    .flatMap((i) => (i.active && i.category === CTRL_CATEGORY && isCtrlSpec(i.spec) ? [{ ...i, spec: i.spec }] : []))
     .map((i) => ({
       id: i.id, model: i.model, brand: i.spec!.brand ?? '', kind: i.spec!.kind, ports: i.spec!.ports, loadPx: i.spec!.loadPx,
       maxW: i.spec!.maxW, maxH: i.spec!.maxH, inputs: i.spec!.inputs, standalone: i.spec!.standalone, price: i.costPrice,
@@ -484,7 +553,7 @@ export function markReviewed(id: number, by: string): void {
 }
 
 /* AV-019 §2.6:01 的「这块屏主要播放什么」「电脑由谁提供」 */
-export interface InquiryAnswers { play_use?: PlayUse | null; pc_by?: PcBy | null }
+export interface InquiryAnswers extends PrjAnswers { play_use?: PlayUse | null; pc_by?: PcBy | null }
 
 export interface Inquiry {
   projectId: string;
@@ -541,7 +610,7 @@ export function ensureInquiry(p: { id: string; packages: { svc: string }[] }, by
   if (cur) return cur;
   const lines = projectLines(p.packages.map((k) => k.svc)).filter(isAvailable);
   if (!lines.length) return null;
-  const packs = Object.fromEntries(lines.map((l) => [l.line, latestConfig(p.id, l.line)?.packVersion || l.pack!])) as Partial<Record<BusinessLine, string>>;
+  const packs = Object.fromEntries(lines.map((l) => [l.line, latestConfig(p.id, l.line)?.packVersion || latestPackOf(l)])) as Partial<Record<BusinessLine, string>>;
   const now = Date.now();
   const made = db().prepare(`INSERT OR IGNORE INTO av_inquiry (project_id, location, notes, lines, packs, created_by, created_at)
     VALUES (?, '', '', ?, ?, ?, ?)`).run(p.id, JSON.stringify(lines.map((l) => l.line)), JSON.stringify(packs), by, now).changes;
@@ -598,7 +667,7 @@ type PriceRow = {
   module_size: string; cabinet_size: string; unit: string; cost_price: number | null; list_price: number | null;
   currency: string; source: string; valid_until: string; active: number; updated_by: string; updated_at: number; spec?: string;
 };
-const parseSpec = (v: string | undefined) => { if (!v) return null; try { return JSON.parse(v) as CtrlSpec; } catch { return null; } };
+const parseSpec = (v: string | undefined): PriceItem['spec'] => { if (!v) return null; try { return JSON.parse(v) as PriceItem['spec']; } catch { return null; } };
 const toItem = (r: PriceRow): PriceItem => ({
   id: r.id, line: r.line as BusinessLine, category: r.category, categoryLabel: r.category_label, model: r.model,
   pitch: r.pitch, moduleSize: r.module_size, cabinetSize: r.cabinet_size, unit: r.unit, costPrice: r.cost_price,

@@ -95,6 +95,8 @@ export const canExportLed = (u: Identity) => isFull(u) || u.role === 'pm';
    the project PM's job, like review. */
 export const canViewPrices = (u: Identity) => u.role !== 'member' && u.role !== 'viewer';
 export const canEditPrices = (u: Identity) => isFull(u);
+/* AV-020 §3.7:规则包常数由 PD 逐项确认、发布 */
+export const canConfirmRules = (u: Identity) => u.role === 'director';
 export const canCostProject = (u: Identity, p?: Project) => canReviewDrawing(u, p);
 
 /* ===== 字段级隔离(2026-09-30 定)=====

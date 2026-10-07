@@ -6,13 +6,14 @@ import { LATEST_ELV_PACK } from '@/av/core/elv/rulepack';
 import type { ElvSummary, LedSummary, PrjSummary, PvSummary } from '@/av/core/pricing';
 import { computePrj, type PrjConfig } from '@/av/core/prj/compute';
 import { computePrjGroups, isGroupsConfig } from '@/av/core/prj/groups';
-import { isGroupsPack, LATEST_PRJ_PACK, PRJ_V01_PACK, prjPackUpgradable } from '@/av/core/prj/rulepack';
+import { isGroupsPack, PRJ_V01_PACK, prjPackUpgradable } from '@/av/core/prj/rulepack';
+import { prjSummaryOf } from '@/av/core/prj/system';
 import { computePv, type PvConfig } from '@/av/core/pv/compute';
 import { LATEST_PV_PACK } from '@/av/core/pv/rulepack';
 import { LATEST_LED_PACK, ledPackUpgradable } from '@/av/core/rulepack';
 import type { LedConfig } from '@/av/core/types';
 import { canCostProject, identityOf } from '@/lib/permissions';
-import { clearDraft, configCount, draftOwners, getDraft, getDrawing, getInquiry, latestConfig, saveConfig, setInquiryPack } from '@/server/avdb';
+import { clearDraft, configCount, draftOwners, getDraft, getDrawing, getInquiry, latestConfig, latestPrjPack, prjLibrary, saveConfig, setInquiryPack } from '@/server/avdb';
 import { lineProjectError } from '@/server/avdrawing';
 import { appendAudit, getProject } from '@/server/db';
 import { currentUser } from '@/server/session';
@@ -120,29 +121,19 @@ export async function POST(req: NextRequest) {
     /* AV-020: a project opened on prj@0.1-draft stays on it until 05 upgrades it on save;
        an unbound project follows the shape of what was sent */
     const boundPrj = inquiry?.packs.projector ?? null;
-    const upgradingPrj = !!body.upgradePack && prjPackUpgradable(boundPrj ?? PRJ_V01_PACK) && isGroupsConfig(body.cfg);
-    const prjPack = upgradingPrj ? LATEST_PRJ_PACK : boundPrj ?? (isGroupsConfig(body.cfg) ? LATEST_PRJ_PACK : PRJ_V01_PACK);
+    const latest = latestPrjPack();   // prj@1.0 once PD has published it
+    const upgradingPrj = !!body.upgradePack && prjPackUpgradable(boundPrj ?? PRJ_V01_PACK, latest) && isGroupsConfig(body.cfg);
+    const prjPack = upgradingPrj ? latest : boundPrj ?? (isGroupsConfig(body.cfg) ? latest : PRJ_V01_PACK);
     if (isGroupsPack(prjPack)) {
       if (!isGroupsConfig(body.cfg)) return NextResponse.json({ error: `规则包 ${prjPack} 需要按融合组填写的方案` }, { status: 400 });
       const cfg = body.cfg;
       let r;
-      try { r = computePrjGroups(cfg, prjPack); }
+      try { r = computePrjGroups(cfg, prjPack, prjLibrary()); }
       catch (e) { return NextResponse.json({ error: e instanceof Error ? e.message : '方案参数无效' }, { status: 400 }); }
       if (!r.ok) return NextResponse.json({ error: r.findings.filter((f) => f.gate === 'compute' && f.severity === 'block').map((f) => f.message).join(' ') }, { status: 400 });
-      const g0 = r.groups[0];
+      /* AV-020 §3.6:汇总里带配套设备数量,06 按配置模板出行 */
       const saved = saveConfig<PrjSummary>({
-        projectId: project!.id, line, packVersion: prjPack, drawingId: null, createdBy: user.name,
-        /* 06 still reads the prj@0.1 summary fields until AV-020 PR3 brings the new device rows */
-        summary: {
-          width: Math.round(Math.max(...r.groups.map((g) => g.L)) * 1000), height: Math.round(Math.max(...r.groups.map((g) => g.H)) * 1000),
-          area: r.groups.reduce((a, g) => a + g.L * g.H, 0), nProj: r.nProj, lmProj: Math.max(...r.groups.map((g) => g.projector.lumens)),
-          throwRatio: g0.d / g0.w, pxW: Math.round((g0.projector.resW * g0.L) / g0.w), pxH: Math.round((g0.projector.resH * g0.H) / g0.h),
-          kw: r.kw, nCircuit: r.nCircuit, nSignalCable: r.nProj + 1,
-          profile: [...new Set(r.groups.map((g) => g.projector.code))].join(' / '), content: cfg.prj_env,
-          groups: r.groups.map((g) => ({ name: g.group.name, projector: g.projector.code, lens: g.lens.code, n: g.n, faces: g.group.faces.length })),
-          interact: cfg.prj_interact,
-          exportable: r.exportable, blocking: r.findings.filter((f) => f.severity === 'block').map((f) => f.code),
-        },
+        projectId: project!.id, line, packVersion: prjPack, drawingId: null, createdBy: user.name, summary: prjSummaryOf(r),
       }, cfg);
       if (upgradingPrj && boundPrj) setInquiryPack(project!.id, 'projector', prjPack);
       appendAudit(project!.id, [...(upgradingPrj ? [{

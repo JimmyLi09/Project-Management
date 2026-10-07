@@ -1,12 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { computePrjGroups, isGroupsConfig, type PrjGroupsConfig } from '@/av/core/prj/groups';
-import { PRJ_LIBRARY_SEED } from '@/av/core/prj/library';
 import { prjProposalDoc } from '@/av/core/prj/proposal';
 import { isGroupsPack } from '@/av/core/prj/rulepack';
 import { buildPrjDxf } from '@/av/core/prj/views';
 import { canExportLed, identityOf } from '@/lib/permissions';
 import { DrawingServiceError, renderFile } from '@/server/avdrawing';
 import { currentUser } from '@/server/session';
+import { prjLibrary } from '@/server/avdb';
 
 /* AV-020 §3.4:POST { kind: 'dxf' | 'proposal', cfg, packVersion, title?, client?, lang? } -> 投影的
    DXF(平面 / 立面 / 剖面分图层)或技术方案 Word(中 / 英)。和 LED 一样由服务端按参数重算,
@@ -33,7 +33,7 @@ export async function POST(req: NextRequest) {
   }
   let result;
   try {
-    result = computePrjGroups(body.cfg, body.packVersion!, PRJ_LIBRARY_SEED);
+    result = computePrjGroups(body.cfg, body.packVersion!, prjLibrary());
   } catch (e) {
     return NextResponse.json({ error: e instanceof Error ? e.message : T('方案参数无效', 'Invalid inputs') }, { status: 400 });
   }

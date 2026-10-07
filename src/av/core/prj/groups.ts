@@ -69,6 +69,8 @@ export interface PrjGroupResult {
   dOk: boolean;
   lensH: number;      // m above the floor (floor groups: hanging height)
   shift: number | null;  // vertical lens shift needed, share of h (null: UST / floor)
+  shiftUp: number;       // the shift available: the lens's own (domestic fixed lenses) or else the projector's
+  shiftDown: number;
   ceilOk: boolean;
   shadowY: number | null;  // m, ray height at the nearest viewer
   shadow: boolean;
@@ -107,6 +109,7 @@ export function computePrjGroups(cfg: PrjGroupsConfig, packVersion: string, lib:
   if (!cfg.prj_groups?.length) bad.push(['至少一个融合组', 'at least one blend group']);
   for (const g of cfg.prj_groups ?? []) {
     if (!lib[g.projector]) bad.push([`${g.name} 的投影机`, `projector of ${g.name}`]);
+    else if (!lib[g.projector].lenses.length) bad.push([`${g.name} 的投影机 ${lib[g.projector].name} 还没有镜头数据（在价格库补）`, `projector ${lib[g.projector].name} in ${g.name} has no lens data yet (add it in the price library)`]);
     if (!g.faces?.length) bad.push([`${g.name} 至少一个投影面`, `at least one face in ${g.name}`]);
     else if (g.faces.some((f) => !(f.w > 0) || !(f.h > 0))) bad.push([`${g.name} 的投影面宽高`, `face sizes in ${g.name}`]);
     else if (new Set(g.faces.map((f) => f.kind)).size > 1) bad.push([`${g.name} 不能同时有墙和地面（分成两组）`, `${g.name} mixes wall and floor (split into two groups)`]);
@@ -124,6 +127,7 @@ export function computePrjGroups(cfg: PrjGroupsConfig, packVersion: string, lib:
   const groups = cfg.prj_groups.map((g): PrjGroupResult => {
     const p = lib[g.projector];
     const lens = lensOf(p, g.lens);
+    const shiftUp = lens.shiftUp ?? p.shiftUp, shiftDown = lens.shiftDown ?? p.shiftDown;
     const aspect = p.resW / p.resH;
     const floor = g.faces[0].kind === 'floor';
     const L = g.faces.reduce((a, f) => a + f.w, 0) / 1000;
@@ -169,16 +173,16 @@ export function computePrjGroups(cfg: PrjGroupsConfig, packVersion: string, lib:
       if (!lens.ust) {
         const centre = bottom + h / 2;
         shift = (lensH - centre) / h;
-        ceilOk = shift >= -p.shiftDown - 1e-6 && shift <= p.shiftUp + 1e-6 && lensH <= cfg.prj_ceiling + 1e-6;
+        ceilOk = shift >= -shiftDown - 1e-6 && shift <= shiftUp + 1e-6 && lensH <= cfg.prj_ceiling + 1e-6;
       } else ceilOk = lensH <= cfg.prj_ceiling + 1e-6;
     } else if (lens.ust) {
       lensH = Math.min(top + K.ustTop.value, cfg.prj_ceiling - 0.05);
       ceilOk = top + K.ustTop.value <= cfg.prj_ceiling + 1e-6;
     } else {
       const centre = bottom + h / 2;
-      lensH = Math.min(cfg.prj_ceiling - K.drop.value, centre + p.shiftUp * h);
+      lensH = Math.min(cfg.prj_ceiling - K.drop.value, centre + shiftUp * h);
       shift = (lensH - centre) / h;
-      ceilOk = shift >= -p.shiftDown - 1e-6;
+      ceilOk = shift >= -shiftDown - 1e-6;
     }
     /* ⑧ shadow: height of the lowest ray where the nearest viewer stands */
     let shadowY: number | null = null, shadow = false;
@@ -189,8 +193,8 @@ export function computePrjGroups(cfg: PrjGroupsConfig, packVersion: string, lib:
     if (floor && cfg.prj_interact === 'floor') shadow = true;
     return {
       group: g, projector: p, lens, floor, L, H, aspect, overlap: o, n, reason, w, h, blend: o * w,
-      lux, luxIndustry: lux * K.industryDerate.value, target, tMin, tMax, d, dOk, lensH, shift, ceilOk, shadowY, shadow,
-      pixel: (w * 1000) / p.resW, kw: (n * p.watts) / 1000, manual: man ? manualLabel(man) : null,
+      lux, luxIndustry: lux * K.industryDerate.value, target, tMin, tMax, d, dOk, lensH, shift, shiftUp, shiftDown, ceilOk, shadowY, shadow,
+      pixel: (w * 1000) / p.resW, kw: (n * (p.watts ?? 0)) / 1000, manual: man ? manualLabel(man) : null,
     };
   });
 
@@ -215,10 +219,10 @@ export function computePrjGroups(cfg: PrjGroupsConfig, packVersion: string, lib:
       push('PRJ-MAN-02', 'block', 'export',
         r.shift == null
           ? `${nm}：人工调整的镜头离地 ${f2(r.lensH)} m 高于天花 ${cfg.prj_ceiling} m。`
-          : `${nm}：人工调整的镜头离地 ${f2(r.lensH)} m 要镜头位移 ${Math.round(r.shift * 100)}%，机器只有 +${Math.round(r.projector.shiftUp * 100)}% / −${Math.round(r.projector.shiftDown * 100)}%${r.lensH > cfg.prj_ceiling ? `，且高于天花 ${cfg.prj_ceiling} m` : ''}。`,
+          : `${nm}：人工调整的镜头离地 ${f2(r.lensH)} m 要镜头位移 ${Math.round(r.shift * 100)}%，机器只有 +${Math.round(r.shiftUp * 100)}% / −${Math.round(r.shiftDown * 100)}%${r.lensH > cfg.prj_ceiling ? `，且高于天花 ${cfg.prj_ceiling} m` : ''}。`,
         r.shift == null
           ? `${nm}: the hand-set lens height of ${f2(r.lensH)} m is above the ${cfg.prj_ceiling} m ceiling.`
-          : `${nm}: a hand-set lens height of ${f2(r.lensH)} m needs ${Math.round(r.shift * 100)}% lens shift; the projector allows +${Math.round(r.projector.shiftUp * 100)}% / −${Math.round(r.projector.shiftDown * 100)}%${r.lensH > cfg.prj_ceiling ? ` and it is above the ${cfg.prj_ceiling} m ceiling` : ''}.`);
+          : `${nm}: a hand-set lens height of ${f2(r.lensH)} m needs ${Math.round(r.shift * 100)}% lens shift; the projector allows +${Math.round(r.shiftUp * 100)}% / −${Math.round(r.shiftDown * 100)}%${r.lensH > cfg.prj_ceiling ? ` and it is above the ${cfg.prj_ceiling} m ceiling` : ''}.`);
     }
     if (!r.dOk && !r.floor && !manD) {
       push('PRJ-THROW-01', 'block', 'export',
@@ -234,10 +238,10 @@ export function computePrjGroups(cfg: PrjGroupsConfig, packVersion: string, lib:
       push('PRJ-CEIL-01', 'block', 'export',
         r.lens.ust
           ? `${nm}：天花太矮 —— 超短焦机要装在画面顶 ${f2(r.group.bottom + r.h)} m 上方 ${K.ustTop.value} m，超过天花 ${cfg.prj_ceiling} m（常见坑 3）。`
-          : `${nm}：天花太矮 —— 镜头最高只能装到 ${f2(r.lensH)} m，需要向下位移 ${Math.round(-(r.shift ?? 0) * 100)}%，机器最多 ${Math.round(r.projector.shiftDown * 100)}%（常见坑 3）。`,
+          : `${nm}：天花太矮 —— 镜头最高只能装到 ${f2(r.lensH)} m，需要向下位移 ${Math.round(-(r.shift ?? 0) * 100)}%，机器最多 ${Math.round(r.shiftDown * 100)}%（常见坑 3）。`,
         r.lens.ust
           ? `${nm}: ceiling too low — the ultra-short-throw unit must sit ${K.ustTop.value} m above the image top (${f2(r.group.bottom + r.h)} m), above the ${cfg.prj_ceiling} m ceiling.`
-          : `${nm}: ceiling too low — the lens can go no higher than ${f2(r.lensH)} m, which needs ${Math.round(-(r.shift ?? 0) * 100)}% downward lens shift; the projector allows ${Math.round(r.projector.shiftDown * 100)}%.`);
+          : `${nm}: ceiling too low — the lens can go no higher than ${f2(r.lensH)} m, which needs ${Math.round(-(r.shift ?? 0) * 100)}% downward lens shift; the projector allows ${Math.round(r.shiftDown * 100)}%.`);
     }
     if (r.lux < r.target) {
       push('PRJ-LUX-01', 'block', 'export',
@@ -268,6 +272,11 @@ export function computePrjGroups(cfg: PrjGroupsConfig, packVersion: string, lib:
       push('PRJ-BLEND-02', 'warn', 'compute',
         `${nm}：融合带占比 ${Math.round(r.overlap * 100)}% 小于 ${Math.round(K.blendMin.value * 100)}%，容易出融合缝。`,
         `${nm}: a ${Math.round(r.overlap * 100)}% blend band is under ${Math.round(K.blendMin.value * 100)}% and seams are likely.`);
+    }
+    if (r.projector.watts == null) {
+      push('PRJ-SPEC-01', 'warn', 'compute',
+        `${nm}：${r.projector.name} 的功耗还没录入，用电和回路数没算它 —— 在价格库补上。`,
+        `${nm}: the power draw of ${r.projector.name} is not in the library yet, so power and circuits leave it out — add it in the price library.`);
     }
     if (r.projector.lumens > K.maxLm.value) {
       push('PRJ-LM-01', 'warn', 'compute',

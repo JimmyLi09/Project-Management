@@ -47,7 +47,8 @@ function price(line: BusinessLine, config: SavedConfig<AnySummary>, picks: Recor
   }
   if (line === 'projector') {
     const cfg = config as SavedConfig<PrjSummary>;
-    const p: PrjPicks = { projector: num(picks.projector), screen: num(picks.screen), signal_cable: num(picks.signal_cable), mount: num(picks.mount), blend: num(picks.blend) };
+    /* AV-020:配置模板的行(projector:<代码>、p_<角色>)没传就用价格库里对应的那一条 */
+    const p: Partial<PrjPicks> & Record<string, number | null> = Object.fromEntries(Object.entries(picks).map(([k, v]) => [k, num(v)]));
     const lines = buildPrjLines(cfg, p, manual, items);
     return { items, lines, extra: prjChecks(lines, cfg, items) };
   }

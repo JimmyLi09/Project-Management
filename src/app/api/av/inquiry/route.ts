@@ -3,7 +3,8 @@ import { isAvailable, LINES } from '@/av/core/lines';
 import type { BusinessLine } from '@/av/core/types';
 import { canCreate, canMeta, identityOf } from '@/lib/permissions';
 import { newProject } from '@/lib/project';
-import { ensureInquiry, getInquiry, openInquiry, setInquiryAnswers, updateInquiry, type InquiryAnswers } from '@/server/avdb';
+import { ensureInquiry, getInquiry, latestPackOf, openInquiry, setInquiryAnswers, updateInquiry, type InquiryAnswers } from '@/server/avdb';
+import { PRJ_ANSWER_KEYS, PRJ_ANSWER_ZH, prjAnswersOf } from '@/av/core/prj/inquiry';
 import { appendAudit, appendAuditMerged, getEffectiveTemplate, getProject, insertProject, saveProject } from '@/server/db';
 import { currentUser } from '@/server/session';
 import { applyAction, PermissionError, ValidationError } from '@/server/actions';
@@ -60,7 +61,8 @@ export async function POST(req: NextRequest) {
   }, getEffectiveTemplate);
   p.log.unshift({ at: Date.now(), by: user.name, text: logZh('proj.createAv'), k: 'proj.createAv' });
 
-  const packs = Object.fromEntries(chosen.map((l) => [l.line, l.pack!])) as Partial<Record<BusinessLine, string>>;
+  /* AV-020:投影 prj@1.0 发布以后新项目绑 1.0(发布记在数据库里) */
+  const packs = Object.fromEntries(chosen.map((l) => [l.line, latestPackOf(l)])) as Partial<Record<BusinessLine, string>>;
   const inquiry = openInquiry({
     projectId: p.id,
     location: String(body.location || '').trim(),
@@ -71,7 +73,7 @@ export async function POST(req: NextRequest) {
     createdBy: user.name,
   }, () => insertProject(p));
 
-  const avLines = chosen.map((l) => `${l.label}（${l.pack}）`).join('、');
+  const avLines = chosen.map((l) => `${l.label}（${packs[l.line]}）`).join('、');
   appendAudit(p.id, [{
     at: Date.now(), by: user.name,
     text: logZh('av.inquiry', { lines: avLines }), k: 'av.inquiry', p: { lines: avLines },
@@ -82,7 +84,8 @@ export async function POST(req: NextRequest) {
 /* AV-016 · 01 编辑已有项目,自动保存。PATCH { projectId, name, client, location, delivery, notes }
    —— 只写改了的字段;业务线 / 规则包立项时定下,这里不改。
    能改项目信息的人(项目负责人、销售、PD / BD)才能改。日志:同一人 10 分钟内的连续改动合并成一条。 */
-const FIELD_ZH: Record<string, string> = { name: '项目名称', client: '客户', location: '地点', delivery: '交付日期', notes: '补充说明', play_use: '播放内容', pc_by: '电脑由谁提供' };
+const FIELD_ZH: Record<string, string> = { name: '项目名称', client: '客户', location: '地点', delivery: '交付日期', notes: '补充说明', play_use: '播放内容', pc_by: '电脑由谁提供', ...PRJ_ANSWER_ZH };
+const ANSWER_KEYS = ['play_use', 'pc_by', ...PRJ_ANSWER_KEYS] as const;
 
 /* AV-019 §2.6:01「这块屏主要播放什么」「电脑由谁提供」—— 只收认得的值;
    不是会议 / 两者都有时,「电脑由谁提供」不用答,清掉 */
@@ -92,7 +95,8 @@ function answersOf(body: Record<string, unknown>, cur: InquiryAnswers): InquiryA
   if ('play_use' in body) next.play_use = USES.includes(String(body.play_use)) ? body.play_use as InquiryAnswers['play_use'] : null;
   if ('pc_by' in body) next.pc_by = body.pc_by === 'client' || body.pc_by === 'us' ? body.pc_by : null;
   if (next.play_use !== 'meeting' && next.play_use !== 'both') next.pc_by = null;
-  return next;
+  /* AV-020 §3.1:投影线的场景、互动、环境光、天花高度、最近观众离墙 */
+  return prjAnswersOf(body, next);
 }
 export async function PATCH(req: NextRequest) {
   const user = await currentUser();
@@ -135,11 +139,11 @@ export async function PATCH(req: NextRequest) {
     if (location !== inquiry.location) changed.push('location');
     if (notes !== inquiry.notes) changed.push('notes');
     if (location !== inquiry.location || notes !== inquiry.notes) updateInquiry(project.id, { location, notes });
-    if ('play_use' in body || 'pc_by' in body) {
+    if (ANSWER_KEYS.some((k) => k in body)) {
       const answers = answersOf(body, inquiry.answers);
-      if ((answers.play_use ?? null) !== (inquiry.answers.play_use ?? null)) changed.push('play_use');
-      if ((answers.pc_by ?? null) !== (inquiry.answers.pc_by ?? null)) changed.push('pc_by');
-      if (changed.includes('play_use') || changed.includes('pc_by')) setInquiryAnswers(project.id, answers);
+      const diff = ANSWER_KEYS.filter((k) => (answers[k] ?? null) !== (inquiry.answers[k] ?? null));
+      changed.push(...diff);
+      if (diff.length) setInquiryAnswers(project.id, answers);
     }
   }
   if (changed.length) {

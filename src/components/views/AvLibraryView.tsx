@@ -16,6 +16,7 @@ import { useStore } from '../store';
 import AvShell, { type AvTab } from './AvShell';
 import AvCasesView from './AvCasesView';
 import AvPricesView from './AvPricesView';
+import PrjConstantsView from './PrjConstantsView';
 
 export default function AvLibraryView() {
   const { view, setView } = useStore();
@@ -24,6 +25,8 @@ export default function AvLibraryView() {
   const tabs: AvTab[] = [
     { key: 'cases', zh: '历史案例', en: 'Past projects' },
     { key: 'prices', zh: '价格库', en: 'Price library' },
+    /* AV-020 §3.7:投影规则包常数逐项确认、发布 prj@1.0 */
+    { key: 'prjconst', zh: '投影常数', en: 'Projection constants' },
   ];
   const active = tabs.some((x) => x.key === view.sub) ? (view.sub as string) : 'cases';
 
@@ -32,13 +35,13 @@ export default function AvLibraryView() {
       view="avlibrary"
       crumb={t('资料库', 'Library')}
       title={t('资料库', 'Library')}
-      subtitle={t('原「历史案例」「价格库」两个菜单合为一页两个标签。',
-        'The former Past projects and Price library menus, now two tabs on one page.')}
+      subtitle={t('历史案例、价格库（含投影设备库），以及投影规则包常数的确认。',
+        'Past projects, the price library (with the projection device library) and confirming the projection rule-pack constants.')}
       tabs={tabs}
       active={active}
       onTab={(k) => setView({ name: 'avlibrary', sub: k })}
     >
-      {active === 'cases' ? <AvCasesView /> : <AvPricesView />}
+      {active === 'cases' ? <AvCasesView /> : active === 'prjconst' ? <PrjConstantsView /> : <AvPricesView />}
     </AvShell>
   );
 }

@@ -31,10 +31,14 @@ test('回测 MY016（U 形 6810 + 13645 + 6810 × 4300，PU900 + 0.46）：5 台
   assert.equal(Math.round(g.w * 1000), 6880);
   assert.equal(Math.round(g.h * 1000), 4300);
   assert.ok(near(g.d, 3.165), `投射 ${g.d}`);
-  assert.ok(near(g.lensH, 3.9));
+  /* 设备清单 rev 1（2026-10-07）：0.46 是国产定焦，位移上下 40%（规格书原装 ±50%）→ 镜头最高 2.15 + 0.4 × 4.3 = 3.87 m，
+     按一位小数仍是验收的 3.9 m；实际图纸画面 7200 × 4500、镜头 3.9 m 时位移约 37%，也在 40% 内 */
+  assert.ok(near(g.lensH, 3.87), `镜头离地 ${g.lensH}`);
+  assert.equal(g.lensH.toFixed(1), '3.9');
   assert.equal(Math.round(g.lux), 304);
   assert.ok(g.lux >= 250);
-  assert.equal(Math.round((g.shift ?? 0) * 100), 41);
+  assert.equal(Math.round((g.shift ?? 0) * 100), 40);
+  assert.ok(g.ceilOk, '位移用满 40%，不报天花太矮');
   assert.equal(Math.round(g.blend * 1000), 1720);
   assert.ok(codes(r).includes('PRJ-BLEND-01'), '5 台融合 → 需要融合器');
   assert.ok(!r.findings.some((f) => f.severity === 'block'), 'MY016 没有红项');

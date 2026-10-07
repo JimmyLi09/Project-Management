@@ -5,6 +5,7 @@
    moves on its own, and the checks say when the library has moved under it. */
 
 import type { CtrlKind } from './controller.ts';
+import { PRJ_PART_CATEGORY, PRJ_PROJECTOR_CATEGORY, type PrjDeviceSpec, type PrjPartRole } from './prj/library.ts';
 import type { BusinessLine } from './types.ts';
 import type { SharedTag } from './xline.ts';
 
@@ -26,8 +27,9 @@ export interface PriceItem {
   active: boolean;
   updatedBy: string;
   updatedAt: number;
-  /* AV-019:设备库(LED「控制系统」分类)的规格 —— 网口、带载、最大宽高、输入、能否独立播放 */
-  spec?: CtrlSpec | null;
+  /* AV-019:设备库(LED「控制系统」分类)的规格 —— 网口、带载、最大宽高、输入、能否独立播放;
+     AV-020:投影机 / 镜头 / 投影配套的规格(prj/library.ts) */
+  spec?: CtrlSpec | PrjDeviceSpec | null;
 }
 
 export interface CtrlSpec {
@@ -42,6 +44,7 @@ export interface CtrlSpec {
 }
 /* 设备库的分类代码 */
 export const CTRL_CATEGORY = 'control';
+export const isCtrlSpec = (s: PriceItem['spec']): s is CtrlSpec => !!s && ['player', 'video', 'large', 'media', 'pc'].includes(s.kind);
 
 /* First number in the printed pitch: "P1.875" → 1.875, "2.8-5.6mm" → 2.8. */
 export function pitchOf(label: string): number | null {
@@ -99,8 +102,10 @@ export interface PrjSummary extends SummaryBase {
   profile: string;
   content: string;
   /* prj@0.2 (AV-020): blend groups and interaction, for the 06 device rows */
-  groups?: { name: string; projector: string; lens: string; n: number; faces: number }[];
+  groups?: { name: string; projector: string; lens: string; n: number; faces: number; model?: string }[];
   interact?: 'none' | 'wall' | 'floor';
+  /* AV-020 §3.6:配套设备数量(prj/system.ts,保存时算好);有它 06 就按配置模板出行 */
+  system?: { pcs: number; blends: number; boxes: number; radars: number | null; boxPerSet: number };
 }
 
 export interface ElvSummary extends SummaryBase {
@@ -190,6 +195,9 @@ export interface Picks {
 }
 /* AV-019:设备行 —— 没价格写「待报价」,不阻断确认成本 */
 export const CTRL_LINE_KEYS = ['controller', 'media_player', 'playback_pc'] as const;
+/* AV-020 §3.6:投影配置模板的行(投影机按机型一行 projector:<代码>,配套 p_<角色>),同样待报价不阻断 */
+export const isPrjTplKey = (k: string) => k.startsWith('projector:') || k.startsWith('p_');
+const quoteLater = (k: string) => (CTRL_LINE_KEYS as readonly string[]).includes(k) || isPrjTplKey(k);
 const KIND_ZH: Record<string, string> = { player: '多媒体播放盒', video: '视频控制器', large: '大型控制器' };
 
 /* AV-015 §4.4: the core has no curvature, so the curved build is a line of its own until it is quoted. */
@@ -250,13 +258,13 @@ export function checkSheet(
     }
     if (!it && l.key === 'display' && extra.some((c) => c.code === 'LED-COST-QUOTE')) continue;   // 已经写成「待报价」
     /* AV-019:控制器 / 媒体播放器 / 播控电脑没选上或没价格 —— 标「待报价」,不阻断 */
-    if ((CTRL_LINE_KEYS as readonly string[]).includes(l.key) && (!it || l.unitCost === null || l.unitList === null)) {
+    if (quoteLater(l.key) && (!it || l.unitCost === null || l.unitList === null)) {
       out.push({ code: 'COST-CTRL-QUOTE', severity: 'warn', message: `「${l.name}」待报价：${it ? '设备库里这一项还没有成本价 / 售价' : '设备库里还没有这一项'}，不影响确认成本，报价前补上。` });
       if (!it) continue;
     }
     if (!it) { out.push({ code: 'COST-ITEM', severity: 'block', message: `「${l.name}」未选择价格库条目。` }); continue; }
     if (!sameUnit(it.unit, l.unit)) out.push({ code: 'COST-UNIT', severity: 'block', message: `「${l.name}」按 ${l.unit} 计，所选条目按 ${it.unit} 计价。` });
-    if ((l.unitCost === null || l.unitList === null) && !(CTRL_LINE_KEYS as readonly string[]).includes(l.key)) out.push({ code: 'COST-PRICE', severity: 'block', message: `「${it.model || it.pitch || it.categoryLabel}」缺少成本价或售价，需在价格库补全。` });
+    if ((l.unitCost === null || l.unitList === null) && !quoteLater(l.key)) out.push({ code: 'COST-PRICE', severity: 'block', message: `「${it.model || it.pitch || it.categoryLabel}」缺少成本价或售价，需在价格库补全。` });
     if (!it.active) out.push({ code: 'COST-INACTIVE', severity: 'warn', message: `「${itemLabel(it)}」已在价格库停用。` });
     if (it.validUntil && it.validUntil < today) out.push({ code: 'COST-EXPIRED', severity: 'warn', message: `「${itemLabel(it)}」价格已于 ${it.validUntil} 过期，需更新后重算。` });
     if (it.costPrice !== l.unitCost || it.listPrice !== l.unitList) {
@@ -285,14 +293,48 @@ export const lumensOf = specNumber;
 
 export interface PrjPicks { projector: number | null; screen: number | null; signal_cable: number | null; mount: number | null; blend: number | null }
 
-export function buildPrjLines(cfg: SavedConfig<PrjSummary>, picks: PrjPicks, manual: ManualLine[], items: PriceItem[]): CostLine[] {
+/* AV-020 §2:安装调试 3 人;≤ 4 台 2 天,5–9 台 3 天(10 台以上待校准,先按 3 天并提示) */
+export const prjInstallDays = (nProj: number) => (nProj <= 4 ? 2 : 3);
+
+export function buildPrjLines(cfg: SavedConfig<PrjSummary>, picks: Partial<PrjPicks> & Record<string, number | null | undefined>, manual: ManualLine[], items: PriceItem[]): CostLine[] {
   const byId = new Map(items.map((i) => [i.id, i]));
-  const priced = (key: string, name: string, qty: number, unit: string, qtySource: string, itemId: number | null): CostLine => {
-    const it = itemId === null ? undefined : byId.get(itemId);
+  const priced = (key: string, name: string, qty: number, unit: string, qtySource: string, itemId: number | null | undefined): CostLine => {
+    const it = itemId == null ? undefined : byId.get(itemId);
     return { key, name, qty, unit, qtySource, itemId: it ? it.id : null, itemLabel: it ? itemLabel(it) : '',
       unitCost: it?.costPrice ?? null, unitList: it?.listPrice ?? null };
   };
   const s = cfg.summary;
+  if (s.system && s.groups) {
+    /* AV-020 §3.6 配置模板:没挑过的行缺省用价格库里对应的那一条(投影机按型号代码,配套按角色) */
+    const spec = (i: PriceItem) => (i.spec && !isCtrlSpec(i.spec) ? i.spec : null);
+    const auto = (key: string, find: (sp: PrjDeviceSpec, i: PriceItem) => boolean) =>
+      (picks[key] !== undefined ? picks[key] : items.find((i) => i.active && spec(i) && find(spec(i)!, i))?.id ?? null);
+    const role = (r: PrjPartRole) => auto(`p_${r}`, (sp, i) => i.category === PRJ_PART_CATEGORY && sp.kind === 'part' && sp.role === r);
+    const sys = s.system;
+    const models = new Map<string, { model: string; n: number; groups: string[] }>();
+    for (const g of s.groups) {
+      const m = models.get(g.projector) ?? { model: g.model ?? g.projector, n: 0, groups: [] };
+      m.n += g.n; m.groups.push(g.name);
+      models.set(g.projector, m);
+    }
+    const days = prjInstallDays(s.nProj);
+    const T = '§3.6';
+    return [
+      ...[...models].map(([code, m]) => priced(`projector:${code}`, `投影机 ${m.model}（${m.groups.join('、')}）`, m.n, '台', T,
+        auto(`projector:${code}`, (sp, i) => i.category === PRJ_PROJECTOR_CATEGORY && sp.kind === 'projector' && sp.code === code))),
+      priced('p_mount', '投影固定支架（每台 1 个）', s.nProj, '个', T, role('mount')),
+      ...(sys.blends ? [priced('p_blend', '软件融合服务器（每个融合组 1 套）', sys.blends, '套', T, role('blend'))] : []),
+      ...(sys.boxes ? [priced('p_box', `多屏宝（每 ${sys.boxPerSet} 台 1 套，待确认）`, sys.boxes, '套', T, role('box'))] : []),
+      priced('p_pc', 'PC 主机（每个融合组 1 台）', sys.pcs, '台', T, role('pc')),
+      priced('p_cable', '线材辅材（每台 1 批：20 m HDMI 光纤 + 六类网线）', s.nProj, '批', T, role('cable')),
+      ...(s.interact === 'wall' && sys.radars ? [priced('p_radar', '雷达（墙面互动）', sys.radars, '颗', T, role('radar'))] : []),
+      priced('p_switch', '路由器 / 交换机', 1, '台', T, role('switch')),
+      priced('p_control', '中控系统', 1, '套', T, role('control')),
+      priced('p_install', `安装调试（3 人 × ${days} 天，含融合调试）`, 3 * days, '人天', T, role('install')),
+      priced('p_trip', '出差费', 1, '项', T, role('trip')),
+      ...manual.map((m) => tagged(priced(m.key, m.name, m.qty, m.unit, '人工', m.itemId), m.shared)),
+    ];
+  }
   return [
     priced('projector', `投影机（单机 ≥ ${Math.ceil(s.lmProj).toLocaleString('en-US')} lm）`, s.nProj, '台', 'P2', picks.projector),
     priced('screen', '投影幕 / 投影面', round2(s.area), '㎡', 'P1', picks.screen),
@@ -341,6 +383,21 @@ function ledDisplayChecks(lines: CostLine[], cfg: SavedConfig<LedSummary>, items
 
 /* The chosen projector must reach the brightness P6 asks for. */
 export function prjChecks(lines: CostLine[], cfg: SavedConfig<PrjSummary>, items: PriceItem[]): CostCheck[] {
+  const s = cfg.summary;
+  if (s.system && s.groups) {
+    /* AV-020:配置模板的提示(不阻断) */
+    const out: CostCheck[] = [];
+    if (s.interact === 'floor') out.push({ code: 'PRJ-COST-RADAR', severity: 'warn', message: '地面互动的雷达 / 传感器数量规则待定：请手动加一行。' });
+    if (s.nProj >= 10) out.push({ code: 'PRJ-COST-INSTALL', severity: 'warn', message: `${s.nProj} 台：10 台以上的安装调试天数待校准，先按 3 天算，请核对。` });
+    for (const l of lines.filter((x) => x.key.startsWith('projector:'))) {
+      const it = l.itemId == null ? undefined : items.find((i) => i.id === l.itemId);
+      const code = l.key.slice('projector:'.length);
+      if (it?.spec && it.spec.kind === 'projector' && it.spec.code !== code) {
+        out.push({ code: 'PRJ-COST-MODEL', severity: 'warn', message: `「${l.name}」选的是 ${it.model}，和 05 方案的机型不一致，请核对。` });
+      }
+    }
+    return out;
+  }
   const line = lines.find((l) => l.key === 'projector');
   const it = line?.itemId == null ? undefined : items.find((i) => i.id === line.itemId);
   if (!it) return [];
