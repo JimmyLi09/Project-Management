@@ -12,7 +12,7 @@
    看全部,PM 与 Engineer 只看自己的。 */
 
 import { NextResponse } from 'next/server';
-import { canSeeProject, identityOf } from '@/lib/permissions';
+import { canSeeModule, canSeeProject, identityOf } from '@/lib/permissions';
 import type { Project, User } from '@/lib/types';
 
 export const AV_DENY = '非你管理 / 参与的项目';
@@ -24,4 +24,11 @@ export function denyUnlessVisible(user: User, project: Project | null | undefine
   if (!project) return null;
   if (canSeeProject(identityOf(user), project)) return null;
   return NextResponse.json({ error: AV_DENY }, { status: 403 });
+}
+
+/* REQ-051: 权限表里「AV 方案成本」对这个角色是「不可见」时,AV 的接口一律拒绝 ——
+   不只是前端藏菜单。写操作各自的 can… 里已经带了模块级「可编辑」那一道。 */
+export const AV_MODULE_DENY = '你的角色看不到「AV 方案成本」/ Your role has no access to "AV design & cost"';
+export function denyAvModule(user: User): NextResponse | null {
+  return canSeeModule(identityOf(user), 'avcost') ? null : NextResponse.json({ error: AV_MODULE_DENY }, { status: 403 });
 }

@@ -2,9 +2,11 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import type { User } from '@/lib/types';
+import type { PermTable } from '@/lib/permTable';
 import { StoreProvider, useStore, type View } from './store';
 import { allOverdue, awaitingPayment, fmtDate, isMyProject, pendingWorkflowAction } from '@/lib/project';
-import { canCreate, canViewPrices, isFull } from '@/lib/permissions';
+import { canCreate, canSeeModule, canViewPrices, isFull } from '@/lib/permissions';
+import type { PermModule } from '@/lib/permTable';
 import { myTasks } from '@/lib/myTasks';
 import { roleTerm } from '@/lib/terms';
 import { useLang } from '@/lib/i18n';
@@ -41,9 +43,9 @@ import KpiView from './views/KpiView';
 import ProjectDetail from './views/ProjectDetail';
 import AvFlow, { stepOf } from './views/AvFlow';
 
-export default function App({ user }: { user: User }) {
+export default function App({ user, permTable }: { user: User; permTable?: PermTable }) {
   return (
-    <StoreProvider user={user}>
+    <StoreProvider user={user} permTable={permTable}>
       <Shell />
     </StoreProvider>
   );
@@ -77,7 +79,7 @@ const PAGE_META: Record<string, { title: [string, string]; sub: [string, string]
   ledingest: { title: ['LED 图纸解析与校核', 'LED Drawing Review'], sub: ['02 图纸接入与分级 · 03 解析提取 · 04 人工校核', 'Intake & grading · extraction · human review'] },
   ledstudio: { title: ['LED 方案配置', 'LED Configuration'], sub: ['LED 词条 · 公式引擎 · 箱体拼接与线路出图', 'LED fields · formula engine · cabinet layout & wiring drawing'] },
   finance: { title: ['收款看板', 'Collections'], sub: ['开票与收款全局视图 · 逾期预警 · 可导出', 'Invoicing & payment across projects · overdue alerts · exportable'] },
-  users: { title: ['用户管理', 'Users'], sub: ['账号、角色与访问权限', 'Accounts, roles and access'] },
+  users: { title: ['用户与权限', 'Users & permissions'], sub: ['账号、角色与访问权限 · 只有 PD / BD 可以修改', 'Accounts, roles and access · PD / BD only'] },
   knowledge: { title: ['运营中心 · 知识库', 'Knowledge Base'], sub: ['公司制度 / SOP / 培训资料 —— 可编辑、留版本、可导入导出', 'Company policies, SOPs and training material — versioned, importable and exportable'] },
   training: { title: ['新人培训', 'Training'], sub: ['按角色的培训路径 · 进度追踪 · 考核小测(教材来自知识库)', 'Role-based paths, progress tracking and quizzes — material lives in the knowledge base'] },
   kpi: { title: ['KPI 看板', 'KPI Board'], sub: ['四维加权 · 数据全部来自平台已有机制,可点开看每一分怎么来的', 'Four weighted dimensions, all computed from existing data — click through to see how each score is derived'] },
@@ -86,13 +88,14 @@ const PAGE_META: Record<string, { title: [string, string]; sub: [string, string]
 };
 
 function Shell() {
-  const { user, me, view, go, projects, users, setView } = useStore();
-  /* C6: name→photo map so every <Avatar> shows real uploaded photos */
+  const { user, me, view, go, projects, allUsers, setView } = useStore();
+  /* C6: name→photo map so every <Avatar> shows real uploaded photos
+     (REQ-051: 用全部账号 —— 停用的人在历史记录里也还是他的头像) */
   const avatarMap = useMemo(() => {
     const m: Record<string, string> = {};
-    users.forEach((u) => { if (u.avatar) m[u.name] = u.avatar; });
+    allUsers.forEach((u) => { if (u.avatar) m[u.name] = u.avatar; });
     return m;
-  }, [users]);
+  }, [allUsers]);
   const { lang, setLang, t, dual, setDual } = useLang();
   const [showNew, setShowNew] = useState(false);
   const [notifOpen, setNotifOpen] = useState(false);
@@ -101,7 +104,7 @@ function Shell() {
   /* force a password change when the account is flagged (first login / after reset) */
   const [mustChange, setMustChange] = useState(!!user.mustChangePassword);
   /* bell shows only the current person's overdue items (A5 scoping) */
-  const overdue = useMemo(() => allOverdue(projects.filter((p) => !p.archived && isMyProject(p, me))), [projects, me]);
+  const overdue = useMemo(() => (canSeeModule(me, 'schedule') ? allOverdue(projects.filter((p) => !p.archived && isMyProject(p, me))) : []), [projects, me]);
 
   useEffect(() => {
     if (!notifOpen) return;
@@ -127,13 +130,20 @@ function Shell() {
   const inFlow = !!stepOf(view);
   const project = isProject ? projects.find((p) => p.id === view.pid) : undefined;
 
-  const navItem = (name: typeof view.name, icon: string, label: string, badge?: number) => (
-    <button className={`side-item ${view.name === name ? 'active' : ''}`} onClick={() => go(name)}>
+  /* REQ-051: 页面属于权限表的哪个模块。「不可见」的不出现在菜单里,直接打网址进来也只看到一句「没有权限」
+     (数据那一层由接口挡:项目接口不下发、AV 接口直接拒绝) */
+  const VIEW_MODULE: Partial<Record<View['name'], PermModule>> = {
+    team: 'stats', stats: 'stats', kpi: 'stats', contacts: 'contacts', registers: 'record', finance: 'finance', users: 'users',
+  };
+  const moduleOf = (n: View['name']): PermModule | undefined => (AV_VIEWS.includes(n) ? 'avcost' : VIEW_MODULE[n]);
+  const allowed = (n: View['name']) => { const m = moduleOf(n); return !m || canSeeModule(me, m); };
+  const navItem = (name: typeof view.name, icon: string, label: string, badge?: number) => (allowed(name) ? (
+    <button className={`side-item ${view.name === name ? 'active' : ''}`} onClick={() => go(name)} data-testid={`nav-${name}`}>
       <Icon name={icon} size={17} />
       <span className="grow">{label}</span>
       {badge ? <span className="side-badge tnum">{badge}</span> : null}
     </button>
-  );
+  ) : null);
 
   /* ===== 0929 改版:AV 收成一个分组 =====
      原来 10 个 AV 入口平铺在侧栏里,和项目、待办、档案挤在一起,一眼扫不完。
@@ -200,7 +210,7 @@ function Shell() {
           {navItem('stats', 'trending', t('统计报表', 'Reports'))}
           {navItem('contacts', 'users', t('通讯录', 'Contacts'))}
           {navItem('registers', 'layers', t('项目档案', 'Registers'))}
-          <div className={`nav-group${avOpen || inAv ? ' open' : ''}${inAv ? ' here' : ''}`} data-testid="av-group">
+          {canSeeModule(me, 'avcost') && <div className={`nav-group${avOpen || inAv ? ' open' : ''}${inAv ? ' here' : ''}`} data-testid="av-group">
             <button className="nav-group-head" onClick={toggleAv} aria-expanded={avOpen || inAv}>
               <Icon name="target" size={17} />
               <span className="grow" style={{ textAlign: 'left' }}>{t('AV 方案成本', 'AV Platform')}</span>
@@ -220,9 +230,9 @@ function Shell() {
                   ['avlibrary', 'avcases', 'avprices'].includes(view.name))}
               </div>
             )}
-          </div>
+          </div>}
           {(isFull(me) || me.role === 'finance') && navItem('finance', 'trending', t('收款看板', 'Collections'), financeAlertCount)}
-          {isFull(me) && navItem('users', 'settings', t('用户管理', 'Users'))}
+          {isFull(me) && navItem('users', 'settings', t('用户与权限', 'Users & permissions'))}
           {navItem('knowledge', 'book', t('知识库', 'Knowledge'))}
           {navItem('training', 'check', t('新人培训', 'Training'))}
           {isFull(me) && navItem('kpi', 'target', t('KPI 看板', 'KPI Board'))}
@@ -336,6 +346,16 @@ function Shell() {
 
         <section className="content">
           <div className="content-inner">
+            {!allowed(view.name) || (view.name === 'users' && !isFull(me)) ? (
+              <div className="panel" style={{ padding: 28 }} data-testid="no-access">
+                <b>{t('没有权限', 'No access')}</b>
+                <div style={{ fontSize: 13, color: 'var(--text2)', marginTop: 6 }}>
+                  {view.name === 'users'
+                    ? t('「用户与权限」只有 PD / BD 可以打开。', '"Users & permissions" is for PD / BD only.')
+                    : t('你的角色看不到这个模块（权限表由 PD / BD 设置）。', 'Your role can’t see this module (PD / BD set the permission table).')}
+                </div>
+              </div>
+            ) : <>
             {view.name === 'overview' && <OverviewView />}
             {view.name === 'projects' && <ProjectsView search={search} />}
             {view.name === 'team' && <TeamView />}
@@ -370,6 +390,7 @@ function Shell() {
             {view.name === 'rules' && <RulesView />}
             {view.name === 'templates' && <TemplatesView />}
             {view.name === 'project' && <ProjectDetail />}
+            </>}
           </div>
         </section>
       </main>

@@ -4,7 +4,7 @@ import type { CtrlAdvice, CtrlDevice } from '@/av/core/controller';
 import type { LedConfig } from '@/av/core/types';
 import { ledAdvice } from '@/server/avctrl';
 import { controllerDevices, getInquiry } from '@/server/avdb';
-import { denyUnlessVisible } from '@/server/avguard';
+import { denyUnlessVisible, denyAvModule } from '@/server/avguard';
 import { getProject } from '@/server/db';
 import { currentUser } from '@/server/session';
 
@@ -14,6 +14,7 @@ import { currentUser } from '@/server/session';
 export async function POST(req: NextRequest) {
   const user = await currentUser();
   if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
+  { const deny = denyAvModule(user); if (deny) return deny; }
   const body = (await req.json().catch(() => ({}))) as { projectId?: string; cfg?: LedConfig; packVersion?: string };
   if (!body.cfg || !body.packVersion) return NextResponse.json({ error: '缺少方案参数' }, { status: 400 });
   let projectId: string | null = null;

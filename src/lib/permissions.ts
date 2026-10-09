@@ -7,6 +7,16 @@
 
 import type { Project, Role, ScheduleRow, User } from './types';
 import { ROLE_TERMS } from './terms';
+import { permAllows, type PermModule } from './permTable';
+
+/* ===== REQ-051:按角色的权限表 =====
+   下面每个函数 = 权限表这一格放行(模块级:不可见 / 只读 / 可编辑)且原有业务规则放行。
+   表的默认值就是原有规则的上限,所以没改表之前每个函数的结果和以前一样。
+   PD / BD 在表里恒为可编辑。 */
+export const canSeeModule = (u: Identity, m: PermModule) => permAllows(u, m, 'read');
+export const canEditModule = (u: Identity, m: PermModule) => permAllows(u, m, 'edit');
+/* 改某个项目的某一块内容:原有的 canEdit(PD / BD、负责人、编辑授权、项目工程师)且这一块可编辑 */
+export const canEditIn = (u: Identity, p: Project, m: PermModule) => canEdit(u, p) && canEditModule(u, m);
 
 export interface Identity {
   name: string;
@@ -53,28 +63,28 @@ export const visibleProjects = <T extends Project>(u: Identity, ps: T[]): T[] =>
 /* v2.2 §6/§7: Finance may edit invoice/payment status only (not production).
    PD/BD can view finance info but only Finance may change it (§7.2). */
 export const isFinance = (u: Identity) => u.role === 'finance';
-export const canEditFinance = (u: Identity) => u.role === 'finance';
+export const canEditFinance = (u: Identity) => u.role === 'finance' && canEditModule(u, 'finance');
 /* REQ-045: 「已开 Invoice」/「撤回开票」—— Finance、Sales、PD / BD(= 原来能改开票
    信息或点「已开票」的人)。PM / Engineer 没有。 */
-export const canMarkInvoice = (u: Identity, _p?: Project) => isFinance(u) || canCommercial(u);
+export const canMarkInvoice = (u: Identity, _p?: Project) => (isFinance(u) || canCommercial(u)) && canEditModule(u, 'finance');
 
 export const canAssign = (u: Identity, _p?: Project) => isFull(u);
 
 export const canStageTo = (u: Identity, p: Project, s: string) =>
   s === 'presales' || s === 'invoice' ? canCommercial(u, p) : canEdit(u, p);
 
-export const canMeta = (u: Identity, p: Project) => canEdit(u, p) || canCommercial(u, p);
+export const canMeta = (u: Identity, p: Project) => (canEdit(u, p) || canCommercial(u, p)) && canEditModule(u, 'projects');
 
 export const canRowEdit = (u: Identity, p: Project, row?: ScheduleRow) =>
-  canEdit(u, p) || (u.role === 'member' && !!row && row.assignee === u.name);
+  canEditModule(u, 'schedule') && (canEdit(u, p) || (u.role === 'member' && !!row && row.assignee === u.name));
 
 export const canDecide = (u: Identity) => isFull(u);
 
-export const canCreate = (u: Identity) => isFull(u) || u.role === 'sales';
+export const canCreate = (u: Identity) => (isFull(u) || u.role === 'sales') && canEditModule(u, 'projects');
 
 /* REQ-008: only Sales / PD / BD may delete a project. PM & members can edit/add
    but never delete; viewer/finance cannot either. Server is the final authority. */
-export const canDelete = (u: Identity) => isFull(u) || u.role === 'sales';
+export const canDelete = (u: Identity) => (isFull(u) || u.role === 'sales') && canEditModule(u, 'projects');
 
 export const canAdmin = (u: Identity) => isFull(u);
 
@@ -84,16 +94,16 @@ export const canAdmin = (u: Identity) => isFull(u);
    to. Without a project these answer the role-level question (what to show);
    with one, whether this person may act on that project. */
 export const canUploadDrawing = (u: Identity, p?: Project) =>
-  isFull(u) || u.role === 'sales' || (u.role === 'pm' && (!p || canEdit(u, p)));
+  (isFull(u) || u.role === 'sales' || (u.role === 'pm' && (!p || canEdit(u, p)))) && canEditModule(u, 'avcost');
 export const canReviewDrawing = (u: Identity, p?: Project) =>
-  isFull(u) || (u.role === 'pm' && (!p || canEdit(u, p)));
-export const canExportLed = (u: Identity) => isFull(u) || u.role === 'pm';
+  (isFull(u) || (u.role === 'pm' && (!p || canEdit(u, p)))) && canEditModule(u, 'avcost');
+export const canExportLed = (u: Identity) => (isFull(u) || u.role === 'pm') && canEditModule(u, 'avcost');
 
 /* Price library and costing. Cost prices are commercial data: production
    members and read-only viewers do not see them. Only PD / BD edit prices and
    company parameters (管理员, §11). Saving a configuration or a cost sheet is
    the project PM's job, like review. */
-export const canViewPrices = (u: Identity) => u.role !== 'member' && u.role !== 'viewer';
+export const canViewPrices = (u: Identity) => u.role !== 'member' && u.role !== 'viewer' && canSeeModule(u, 'avcost');
 export const canEditPrices = (u: Identity) => isFull(u);
 /* AV-020 §3.7:规则包常数由 PD 逐项确认、发布 */
 export const canConfirmRules = (u: Identity) => u.role === 'director';
@@ -112,7 +122,7 @@ export const canCostProject = (u: Identity, p?: Project) => canReviewDrawing(u, 
    跟着走 —— 前端藏起来而接口照样回数,等于没隔离。 */
 export type PriceView = 'full' | 'list' | 'none';
 export const priceView = (u: Identity): PriceView =>
-  isFull(u) || u.role === 'finance' ? 'full' : u.role === 'sales' ? 'list' : 'none';
+  isFull(u) ? 'full' : !canSeeModule(u, 'avcost') ? 'none' : u.role === 'finance' ? 'full' : u.role === 'sales' ? 'list' : 'none';
 export const canSeeCost = (u: Identity) => priceView(u) === 'full';
 export const canSeeListPrice = (u: Identity) => priceView(u) !== 'none';
 /** 确认成本单:得看得见毛利才谈得上确认,所以只给 PD / BD。 */
@@ -121,7 +131,7 @@ export const canConfirmCost = (u: Identity) => isFull(u);
 /* 07 报价审批 (2026-09-26): sales or the project's PM put a quotation together
    and submit it; every quotation needs PD / BD approval before it goes out. */
 /* 2026-09-30 字段级隔离:报价就是售价,PM 不看售价,所以 PM 不再发起报价。 */
-export const canSubmitQuote = (u: Identity, _p?: Project) => isFull(u) || u.role === 'sales';
+export const canSubmitQuote = (u: Identity, _p?: Project) => (isFull(u) || u.role === 'sales') && canEditModule(u, 'avcost');
 /** 报价页 / 报价接口 / 打印页:看得到售价的人才进得去。 */
 export const canViewQuotes = (u: Identity) => canSeeListPrice(u);
 export const canApproveQuote = (u: Identity) => isFull(u);
@@ -148,10 +158,10 @@ export const canSeeCompletionBlock = (u: Identity) => isFull(u);
 export const canSeeVerifyBlock = (u: Identity) =>
   !isPM(u) && !isBystander(u) && u.role !== 'finance' && canCommercial(u);
 export const canSeeFinanceBlock = (u: Identity) =>
-  !isPM(u) && !isBystander(u) && (isFull(u) || u.role === 'sales' || u.role === 'finance');
+  !isPM(u) && !isBystander(u) && (isFull(u) || u.role === 'sales' || u.role === 'finance') && canSeeModule(u, 'finance');
 
 /* 「提交完工」的新家:排期页底部,只给本项目的 PM 与全权角色 */
-export const canSubmitCompletionHere = (u: Identity, p: Project) => canEdit(u, p);
+export const canSubmitCompletionHere = (u: Identity, p: Project) => canEditIn(u, p, 'schedule');
 
 /* REQ-012: anyone who actually builds schedules/checklists may save one as a
    reusable template — that includes PM, who owns the production content.

@@ -3,6 +3,7 @@ import { getPrjGroupsPack, PRJ_CONST_LABEL, PRJ_RELEASE_PACK, type PrjConstKey }
 import { canConfirmRules, identityOf } from '@/lib/permissions';
 import { latestPrjPack, prjAllConfirmed, prjConfirmState, publishPrjRelease, setPrjConfirm } from '@/server/avdb';
 import { currentUser } from '@/server/session';
+import { denyAvModule } from '@/server/avguard';
 
 /* AV-020 §3.7 · 投影常数确认页
    GET  → prj@0.2 的每个常数(值、来源、依据)、谁在什么时候确认的、prj@1.0 发布了没有
@@ -21,12 +22,14 @@ function state(canConfirm: boolean) {
 export async function GET() {
   const user = await currentUser();
   if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
+  { const deny = denyAvModule(user); if (deny) return deny; }
   return NextResponse.json(state(canConfirmRules(identityOf(user))));
 }
 
 export async function POST(req: NextRequest) {
   const user = await currentUser();
   if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
+  { const deny = denyAvModule(user); if (deny) return deny; }
   const body = (await req.json().catch(() => ({}))) as { key?: string; confirmed?: boolean; publish?: boolean; lang?: string };
   const T = (zh: string, en: string) => (body.lang === 'en' ? en : zh);
   if (!canConfirmRules(identityOf(user))) return NextResponse.json({ error: T('只有 PD 可以确认常数、发布规则包', 'Only the PD can confirm constants and publish the rule pack') }, { status: 403 });

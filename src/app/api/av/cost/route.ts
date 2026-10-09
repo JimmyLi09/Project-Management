@@ -14,7 +14,7 @@ import { lineProjectError } from '@/server/avdrawing';
 import { appendAudit, getProject } from '@/server/db';
 import { currentUser } from '@/server/session';
 import { logZh } from '@/lib/logmsg';
-import { denyUnlessVisible } from '@/server/avguard';
+import { denyUnlessVisible, denyAvModule } from '@/server/avguard';
 
 /* 06 成本核算, per business line.
    GET ?project=ID&line=led|projector|elv|pv  the line's latest saved configuration,
@@ -62,6 +62,7 @@ function price(line: BusinessLine, config: SavedConfig<AnySummary>, picks: Recor
 export async function GET(req: NextRequest) {
   const user = await currentUser();
   if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
+  { const deny = denyAvModule(user); if (deny) return deny; }
   if (!canViewPrices(identityOf(user))) return NextResponse.json({ error: '无权查看成本' }, { status: 403 });
   const projectId = req.nextUrl.searchParams.get('project') ?? '';
   const line = lineOf(req.nextUrl.searchParams.get('line'));
@@ -119,6 +120,7 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   const user = await currentUser();
   if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
+  { const deny = denyAvModule(user); if (deny) return deny; }
   const body = (await req.json().catch(() => ({}))) as { projectId?: string; line?: string; picks?: Record<string, unknown>; manual?: ManualLine[]; confirm?: boolean };
   const line = lineOf(body.line);
   const info = lineInfo(line);

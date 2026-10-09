@@ -2,7 +2,7 @@
 
 import React, { useMemo, useState } from 'react';
 import { useStore } from '../store';
-import { canAdmin, canDelete, canEdit } from '@/lib/permissions';
+import { canAdmin, canDelete, canEdit, canEditIn } from '@/lib/permissions';
 import { SVC, svcName, svcColor } from '@/lib/templates';
 import { fmtDate, parseISO, pkgSuffix } from '@/lib/project';
 import { useLang } from '@/lib/i18n';
@@ -24,7 +24,7 @@ import { fieldGroupTerm } from '@/lib/terms';
 export default function JobRecordTab({ p }: { p: Project }) {
   const { me, recordFields } = useStore();
   const { lang, t } = useLang();
-  const canEd = canEdit(me, p);
+  const canEd = canEditIn(me, p, 'record');   // REQ-051: 再过权限表
 
   /* 0917 变更单 · REQ-023:「有没有资料卡」不再只看出厂的 7 张表 ——
      PD 给某个业务加过列之后,它就该像内置的一样出一张完整的资料卡。 */

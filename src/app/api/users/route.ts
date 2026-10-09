@@ -1,17 +1,25 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createUser, getUserByEmail, getUserById, getUserByUsername, listUsers, resetPassword, setUserAvatar, setUserDisabled, updateUser } from '@/server/db';
+import { appendAdminLog, createUser, getUserByEmail, getUserById, getUserByUsername, listUsers, resetPassword, setUserAvatar, setUserDisabled, updateUser } from '@/server/db';
 import { currentUser } from '@/server/session';
 import { canAdmin, identityOf } from '@/lib/permissions';
 import type { Role } from '@/lib/types';
 
 const ROLES: Role[] = ['director', 'bd', 'sales', 'pm', 'member', 'viewer', 'finance'];
 
-/* All signed-in users may list users (needed for PM assignment pickers). */
+/* All signed-in users may list users (needed for PM assignment pickers).
+   REQ-051: 已删除的账号也在列表里(历史记录要认得出这个名字,显示「(已删除)」),
+   但只给名字和角色;指派下拉在前端排除停用 / 已删除的人。 */
 export async function GET() {
   const user = await currentUser();
   if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
-  return NextResponse.json({ users: listUsers() });
+  const users = listUsers().map((u) => (u.deletedAt
+    ? { id: u.id, username: '', name: u.name, role: u.role, email: '', position: u.position, disabled: true, deletedAt: u.deletedAt }
+    : u));
+  return NextResponse.json({ users });
 }
+
+/* REQ-051: 「至少保留 1 个 PD」「不能停用唯一的 PD/BD」都只数还能用的账号 */
+const isActive = (u: { disabled?: boolean; deletedAt?: number }) => !u.disabled && !u.deletedAt;
 
 /* Only PD/BD may create accounts. */
 export async function POST(req: NextRequest) {
@@ -36,14 +44,18 @@ export async function POST(req: NextRequest) {
   if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
     return NextResponse.json({ error: 'Email 格式不正确' }, { status: 400 });
   }
-  if (getUserByUsername(username)) {
-    return NextResponse.json({ error: '账号已存在' }, { status: 409 });
+  const taken = getUserByUsername(username) as { deleted_at?: number } | undefined;
+  if (taken) {
+    return NextResponse.json({ error: taken.deleted_at ? '账号已存在（被一个已删除的账号占用）/ Username taken by a deleted account' : '账号已存在' }, { status: 409 });
   }
   if (email && getUserByEmail(email)) {
     return NextResponse.json({ error: '该 Email 已被使用' }, { status: 409 });
   }
   /* names are used for assignment matching — keep them unique */
-  if (listUsers().some((u) => u.name === name)) {
+  const sameName = listUsers().find((u) => u.name === name);
+  if (sameName) {
+    /* 已删除的人的名字也不复用:历史记录按名字认人,复用了就分不清是谁 */
+    if (sameName.deletedAt) return NextResponse.json({ error: '这个姓名属于一个已删除的账号（历史记录按姓名认人），请加后缀区分 / This name belongs to a deleted account — add a suffix' }, { status: 409 });
     return NextResponse.json({ error: '姓名已存在(指派按姓名匹配,需唯一);可加后缀区分' }, { status: 409 });
   }
   const created = createUser(username, password, name, role, email, position);
@@ -78,6 +90,7 @@ export async function PATCH(req: NextRequest) {
   if (!canAdmin(identityOf(user))) {
     return NextResponse.json({ error: '仅 PD/BD 可管理用户' }, { status: 403 });
   }
+  if (target.deletedAt) return NextResponse.json({ error: '账号已删除，不能再修改 / This account has been deleted' }, { status: 400 });
 
   /* PD/BD resets someone's password (forces a change on their next login) */
   if (body.action === 'resetPassword') {
@@ -92,10 +105,14 @@ export async function PATCH(req: NextRequest) {
     const disabled = !!body.disabled;
     if (disabled && id === user.id) return NextResponse.json({ error: '不能停用你自己的账号' }, { status: 400 });
     if (disabled && (target.role === 'director' || target.role === 'bd')) {
-      const activeAdmins = listUsers().filter((u) => (u.role === 'director' || u.role === 'bd') && !u.disabled && u.id !== id);
+      const activeAdmins = listUsers().filter((u) => (u.role === 'director' || u.role === 'bd') && isActive(u) && u.id !== id);
       if (activeAdmins.length === 0) return NextResponse.json({ error: '不能停用唯一的 PD/BD 账号' }, { status: 400 });
+      if (target.role === 'director' && !activeAdmins.some((u) => u.role === 'director')) {
+        return NextResponse.json({ error: '至少保留 1 个可用的 PD 账号 / Keep at least one active PD account' }, { status: 400 });
+      }
     }
     setUserDisabled(id, disabled);
+    if (disabled !== !!target.disabled) appendAdminLog(user.name, disabled ? 'user.disable' : 'user.enable', { name: target.name });
     return NextResponse.json({ ok: true });
   }
 
@@ -125,10 +142,14 @@ export async function PATCH(req: NextRequest) {
   if (body.position !== undefined) fields.position = String(body.position).trim();
   if (body.role !== undefined) {
     if (!ROLES.includes(body.role)) return NextResponse.json({ error: '角色无效' }, { status: 400 });
-    /* don't let an admin strip the last PD/BD's own access by accident */
+    /* don't let an admin strip the last PD/BD's own access by accident.
+       REQ-051: 只数还能用的账号(停用 / 已删除的 PD 不算),并且至少留 1 个 PD */
+    const others = listUsers().filter((u) => isActive(u) && u.id !== id);
     if (id === user.id && body.role !== 'director' && body.role !== 'bd') {
-      const admins = listUsers().filter((u) => u.role === 'director' || u.role === 'bd');
-      if (admins.length <= 1) return NextResponse.json({ error: '不能降级唯一的 PD/BD 账号' }, { status: 400 });
+      if (!others.some((u) => u.role === 'director' || u.role === 'bd')) return NextResponse.json({ error: '不能降级唯一的 PD/BD 账号' }, { status: 400 });
+    }
+    if (target.role === 'director' && body.role !== 'director' && isActive(target) && !others.some((u) => u.role === 'director')) {
+      return NextResponse.json({ error: '至少保留 1 个可用的 PD 账号 / Keep at least one active PD account' }, { status: 400 });
     }
     fields.role = body.role as Role;
   }

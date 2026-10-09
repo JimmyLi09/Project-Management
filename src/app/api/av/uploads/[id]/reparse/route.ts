@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { canUploadDrawing, identityOf, isFull } from '@/lib/permissions';
-import { denyUnlessVisible } from '@/server/avguard';
+import { denyUnlessVisible, denyAvModule } from '@/server/avguard';
 import { parseUpload, uploadProject } from '@/server/avupload';
 import { getProject } from '@/server/db';
 import { currentUser } from '@/server/session';
@@ -11,6 +11,7 @@ type Params = { params: Promise<{ id: string }> };
 export async function POST(req: NextRequest, { params }: Params) {
   const user = await currentUser();
   if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
+  { const deny = denyAvModule(user); if (deny) return deny; }
   const id = Number((await params).id);
   const pid = Number.isInteger(id) ? uploadProject(id) : null;
   const project = pid ? getProject(pid) : null;

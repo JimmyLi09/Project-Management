@@ -3,7 +3,7 @@
 import React, { useMemo, useState } from 'react';
 import { useStore } from '../store';
 import { awaitingPayment, fmtDate, overdueItems, projectHealth, projStage, staleInfo, todayMid } from '@/lib/project';
-import { canDecide, canEdit } from '@/lib/permissions';
+import { canDecide, canEdit, canEditIn } from '@/lib/permissions';
 import { useLang } from '@/lib/i18n';
 import { Avatar, Drill, Ell, HM, Icon, Pill } from '../ui';
 import type { Focus } from '@/lib/focus';
@@ -116,7 +116,7 @@ export default function DirectorUpdateView() {
           {list.length === 0 && <div style={{ padding: 30, textAlign: 'center', color: 'var(--text2)', fontSize: 13 }}>{t('没有匹配的项目。', 'No matching projects.')}</div>}
           {list.map((p) => {
             const u = p.update || ({} as typeof p.update);
-            const ed = canEdit(me, p);
+            const ed = canEditIn(me, p, 'projects');   // REQ-051: 再过权限表
             const st = staleInfo(u, lang);
             const stage = projStage(p);
             const h = stage === 'complete' || stage === 'invoice' ? 'completed' : projectHealth(p);

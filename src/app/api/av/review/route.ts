@@ -5,7 +5,7 @@ import { DrawingServiceError, runDrawingCli, SAMPLE_STORE } from '@/server/avdra
 import { appendAudit, getProject } from '@/server/db';
 import { currentUser } from '@/server/session';
 import { logZh } from '@/lib/logmsg';
-import { denyUnlessVisible } from '@/server/avguard';
+import { denyUnlessVisible, denyAvModule } from '@/server/avguard';
 
 /* 04 人工校核: POST { id, changes: [{ element, confirmed, corrected }], submit }.
 
@@ -20,6 +20,7 @@ import { denyUnlessVisible } from '@/server/avguard';
 export async function POST(req: NextRequest) {
   const user = await currentUser();
   if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
+  { const deny = denyAvModule(user); if (deny) return deny; }
 
   const body = (await req.json().catch(() => null)) as { id?: number; changes?: ReviewChange[]; submit?: boolean } | null;
   const current = body?.id ? getDrawing(Number(body.id)) : null;

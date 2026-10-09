@@ -32,6 +32,9 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: '账号或密码错误' }, { status: 401 });
   }
   FAILS.delete(key);
+  if ((user as { deleted_at?: number }).deleted_at) {
+    return NextResponse.json({ error: '账号已删除 / This account has been deleted' }, { status: 403 });
+  }
   if ((user as { disabled?: number | boolean }).disabled) {
     return NextResponse.json({ error: '账号已停用,请联系管理员' }, { status: 403 });
   }

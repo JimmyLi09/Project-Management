@@ -60,5 +60,8 @@ export async function currentUser(): Promise<User | null> {
   const store = await cookies();
   const payload = parseToken(store.get(COOKIE)?.value);
   if (!payload) return null;
-  return getUserById(payload.uid) || null;
+  const u = getUserById(payload.uid);
+  /* REQ-051: 停用 / 删除以后,已经登录的会话下一次请求就失效(以前只在登录时查) */
+  if (!u || u.disabled || u.deletedAt) return null;
+  return u;
 }

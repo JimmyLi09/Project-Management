@@ -3,6 +3,7 @@ import { canEditPrices, canViewPrices, identityOf, priceView } from '@/lib/permi
 import { redactHistory } from '@/server/avredact';
 import { listPriceItems, priceHistory, updatePriceItem } from '@/server/avdb';
 import { currentUser } from '@/server/session';
+import { denyAvModule } from '@/server/avguard';
 import { normalise, validate } from '@/server/avprice';
 
 type Params = { params: Promise<{ id: string }> };
@@ -11,6 +12,7 @@ type Params = { params: Promise<{ id: string }> };
 export async function GET(_req: NextRequest, { params }: Params) {
   const user = await currentUser();
   if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
+  { const deny = denyAvModule(user); if (deny) return deny; }
   if (!canViewPrices(identityOf(user))) return NextResponse.json({ error: '无权查看价格库' }, { status: 403 });
   const v = priceView(identityOf(user));
   return NextResponse.json({ history: priceHistory(Number((await params).id)).map((h) => redactHistory(h, v)) });
@@ -19,6 +21,7 @@ export async function GET(_req: NextRequest, { params }: Params) {
 export async function PATCH(req: NextRequest, { params }: Params) {
   const user = await currentUser();
   if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
+  { const deny = denyAvModule(user); if (deny) return deny; }
   if (!canEditPrices(identityOf(user))) return NextResponse.json({ error: '仅 PD / BD 可维护价格库' }, { status: 403 });
   const id = Number((await params).id);
   const current = listPriceItems().find((i) => i.id === id);

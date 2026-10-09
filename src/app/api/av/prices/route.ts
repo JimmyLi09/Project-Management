@@ -6,6 +6,7 @@ import { redactItem } from '@/server/avredact';
 import { createPriceItem, importPriceItems, listPriceItems, type PriceInput } from '@/server/avdb';
 import { normalise, validate } from '@/server/avprice';
 import { currentUser } from '@/server/session';
+import { denyAvModule } from '@/server/avguard';
 
 /* Price library.
    GET ?line=led              list items
@@ -15,6 +16,7 @@ import { currentUser } from '@/server/session';
 export async function GET(req: NextRequest) {
   const user = await currentUser();
   if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
+  { const deny = denyAvModule(user); if (deny) return deny; }
   if (!canViewPrices(identityOf(user))) return NextResponse.json({ error: '无权查看价格库' }, { status: 403 });
   const line = req.nextUrl.searchParams.get('line') as BusinessLine | null;
   const v = priceView(identityOf(user));
@@ -24,6 +26,7 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   const user = await currentUser();
   if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
+  { const deny = denyAvModule(user); if (deny) return deny; }
   if (!canEditPrices(identityOf(user))) return NextResponse.json({ error: '仅 PD / BD 可维护价格库' }, { status: 403 });
   const body = (await req.json().catch(() => ({}))) as { item?: Partial<PriceInput>; import?: string };
 

@@ -6,6 +6,7 @@ import { appendAudit, commitWorkflowAction, deleteProject, getEffectiveTemplate,
 import { currentUser } from '@/server/session';
 import { canDelete, canSeeProject, identityOf, isFull } from '@/lib/permissions';
 import { applyAction, PermissionError, ValidationError, type ProjectAction } from '@/server/actions';
+import { redactProject } from '@/lib/permRedact';
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -32,7 +33,7 @@ export async function GET(_req: NextRequest, { params }: Params) {
   const p = getProject(id);
   if (!p) return NextResponse.json({ error: '项目不存在' }, { status: 404 });
   if (!canSeeProject(identityOf(user), p)) return NextResponse.json({ error: DENY.error }, { status: DENY.status });
-  return NextResponse.json({ project: p });
+  return NextResponse.json({ project: redactProject(identityOf(user), p) });
 }
 
 /* Apply one permission-checked action to the project (server is authoritative).
@@ -80,7 +81,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
     if (r === 'duplicate') return NextResponse.json({ error: '该动作已提交,请勿重复提交。' }, { status: 409 });
     if (r === 'stale') return NextResponse.json({ error: '此项目刚被他人修改,请刷新后重新提交。', stale: true }, { status: 409 });
     appendAudit(id, newEntries);
-    return NextResponse.json({ project: p, conflict: false });
+    return NextResponse.json({ project: redactProject(identityOf(user), p), conflict: false });
   }
 
   /* every other write also goes through the version CAS (§9): rejects a race
@@ -90,7 +91,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
     return NextResponse.json({ error: '此项目刚被他人修改,已为你刷新,请核对后重新操作。', stale: true }, { status: 409 });
   }
   appendAudit(id, newEntries);
-  return NextResponse.json({ project: p, conflict: false });
+  return NextResponse.json({ project: redactProject(identityOf(user), p), conflict: false });
 }
 
 export async function DELETE(_req: NextRequest, { params }: Params) {

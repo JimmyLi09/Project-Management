@@ -3,7 +3,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useStore } from '../store';
 import { useLang } from '@/lib/i18n';
-import { canEdit } from '@/lib/permissions';
+import { canEdit, canEditIn } from '@/lib/permissions';
 import { pkgSuffix, projCode } from '@/lib/project';
 import { svcName } from '@/lib/templates';
 import { CalendarPlanner } from '@/features/schedule-planner/components/CalendarPlanner';
@@ -23,7 +23,7 @@ import '@/features/schedule-planner/planner.css';
 export default function CalendarScheduleTab({ p, pkgIdx }: { p: Project; pkgIdx: number }) {
   const { dispatch, me, setToast } = useStore();
   const { lang, t } = useLang();
-  const ed = canEdit(me, p);
+  const ed = canEditIn(me, p, 'schedule');   // REQ-051: 再过权限表
   const pkg = p.packages[pkgIdx];
   const cal = pkg?.calendar;
   const [syncDelivery, setSyncDelivery] = useState(true);

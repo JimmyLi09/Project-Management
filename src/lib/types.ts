@@ -71,6 +71,7 @@ export interface User {
   disabled?: boolean; // account deactivated (e.g. departure) — cannot sign in
   avatar?: string; // dataURL of an uploaded profile photo (else initials fallback)
   pointCap?: number; // workload ceiling in points; overload shows a red warning
+  deletedAt?: number; // REQ-051: deleted (after handing work over) — kept so history still shows the name, marked 「(已删除)」
 }
 
 export type ScheduleStatus = 'todo' | 'wip' | 'done' | 'block';

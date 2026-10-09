@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useMemo, useState } from 'react';
-import { useStore } from '../store';
+import { useStore, useWho } from '../store';
 import { useLang } from '@/lib/i18n';
 import { fmtDate, parseISO } from '@/lib/project';
 import { CM } from '../ui';
@@ -32,6 +32,7 @@ export function ItemReceipts({ p, item, receipts, canEd, onClose }: {
 }) {
   const { dispatch } = useStore();
   const { lang, t } = useLang();
+  const who = useWho();   // REQ-051: 已删除的人显示「(已删除)」
   const [adding, setAdding] = useState(receipts.length === 0);
   const [editId, setEditId] = useState<string | null>(null);
 
@@ -75,7 +76,7 @@ export function ItemReceipts({ p, item, receipts, canEd, onClose }: {
               <b style={{ minWidth: 0, wordBreak: 'break-all' }}>{r.fileName || t('(未填文件名)', '(no file name)')}</b>
               {r.from && <span style={{ color: 'var(--text2)' }}>· {t('来自', 'from')} {r.from}</span>}
               {r.via && <span style={{ color: 'var(--text2)' }}>· {viaName(r.via, lang)}</span>}
-              {r.receivedBy && <span style={{ color: 'var(--text2)' }}>· {t('接收', 'received by')} {r.receivedBy}</span>}
+              {r.receivedBy && <span style={{ color: 'var(--text2)' }}>· {t('接收', 'received by')} {who(r.receivedBy)}</span>}
               <div style={{ flex: 1 }} />
               {canEd && (
                 <>
@@ -166,6 +167,7 @@ export function ReceivingLog({ p, scope, canEd, onOpenItem }: {
   onOpenItem: (id: string) => void;
 }) {
   const { lang, t } = useLang();
+  const who = useWho();   // REQ-051: 已删除的人显示「(已删除)」
   const [q, setQ] = useState('');
   const [st, setSt] = useState('');
   const [from, setFrom] = useState('');
@@ -259,7 +261,7 @@ export function ReceivingLog({ p, scope, canEd, onOpenItem }: {
                   </td>
                   <td style={{ ...cell, wordBreak: 'break-all' }}>{x.r.fileName || '—'}</td>
                   <td style={cell}>{x.r.from || '—'}{x.r.via ? <span style={{ display: 'block', fontSize: 11, color: 'var(--text2)' }}>{viaName(x.r.via, lang)}</span> : null}</td>
-                  <td style={{ ...cell, whiteSpace: 'nowrap' }}>{x.r.receivedBy || '—'}</td>
+                  <td style={{ ...cell, whiteSpace: 'nowrap' }}>{who(x.r.receivedBy) || '—'}</td>
                   <td style={{ ...cell, wordBreak: 'break-all', fontSize: 11.5, color: 'var(--text2)' }}>{x.r.path || '—'}</td>
                   <td style={cell}><StatusBadge s={x.r.status} lang={lang} /></td>
                   <td style={{ ...cell, fontSize: 11.5, color: 'var(--text2)', whiteSpace: 'pre-wrap' }}>{x.r.remark || '—'}</td>

@@ -11,6 +11,8 @@ import type { AvDerived, FieldOverrides } from '@/lib/records';
 import type { Focus } from '@/lib/focus';
 import { DEFAULT_POINT_RULES, rulesAt, type PointRuleVersion, type PointRules } from '@/lib/points';
 import { DEFAULT_KPI_RULES, kpiRulesAt, type KpiRuleVersion, type KpiRules } from '@/lib/kpi';
+import { defaultPermTable, sanitizePermTable, setPermSource, type PermTable } from '@/lib/permTable';
+import { useLang } from '@/lib/i18n';
 
 export interface View {
   name: 'overview' | 'projects' | 'team' | 'mytasks' | 'dupdate' | 'stats' | 'contacts' | 'finance' | 'registers' | 'avhome' | 'avconfig' | 'avcostquote' | 'avlibrary' | 'avinquiry' | 'ledingest' | 'ledstudio' | 'prjstudio' | 'elvstudio' | 'pvstudio' | 'avcost' | 'avquote' | 'avcases' | 'avprices' | 'users' | 'templates' | 'rules' | 'knowledge' | 'training' | 'kpi' | 'project';
@@ -89,7 +91,13 @@ interface Store {
   user: User;
   me: Identity;
   projects: Project[];
+  /* REQ-051: users = 还能用的账号(指派下拉、团队负载、KPI 都用它,停用 / 已删除的不出现);
+     allUsers = 全部(用户管理、历史记录认名字用) */
   users: User[];
+  allUsers: User[];
+  /* REQ-051: 当前生效的权限表(permissions.ts 的函数都读它);PD / BD 改完调 setPermTable */
+  permTable: PermTable;
+  setPermTable: (t: PermTable) => void;
   view: View;
   toast: string;
   setToast: (s: string) => void;
@@ -139,9 +147,23 @@ export const useStore = () => {
   return s;
 };
 
-export function StoreProvider({ user, children }: { user: User; children: React.ReactNode }) {
+export function StoreProvider({ user, permTable: initialPerm, children }: { user: User; permTable?: PermTable; children: React.ReactNode }) {
   const [projects, setProjects] = useState<Project[]>([]);
-  const [users, setUsers] = useState<User[]>([]);
+  const [allUsers, setUsers] = useState<User[]>([]);
+  const users = useMemo(() => allUsers.filter((u) => !u.disabled && !u.deletedAt), [allUsers]);
+  /* REQ-051: 权限表。首屏由服务端页面带进来;之后随轮询刷新(PD / BD 改了,别人刷新即生效)。
+     permissions.ts 是全局读的,所以表一变就把 source 指过去,再靠 permTable 进依赖让界面重画。 */
+  const [permTable, setPermTableState] = useState<PermTable>(() => sanitizePermTable(initialPerm ?? defaultPermTable()));
+  const permRef = useRef(permTable);
+  permRef.current = permTable;
+  setPermSource(() => permRef.current);
+  const setPermTable = useCallback((t: PermTable) => setPermTableState(sanitizePermTable(t)), []);
+  const refreshPerms = useCallback(async () => {
+    const res = await fetch('/api/permissions').catch(() => null);
+    if (!res?.ok) return;
+    const t = (await res.json()).table as PermTable;
+    setPermTableState((cur) => (JSON.stringify(cur) === JSON.stringify(t) ? cur : sanitizePermTable(t)));
+  }, []);
   const [recordFields, setRecordFields] = useState<FieldOverrides>({});
   const [avDerived, setAvDerived] = useState<Record<string, AvDerived>>({});
   const [pointRuleVersions, setPointRuleVersions] = useState<PointRuleVersion[]>([]);
@@ -224,6 +246,7 @@ export function StoreProvider({ user, children }: { user: User; children: React.
 
   const refreshUsers = useCallback(async () => {
     const res = await fetch('/api/users');
+    if (res.status === 401) { location.href = '/login'; return; }
     if (res.ok) setUsers((await res.json()).users);
   }, []);
 
@@ -258,9 +281,9 @@ export function StoreProvider({ user, children }: { user: User; children: React.
     refreshPointRules();
     refreshKpiRules();
     /* light polling so teammates' changes appear without manual reload */
-    const t = setInterval(refresh, 30_000);
+    const t = setInterval(() => { refresh(); refreshPerms(); }, 30_000);
     return () => clearInterval(t);
-  }, [refresh, refreshUsers, refreshRecordFields, refreshAvDerived, refreshPointRules, refreshKpiRules]);
+  }, [refresh, refreshUsers, refreshRecordFields, refreshAvDerived, refreshPointRules, refreshKpiRules, refreshPerms]);
 
   const dispatch = useCallback((pid: string, action: ProjectAction) => {
     /* v2.2 [P0-3] strict optimistic lock. Serialize per project so a user's own
@@ -279,6 +302,8 @@ export function StoreProvider({ user, children }: { user: User; children: React.
         setProjects((list) => list.map((p) => (p.id === pid ? project : p)));
         return true;
       }
+      /* REQ-051: 账号被停用 / 删除后会话立即失效 —— 下一次操作就回登录页 */
+      if (res.status === 401) { location.href = '/login'; return false; }
       const body = await res.json().catch(() => ({}));
       if (res.status === 409 && body.stale) {
         const fresh = await fetch(`/api/projects/${pid}`).then((r) => (r.ok ? r.json() : null)).catch(() => null);
@@ -331,6 +356,9 @@ export function StoreProvider({ user, children }: { user: User; children: React.
     me: { name: user.name, role: user.role },
     projects,
     users,
+    allUsers,
+    permTable,
+    setPermTable,
     view,
     toast,
     setToast,
@@ -362,7 +390,20 @@ export function StoreProvider({ user, children }: { user: User; children: React.
     kpiRuleVersions,
     kpiRules: kpiRuleVersions.length ? kpiRulesAt(kpiRuleVersions, Date.now()) : DEFAULT_KPI_RULES,
     refreshKpiRules,
-  }), [user, projects, users, view, histIdx, setView, setLedProjectId, toast, dispatch, createProject, removeProject, refresh, refreshUsers, recordFields, refreshRecordFields, avDerived, refreshAvDerived, pointRuleVersions, refreshPointRules, kpiRuleVersions, refreshKpiRules, ledProjectId, ledIngest, ledHandoff]);
+  }), [user, projects, users, allUsers, permTable, setPermTable, view, histIdx, setView, setLedProjectId, toast, dispatch, createProject, removeProject, refresh, refreshUsers, recordFields, refreshRecordFields, avDerived, refreshAvDerived, pointRuleVersions, refreshPointRules, kpiRuleVersions, refreshKpiRules, ledProjectId, ledIngest, ledHandoff]);
 
   return <Ctx.Provider value={store}>{children}</Ctx.Provider>;
+}
+
+/* REQ-051: 历史记录里显示人名用这个 —— 已删除的人显示「X(已删除)」。
+   只有名字对得上一个已删除的账号、又没有同名的在用账号时才标(改过名的老名字照原样显示)。 */
+export function useWho(): (name: string | undefined | null) => string {
+  const { allUsers } = useStore();
+  const { t } = useLang();
+  const tag = t('（已删除）', ' (deleted)');
+  return useMemo(() => {
+    const deleted = new Set(allUsers.filter((u) => u.deletedAt).map((u) => u.name));
+    const live = new Set(allUsers.filter((u) => !u.deletedAt).map((u) => u.name));
+    return (name) => (name && deleted.has(name) && !live.has(name) ? name + tag : name || '');
+  }, [allUsers, tag]);
 }

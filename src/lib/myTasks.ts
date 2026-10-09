@@ -3,7 +3,8 @@
    比列表多。一周以后的任务不显示,到时间自然出现(要看去项目排期)。 */
 
 import { pkgStart, planDates, projStage, todayMid, type PlanDate } from './project';
-import type { Project, ScheduleRow } from './types';
+import { canSeeModule } from './permissions';
+import type { Project, Role, ScheduleRow } from './types';
 
 export const WEEK_DAYS = 7;
 
@@ -25,6 +26,8 @@ export function myTasks(projects: Project[], me: { name: string; role: string },
   const until = new Date(t0); until.setDate(until.getDate() + WEEK_DAYS);
   const seesAll = me.role === 'director' || me.role === 'bd' || me.role === 'sales';
   const out: MyTask[] = [];
+  /* REQ-051: 权限表里「排期」对他不可见 → 待办里也没有排期任务 */
+  if (!canSeeModule({ name: me.name, role: me.role as Role }, 'schedule')) return out;
   for (const p of projects) {
     if (p.archived) continue;
     if (projStage(p) === 'presales') continue;   // REQ-004 #11:未开始(售前)项目的任务不进待办
