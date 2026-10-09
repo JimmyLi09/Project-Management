@@ -7,6 +7,7 @@ import { mergeChecklists, migrateProjectChecklist, type ProjectMigration } from 
 import { canSeeProject } from './permissions';
 import { roleKeyOf } from './contactRoles';
 import { calendarFromRows, seedCalendar } from './scheduleSync';
+import { blankRow, ensureJobRows } from './jobRecord';
 import { layoutFromStart } from '@/features/schedule-planner/domain/duration';
 import type {
   ChecklistGroup,
@@ -151,6 +152,8 @@ export function newProject(o: NewProjectInput, tplLookup?: (svc: string) => Temp
     log: [],
     packages,
     checklist: merged.checklist,
+    /* REQ-049:Job Record 每种业务一行,Service Item 预填业务英文名,其余自己填 */
+    jobRecord: [...new Set(packages.map((pk) => pk.svc))].map((svc) => blankRow(svc)),
   };
 }
 
@@ -262,6 +265,8 @@ export function migrate(p: any, opts: { onChecklistMigrated?: (m: ProjectMigrati
       pk.calendar = calendarFromRows(pk.schedule || [], planDates(pk, pkgStart(p, pk)), { by: '', at: Date.now() }).calendar;
     }
   });
+  /* REQ-049:Job Record 每种业务至少 1 行(上线时服务端先把旧字段转成行,这里只是兜底) */
+  ensureJobRows(p as Project);
   migrateWorkflow(p);
   return p as Project;
 }

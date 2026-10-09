@@ -35,6 +35,9 @@ export interface LogLike {
 }
 
 /* ---- 枚举型槽位:值是 key,显示要按语言翻 ---- */
+const JOB_COL: Record<string, [string, string]> = {
+  item: ['服务项目', 'Service Item'], detail: ['明细', 'Detail'], qty: ['数量', 'Quantity'], note: ['特别说明', 'Special Notes'],
+};
 const PERM_LEVEL: Record<string, [string, string]> = {
   none: ['不可见', 'Hidden'],
   read: ['只读', 'Read only'],
@@ -102,6 +105,8 @@ const TRANSLATED: Record<string, (v: string, lang: Lang) => string> = {
     const [k, a, b] = c.split(':');
     return `${enumTerm(JUDGE_ITEM, k, l)} ${a || '—'}→${b || '—'}`;
   }).join(l === 'zh' ? '；' : '; '),
+  /* REQ-049 Job Record 改了哪一栏 */
+  col: (v, l) => enumTerm(JOB_COL, v, l),
   /* REQ-051 权限表:哪个角色、哪个模块、从哪级改到哪级 */
   role: roleTerm,
   mod: (v, l) => { const m = PERM_MODULES.find((x) => x.key === v); return m ? (l === 'zh' ? m.zh : m.en) : v; },
@@ -188,7 +193,14 @@ export const LOG_MSG: Record<string, [string, string]> = {
   'pkg.addRecord': ['新增登记记录 {svc}{label}', 'Register record added: {svc}{label}'],
   'pkg.remove': ['删除业务 {svc}{label}', 'Service removed: {svc}{label}'],
   'record.update': ['更新资料 Record:{svc}', 'Record updated: {svc}'],
+  /* REQ-049 Job Record 4 栏表。{col} = item / detail / qty / note */
+  'job.add': ['Job Record {svc} 加一行「{item}」', 'Job Record {svc}: row added “{item}”'],
+  'job.edit': ['Job Record {svc}「{item}」改了 {col}', 'Job Record {svc} “{item}”: {col} edited'],
+  'job.remove': ['Job Record {svc} 删除一行「{item} · {detail}」', 'Job Record {svc}: row removed “{item} · {detail}”'],
+  'job.move': ['Job Record「{item}」归到 {svc}', 'Job Record “{item}” moved to {svc}'],
+  'job.paste': ['Job Record 从报价单粘贴 {n} 行(没对上业务的 {unmatched} 行)', 'Job Record: {n} rows pasted from a quotation ({unmatched} not matched to a service)'],
   'record.import': ['导入登记记录:{svc}', 'Register records imported: {svc}'],
+  'job.import': ['项目档案导入 Job Record {n} 行({svc})', 'Registers: {n} Job Record rows imported ({svc})'],
   'frag.apply': ['{text}', '{text}'],
 
   /* 积分 */

@@ -204,6 +204,16 @@ export interface ChecklistGroup {
   items: ChecklistItem[];
 }
 
+/* REQ-049: Job Record 的一行(4 栏,和 Sales 报价表一致)。存在项目上,svc = 属于哪种业务('' = 没对上业务) */
+export interface JobRow {
+  id: string;
+  svc: string;
+  item: string;    // Service Item
+  detail: string;  // Detail
+  qty: string;     // Quantity(文本:2 / 180s / 1 set / 5 spots)
+  note: string;    // Special Notes
+}
+
 /* R5-3: a scope / quotation line for a service package (from the sales job record) */
 export interface ScopeItem {
   item: string; // e.g. "Hero Shot", "Indoor Facility Views"
@@ -348,6 +358,10 @@ export interface Project {
   noCategories?: boolean;                       // 无固定分类(项目级开关)
   checklistLegacy?: { svc: string; label?: string; checklist?: ChecklistGroup[]; noCategories?: boolean }[];   // 迁移前各服务包的清单原样
   checklistRemoved?: RemovedClItem[];           // 已移除的项(可恢复)
+  /* REQ-049:Job Record 4 栏表(全部业务一张,按业务分组)。上线迁移时由各业务的旧字段 pk.record 转来;
+     mig049 记迁移时间和转了几行(回退脚本看它) */
+  jobRecord?: JobRow[];
+  mig049?: { at: number; rows: number };
   /* ===== v2.2 Version 1A post-sales workflow ===== */
   version?: number; // server-injected optimistic-lock counter (CAS)
   workflowVersion?: number; // schema version of the workflow blocks below (1)

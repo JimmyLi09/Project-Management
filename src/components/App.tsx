@@ -59,7 +59,7 @@ const PAGE_META: Record<string, { title: [string, string]; sub: [string, string]
   dupdate: { title: ['向上汇报', 'Director Update'], sub: ['每周汇报、风险与决策闭环', 'Weekly updates, risks and decisions'] },
   stats: { title: ['统计报表', 'Reports'], sub: ['项目统计 · 按 PM 的项目数与积分', 'Projects and points by PM'] },
   contacts: { title: ['通讯录', 'Contacts'], sub: ['所有客户、总包与联系人 · 可导出', 'All clients, contractors and contacts · exportable'] },
-  registers: { title: ['项目档案', 'Registers'], sub: ['按业务类型的跨项目登记表 · 7 类 · 可筛选导出', 'Cross-project registers by business type · 7 tables · filter & export'] },
+  registers: { title: ['项目档案', 'Registers'], sub: ['各项目 Job Record 4 栏表汇总 · 全部业务 · 可筛选导出', 'Every project\'s Job Record table · all services · filter & export'] },
   /* AV-017:四个合并页原来没有这几行,顶部标题一直显示「总览」 */
   avhome: { title: ['AV 工作台', 'AV Workbench'], sub: ['进行中的 AV 项目与各自卡在哪一步', 'Live AV projects and where each one stands'] },
   avconfig: { title: ['方案配置', 'Configuration'], sub: ['05 · 业务线在页内切换', '05 · Switch business lines in-page'] },
