@@ -9,7 +9,7 @@ import { getBuiltinTemplate, SVC, type Template } from '@/lib/templates';
 import { applyProjField, projSourceOf } from '@/lib/records';
 import { logZh, type LogParams } from '@/lib/logmsg';
 import { cleanSynonyms, DEFAULT_SYNONYMS, getSynonyms, migrationReport, setSynonyms, type ProjectMigration } from '@/lib/checklistMerge';
-import { defaultPermTable, permDiff, sanitizePermTable, setPermSource, type PermTable } from '@/lib/permTable';
+import { defaultPermTable, permDiff, sanitizePermTable, setServerPermSource, type PermTable } from '@/lib/permTable';
 import { handOverWork, renameInProject } from '@/lib/peopleRefs';
 import { migrateProject048, type Mig048Entry } from '@/lib/mig048';
 import { isLegacyFlow } from '@/lib/legacyStages';
@@ -1211,7 +1211,7 @@ export function savePermTable(raw: unknown, by: string): { table: PermTable; cha
   permCache = { at: Date.now(), t: next };
   return { table: next, changed: diff.length };
 }
-setPermSource(getPermTable);
+setServerPermSource(getPermTable);
 
 /* ---- default accounts so the system is usable out of the box ---- */
 function seedIfEmpty(d: Database.Database) {
