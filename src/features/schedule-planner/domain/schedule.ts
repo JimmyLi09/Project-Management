@@ -48,14 +48,12 @@ export function createStage(name: string, index: number): StageDefinition {
 /**
  * 独立版(不接项目)的默认阶段。接了项目时,默认阶段按服务包的服务从模板取
  * (REQ-047,见 src/lib/calendarStages.ts),这一套只是兜底。
- * REQ-047:CGI 静帧新流程 —— 白膜角度小样 → AI 效果图定角度与大效果 → 带材质后期图。
+ * REQ-048:效果图 3 个阶段,各 2 周(与 templates.ts 的 cgi 同一份)。
  */
 export const STAGES: readonly StageDefinition[] = [
-  { id: 'brief', name: '信息收集：收到模型资料（见信息清单）', nameEn: 'Information gathering: model files received', tone: 'coral', weeks: 0 },
-  { id: 'clay', name: '白膜角度小样', nameEn: 'Clay-model angle previews', tone: 'peach', weeks: 2 },
-  { id: 'shortlist', name: '角度 shortlist + AI 效果图，确定角度与大效果（含 1–2 轮）', nameEn: 'Angle shortlist + AI mood renders: lock angles and overall look (1–2 rounds)', tone: 'sage', weeks: 2 },
-  { id: 'final', name: '带材质、模型的后期图（参考大效果，含 2–3 轮）', nameEn: 'Final renders with materials and model detail, following the approved look (2–3 rounds)', tone: 'sky', weeks: 2 },
-  { id: 'handover', name: '导出成品格式，客户签收', nameEn: 'Export final formats, client sign-off', tone: 'lavender', weeks: 1 }
+  { id: 'angle', name: 'Angle stage：出 wireframe 草图，筛选 shortlist 角度', nameEn: 'Angle stage: wireframe sketches, shortlist the angles', tone: 'coral', weeks: 2 },
+  { id: 'mood', name: 'Mood & angle stage：每个角度出氛围图，确认角度与氛围', nameEn: 'Mood & angle stage: a mood render for each angle; confirm angles and mood', tone: 'peach', weeks: 2 },
+  { id: 'material', name: 'Material & model stage：微调模型与材质，最终确认', nameEn: 'Material & model stage: fine-tune the model and materials; final confirmation', tone: 'sage', weeks: 2 }
 ]
 
 /* REQ-047 之前所有服务共用的那 6 个阶段(CGI 老流程)。已有项目存的就是它 —— 用来认出

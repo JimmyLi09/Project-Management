@@ -52,8 +52,9 @@ export function seedDemo(d: Database.Database) {
     name: 'The Continuum', client: 'Hoi Hup Realty', services: ['cgi', 'saleskit'],
     owners: ['Priya Nair'], difficulty: 'medium', start: iso(-50), delivery: iso(22), buffer: 3,
   });
-  p2.packages[0].schedule.forEach((r, i) => { if (i <= 2) r.status = 'done'; });
-  p2.packages[0].schedule[3].status = 'wip';
+  /* REQ-048:效果图现在是 3 个阶段 —— 前两段做完,第三段进行中 */
+  p2.packages[0].schedule.forEach((r, i) => { if (i <= 1) r.status = 'done'; });
+  p2.packages[0].schedule[2].status = 'wip';
   p2.packages[1].schedule[0].status = 'done';
   p2.packages[1].schedule[1].status = 'wip';
   p2.packages[1].schedule[1].assignee = 'Kevin Lee';

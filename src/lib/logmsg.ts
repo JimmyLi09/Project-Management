@@ -155,9 +155,9 @@ export const LOG_MSG: Record<string, [string, string]> = {
   /* 日历排期 */
   'cal.save': ['{svc} 保存日历排期(第 {version} 版,{stages} 阶段)', '{svc} calendar saved (v{version}, {stages} stages)'],
   /* REQ-047:老效果图流程的日历排期 */
-  'cal.flowSwitch': ['{svc} 日历排期换成新效果图流程({stages} 阶段,日期按新阶段重新分配)', '{svc} calendar switched to the new CGI flow ({stages} stages, dates redistributed)'],
-  'cal.flowKeep': ['{svc} 日历排期保持原效果图流程', '{svc} calendar keeps the previous CGI flow'],
-  'cal.flowUndo': ['{svc} 日历排期撤销更换,恢复原效果图流程', '{svc} calendar switch undone; previous CGI flow restored'],
+  'cal.flowSwitch': ['{svc} 日历排期换成新流程({stages} 阶段,日期按新阶段重新分配)', '{svc} calendar switched to the new flow ({stages} stages, dates redistributed)'],
+  'cal.flowKeep': ['{svc} 日历排期保持原流程', '{svc} calendar keeps the previous flow'],
+  'cal.flowUndo': ['{svc} 日历排期撤销更换,恢复原流程', '{svc} calendar switch undone; previous flow restored'],
   'cal.delivery': ['交付日按日历排期更新:{from} → {to}', 'Delivery updated from the calendar: {from} → {to}'],
 
   /* 信息清单 */

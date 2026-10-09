@@ -11,6 +11,9 @@ import { logZh, type LogParams } from '@/lib/logmsg';
 import { cleanSynonyms, DEFAULT_SYNONYMS, getSynonyms, migrationReport, setSynonyms, type ProjectMigration } from '@/lib/checklistMerge';
 import { defaultPermTable, permDiff, sanitizePermTable, setPermSource, type PermTable } from '@/lib/permTable';
 import { handOverWork, renameInProject } from '@/lib/peopleRefs';
+import { migrateProject048, type Mig048Entry } from '@/lib/mig048';
+import { isLegacyFlow } from '@/lib/legacyStages';
+import { TPL } from '@/lib/templates';
 
 /* On serverless platforms (Vercel) the project directory is read-only and
    ephemeral — keep the demo database in /tmp there. */
@@ -84,6 +87,7 @@ export function getDb(): Database.Database {
   backfillSerials(db);
   migrateInvoiceArchive(db);
   migrateContactRoles(db);
+  migrateSchedules048(db);
   scheduleBackups(db);
   return db;
 }
@@ -215,6 +219,90 @@ function migrateContactRoles(d: Database.Database) {
     console.log(`[REQ-052] 联系人角色改存键:${done.length} 个项目,报告 ${file}`);
   } catch (e) {
     console.warn('[REQ-052] 迁移报告没写成(数据已迁移,不影响使用):', e);
+  }
+}
+
+/* ===== REQ-048 每个业务一份日历(阶段 = 阶段行)· 上线迁移 =====
+   规则见 lib/mig048.ts。先把整个库备份一份(VACUUM INTO,同步、在线安全),再在一个事务里改,
+   最后出报告。模板管理里 CGI / 动画的排期如果还是某一版老出厂模板的原样,换成新的默认阶段
+   (改过的不动,报告里提一句);原来那份存在 meta 的 mig.req048.tplPrev,回退脚本用。 */
+const MIG_048 = 'mig.req048.schedule';
+function migrateSchedules048(d: Database.Database) {
+  if (d.prepare('SELECT 1 FROM meta WHERE key = ?').get(MIG_048)) return;
+  const rows = d.prepare('SELECT id, data FROM projects').all() as { id: string; data: string }[];
+  const tpls = d.prepare("SELECT svc, data FROM templates WHERE svc IN ('cgi', 'ani')").all() as { svc: string; data: string }[];
+  const now = Date.now();
+  const t = new Date(now), pad = (n: number) => String(n).padStart(2, '0');
+  const stamp = `${t.getFullYear()}${pad(t.getMonth() + 1)}${pad(t.getDate())}-${pad(t.getHours())}${pad(t.getMinutes())}${pad(t.getSeconds())}`;
+  let backup = '';
+  if (rows.length || tpls.length) {
+    try {
+      const dir = path.join(DATA_DIR, 'backups');
+      fs.mkdirSync(dir, { recursive: true });
+      backup = path.join(dir, `pre-req048-${stamp}.db`);
+      d.exec(`VACUUM INTO '${backup.replace(/'/g, "''")}'`);
+    } catch (e) {
+      /* 备份不成就不迁移 —— 下次启动再试(读项目时有兜底,页面照样能用) */
+      console.warn('[REQ-048] 迁移前备份失败,这次不迁移:', e);
+      return;
+    }
+  }
+  const upd = d.prepare('UPDATE projects SET data = ?, updated_at = ?, version = version + 1 WHERE id = ?');
+  const done: Mig048Entry[] = [];
+  const tplNotes: string[] = [];
+  const tplPrev: Record<string, string> = {};
+  d.transaction(() => {
+    for (const r of rows) {
+      let o: any;
+      try { o = JSON.parse(r.data); } catch { continue; }
+      if (!Array.isArray(o.packages)) continue;   // 更老的结构:读的时候 migrate() 会补
+      const got = migrateProject048(o, now, () => crypto.randomBytes(6).toString('hex'));
+      if (!got.length) continue;
+      const { updatedAt: _u, version: _v, ...data } = o;
+      upd.run(JSON.stringify(data), now, r.id);
+      done.push(...got);
+    }
+    for (const x of tpls) {
+      let tpl: Template;
+      try { tpl = JSON.parse(x.data) as Template; } catch { continue; }
+      const names = (tpl.schedule || []).map((row) => String(row[2] || ''));
+      if (isLegacyFlow(x.svc, names)) {
+        tplPrev[x.svc] = x.data;
+        d.prepare('UPDATE templates SET data = ?, updated_at = ?, updated_by = ? WHERE svc = ?')
+          .run(JSON.stringify({ ...tpl, schedule: TPL[x.svc].schedule }), now, 'REQ-048', x.svc);
+        tplNotes.push(`- 模板管理「${SVC[x.svc]?.label || x.svc}」的排期是老出厂模板原样,换成新的默认阶段(信息清单没动)。`);
+      } else {
+        tplNotes.push(`- 模板管理「${SVC[x.svc]?.label || x.svc}」的排期改过,**没动**;要用新默认阶段,在模板管理点「恢复默认」。`);
+      }
+    }
+    if (Object.keys(tplPrev).length) d.prepare('INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value').run('mig.req048.tplPrev', JSON.stringify(tplPrev));
+    const n = (k: Mig048Entry['kind']) => done.filter((x) => x.kind === k).length;
+    d.prepare('INSERT INTO meta (key, value) VALUES (?, ?)').run(MIG_048, JSON.stringify({
+      at: now, backup, packages: done.length, fromRows: n('fromRows'), rowsFromCal: n('rowsFromCal'), conflict: n('conflict'),
+      adjusted: done.reduce((a, x) => a + x.adjusted, 0), templates: Object.keys(tplPrev),
+    }));
+  })();
+  if (!done.length && !tplNotes.length) return;
+  try {
+    const dir = path.join(DATA_DIR, 'migrations');
+    fs.mkdirSync(dir, { recursive: true });
+    const file = path.join(dir, `048-schedule-${stamp}.md`);
+    const kindZh = { fromRows: '用阶段行生成日历', rowsFromCal: '用日历重写阶段行', conflict: '两边都有内容 · 以阶段行为准,原日历进存档' };
+    const n = (k: Mig048Entry['kind']) => done.filter((x) => x.kind === k).length;
+    const lines = ['# REQ-048 排期按业务分开、去掉经典模式 · 上线迁移报告', '', `时间:${t.toLocaleString('zh-CN')}`,
+      `迁移前备份:${backup || '(库是空的,没备份)'}`, '',
+      `共 ${done.length} 份业务:用阶段行生成日历 ${n('fromRows')} 份、用日历重写阶段行 ${n('rowsFromCal')} 份、两边都有内容 ${n('conflict')} 份。`,
+      '阶段行上的负责人、状态、备注一个都没动;「用阶段行生成日历」的业务,日历上的日期就是行上的日期(按日历天算)。',
+      '「日期调整」= 原来几行有重叠或空档,日历只能首尾相接,这几行在日历上的日期和原来差了几天 —— 下次在日历上保存时以日历为准,保存前行上的日期不变。',
+      '「无日期」= 原来 0 周、又没填日期的阶段(多是「信息收集」),日历上各给了 1 天,排在第一个有日期的阶段之前。', '',
+      ...(tplNotes.length ? ['## 模板管理', '', ...tplNotes, ''] : []),
+      '## 每份业务', '', '| 项目 | 业务 | 做了什么 | 阶段数 | 有日期 | 日期调整 | 无日期 |', '|---|---|---|---|---|---|---|',
+      ...done.map((x) => `| ${x.project.replace(/\|/g, '/')} | ${x.pkg} | ${kindZh[x.kind]} | ${x.stages} | ${x.dated ? '是' : '否'} | ${x.adjusted || ''} | ${x.undated || ''} |`),
+      '', '回退:先 pm2 stop audax,再跑 scripts\\req048-rollback.bat(不带参数只报告;--apply 才写库)。'];
+    fs.writeFileSync(file, lines.join('\n') + '\n', 'utf8');
+    console.log(`[REQ-048] 排期迁移:${done.length} 份业务,报告 ${file}`);
+  } catch (e) {
+    console.warn('[REQ-048] 迁移报告没写成(数据已迁移,不影响使用):', e);
   }
 }
 

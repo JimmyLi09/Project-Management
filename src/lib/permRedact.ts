@@ -24,7 +24,9 @@ export function redactProject<T extends Project>(u: Identity, p: T): T {
   if (hide.schedule) {
     (q.packages || []).forEach((pk) => {
       pk.schedule = (pk.schedule || []).map((r) => ({ ...r, task: '', taskEn: '', note: '', delayNote: '' }));
-      if (pk.calendar) pk.calendar = { ...pk.calendar, archives: [] };
+      /* 日历的阶段名、备注也是排期内容(REQ-048 起它就是排期本体),一样清空;分界点留着 */
+      if (pk.calendar) pk.calendar = { ...pk.calendar, stages: pk.calendar.stages.map((st) => ({ ...st, name: '', nameEn: '', note: '' })), archives: [] };
+      delete pk.scheduleLegacy;
     });
   }
   if (hide.checklist) {

@@ -1,4 +1,4 @@
-import { Fragment, useState } from 'react'
+import { Fragment, useState, type ReactNode } from 'react'
 
 import { formatDisplayDate } from '../domain/calendar'
 import { calculateDuration, durationExact, formatDuration, nonWorkingReason } from '../domain/duration'
@@ -35,6 +35,10 @@ export interface StagePanelProps {
   onMoveStage: (fromIndex: number, toIndex: number) => void
   /* REQ-046:在右边直接改某阶段的开始 / 结束日。返回 null = 成功;否则是不允许的原因(给人看的一句话) */
   onEditDate?: (index: number, which: 'start' | 'end', date: LocalDate, mode: EditMode) => string | null
+  /* REQ-048:直接改工期(当前单位:工作日 / 日历天)。返回 null = 成功 */
+  onEditDuration?: (index: number, units: number) => string | null
+  /* REQ-048:每行右侧附加内容(负责人 / 状态) */
+  stageExtra?: (stage: StageSchedule) => ReactNode
 }
 
 export function StagePanel({
@@ -56,7 +60,9 @@ export function StagePanel({
   onRemoveStage,
   onRestoreStages,
   onMoveStage,
-  onEditDate
+  onEditDate,
+  onEditDuration,
+  stageExtra
 }: StagePanelProps) {
   const { lang, t } = useLang()
   const unit = excludeHolidays ? 'workdays' : 'days'
@@ -267,6 +273,40 @@ export function StagePanel({
                       <span data-testid={`stage-end-${stage.index}`}>{stage.end ? formatDisplayDate(stage.end) : '—'}</span>
                     </div>
                   )}
+                  {/* REQ-048:工期可以直接改,改了后面的阶段自动顺延;和默认不一样就标「已改 · 默认 2w」 */}
+                  {onEditDuration && (() => {
+                    const def = typeof stage.weeks === 'number' ? Math.max(1, Math.round(stage.weeks * (excludeHolidays ? 5 : 7))) : null
+                    const changed = def !== null && stage.duration !== null && stage.duration !== def
+                    const wk = typeof stage.weeks === 'number' ? `${Number.isInteger(stage.weeks) ? stage.weeks : stage.weeks.toFixed(1)}w` : ''
+                    return (
+                      <div className="stage-row-duration">
+                        <span>{t('工期', 'Duration')}</span>
+                        <input
+                          aria-label={t(`阶段 ${stage.index + 1} 工期`, `Stage ${stage.index + 1} duration`)}
+                          data-testid={`stage-days-${stage.index}`}
+                          disabled={!stage.start}
+                          key={`${stage.id}:${stage.duration ?? ''}`}
+                          defaultValue={stage.duration ?? ''}
+                          min={1}
+                          max={999}
+                          type="number"
+                          onBlur={(event) => {
+                            const n = Number(event.target.value)
+                            if (!event.target.value || n === stage.duration) return
+                            const err = onEditDuration(stage.index, n)
+                            setRowMsg(err ? { [stage.index]: { kind: 'error', text: err } } : {})
+                            if (err) event.target.value = String(stage.duration ?? '')
+                          }}
+                          onKeyDown={(event) => { if (event.key === 'Enter') (event.target as HTMLInputElement).blur() }}
+                        />
+                        <span>{excludeHolidays ? t('个工作日', 'working days') : t('天', 'days')}</span>
+                        {changed
+                          ? <span className="stage-changed" data-testid={`stage-changed-${stage.index}`}>{t(`已改 · 默认 ${wk}`, `Changed · default ${wk}`)}</span>
+                          : wk && <span className="stage-default">{t(`默认 ${wk}`, `Default ${wk}`)}</span>}
+                      </div>
+                    )
+                  })()}
+                  {stageExtra && <div className="stage-row-extra">{stageExtra(stage)}</div>}
                   {stage.index === 0 && noStart && onEditDate && (
                     <span className="stage-need-hint" data-testid="stage-need-start">{t('选开始日期（在这里选，或在左边日历点一天）', 'Pick a start date (here, or click a day on the calendar)')}</span>
                   )}

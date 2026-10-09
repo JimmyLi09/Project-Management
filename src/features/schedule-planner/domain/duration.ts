@@ -78,7 +78,7 @@ export function nonWorkingReason(value: LocalDate, lang: 'zh' | 'en'): string | 
 }
 
 /** 从 start(含)起数第 n 个工作日(start 是周末 / 假期就从下一个工作日数起) */
-function nthWorkingDay(start: LocalDate, n: number): LocalDate {
+export function nthWorkingDay(start: LocalDate, n: number): LocalDate {
   let cursor = start
   let count = 0
   for (let guard = 0; guard < 4000; guard += 1) {
@@ -153,4 +153,10 @@ export function distributeByWeights(
     boundaries.push(i === n - 1 ? end : units[used - 1])
   }
   return boundaries
+}
+
+/** REQ-048:从开始日起 n 个单位(工作日或日历天)后的结束日(含开始日那天) */
+export function endAfterUnits(start: LocalDate, n: number, excludeHolidays: boolean): LocalDate {
+  const k = Math.max(1, Math.round(n))
+  return excludeHolidays ? nthWorkingDay(start, k) : addDays(start, k - 1)
 }

@@ -80,15 +80,13 @@ export const GENERIC: Template = {
 
 export const TPL: Record<string, Template> = {
   cgi: {
-    /* REQ-047(1001 Jimmy):CGI 静帧新流程 —— 收到模型资料 → 白膜角度小样 → 角度 shortlist + AI 效果图
-       定角度与大效果 → 带材质、模型的后期图 → 导出签收。原「搭建 3D 建筑模型」并入白膜一步。
-       默认周数是建议值,PD / BD 可在模板管理里改(排期日历的默认阶段同步用这一份)。 */
+    /* REQ-048(1009 第 3 条,JM 1012 确认):效果图 3 个阶段,各 2 周 —— 只是默认值,每个项目可以改工期,
+       PD / BD 在模板管理里改默认周数只影响之后新建的业务。英文阶段名用 JM 原文。
+       取代 REQ-047 的 5 步(收到资料 → 白膜 → 角度 + AI → 后期 → 导出签收);老的两套见 LEGACY_STAGE_NAMES。 */
     schedule: [
-      ['0', '信息 Info', '信息收集：收到模型资料（见信息清单）', 'Information gathering: model files received', 'Client / All', 0, '—', '★ 排期从此起算 Schedule starts here', true, '—', '★ Schedule starts here'],
-      ['1', '白膜', '白膜角度小样', 'Clay-model angle previews', 'Audax', 2, '2 周', '客户看各角度小样', false, '2 weeks', 'Client reviews the angle previews'],
-      ['2', '角度 + AI', '角度 shortlist + AI 效果图，确定角度与大效果（含 1–2 轮）', 'Angle shortlist + AI mood renders: lock angles and overall look (1–2 rounds)', 'Audax / Client', 2, '2 周', '★ 冻结：角度和大效果 Lock angles & overall look', true, '2 weeks', '★ Freeze: angles and overall look'],
-      ['3', '后期', '带材质、模型的后期图（参考大效果，含 2–3 轮）', 'Final renders with materials and model detail, following the approved look (2–3 rounds)', 'Audax / Client', 2, '2 周', '此后不接受重建模 / 大改', false, '2 weeks', 'No remodelling / major changes after this'],
-      ['4', '交付', '导出成品格式，客户签收', 'Export final formats, client sign-off', 'Audax / PM', 1, '1 周', '★ 交付 · 对照信息清单逐项 QC', true, '1 week', '★ Delivery · QC against the checklist'],
+      ['A', 'Angle', 'Angle stage：出 wireframe 草图，筛选 shortlist 角度', 'Angle stage: wireframe sketches, shortlist the angles', 'Audax / Client', 2, '2 周', ' ', false, '2 weeks', ' '],
+      ['B', 'Mood & angle', 'Mood & angle stage：每个角度出氛围图，确认角度与氛围', 'Mood & angle stage: a mood render for each angle; confirm angles and mood', 'Audax / Client', 2, '2 周', ' ', false, '2 weeks', ' '],
+      ['C', 'Material & model', 'Material & model stage：微调模型与材质，最终确认', 'Material & model stage: fine-tune the model and materials; final confirmation', 'Audax / Client', 2, '2 周', ' ', false, '2 weeks', ' '],
     ],
     checklist: [
       ['建筑方 · 外观', 'From Architect (Exterior)', '#D98A2B', [
@@ -127,13 +125,13 @@ export const TPL: Record<string, Template> = {
     ],
   },
   ani: {
+    /* REQ-048(1009 第 3 条):动画 5 个阶段,1 / 2 / 1 / 2 / 1 周 —— 只是默认值。英文阶段名用 JM 原文。 */
     schedule: [
-      ['0', '需求', '确认flythrough时长/分镜/特效/音乐/字体/航拍/截止日', 'Confirm flythrough, storyboard, media, music, font, drone, deadline', 'Client / Sales', 0, '—', '★ 视角数=工作量;排期从此起算', true],
-      ['1', '分镜', '确认卖点/时长/情绪板+参考/logo/音乐;与深圳对齐', 'Confirm selling point, mood+ref, logo, music; align SZ', 'Audax / SZ / Client', 1, '1 周', '备注:不建议加人物', false],
-      ['2', '建模', '搭建 3D 模型', 'Build 3D model', 'Audax / SZ', 2, '1–2 周', ' ', false],
-      ['3', '相机路径', '线框相机路径预览审阅(含2–3轮)', 'Camera-path preview (2–3 rounds)', 'Audax / SZ / Client', 3, '2–3 周', '★ 路径改动影响全部下游,确认后冻结', true],
-      ['4', '配景', '加树木/人/景观/灯光/材质(含2–3轮)', 'Entourage (2–3 rounds)', 'Audax / SZ', 4, '3–4 周', ' ', false],
-      ['5', '最终高清', '静帧确认后出高清动画', 'Hi-res animation after still-frame confirm', 'Audax / SZ', 1, '1 周+', '★ 后期后不接受大改模型/角度', true],
+      ['A', 'Storyboard', 'Storyboard stage：PM 出整体分镜（收到资料后）', 'Storyboard stage: PM drafts the overall storyboard (after the materials are received)', 'PM', 1, '1 周', ' ', false, '1 week', ' '],
+      ['B', 'Preview', 'Animation preview：整体相机路径 + 内部讨论，第 1 轮预览', 'Animation preview: overall camera path + internal discussion, 1st preview round', 'Audax / SZ', 2, '2 周', ' ', false, '2 weeks', ' '],
+      ['C', 'Still frame 1', 'Still frame stage 1：各场景氛围静帧', 'Still frame stage 1: mood still frames for each scene', 'Audax / SZ', 1, '1 周', ' ', false, '1 week', ' '],
+      ['D', 'Still frame 2', 'Still frame stage 2：确认所有模型与材质细节', 'Still frame stage 2: confirm all model and material details', 'Audax / SZ / Client', 2, '2 周', ' ', false, '2 weeks', ' '],
+      ['E', 'Post', 'Post production', 'Post production', 'Audax / SZ', 1, '1 周', ' ', false, '1 week', ' '],
     ],
     checklist: [
       ['建筑方', 'From Architect', '#D98A2B', [

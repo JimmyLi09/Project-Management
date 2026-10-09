@@ -9,12 +9,14 @@ import { ACTION_MODULE, PERM_MODULES } from '@/lib/permTable';
 import { buildPackage, deriveStatuses, fitWindow, newId, parseISO, isoDate, totalDays } from '@/lib/project';
 import { getBuiltinTemplate, SVC, type Template } from '@/lib/templates';
 import { stagesFromTemplate } from '@/lib/calendarStages';
+import { applyCalendarToPackage } from '@/lib/scheduleSync';
+import { isLegacyFlow } from '@/lib/legacyStages';
 import { isLegacyCgiStages, type LocalDate } from '@/features/schedule-planner/domain/schedule';
 import { distributeByWeights, layoutFromStart } from '@/features/schedule-planner/domain/duration';
 import {
   ALL, clGroups, dropSvc, findClItem, inScope, instOf, mergeIntoProject, moveToRemoved, projectSvcs, replaceSection, restoreRemoved,
 } from '@/lib/sharedChecklist';
-import type { CalendarSchedule, CalendarStage, ChecklistStatus, Project, ReceiptRecord, ScheduleStatus } from '@/lib/types';
+import type { CalendarSchedule, CalendarStage, ChecklistStatus, Project, ReceiptRecord, ScheduleRow, ScheduleStatus } from '@/lib/types';
 import { cleanReceipt, sortReceipts, syncFromLatest, syncToLatest } from '@/lib/receipts';
 import { applyProjField, projSourceOf } from '@/lib/records';
 import { logZh, type LogParams } from '@/lib/logmsg';
@@ -143,6 +145,24 @@ const svcName = (k: string) => SVC[k]?.label || k;
 /* 操作日志 i18n:存 key + 参数,不存渲染好的句子 —— 存句子的话,写的时候是
    哪种语言,以后就永远是哪种语言。同时把中文那句渲染进 text,导出和老客户端
    还能读到一句人话。词条表在 lib/logmsg.ts。 */
+/* REQ-048:日历写回阶段行。行的顺序 / 数量可能变 —— 「已处理」的风险是按行号记的(od:包:行),
+   按行 id 对到新行号上,删掉的行那几条就不要了 */
+function writeBack(p: Project, pi: number) {
+  const pk = p.packages[pi];
+  const oldIds = (pk.schedule || []).map((r) => r.id);
+  applyCalendarToPackage(pk);
+  const newIdx = new Map(pk.schedule.map((r, i) => [r.id, i] as const));
+  if (p.dismissedRisks?.length) {
+    p.dismissedRisks = p.dismissedRisks.flatMap((k) => {
+      const m = /^(od|bl|fz):(\d+):(\d+)$/.exec(k);
+      if (!m || Number(m[2]) !== pi) return [k];
+      const id = oldIds[Number(m[3])];
+      const ni = id ? newIdx.get(id) : undefined;
+      return ni === undefined ? [] : [`${m[1]}:${pi}:${ni}`];
+    });
+  }
+}
+
 function logIt(p: Project, by: string, k: string, params?: LogParams) {
   p.log = p.log || [];
   p.log.unshift({ at: Date.now(), by, text: logZh(k, params), k, p: params });
@@ -678,7 +698,10 @@ export function applyAction(u: Identity, p: Project, a: ProjectAction, ctx: Acti
         excludeHolidays: a.excludeHolidays !== false,
         /* 已经提示过的选择留着;再存一次之后「撤销换阶段」就不再提供 */
         ...(prev?.flow047 ? { flow047: prev.flow047 } : {}),
+        ...(prev?.flow048 ? { flow048: prev.flow048 } : {}),
       };
+      /* REQ-048:日历一保存,每个阶段写回成一行(待办、KPI、负载、报表、导出读的都是行) */
+      writeBack(p, a.pkg);
       /* 打通交付日:最后一个分界点就是这份业务排到的交付日。
          只在用户勾了同步时才动项目的交付日 —— 不声不响改掉交付日太吓人。 */
       const last = boundaries[boundaries.length - 1];
@@ -703,7 +726,7 @@ export function applyAction(u: Identity, p: Project, a: ProjectAction, ctx: Acti
       const cal = pk.calendar;
       if (!cal) throw new ValidationError('还没有日历排期');
       if (a.choice === 'keep') {
-        cal.flow047 = 'kept';
+        cal.flow048 = 'kept';
         logIt(p, u.name, 'cal.flowKeep', { svc: pk.svc });
         break;
       }
@@ -711,29 +734,46 @@ export function applyAction(u: Identity, p: Project, a: ProjectAction, ctx: Acti
         if (!cal.flowUndo) throw new ValidationError('没有可撤销的更换');
         cal.stages = cal.flowUndo.stages;
         cal.boundaries = cal.flowUndo.boundaries;
+        /* REQ-048:换阶段时阶段行也跟着换了,撤销时原样换回;换的时候挪去留底的那几行拿回来 */
+        if (cal.flowUndo.rows) {
+          const back = new Set(cal.flowUndo.rows.map((r) => r.id));
+          pk.schedule = cal.flowUndo.rows;
+          if (pk.scheduleLegacy) pk.scheduleLegacy = pk.scheduleLegacy.filter((r) => !back.has(r.id));
+        }
         delete cal.flowUndo;
-        cal.flow047 = 'kept';
+        cal.flow048 = 'kept';
         cal.version += 1; cal.updatedAt = Date.now(); cal.updatedBy = u.name;
         logIt(p, u.name, 'cal.flowUndo', { svc: pk.svc });
         break;
       }
-      if (pk.svc !== 'cgi' || !isLegacyCgiStages(cal.stages)) throw new ValidationError('这份排期不是老的效果图流程');
+      /* 老流程:REQ-040 的固定 6 阶段(按 id 认),或某一版老模板的原样阶段名(REQ-048,按名字认 ——
+         从经典排期迁过来的阶段 id 是行 id) */
+      const legacy = (pk.svc === 'cgi' && isLegacyCgiStages(cal.stages)) || isLegacyFlow(pk.svc, cal.stages.map((x) => x.name));
+      if (!legacy) throw new ValidationError('这份排期不是老流程');
       const next = stagesFromTemplate(pk.svc, (tplForSvc ?? getBuiltinTemplate)(pk.svc));
       const ex = cal.excludeHolidays !== false;
       const b = cal.boundaries as LocalDate[];
       let boundaries: string[] = [];
       if (b.length === cal.stages.length + 1) {
+        /* 首日、末日不变,中间按新阶段的默认周数分;工作日不够分就退到日历天,再不够就从首日按默认工期排 */
         boundaries = distributeByWeights(b[0], b[b.length - 1], next.map((x) => x.weeks ?? 1), ex)
           ?? distributeByWeights(b[0], b[b.length - 1], next.map((x) => x.weeks ?? 1), false)
           ?? layoutFromStart(b[0], next.map((x) => x.weeks), ex);
       } else if (b.length) {
         boundaries = layoutFromStart(b[0], next.map((x) => x.weeks), ex);
       }
-      cal.flowUndo = { stages: cal.stages, boundaries: cal.boundaries };
-      cal.stages = next.map((x) => ({ id: x.id, name: x.name, ...(x.nameEn ? { nameEn: x.nameEn } : {}), tone: x.tone, note: '', ...(x.weeks !== undefined ? { weeks: x.weeks } : {}) }));
+      const oldRows = JSON.parse(JSON.stringify(pk.schedule)) as ScheduleRow[];
+      cal.flowUndo = { stages: cal.stages, boundaries: cal.boundaries, rows: oldRows };
+      /* 阶段 id 带上包号和时间,别和老行的 id 撞上 */
+      const tag = Date.now().toString(36);
+      cal.stages = next.map((x, i) => ({ id: `${pk.svc}-${tag}-${i}`, name: x.name, ...(x.nameEn ? { nameEn: x.nameEn } : {}), tone: x.tone, note: '', ...(x.weeks !== undefined ? { weeks: x.weeks } : {}) }));
       cal.boundaries = boundaries;
-      cal.flow047 = 'switched';
+      cal.flow048 = 'switched';
       cal.version += 1; cal.updatedAt = Date.now(); cal.updatedBy = u.name;
+      writeBack(p, a.pkg);
+      /* 原来整份排期只有一个负责人的,新阶段也给他 */
+      const who = [...new Set(oldRows.filter((r) => !r.kind && !r.custom && r.assignee).map((r) => r.assignee))];
+      if (who.length === 1) pk.schedule.forEach((r) => { if (!r.kind && !r.custom && !r.assignee) r.assignee = who[0]; });
       logIt(p, u.name, 'cal.flowSwitch', { svc: pk.svc, stages: next.length });
       break;
     }
@@ -1120,6 +1160,7 @@ export function applyAction(u: Identity, p: Project, a: ProjectAction, ctx: Acti
         if (tpl) {
           const built = buildPackage(svc, '', tpl);
           pk.schedule = built.schedule;
+          pk.calendar = built.calendar;   // REQ-048:阶段 = 行,一起带上
           /* REQ-044: 模板清单并进项目的共用清单 —— 同名项不重复,只多一个服务标签。
              同一种服务的第二份起,只属于它的项单独一条(名字后加实例名) */
           const inst = instOf(p, p.packages.length - 1);
