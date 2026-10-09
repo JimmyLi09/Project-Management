@@ -1,3 +1,4 @@
+import { remapContactRoles, toRoleKey } from '@/lib/contactRoles';
 import Database from 'better-sqlite3';
 import fs from 'fs';
 import path from 'path';
@@ -80,6 +81,7 @@ export function getDb(): Database.Database {
   backfillIds(db);
   backfillSerials(db);
   migrateInvoiceArchive(db);
+  migrateContactRoles(db);
   scheduleBackups(db);
   return db;
 }
@@ -170,6 +172,48 @@ function migrateInvoiceArchive(d: Database.Database) {
     d.prepare('INSERT INTO meta (key, value) VALUES (?, ?)').run(MIG_045, JSON.stringify({ at: now, archived: done.length }));
   })();
   if (done.length) console.log(`[REQ-045] 已开 Invoice 的项目自动归档 ${done.length} 个:${done.join('、')}`);
+}
+
+/* ===== REQ-052 联系人角色改存键 =====
+   上线时一次性:「客户 Client」→ developer(界面显示「发展商 / Developer」),
+   「总包 Main-con」「总包 Main Con」→ 同一个 maincon,其它固定角色也换成键。手填的不动。
+   meta 记一笔只跑一次;改了哪些写到 data/migrations/052-contact-roles-<时间>.md。
+   回退:scripts/req052-rollback.bat(键 → 旧标签)。 */
+const MIG_052 = 'mig.req052.contactRoles';
+function migrateContactRoles(d: Database.Database) {
+  if (d.prepare('SELECT 1 FROM meta WHERE key = ?').get(MIG_052)) return;
+  const rows = d.prepare('SELECT id, data FROM projects').all() as { id: string; data: string }[];
+  const upd = d.prepare('UPDATE projects SET data = ?, updated_at = ?, version = version + 1 WHERE id = ?');
+  const now = Date.now();
+  const done: { name: string; changes: { from: string; to: string }[] }[] = [];
+  d.transaction(() => {
+    for (const r of rows) {
+      let o: any;
+      try { o = JSON.parse(r.data); } catch { continue; }
+      const changes = remapContactRoles(o.contacts, toRoleKey);
+      if (!changes.length) continue;
+      const { updatedAt: _u, version: _v, ...data } = o;
+      upd.run(JSON.stringify(data), now, r.id);
+      done.push({ name: o.name || r.id, changes });
+    }
+    d.prepare('INSERT INTO meta (key, value) VALUES (?, ?)').run(MIG_052, JSON.stringify({ at: now, projects: done.length, contacts: done.reduce((a, x) => a + x.changes.length, 0) }));
+  })();
+  if (!done.length) return;
+  try {
+    const dir = path.join(DATA_DIR, 'migrations');
+    fs.mkdirSync(dir, { recursive: true });
+    const t = new Date(now), pad = (n: number) => String(n).padStart(2, '0');
+    const stamp = `${t.getFullYear()}${pad(t.getMonth() + 1)}${pad(t.getDate())}-${pad(t.getHours())}${pad(t.getMinutes())}${pad(t.getSeconds())}`;
+    const file = path.join(dir, `052-contact-roles-${stamp}.md`);
+    const lines = ['# REQ-052 联系人角色改存键 · 上线迁移报告', '', `时间:${t.toLocaleString('zh-CN')}`, '',
+      `共 ${done.length} 个项目、${done.reduce((a, x) => a + x.changes.length, 0)} 条联系人。「客户 Client」→ developer(显示「发展商」);两种「总包」写法 → maincon。手填的角色没动。`, '',
+      '回退:先 pm2 stop audax,再跑 scripts\\req052-rollback.bat。', '',
+      ...done.map((x) => `- ${x.name}:${x.changes.map((c) => `${c.from} → ${c.to}`).join('、')}`)];
+    fs.writeFileSync(file, lines.join('\n') + '\n', 'utf8');
+    console.log(`[REQ-052] 联系人角色改存键:${done.length} 个项目,报告 ${file}`);
+  } catch (e) {
+    console.warn('[REQ-052] 迁移报告没写成(数据已迁移,不影响使用):', e);
+  }
 }
 
 /* ===== REQ-044 一个项目一张信息清单 =====

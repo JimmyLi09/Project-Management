@@ -398,7 +398,8 @@ export const projSourceOf = (key: string): ProjSource | undefined => PROJ_SOURCE
 
 /* 项目联系人里哪一条是客户。建项目时播的是「客户 Client」,但这一栏 PD 能
    自己改字,所以按关键词认而不是全等。 */
-const CLIENT_ROLE = /客户|client/i;
+/* REQ-052:「客户」那一条现在存键 developer(旧数据里是「客户 Client」) */
+const CLIENT_ROLE = /客户|client|developer|发展商/i;
 export const clientContactIdx = (p: Project): number =>
   (p.contacts || []).findIndex((c) => CLIENT_ROLE.test(c.role || ''));
 
@@ -491,7 +492,7 @@ export function applyProjField(p: Project, src: ProjSource, raw: string): ProjFi
     /* 这个项目还没有客户那一条联系人 —— 建一条,别让填进来的名字没地方放 */
     if (!person) return { ok: true, log: null };
     if (!Array.isArray(p.contacts)) p.contacts = [];
-    p.contacts.push({ role: '客户 Client', company: p.client || '', person, phone: '', email: '' });
+    p.contacts.push({ role: 'developer', company: p.client || '', person, phone: '', email: '' });
     return { ok: true, log: { k: 'contact.person', p: { from: '', to: person } } };
   }
   const c = (p.contacts || [])[i];

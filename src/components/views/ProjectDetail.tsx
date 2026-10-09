@@ -15,6 +15,7 @@ import {
 } from '@/lib/permissions';
 import { DIFF, STAGES, stageIdx, svcColor, svcName } from '@/lib/templates';
 import { contactRoleTerm, diffTerm, fieldGroupTerm } from '@/lib/terms';
+import { CONTACT_ROLES as ROLE_DEFS, roleKeyOf } from '@/lib/contactRoles';
 import { useLang } from '@/lib/i18n';
 import { logText, type LogLike } from '@/lib/logmsg';
 import { Avatar, Ell, HM, Icon, Pill, ProgressBar, TM } from '../ui';
@@ -1234,14 +1235,8 @@ function HistoryModal({ pid, onClose }: { pid: string; onClose: () => void }) {
    原来一进来就是一排输入框,容易误改也显得杂乱。改成默认只读展示,
    点「编辑」整块一起进编辑态(和 Job Record 的「总编辑」一个思路),
    保存 / 取消明确。角色改成下拉,选「其他」再手填。 */
-const CONTACT_ROLES: [string, string][] = [
-  ['客户 Client', 'Client'],
-  ['总包 Main-con', 'Main contractor'],
-  ['建筑师 Architect', 'Architect'],
-  ['景观 Landscape', 'Landscape'],
-  ['室内 Interior', 'Interior'],
-  ['创意 Creative', 'Creative'],
-];
+/* REQ-052:下拉存键(developer = 原「客户」,改名「发展商 / Developer」),显示时翻译 */
+const CONTACT_ROLES: [string, string][] = ROLE_DEFS.map((r) => [r.key, r.en]);
 
 function ContactsPanel({ p, canEd }: { p: Project; canEd: boolean }) {
   const { dispatch, setToast, projects } = useStore();
@@ -1371,10 +1366,10 @@ function ContactsPanel({ p, canEd }: { p: Project; canEd: boolean }) {
    老数据里那些手打的角色不会因为换成下拉就丢掉。 */
 function RoleSelect({ value, onChange }: { value: string; onChange: (v: string) => void }) {
   const { lang, t } = useLang();
-  /* REQ-041: 下拉里显示的名字与只读态那一行走同一个词条(中文只显示「客户」,
-     不再是存进库的那串「客户 Client」);存的值一个字都不变。 */
-  return <PickOrType value={value} placeholder={t('角色', 'Role')}
-    options={CONTACT_ROLES.map(([zh]) => zh)} labelOf={(v) => contactRoleTerm(v, lang)}
+  /* REQ-041: 下拉里显示的名字与只读态那一行走同一个词条。REQ-052:存键;旧数据里的「客户 Client」
+     这类标签上线时已改成键,万一还有也认得(roleKeyOf),手填的原样保留 */
+  return <PickOrType value={roleKeyOf(value)} placeholder={t('角色', 'Role')}
+    options={CONTACT_ROLES.map(([k]) => k)} labelOf={(v) => contactRoleTerm(v, lang)}
     onChange={onChange} />;
 }
 

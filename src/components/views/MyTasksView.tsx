@@ -3,29 +3,32 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useStore } from '../store';
 import {
-  fmtDate, parseISO, pendingWorkflowAction, pkgStart, planDates, projectHealth,
+  fmtDate, parseISO, pendingWorkflowAction, projectHealth,
   projStage, schedProgress, todayMid,
 } from '@/lib/project';
+import { myTasks, withinWeek, WEEK_DAYS, type MyTask } from '@/lib/myTasks';
 import { canEditPrices, canRowEdit } from '@/lib/permissions';
 import type { CaseRow } from '@/server/avdb';
 import { presetCaseFilter } from './AvCasesView';
 import { STAGES, stageColor, stageIdx, svcName } from '@/lib/templates';
 import { useLang } from '@/lib/i18n';
 import { Avatar, Ell, HM, Icon, Pill, TM } from '../ui';
-import type { PlanDate } from '@/lib/project';
-import type { Project, ScheduleRow } from '@/lib/types';
+import type { Project } from '@/lib/types';
 
-interface Item { p: Project; r: ScheduleRow; i: number; pi: number; svc: string; d: PlanDate | null; year: string }
-const GRID = '24px 1fr 52px 96px 92px 32px';
+const GRID = '24px 1fr 104px 92px 32px';
+
+const daysLeftOf = (iso: string | null) => {
+  const d = parseISO(iso);
+  return d ? Math.round((d.getTime() - todayMid().getTime()) / 86_400_000) : null;
+};
 
 export default function MyTasksView() {
   const { projects, me, dispatch, openProject, setView } = useStore();
   const { lang, t } = useLang();
-  const [filter, setFilter] = useState<'all' | 'overdue' | 'wip'>('all');
-  const [year, setYear] = useState('');
+  /* REQ-052:只显示「已逾期」「本周内」两组;去掉「全部 / 进行中」和年份筛选,只留按项目搜索 */
+  const [q, setQ] = useState('');
   const [sel, setSel] = useState<string | null>(null);
   const t0 = todayMid();
-  const seesAll = me.role === 'director' || me.role === 'bd' || me.role === 'sales';
 
   const workflowTodos = useMemo(() => {
     const out: { p: Project; label: string; labelEn: string }[] = [];
@@ -34,41 +37,16 @@ export default function MyTasksView() {
     return out;
   }, [projects, me]);
 
-  const items = useMemo(() => {
-    const out: Item[] = [];
-    projects.forEach((p) => {
-      if (p.archived) return;
-      // REQ-004 #11: hide tasks from 未开始 (presales) projects
-      if (projStage(p) === 'presales') return;
-      const isOwner = (p.owners || []).includes(me.name);
-      p.packages.forEach((pk, pi) => {
-        const pd = planDates(pk, pkgStart(p, pk));
-        pk.schedule.forEach((r, i) => {
-          if (r.status === 'done') return;
-          let mine: boolean;
-          if (seesAll) mine = true;
-          else if (me.role === 'member') mine = r.assignee === me.name;
-          else if (me.role === 'viewer') mine = false;
-          else mine = isOwner || r.assignee === me.name;
-          if (mine) {
-            const d = pd[i];
-            const yr = String((d ? d.end : new Date(p.created)).getFullYear());
-            out.push({ p, r, i, pi, svc: pk.svc, d, year: yr });
-          }
-        });
-      });
-    });
-    return out.sort((a, b) => (a.d?.end.getTime() || 9e15) - (b.d?.end.getTime() || 9e15));
-  }, [projects, me, seesAll]);
-
-  const years = useMemo(() => [...new Set(items.map((x) => x.year))].sort().reverse(), [items]);
-  const overdueN = items.filter((x) => x.d && x.d.end < t0).length;
-  const shown = items.filter((x) => {
-    if (year && x.year !== year) return false;
-    if (filter === 'overdue') return x.d && x.d.end < t0;
-    if (filter === 'wip') return x.r.status === 'wip';
-    return true;
-  });
+  /* 侧栏数字也是这个函数(App.tsx),两边永远一致 */
+  const items = useMemo(() => myTasks(projects, me), [projects, me]);
+  const overdueN = items.filter((x) => x.group === 'overdue').length;
+  const weekN = items.length - overdueN;
+  const needle = q.trim().toLowerCase();
+  const shown = needle ? items.filter((x) => x.p.name.toLowerCase().includes(needle) || (x.p.client || '').toLowerCase().includes(needle)) : items;
+  const groups: { key: MyTask['group']; title: string; rows: MyTask[] }[] = [
+    { key: 'overdue', title: t('已逾期', 'Overdue'), rows: shown.filter((x) => x.group === 'overdue') },
+    { key: 'week', title: t(`本周内（今天起 ${WEEK_DAYS} 天）`, `This week (next ${WEEK_DAYS} days)`), rows: shown.filter((x) => x.group === 'week') },
+  ];
 
   const selP = sel ? projects.find((p) => p.id === sel) || null : null;
 
@@ -84,9 +62,11 @@ export default function MyTasksView() {
     if (!canEditPrices(me)) return;
     const get = (c: string) => fetch(`/api/av/cases?warranty=soon&contacted=${c}&sort=expire&dir=asc`)
       .then((r) => (r.ok ? r.json() : null)).catch(() => null);
+    /* REQ-052:和待办同一个时间范围 —— 已过期没联系的 + 7 天内到期的;30 天的完整清单在历史案例里看 */
+    const near = (cs: CaseRow[]) => cs.filter((c) => withinWeek(daysLeftOf(c.expire)));
     Promise.all([get('0'), get('1')]).then(([a, b]) => {
-      if (a?.cases) { setExpiring(a.cases); setExpiringTotal(a.total); }
-      if (b?.cases) setContacted(b.cases);
+      if (a?.cases) { const n = near(a.cases); setExpiring(n); setExpiringTotal(n.length); }
+      if (b?.cases) setContacted(near(b.cases));
     });
   }, [me]);
   useEffect(() => { loadExpiring(); }, [loadExpiring]);
@@ -97,10 +77,7 @@ export default function MyTasksView() {
     }).catch(() => null);
     if (r?.ok) loadExpiring();
   };
-  const daysLeft = (iso: string | null) => {
-    const d = parseISO(iso);
-    return d ? Math.round((d.getTime() - t0.getTime()) / 86_400_000) : null;
-  };
+  const daysLeft = daysLeftOf;
   const openExpiring = () => {
     presetCaseFilter({ warranty: ['soon'] }, { k: 'expire', dir: 'asc' });
     setView({ name: 'avlibrary', sub: 'cases' });
@@ -109,28 +86,20 @@ export default function MyTasksView() {
   return (
     <>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2,minmax(0,220px)) 1fr', gap: 20, marginBottom: 20, alignItems: 'center' }}>
-        {/* REQ-034: 两张卡可点 —— 点了直接切到对应筛选,和下面的「全部 / 逾期」按钮联动。
-            当前选中的那张给个高亮边,免得点完看不出发生了什么。 */}
-        <button className="kpi" style={{ padding: '18px 20px', textAlign: 'left', cursor: 'pointer', border: filter === 'all' ? '1.5px solid var(--navy700)' : undefined }}
-          title={t('查看全部未完成任务', 'Show all open tasks')}
-          onClick={() => setFilter('all')}>
-          <div className="kpi-label">{t('未完成任务', 'Open Tasks')}</div>
-          <div className="tnum" style={{ fontSize: 32, fontWeight: 600, color: 'var(--navy900)', marginTop: 6, lineHeight: 1 }}>{items.length}</div>
-        </button>
-        <button className="kpi" style={{ padding: '18px 20px', textAlign: 'left', cursor: 'pointer', border: filter === 'overdue' ? '1.5px solid var(--navy700)' : undefined }}
-          title={t('只看逾期任务', 'Show overdue only')}
-          onClick={() => setFilter('overdue')}>
-          <div className="kpi-label">{t('逾期', 'Overdue')}</div>
+        <div className="kpi" style={{ padding: '18px 20px' }} data-testid="tasks-overdue-n">
+          <div className="kpi-label">{t('已逾期', 'Overdue')}</div>
           <div className="tnum" style={{ fontSize: 32, fontWeight: 600, color: overdueN ? 'var(--danger)' : 'var(--success)', marginTop: 6, lineHeight: 1 }}>{overdueN}</div>
-        </button>
-        <div style={{ display: 'flex', gap: 7, justifySelf: 'end', flexWrap: 'wrap', alignItems: 'center' }}>
-          <button className={`chip ${filter === 'all' ? 'active' : ''}`} onClick={() => setFilter('all')}>{t('全部', 'All')}</button>
-          <button className={`chip ${filter === 'overdue' ? 'active' : ''}`} onClick={() => setFilter('overdue')}>{t('逾期', 'Overdue')}</button>
-          <button className={`chip ${filter === 'wip' ? 'active' : ''}`} onClick={() => setFilter('wip')}>{t('进行中', 'In Progress')}</button>
-          <select className="in sm" value={year} onChange={(e) => setYear(e.target.value)} style={{ width: 'auto' }}>
-            <option value="">{t('全部年份', 'All years')}</option>
-            {years.map((y) => <option key={y} value={y}>{y}</option>)}
-          </select>
+        </div>
+        <div className="kpi" style={{ padding: '18px 20px' }} data-testid="tasks-week-n">
+          <div className="kpi-label">{t('本周内到期', 'Due this week')}</div>
+          <div className="tnum" style={{ fontSize: 32, fontWeight: 600, color: 'var(--navy900)', marginTop: 6, lineHeight: 1 }}>{weekN}</div>
+        </div>
+        <div style={{ display: 'flex', gap: 10, justifySelf: 'end', flexWrap: 'wrap', alignItems: 'center' }}>
+          <span style={{ fontSize: 12, color: 'var(--text2)' }}>{t('一周以后的任务不显示，到时间自然出现；要看全部请去项目排期。', 'Tasks due later than a week are hidden until then — see the project schedule for everything.')}</span>
+          <div className="searchbox" style={{ background: 'var(--card)', width: 220 }}>
+            <Icon name="search" size={15} />
+            <input placeholder={t('按项目搜索…', 'Search by project…')} value={q} onChange={(e) => setQ(e.target.value)} data-testid="tasks-search" />
+          </div>
         </div>
       </div>
 
@@ -156,7 +125,7 @@ export default function MyTasksView() {
         <div className="panel clip" style={{ marginBottom: 18, borderColor: 'var(--warning)' }} data-testid="warranty-remind">
           <div className="panel-head" style={{ background: '#fdf6e9' }}>
             <span className="panel-title"><Icon name="alert" style={{ color: 'var(--warning)' }} />
-              {t('保修即将到期 · 联系客户续保 / 回访', 'Warranty expiring soon · contact the client')}
+              {t('保修 7 天内到期 · 联系客户续保 / 回访', 'Warranty expiring within 7 days · contact the client')}
               <span className="badge" style={{ background: 'var(--warning)', color: '#fff', marginLeft: 6 }}>{expiringTotal}</span>
             </span>
             <button className="btn-line" style={{ padding: '3px 10px', fontSize: 12 }} onClick={openExpiring}>
@@ -165,7 +134,7 @@ export default function MyTasksView() {
           </div>
           {expiring.length === 0 && (
             <div style={{ padding: '11px 20px', borderTop: '1px solid var(--row-line)', fontSize: 12.5, color: 'var(--success)' }}>
-              {t('30 天内到期的屏都已联系过。', 'Every screen expiring within 30 days has been followed up.')}
+              {t('7 天内到期的屏都已联系过。', 'Every screen expiring within 7 days has been followed up.')}
             </div>
           )}
           {expiring.slice(0, 6).map((c) => {
@@ -218,16 +187,21 @@ export default function MyTasksView() {
       <div className="grid-2col" style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1.7fr) minmax(260px,1fr)', gap: 18, alignItems: 'start' }}>
         <div className="panel clip">
           <div className="table-head" style={{ display: 'grid', gridTemplateColumns: GRID, gap: 12 }}>
-            <div /><div>{t('任务', 'Task')}</div><div>{t('年', 'Yr')}</div><div>{t('到期', 'Due')}</div><div>{t('状态', 'Status')}</div><div />
+            <div /><div>{t('任务', 'Task')}</div><div>{t('到期', 'Due')}</div><div>{t('状态', 'Status')}</div><div />
           </div>
           {shown.length === 0 && (
-            <div style={{ padding: 34, textAlign: 'center', color: 'var(--text2)', fontSize: 13 }}>
-              ✓ {t('没有匹配的待办。', 'No matching tasks.')}
+            <div style={{ padding: 34, textAlign: 'center', color: 'var(--text2)', fontSize: 13 }} data-testid="tasks-empty">
+              ✓ {needle ? t('没有匹配的待办。', 'No matching tasks.') : t('没有逾期或一周内到期的任务。', 'Nothing overdue or due this week.')}
               {me.role === 'member' ? t('(成员只看被指派👤给自己的任务)', ' (Members see only tasks assigned 👤 to them.)') : ''}
             </div>
           )}
-          {shown.map((x, xi) => {
-            const over = x.d && x.d.end < t0;
+          {groups.filter((g) => g.rows.length).map((g) => (<React.Fragment key={g.key}>
+          <div style={{ padding: '8px 18px', fontSize: 11.5, fontWeight: 700, color: g.key === 'overdue' ? 'var(--danger)' : 'var(--text2)', background: 'var(--hover-bg)', borderBottom: '1px solid var(--row-line)' }} data-testid={`tasks-group-${g.key}`}>
+            {g.title} · {g.rows.length}
+          </div>
+          {g.rows.map((x) => {
+            const over = x.group === 'overdue';
+            const xi = `${x.p.id}-${x.pi}-${x.i}`;
             const rowEd = canRowEdit(me, x.p, x.r);
             const active = sel === x.p.id;
             return (
@@ -248,10 +222,10 @@ export default function MyTasksView() {
                     {x.p.name}{x.p.packages.length > 1 ? ` · ${svcName(x.svc, lang)}` : ''}
                   </Ell>
                 </div>
-                <div className="tnum" style={{ fontSize: 11.5, color: 'var(--text2)' }}>{x.year}</div>
                 <div className="tnum" style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 12, fontWeight: 500, color: over ? 'var(--danger)' : 'var(--text2)' }}>
                   {over && <Icon name="alert" size={12} />}
-                  {x.d ? fmtDate(x.d.end).slice(0, 6) : '—'}
+                  {fmtDate(x.d.end).slice(0, 6)}
+                  {over && <span style={{ fontSize: 11 }} data-testid="tasks-overdue-days">{t(`逾期 ${x.overdueDays} 天`, `${x.overdueDays}d over`)}</span>}
                 </div>
                 <div><Pill m={TM[x.r.status]} /></div>
                 <button aria-label="Open project" onClick={() => openProject(x.p.id)}
@@ -261,6 +235,7 @@ export default function MyTasksView() {
               </div>
             );
           })}
+          </React.Fragment>))}
         </div>
 
         {/* right: selected project info (REQ-004 #15/#7) */}

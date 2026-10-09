@@ -5,6 +5,7 @@ import type { User } from '@/lib/types';
 import { StoreProvider, useStore, type View } from './store';
 import { allOverdue, awaitingPayment, fmtDate, isMyProject, pendingWorkflowAction } from '@/lib/project';
 import { canCreate, canViewPrices, isFull } from '@/lib/permissions';
+import { myTasks } from '@/lib/myTasks';
 import { roleTerm } from '@/lib/terms';
 import { useLang } from '@/lib/i18n';
 import { Avatar, AvatarSrcProvider, Ell, Icon } from './ui';
@@ -52,7 +53,7 @@ const PAGE_META: Record<string, { title: [string, string]; sub: [string, string]
   overview: { title: ['总览', 'Overview'], sub: ['项目组合健康度、团队负载与优先事项', 'Portfolio health, team load and priorities'] },
   projects: { title: ['项目', 'Projects'], sub: ['全部项目 · 按服务与负责人筛选', 'All projects · filter by service and PM'] },
   team: { title: ['团队负载', 'Team Allocation'], sub: ['团队工作量与项目分配', 'Workload and assignments across the team'] },
-  mytasks: { title: ['我的待办', 'My Tasks'], sub: ['你的未完成任务 · 按到期日排序', 'Your open items, sorted by due date'] },
+  mytasks: { title: ['我的待办', 'My Tasks'], sub: ['已逾期和本周内到期的任务 · 按到期日排序', 'Overdue and due this week · sorted by due date'] },
   dupdate: { title: ['向上汇报', 'Director Update'], sub: ['每周汇报、风险与决策闭环', 'Weekly updates, risks and decisions'] },
   stats: { title: ['统计报表', 'Reports'], sub: ['项目统计 · 按 PM 的项目数与积分', 'Projects and points by PM'] },
   contacts: { title: ['通讯录', 'Contacts'], sub: ['所有客户、总包与联系人 · 可导出', 'All clients, contractors and contacts · exportable'] },
@@ -164,19 +165,8 @@ function Shell() {
     <button key={name} className={(on ?? view.name === name) ? 'on' : ''} onClick={() => go(name)}>{label}</button>
   );
 
-  const myOpenCount = useMemo(() => {
-    let n = 0;
-    projects.forEach((p) => {
-      const isOwner = (p.owners || []).includes(me.name);
-      p.packages.forEach((pk) => pk.schedule.forEach((r) => {
-        if (r.status === 'done') return;
-        if (me.role === 'director' || me.role === 'bd' || me.role === 'sales') n++;
-        else if (me.role === 'member') { if (r.assignee === me.name) n++; }
-        else if (me.role !== 'viewer' && (isOwner || r.assignee === me.name)) n++;
-      }));
-    });
-    return n;
-  }, [projects, me]);
+  /* REQ-052:和「我的待办」列表同一个函数(逾期 + 本周内;排除已归档、售前项目) */
+  const myOpenCount = useMemo(() => myTasks(projects, me).length, [projects, me]);
 
   /* v2.2 workflow inbox count — projects awaiting this user's workflow action */
   const workflowCount = useMemo(
