@@ -1,15 +1,16 @@
 'use client';
 
 import React, { useEffect, useMemo, useState } from 'react';
-import { useStore } from '../store';
+import { useStore, useWho } from '../store';
 import { useLang } from '@/lib/i18n';
-import { canEdit, canEditIn } from '@/lib/permissions';
+import { canEditIn, canRowEdit } from '@/lib/permissions';
+import { isLegacyFlow } from '@/lib/legacyStages';
 import { pkgSuffix, projCode } from '@/lib/project';
 import { svcName } from '@/lib/templates';
 import { CalendarPlanner } from '@/features/schedule-planner/components/CalendarPlanner';
-import { isLegacyCgiStages, stageName, type LocalDate, type StageDefinition } from '@/features/schedule-planner/domain/schedule';
+import { isLegacyCgiStages, stageName, type LocalDate, type StageDefinition, type StageSchedule } from '@/features/schedule-planner/domain/schedule';
 import type { ScheduleArchive } from '@/features/schedule-planner/domain/archives';
-import type { CalendarStage, Project } from '@/lib/types';
+import type { CalendarStage, Project, ScheduleStatus } from '@/lib/types';
 import '@/features/schedule-planner/planner.css';
 
 /* ===== REQ-040: 日历式排期 =====
@@ -19,10 +20,12 @@ import '@/features/schedule-planner/planner.css';
    - 打开时把项目里存的 boundaries / 阶段 / 备注喂进去;
    - 「保存到项目」写回 packages[i].calendar,存档也升级成项目级(不再进浏览器本地);
    - 排出来的交付日可选同步到项目交付日,并能导出 .ics 丢进个人日历。
-   与老的经典排期**并存** —— 导出 / KPI / 进度统计读的还是老的 schedule 数组。 */
+   REQ-048 起这是唯一的排期视图(经典模式去掉了):保存时服务端把每个阶段写回成一行 pkg.schedule,
+   待办 / KPI / 负载 / 报表 / 导出照旧读行。负责人、状态挂在行上,在这里直接改(不用等「保存」)。 */
 export default function CalendarScheduleTab({ p, pkgIdx }: { p: Project; pkgIdx: number }) {
-  const { dispatch, me, setToast } = useStore();
+  const { dispatch, me, setToast, users } = useStore();
   const { lang, t } = useLang();
+  const who = useWho();
   const ed = canEditIn(me, p, 'schedule');   // REQ-051: 再过权限表
   const pkg = p.packages[pkgIdx];
   const cal = pkg?.calendar;
@@ -131,9 +134,46 @@ export default function CalendarScheduleTab({ p, pkgIdx }: { p: Project; pkgIdx:
 
   if (!pkg) return null;
 
-  /* REQ-047:已有 CGI 项目的日历排期还是老流程 → 提示一次 */
-  const legacyCgi = pkg.svc === 'cgi' && !!cal && isLegacyCgiStages(cal.stages) && !cal.flow047;
-  const canUndoFlow = pkg.svc === 'cgi' && cal?.flow047 === 'switched' && !!cal.flowUndo;
+  /* REQ-047 / 048:已有项目的排期还是某一版老的效果图 / 动画流程 → 提示一次要不要换成新阶段 */
+  const legacyFlow = !!cal && !cal.flow048
+    && ((pkg.svc === 'cgi' && isLegacyCgiStages(cal.stages)) || isLegacyFlow(pkg.svc, cal.stages.map((x) => x.name)));
+  const canUndoFlow = cal?.flow048 === 'switched' && !!cal.flowUndo;
+  const NEW_FLOW: Record<string, [string, string]> = {
+    cgi: ['效果图流程已更新（Angle → Mood & angle → Material & model，各 2 周），要换成新阶段吗？',
+      'The CGI flow has changed (Angle → Mood & angle → Material & model, 2 weeks each). Switch this schedule to the new stages?'],
+    ani: ['动画流程已更新（Storyboard → Animation preview → Still frame 1 / 2 → Post production），要换成新阶段吗？',
+      'The animation flow has changed (Storyboard → Animation preview → Still frame 1 / 2 → Post production). Switch this schedule to the new stages?'],
+  };
+
+  /* REQ-048:阶段行右边 = 这一行的负责人和状态(阶段 id = 行 id)。新加、还没保存的阶段没有行,先保存 */
+  const assigneeNames = users.filter((x) => x.role !== 'viewer').map((x) => x.name);
+  const STATUS: [ScheduleStatus, string, string][] = [['todo', '未开始', 'Not started'], ['wip', '进行中', 'In progress'], ['done', '已完成', 'Done'], ['block', '受阻', 'Blocked']];
+  function stageExtra(stage: StageSchedule) {
+    const ri = pkg.schedule.findIndex((r) => r.id === stage.id);
+    if (ri < 0) return <span style={{ color: 'var(--text2)' }}>{t('保存后可以指派负责人、改状态', 'Save first to assign an owner and set the status')}</span>;
+    const r = pkg.schedule[ri];
+    const rowEd = canRowEdit(me, p, r);
+    const names = r.assignee && !assigneeNames.includes(r.assignee) ? [r.assignee, ...assigneeNames] : assigneeNames;
+    return (
+      <>
+        <span style={{ color: 'var(--text2)' }}>{t('负责人', 'Owner')}</span>
+        {ed ? (
+          <select value={r.assignee || ''} data-testid={`stage-owner-${stage.index}`}
+            onChange={(e) => dispatch(p.id, { type: 'editSched', pkg: pkgIdx, idx: ri, field: 'assignee', value: e.target.value })}>
+            <option value="">{t('未指派', 'Unassigned')}</option>
+            {names.map((n) => <option key={n} value={n}>{who(n)}</option>)}
+          </select>
+        ) : <b data-testid={`stage-owner-${stage.index}`}>{r.assignee ? who(r.assignee) : '—'}</b>}
+        <span style={{ color: 'var(--text2)', marginLeft: 6 }}>{t('状态', 'Status')}</span>
+        {rowEd ? (
+          <select value={r.status} data-testid={`stage-status-${stage.index}`}
+            onChange={(e) => dispatch(p.id, { type: 'setRowStatus', pkg: pkgIdx, idx: ri, status: e.target.value as ScheduleStatus })}>
+            {STATUS.map(([k, zh, en]) => <option key={k} value={k}>{t(zh, en)}</option>)}
+          </select>
+        ) : <b data-testid={`stage-status-${stage.index}`}>{t(...(STATUS.find((x) => x[0] === r.status) || STATUS[0]).slice(1) as [string, string])}</b>}
+      </>
+    );
+  }
   async function flow(choice: 'switch' | 'keep' | 'undo') {
     setBusy(true);
     const ok = await dispatch(p.id, { type: 'calendarFlow', pkg: pkgIdx, choice });
@@ -148,9 +188,12 @@ export default function CalendarScheduleTab({ p, pkgIdx }: { p: Project; pkgIdx:
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
       <div className="panel" style={{ padding: '11px 16px', display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
         <span style={{ fontSize: 12.5, color: 'var(--text2)', flex: 1, minWidth: 220 }}>
-          {cal?.boundaries?.length
+          {cal?.boundaries?.length && cal.version > 0
             ? t(`第 ${cal.version} 版 · ${cal.updatedBy} ${new Date(cal.updatedAt).toLocaleDateString()} 保存`,
                 `v${cal.version} · saved by ${cal.updatedBy} on ${new Date(cal.updatedAt).toLocaleDateString()}`)
+            : cal?.boundaries?.length
+            ? t('按默认阶段自动排好的（上线迁移的就是原来阶段行上的日期），还没在日历上保存过。改完记得点「保存到项目」。',
+                'Laid out from the default stages (or, for older projects, from the original stage rows) and not saved on the calendar yet. Hit “Save to project” after changes.')
             : t('在月历上点起始日,再依次点每个阶段的结束日;排完可以拖分界点微调。排完记得点「保存到项目」。',
                 'Click a start date, then each stage’s end date; drag the boundaries to fine-tune. Hit “保存到项目” when done.')}
         </span>
@@ -167,11 +210,10 @@ export default function CalendarScheduleTab({ p, pkgIdx }: { p: Project; pkgIdx:
         </button>
       </div>
 
-      {ed && legacyCgi && (
+      {ed && legacyFlow && NEW_FLOW[pkg.svc] && (
         <div className="panel" data-testid="cgi-flow-banner" style={{ padding: '11px 16px', display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', background: 'var(--warning-bg, #FDF7F1)' }}>
           <span style={{ flex: 1, minWidth: 260, fontSize: 13 }}>
-            {t('效果图流程已更新（白膜小样 → AI 效果图 → 后期图），要换成新阶段吗？',
-              'The CGI flow has changed (clay previews → AI mood renders → final renders). Switch this schedule to the new stages?')}
+            {t(...NEW_FLOW[pkg.svc])}
             <span style={{ display: 'block', fontSize: 11.5, color: 'var(--text2)' }}>
               {t('换的话，已排好的首日到末日不变，按新阶段的默认工期重新分配；换完可以撤销。',
                 'If you switch, the first and last dates stay; the new stages share them by their default durations. You can undo it.')}
@@ -183,7 +225,7 @@ export default function CalendarScheduleTab({ p, pkgIdx }: { p: Project; pkgIdx:
       )}
       {ed && canUndoFlow && (
         <div className="panel" data-testid="cgi-flow-undo" style={{ padding: '9px 16px', display: 'flex', gap: 10, alignItems: 'center', fontSize: 12.5 }}>
-          <span style={{ flex: 1, color: 'var(--text2)' }}>{t('已换成新的效果图阶段。', 'Switched to the new CGI stages.')}</span>
+          <span style={{ flex: 1, color: 'var(--text2)' }}>{t('已换成新阶段（负责人、状态按新阶段重新填）。', 'Switched to the new stages (set owners and statuses again for the new stages).')}</span>
           <button className="btn-line sm" disabled={busy} onClick={() => flow('undo')} data-testid="cgi-flow-undo-btn">{t('撤销', 'Undo')}</button>
         </div>
       )}
@@ -214,6 +256,7 @@ export default function CalendarScheduleTab({ p, pkgIdx }: { p: Project; pkgIdx:
           onSave={ed ? save : undefined}
           saveLabel={t('保存到项目', 'Save to project')}
           busy={busy}
+          stageExtra={stageExtra}
         />
       </div>
       )}

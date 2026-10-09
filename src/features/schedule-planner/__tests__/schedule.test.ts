@@ -20,15 +20,13 @@ import {
 const SIX = Array.from({ length: 6 }, (_, i) => ({ id: `s${i}`, name: `S${i}`, tone: 'coral' }))
 
 describe('schedule date primitives', () => {
-  it('REQ-047: the standalone default is the new CGI flow (5 stages, weeks 0/2/2/2/1 — 1002 Jimmy 确认)', () => {
-    expect(STAGES.map((stage) => stage.name)).toEqual([
-      '信息收集：收到模型资料（见信息清单）',
-      '白膜角度小样',
-      '角度 shortlist + AI 效果图，确定角度与大效果（含 1–2 轮）',
-      '带材质、模型的后期图（参考大效果，含 2–3 轮）',
-      '导出成品格式，客户签收'
+  it('REQ-048: the standalone default is the CGI flow of 1009 (3 stages × 2 weeks — JM 1012 确认)', () => {
+    expect(STAGES.map((stage) => stage.nameEn)).toEqual([
+      'Angle stage: wireframe sketches, shortlist the angles',
+      'Mood & angle stage: a mood render for each angle; confirm angles and mood',
+      'Material & model stage: fine-tune the model and materials; final confirmation'
     ])
-    expect(STAGES.map((stage) => stage.weeks)).toEqual([0, 2, 2, 2, 1])
+    expect(STAGES.map((stage) => stage.weeks)).toEqual([2, 2, 2])
   })
 
   it('adds calendar days without shifting across month boundaries', () => {

@@ -3,7 +3,8 @@
    "save/apply template", so templates and projects never diverge into two
    data formats — a fragment is literally the slice of a ServicePackage that
    REQ-018 (schedule) / REQ-019 (checklist) already render. */
-import { newId } from '@/lib/project';
+import { newId, planDates } from '@/lib/project';
+import { calendarFromRows } from '@/lib/scheduleSync';
 import { ALL, mergeIntoProject, projectSvcs, replaceSection, sectionOf, type ClScope } from '@/lib/sharedChecklist';
 import type { ChecklistGroup, ChecklistItem, Project, ScheduleRow, ServicePackage } from '@/lib/types';
 
@@ -56,9 +57,13 @@ export function extractChecklist(p: Project, scope: ClScope, withContent = false
 }
 
 /* apply a schedule fragment onto a package — replace swaps the section, append adds to it */
-export function applySchedule(pkg: ServicePackage, frag: ScheduleFragment, mode: 'replace' | 'append', withContent = false) {
+export function applySchedule(pkg: ServicePackage, frag: ScheduleFragment, mode: 'replace' | 'append', withContent = false, opts: { projectStart?: string; by?: string } = {}) {
   const rows = freshSchedule(frag.schedule || [], withContent);
   pkg.schedule = mode === 'replace' ? rows : [...pkg.schedule, ...rows];
+  /* REQ-048:排期只在日历上排 —— 行换了,日历按新的行重建(日期 = 行上算出来的日期),存档保留 */
+  const prev = pkg.calendar;
+  const { calendar } = calendarFromRows(pkg.schedule, planDates(pkg, pkg.start || opts.projectStart || ''), { by: opts.by || '', at: Date.now() });
+  pkg.calendar = { ...calendar, version: (prev?.version || 0) + 1, ...(prev?.archives?.length ? { archives: prev.archives } : {}) };
 }
 
 /* REQ-044: 套用 / 导入清单 —— 作用于当前标签对应服务的项;「全部」下作用于整张清单。
@@ -101,6 +106,10 @@ export function trimPackage(pkg: ServicePackage, mode: 'entire' | 'schedule' | '
     start: '', delivery: '',
   };
   delete out.checklist;
+  /* REQ-048:行换了新 id、日期清空了,日历对不上 —— 去掉,读的时候按新的行重建 */
+  delete out.calendar;
+  delete out.scheduleLegacy;
+  delete out.mig048;
   delete out.noCategories;
   if (mode === 'checklist') out.schedule = [];
   /* Job Record never rides along: its fields (尺寸/链接/安装日期/保修) belong to

@@ -52,6 +52,8 @@ export default function ExportOverlay({ p, onClose, scope = 'all', clScope = 'al
   const [sec, setSec] = useState<ExportScope>(scope);
   const [order, setOrder] = useState<Order>('byPkg');
   const [orient, setOrient] = useState<'portrait' | 'landscape'>('portrait');
+  /* REQ-048:排期页不再选「样式」,导出时在这里选(默认沿用项目上次用的那种) */
+  const [schedStyle, setSchedStyle] = useState<'classic' | 'weeks' | 'dates'>(p.schedStyle || 'classic');
   const [pkgSel, setPkgSel] = useState<boolean[]>(() => p.packages.map((pk) => clScope === 'all' || pk.svc === clScope));
   const [blanks, setBlanks] = useState(true); // REQ-013: include blank (Pending) items — default on
   /* REQ-021 封面页。0917 变更单:「Checklist 导出第一页空白太多」——
@@ -121,7 +123,7 @@ export default function ExportOverlay({ p, onClose, scope = 'all', clScope = 'al
   /* ── unified schedule block (per package) — follows the project's REQ-018 template ── */
   function SchedBlock({ pkg, pi }: { pkg: ServicePackage; pi: number }) {
     const pd = planDates(pkg, pkgStart(p, pkg));
-    const style = p.schedStyle || 'classic';
+    const style = schedStyle;
     const sub = pkg.schedule.filter((r) => !r.kind).reduce((n, r) => n + (Number(r.weeks) || 0), 0);
     const band = (r: { phase: string; task: string; taskEn: string }) => {
       const s = `${r.phase} ${r.task} ${r.taskEn}`.toLowerCase();
@@ -158,7 +160,7 @@ export default function ExportOverlay({ p, onClose, scope = 'all', clScope = 'al
                 return (
                   <tr key={r.id || i}>
                     <td>{d ? `${fmtDate(d.start)} – ${fmtDate(d.end)}` : '—'}</td>
-                    <td>{(L === 'zh' ? r.task : r.taskEn)}{r.freeze ? ' ★' : ''}</td>
+                    <td>{(L === 'zh' ? r.task : r.taskEn || r.task)}{r.freeze ? ' ★' : ''}</td>
                     <td>{r.weeks ? T(`${r.weeks} 周`, `${r.weeks}w`) : '—'}</td>
                     <td>{showBand ? `${b + 1}. ${L === 'zh' ? BAND_L[b][0] : BAND_L[b][1]}` : ''}</td>
                   </tr>
@@ -184,7 +186,7 @@ export default function ExportOverlay({ p, onClose, scope = 'all', clScope = 'al
                 const d = pd[i];
                 return (
                   <tr key={r.id || i}>
-                    <td>{(L === 'zh' ? r.task : r.taskEn)}{r.freeze ? ' ★' : ''}</td>
+                    <td>{(L === 'zh' ? r.task : r.taskEn || r.task)}{r.freeze ? ' ★' : ''}</td>
                     <td>{d ? `${fmtDate(d.start)} – ${fmtDate(d.end)}` : '—'}</td>
                     <td>{r.weeks ? T(`${r.weeks} 周`, `${r.weeks} week${r.weeks > 1 ? 's' : ''}`) : '—'}</td>
                   </tr>
@@ -218,8 +220,8 @@ export default function ExportOverlay({ p, onClose, scope = 'all', clScope = 'al
               }[r.status];
               return (
                 <tr key={r.id || i}>
-                  <td>{(L === 'zh' ? r.task : r.taskEn)}{r.freeze ? ' ★' : ''}{r.custom ? ` (${T('自定义', 'custom')})` : ''}</td>
-                  {cols.owner && <td>{r.owner}</td>}
+                  <td>{(L === 'zh' ? r.task : r.taskEn || r.task)}{r.freeze ? ' ★' : ''}{r.custom ? ` (${T('自定义', 'custom')})` : ''}</td>
+                  {cols.owner && <td>{r.assignee || r.owner}</td>}
                   {cols.start && <td>{d ? fmtDate(d.start) : '—'}</td>}
                   {cols.due && <td>{d ? fmtDate(d.end) : '—'}</td>}
                   {cols.status && <td>{stt}</td>}
@@ -364,6 +366,16 @@ export default function ExportOverlay({ p, onClose, scope = 'all', clScope = 'al
             ))}
           </span>
         )}
+        {showSched && (
+          <span className="ex-grp">
+            {T('排期样式', 'Schedule layout')}:
+            <select className="in sm" value={schedStyle} onChange={(e) => setSchedStyle(e.target.value as 'classic' | 'weeks' | 'dates')} style={{ width: 'auto', padding: '3px 6px' }} data-testid="export-sched-style">
+              <option value="classic">{T('阶段表', 'Stage table')}</option>
+              <option value="weeks">{T('按服务分组(周)', 'By service (weeks)')}</option>
+              <option value="dates">{T('按日期(Scale Model)', 'By date (Scale Model)')}</option>
+            </select>
+          </span>
+        )}
         {multi && showSched && showCl && (
           <span className="ex-grp">
             {T('排列', 'Order')}:
@@ -451,7 +463,7 @@ export default function ExportOverlay({ p, onClose, scope = 'all', clScope = 'al
           <p style={{ color: '#888' }}>{T('请至少勾选一个服务。', 'Select at least one service.')}</p>
         ) : blocks}
         {/* REQ-018 style A: overall Sum across the exported services */}
-        {(p.schedStyle || 'classic') === 'weeks' && showSched && selPkgs.length > 0 && (
+        {schedStyle === 'weeks' && showSched && selPkgs.length > 0 && (
           <table className="t-fix" style={{ marginTop: 4 }}>
             <tbody>
               <tr>

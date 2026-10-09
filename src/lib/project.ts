@@ -6,6 +6,8 @@ import { seedReceipt } from './receipts';
 import { mergeChecklists, migrateProjectChecklist, type ProjectMigration } from './checklistMerge';
 import { canSeeProject } from './permissions';
 import { roleKeyOf } from './contactRoles';
+import { calendarFromRows, seedCalendar } from './scheduleSync';
+import { layoutFromStart } from '@/features/schedule-planner/domain/duration';
 import type {
   ChecklistGroup,
   ChecklistItem,
@@ -65,7 +67,7 @@ export interface NewProjectInput {
 
 export function buildPackage(svc: string, start: string, tpl?: Template): ServicePackage {
   const t = tpl || TPL[svc] || GENERIC;
-  return {
+  const pk: ServicePackage = {
     svc,
     start: start || '',
     delivery: '',
@@ -82,6 +84,10 @@ export function buildPackage(svc: string, start: string, tpl?: Template): Servic
       items: g[3].map((i) => ({ id: newId(), zh: i[0], en: i[1], status: 'pending' as const, date: '', remark: '', owner: '', shots: [] as string[] })),
     })),
   };
+  /* REQ-048:排期只在日历上排 —— 新建业务就带一份日历(阶段 = 上面这些行,id 相同);
+     有开始日就按默认工期排好(日历天,和原来经典排期一样),日期同时写回行 */
+  seedCalendar(pk, (st, weeks) => layoutFromStart(st, weeks, false), '');
+  return pk;
 }
 
 /* REQ-006: display code for a project's sequential NO. (zero-padded to 3).
@@ -249,6 +255,13 @@ export function migrate(p: any, opts: { onChecklistMigrated?: (m: ProjectMigrati
   if (!p.perm) p.perm = [];
   if (!Array.isArray(p.contacts)) p.contacts = [];
   p.packages.forEach((pk: any) => { if (!Array.isArray(pk.scopeItems)) pk.scopeItems = []; });
+  /* REQ-048:没有日历的业务(上线前的老数据、登记表导入、复制出来的)按阶段行补一份 ——
+     日期就是行上算出来的日期。上线时服务端会整体跑一遍、存库并写报告,这里只是兜底。 */
+  p.packages.forEach((pk: any) => {
+    if (!pk.calendar || !Array.isArray(pk.calendar.stages) || !pk.calendar.stages.length) {
+      pk.calendar = calendarFromRows(pk.schedule || [], planDates(pk, pkgStart(p, pk)), { by: '', at: Date.now() }).calendar;
+    }
+  });
   migrateWorkflow(p);
   return p as Project;
 }

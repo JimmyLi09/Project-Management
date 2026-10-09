@@ -190,7 +190,9 @@ export interface CalendarSchedule {
   /* REQ-047:老 CGI 流程的排期,提示过一次「要换成新阶段吗」之后的选择;
      flowUndo = 换之前的阶段和日期(「撤销」用,撤销或再存一次后清掉) */
   flow047?: 'kept' | 'switched';
-  flowUndo?: { stages: CalendarStage[]; boundaries: string[] };
+  flowUndo?: { stages: CalendarStage[]; boundaries: string[]; rows?: ScheduleRow[] };
+  /* REQ-048:效果图 / 动画新默认阶段,提示过一次「要换成新阶段吗」之后的选择(和 flow047 分开:换的是另一套新阶段) */
+  flow048?: 'kept' | 'switched';
   /* 项目级命名存档(替掉浏览器 localStorage) */
   archives?: { id: string; name: string; savedAt: string; stages: CalendarStage[]; boundaries: string[] }[];
 }
@@ -233,6 +235,12 @@ export interface ServicePackage {
      日历排期是另一种排法,项目可以两种都用、也可以只用一种。
      只存 boundaries + 阶段 + 备注,起止和工期是派生值,不入库。 */
   calendar?: CalendarSchedule;
+  /* REQ-048:日历上删掉的阶段,原来那一行有内容(负责人、状态、备注…)的挪到这里留底,只读显示 */
+  scheduleLegacy?: (ScheduleRow & { removedAt?: number })[];
+  /* REQ-048 上线迁移做了什么(回退脚本靠它还原):fromRows = 用阶段行生成了日历;
+     rowsFromCal = 原来只在日历上排、阶段行还是模板原样,用日历重写了阶段行(原行在 prevRows);
+     conflict = 两边都有内容,以阶段行为准重建日历,原日历在 prevCalendar(也进了存档) */
+  mig048?: { at: number; kind: 'fromRows' | 'rowsFromCal' | 'conflict'; calVersion?: number; prevRows?: ScheduleRow[]; prevCalendar?: CalendarSchedule };
 }
 
 /* business record attached to a service package (Job Record / Project Registers).

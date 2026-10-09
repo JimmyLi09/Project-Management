@@ -49,7 +49,8 @@ export default function ProjectDetail() {
   /* REQ-038: 这个项目按它创建时生效的那一版积分规则计分 */
   const pts = projPoints(p, rulesFor(p.created));
   const rawTab = view.tab || 'overview';
-  const pkgIdx = Math.min(view.pkg || 0, p.packages.length - 1);
+  /* REQ-048:排期页 pkg = -1 是「全部业务 · 总览」 */
+  const pkgIdx = view.pkg === -1 ? -1 : Math.max(0, Math.min(view.pkg || 0, p.packages.length - 1));
   const stage = projStage(p);
   const done = stage === 'complete' || stage === 'invoice';
   const h = done ? 'completed' : projectHealth(p);
@@ -58,7 +59,9 @@ export default function ProjectDetail() {
   const t0 = todayMid();
   const daysLeft = del ? Math.round((del.getTime() - t0.getTime()) / 86400000) : null;
 
-  const setTab = (tb: 'overview' | 'schedule' | 'checklist' | 'jobrecord') => setView({ ...view, tab: tb });
+  /* REQ-048:从标签点进排期先看总览(多个业务时);从概览点某个业务进来的直接到那个业务(onSchedule) */
+  const setTab = (tb: 'overview' | 'schedule' | 'checklist' | 'jobrecord') =>
+    setView({ ...view, tab: tb, ...(tb === 'schedule' && tab !== 'schedule' ? { pkg: p.packages.length > 1 ? -1 : 0 } : {}) });
   /* REQ-051: 权限表里「不可见」的标签不出现;直接打网址进来的落回概览 */
   const seeTab = { overview: true, schedule: canSeeModule(me, 'schedule'), checklist: canSeeModule(me, 'checklist'), jobrecord: canSeeModule(me, 'record') };
   const tab = seeTab[rawTab] ? rawTab : 'overview';

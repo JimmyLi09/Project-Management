@@ -6,6 +6,7 @@ import {
   useRef,
   useState,
   type FormEvent,
+  type ReactNode,
   type KeyboardEvent as ReactKeyboardEvent,
   type PointerEvent as ReactPointerEvent,
   type UIEvent as ReactUIEvent
@@ -38,6 +39,7 @@ import {
   setStageStart,
   type EditError,
   type EditMode,
+  type StageSchedule,
   type StageDefinition,
   stageName,
   STAGES
@@ -49,7 +51,7 @@ import {
   type ScheduleArchive
 } from '../domain/archives'
 import { getPublicHoliday } from '../domain/holidays'
-import { calculateDuration, distributeByWeights, formatDuration, layoutFromStart } from '../domain/duration'
+import { calculateDuration, distributeByWeights, endAfterUnits, formatDuration, layoutFromStart } from '../domain/duration'
 import { ArchivePanel } from './ArchivePanel'
 import { ExportPanel } from './ExportPanel'
 import { DEFAULT_EXPORT_NOTE, PrintSchedule, type PrintScheduleMeta } from './PrintSchedule'
@@ -158,6 +160,8 @@ export interface CalendarPlannerProps {
   }) => void | Promise<void>
   saveLabel?: string
   busy?: boolean
+  /* REQ-048:每个阶段行右边再挂点东西(接了项目时 = 负责人、状态)。不传就跟以前一样 */
+  stageExtra?: (stage: StageSchedule) => ReactNode
 }
 
 export function CalendarPlanner({
@@ -171,6 +175,7 @@ export function CalendarPlanner({
   onSave,
   saveLabel,
   busy,
+  stageExtra,
 }: CalendarPlannerProps = {}) {
   const { lang, t } = useLang()
   const initialCursorRef = useRef<MonthCursor>(monthFromDate(todayLocalDate()))
@@ -512,6 +517,23 @@ export function CalendarPlanner({
     setHoverDate(null)
     setIsDone(false)
     keepDateVisible(date)
+    return null
+  }
+
+  /* REQ-048:直接改某阶段的工期(工作日 / 日历天,跟 Exclude Holidays 走):结束日 = 开始日起第 n 个单位,
+     后面各阶段整体顺延 / 提前,工期不变 */
+  function handleEditDuration(index: number, units: number): string | null {
+    if (reverseOpen) return t('先关掉 Reverse plan。', 'Close Reverse plan first.')
+    const start = schedules[index]?.start
+    if (!start || boundaries.length === 0) return t(...EDIT_ERR.notReady)
+    if (!Number.isFinite(units) || units < 1) return t('工期至少 1 天。', 'A stage needs at least one day.')
+    const end = endAfterUnits(start, units, excludeHolidays)
+    const r = setStageEnd(boundaries, index, end, 'shift')
+    if ('error' in r) return t(...EDIT_ERR[r.error])
+    setBoundaries(r.boundaries)
+    setHoverDate(null)
+    setIsDone(false)
+    keepDateVisible(end)
     return null
   }
 
@@ -949,6 +971,8 @@ export function CalendarPlanner({
             onReset={handleReset}
             onRestoreStages={handleRestoreStages}
             onEditDate={handleEditDate}
+            onEditDuration={onSave ? handleEditDuration : undefined}
+            stageExtra={stageExtra}
             notes={notes}
             onNoteChange={onSave ? (stageId, note) => setNotes((cur) => ({ ...cur, [stageId]: note })) : undefined}
             onSave={onSave ? async () => {

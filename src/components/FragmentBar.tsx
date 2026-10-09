@@ -61,11 +61,10 @@ export default function FragmentBar({ p, pkgIdx, kind, scope = 'all' }: { p: Pro
 
   /* built-in reference templates reuse the existing schedule-style switch
      (REQ-018) / default checklist template, so they sit in the same dropdown. */
+  /* REQ-048:排期不再有「样式」可切(导出时再选),排期的两个参考模板去掉;
+     要回到这项服务的默认阶段,用阶段列表下面的「恢复默认阶段」 */
   const builtins = kind === 'schedule'
-    ? [
-        { key: 'weeks', label: t('参考模板:按服务分组(周)', 'Reference: by service (weeks)') },
-        { key: 'dates', label: t('参考模板:按日期(Scale Model)', 'Reference: by date (Scale Model)') },
-      ]
+    ? []
     : [{ key: 'default', label: t('参考模板:默认信息清单', 'Reference: default checklist') }];
 
   async function applyBuiltin(key: string) {

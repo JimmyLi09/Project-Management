@@ -87,7 +87,7 @@ export async function POST(req: NextRequest, { params }: Params) {
   /* 预览:数完就返回,一个字节都不写 */
   if (preview) return NextResponse.json({ preview: statFragment(frag, kind), label });
 
-  if (kind === 'schedule') applySchedule(dest, frag as ScheduleFragment, mode, withContent);
+  if (kind === 'schedule') applySchedule(dest, frag as ScheduleFragment, mode, withContent, { projectStart: p.start, by: user.name });
   else applyChecklist(p, scope, frag as ChecklistFragment, mode, withContent, user.name);
   const now = Date.now();
   const text = `${mode === 'replace' ? '覆盖' : '追加'}导入${kind === 'schedule' ? '排期' : '信息清单'}${withContent ? '(含内容)' : ''} ← ${label}`;
