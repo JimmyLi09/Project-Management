@@ -5,6 +5,7 @@ import { rulePoints, type PointRules } from './points';
 import { seedReceipt } from './receipts';
 import { mergeChecklists, migrateProjectChecklist, type ProjectMigration } from './checklistMerge';
 import { canSeeProject } from './permissions';
+import { roleKeyOf } from './contactRoles';
 import type {
   ChecklistGroup,
   ChecklistItem,
@@ -130,15 +131,16 @@ export function newProject(o: NewProjectInput, tplLookup?: (svc: string) => Temp
     /* seed the contact directory: a client row (+ any parties given), so the
        Contacts module has data from day one (R5-2/R5-4) */
     contacts: [
-      { role: '客户 Client', company: o.client || '', person: o.clientPerson || '', phone: o.clientPhone || '', email: o.clientEmail || '' },
+      /* REQ-052:角色存键(developer = 原「客户」) */
+      { role: 'developer', company: o.client || '', person: o.clientPerson || '', phone: o.clientPhone || '', email: o.clientEmail || '' },
       ...(o.mainContractor || o.mainConPerson || o.mainConPhone || o.mainConEmail
-        ? [{ role: '总包 Main Con', company: o.mainContractor || '', person: o.mainConPerson || '', phone: o.mainConPhone || '', email: o.mainConEmail || '' }] : []),
-      ...(o.architect ? [{ role: '建筑师 Architect', company: o.architect, person: '', phone: '', email: '' }] : []),
-      ...(o.landscape ? [{ role: '景观 Landscape', company: o.landscape, person: '', phone: '', email: '' }] : []),
-      ...(o.interior ? [{ role: '室内 Interior', company: o.interior, person: '', phone: '', email: '' }] : []),
-      ...(o.creative ? [{ role: '创意 Creative', company: o.creative, person: '', phone: '', email: '' }] : []),
+        ? [{ role: 'maincon', company: o.mainContractor || '', person: o.mainConPerson || '', phone: o.mainConPhone || '', email: o.mainConEmail || '' }] : []),
+      ...(o.architect ? [{ role: 'architect', company: o.architect, person: '', phone: '', email: '' }] : []),
+      ...(o.landscape ? [{ role: 'landscape', company: o.landscape, person: '', phone: '', email: '' }] : []),
+      ...(o.interior ? [{ role: 'interior', company: o.interior, person: '', phone: '', email: '' }] : []),
+      ...(o.creative ? [{ role: 'creative', company: o.creative, person: '', phone: '', email: '' }] : []),
       /* REQ-010: dynamic company blocks straight into the directory */
-      ...(o.companies || []).map((c) => ({ role: c.role || '', company: c.company || '', person: c.person || '', phone: c.phone || '', email: c.email || '' })),
+      ...(o.companies || []).map((c) => ({ role: roleKeyOf(c.role), company: c.company || '', person: c.person || '', phone: c.phone || '', email: c.email || '' })),
     ].filter((c) => c.company || c.person || c.phone || c.email),
     log: [],
     packages,

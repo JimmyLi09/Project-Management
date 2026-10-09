@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useMemo, useState } from 'react';
+import { CONTACT_ROLES as CONTACT_ROLE_DEFS } from '@/lib/contactRoles';
 import { useStore } from '../store';
 import { fmtDate, isoDate, missingInvoiceRef, parseISO, projectHealth, projPoints, projStage, schedProgress } from '@/lib/project';
 import { canAssign, canCreate, isScopedRole } from '@/lib/permissions';
@@ -395,10 +396,8 @@ function ProjectCard({ p, onOpen }: { p: Project; onOpen: () => void }) {
    REQ-010: sectioned form (客户信息 / 相关公司 / 服务类型 / 项目属性) with
    dynamic add/remove company blocks, each carrying person/phone/email. */
 interface CompanyDraft { role: string; company: string; person: string; phone: string; email: string }
-const COMPANY_ROLES: [string, string][] = [
-  ['总包 Main Con', 'Main Contractor'], ['建筑师 Architect', 'Architect'], ['景观 Landscape', 'Landscape'],
-  ['室内 Interior', 'Interior'], ['创意 Creative', 'Creative'],
-];
+/* REQ-052:这里只是输入提示,填进去的名字在建项目时换成键(roleKeyOf) */
+const COMPANY_ROLES: [string, string][] = CONTACT_ROLE_DEFS.filter((r) => r.key !== 'developer').map((r) => [r.zh, r.en]);
 
 export function NewProjectModal({ onClose }: { onClose: () => void }) {
   const { me, users, createProject, openProject } = useStore();

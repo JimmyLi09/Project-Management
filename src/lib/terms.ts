@@ -13,6 +13,8 @@
    · 已经落库的旧数据里那些「中文 English」混排字符串,用 `splitTerm()`
      临时劈开,不改库 —— 库里的历史值不该因为界面改语言而被重写。 */
 
+import { contactRoleLabel, isRoleKey, roleKeyOf } from './contactRoles';
+
 export type Lang = 'zh' | 'en';
 export type Term = [string, string];            // [zh, en]
 
@@ -82,18 +84,13 @@ export const DIFF_TERMS: Record<string, Term> = {
 };
 export const diffTerm = (d: string, lang: Lang): string => pick(DIFF_TERMS[d], lang, d);
 
-/* ---- 联系人角色(ProjectDetail.CONTACT_ROLES 存进库的是中文那一串)----
-   存的值不动,只在显示时换一边。手填的角色查不到就原样显示。 */
-export const CONTACT_ROLE_TERMS: Record<string, Term> = {
-  '客户 Client': ['客户', 'Client'],
-  '总包 Main-con': ['总包', 'Main contractor'],
-  '建筑师 Architect': ['建筑师', 'Architect'],
-  '景观 Landscape': ['景观', 'Landscape'],
-  '室内 Interior': ['室内', 'Interior'],
-  '创意 Creative': ['创意', 'Creative'],
+/* ---- 联系人角色 ----
+   REQ-052:存的是键(developer / maincon …,见 contactRoles.ts),旧数据里的中英标签也认;
+   「客户」改名「发展商 / Developer」。手填的角色查不到就按原文(中英混写的拆开)显示。 */
+export const contactRoleTerm = (v: string, lang: Lang): string => {
+  const k = roleKeyOf(v);
+  return isRoleKey(k) ? contactRoleLabel(k, lang) : termOf(v, lang);
 };
-export const contactRoleTerm = (v: string, lang: Lang): string =>
-  pick(CONTACT_ROLE_TERMS[v], lang, termOf(v, lang));
 
 /* ---- 资料卡字段分组(records.ts 里那几个 G_* 常量)----
    分组名是 PD 可以自己改的自由文本,所以这里只认出厂的几个;
