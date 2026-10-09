@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { identityOf, isFull } from '@/lib/permissions';
-import { denyUnlessVisible } from '@/server/avguard';
+import { denyUnlessVisible, denyAvModule } from '@/server/avguard';
 import { listUploads } from '@/server/avupload';
 import { getProject } from '@/server/db';
 import { currentUser } from '@/server/session';
@@ -9,6 +9,7 @@ import { currentUser } from '@/server/session';
 export async function GET(req: NextRequest) {
   const user = await currentUser();
   if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
+  { const deny = denyAvModule(user); if (deny) return deny; }
   const project = getProject(req.nextUrl.searchParams.get('project') ?? '');
   if (!project) return NextResponse.json({ error: '项目不存在' }, { status: 404 });
   const denied = denyUnlessVisible(user, project);

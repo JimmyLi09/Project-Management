@@ -1,10 +1,10 @@
 'use client';
 
 import React, { useState } from 'react';
-import { useStore } from '../store';
+import { useStore, useWho } from '../store';
 import CalendarScheduleTab from './CalendarScheduleTab';
 import { fmtDate, isoDate, MACRO, macroStage, parseISO, pkgStart, planDates, todayMid , pkgSuffix } from '@/lib/project';
-import { canEdit, canRowEdit, canSubmitCompletionHere } from '@/lib/permissions';
+import { canEdit, canEditIn, canRowEdit, canSubmitCompletionHere } from '@/lib/permissions';
 import { svcColor, svcName } from '@/lib/templates';
 import { useLang } from '@/lib/i18n';
 import { Avatar, Ell, Icon, Pill, TM } from '../ui';
@@ -28,6 +28,7 @@ export default function ScheduleTab({ p, pkgIdx, onExport, onPkg }: {
 }) {
   const { me, dispatch, users, setToast } = useStore();
   const { lang, t, dual } = useLang();
+  const who = useWho();   // REQ-051
   const [editMode, setEditMode] = useState(false);
   /* REQ-040(方案 A):日历排期与经典排期并存。
      已经排过日历的服务包默认打开日历视图,其余仍是经典 —— 老项目一行不动。 */
@@ -40,7 +41,7 @@ export default function ScheduleTab({ p, pkgIdx, onExport, onPkg }: {
   /* REQ-018: template style (stored on the project) + its edit toggle */
   const style = p.schedStyle || 'classic';
   const [tplEdit, setTplEdit] = useState(false);
-  const ed = canEdit(me, p);
+  const ed = canEditIn(me, p, 'schedule');   // REQ-051: 再过权限表
   const pkg = p.packages[pkgIdx];
   const assigneeNames = users.filter((u) => u.role === 'pm' || u.role === 'member' || u.role === 'director' || u.role === 'bd').map((u) => u.name);
   const pd = planDates(pkg, pkgStart(p, pkg));
@@ -354,7 +355,7 @@ export default function ScheduleTab({ p, pkgIdx, onExport, onPkg }: {
                           </>
                         )}
                       </div>
-                      <div>{r.assignee ? <Avatar name={r.assignee} size={26} /> : null}</div>
+                      <div>{r.assignee ? <Avatar name={r.assignee} size={26} title={who(r.assignee)} /> : null}</div>
                       {/* D6: dates editable inline (not only in edit mode). Editing sets
                           a start/end override; blank falls back to the planned date. */}
                       {ed && !editMode ? (
@@ -420,6 +421,7 @@ export default function ScheduleTab({ p, pkgIdx, onExport, onPkg }: {
 function CompletionCard({ p }: { p: Project }) {
   const { me, dispatch } = useStore();
   const { t } = useLang();
+  const who = useWho();
   const [summary, setSummary] = useState('');
   const [links, setLinks] = useState('');
   const [busy, setBusy] = useState(false);
@@ -447,7 +449,7 @@ function CompletionCard({ p }: { p: Project }) {
           <span style={{ fontSize: 12.5, color: 'var(--warning)', fontWeight: 600 }}>{t('待 PD 审批', 'Awaiting PD approval')}</span>
         )}
         <span style={{ fontSize: 12, color: 'var(--text2)' }}>
-          · {cr.submittedBy} {cr.submittedAt ? fmtDate(new Date(cr.submittedAt)) : ''}
+          · {who(cr.submittedBy)} {cr.submittedAt ? fmtDate(new Date(cr.submittedAt)) : ''}
         </span>
       </div>
     );
@@ -811,7 +813,7 @@ function AddNodeBar({ pid, pkgIdx }: { pid: string; pkgIdx: number }) {
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
         <input className="in sm" placeholder={t('节点名称,如「客户临时加一版小样」', 'Node name, e.g. "extra sample round"')} value={name} onChange={(e) => setName(e.target.value)} style={{ flex: 1, minWidth: 200 }} autoFocus />
         <input type="date" className="in sm" value={date} onChange={(e) => setDate(e.target.value)} title={t('日期', 'Date')} />
-        <input className="in sm" list="assignee-names" placeholder={t('负责人', 'Owner')} value={owner} onChange={(e) => setOwner(e.target.value)} style={{ width: 130 }} />
+        <input className="in sm" list="assignee-names-node" placeholder={t('负责人', 'Owner')} value={owner} onChange={(e) => setOwner(e.target.value)} style={{ width: 130 }} />
         <datalist id="assignee-names-node">{names.map((n) => <option key={n} value={n} />)}</datalist>
         <button className="btn-navy sm" onClick={add} disabled={busy || !name.trim()}>{busy ? t('添加中…', 'Adding…') : t('添加', 'Add')}</button>
         <button className="btn-line sm" onClick={() => setOpen(false)} disabled={busy}>{t('取消', 'Cancel')}</button>

@@ -22,7 +22,8 @@
    其余槽位原样填(人名、项目名、日期、数字)。 */
 
 import { SVC } from './templates';
-import { caseFieldTerm, caseStatusTerm } from './terms';
+import { caseFieldTerm, caseStatusTerm, roleTerm } from './terms';
+import { PERM_MODULES } from './permTable';
 import type { Lang } from './i18n';
 
 export type LogParams = Record<string, string | number | null | undefined>;
@@ -34,6 +35,11 @@ export interface LogLike {
 }
 
 /* ---- 枚举型槽位:值是 key,显示要按语言翻 ---- */
+const PERM_LEVEL: Record<string, [string, string]> = {
+  none: ['不可见', 'Hidden'],
+  read: ['只读', 'Read only'],
+  edit: ['可编辑', 'Can edit'],
+};
 const SCHED_STATUS: Record<string, [string, string]> = {
   todo: ['待办', 'To do'],
   wip: ['进行中', 'In progress'],
@@ -96,6 +102,11 @@ const TRANSLATED: Record<string, (v: string, lang: Lang) => string> = {
     const [k, a, b] = c.split(':');
     return `${enumTerm(JUDGE_ITEM, k, l)} ${a || '—'}→${b || '—'}`;
   }).join(l === 'zh' ? '；' : '; '),
+  /* REQ-051 权限表:哪个角色、哪个模块、从哪级改到哪级 */
+  role: roleTerm,
+  mod: (v, l) => { const m = PERM_MODULES.find((x) => x.key === v); return m ? (l === 'zh' ? m.zh : m.en) : v; },
+  lvFrom: (v, l) => enumTerm(PERM_LEVEL, v, l),
+  lvTo: (v, l) => enumTerm(PERM_LEVEL, v, l),
 };
 
 /* ---- 词条表 ---- */
@@ -270,6 +281,14 @@ export const LOG_MSG: Record<string, [string, string]> = {
   /* 风险 */
   'risk.dismiss': ['标记风险已处理:{key}', 'Risk dismissed: {key}'],
   'risk.restore': ['恢复风险:{key}', 'Risk restored: {key}'],
+
+  /* REQ-051 用户与权限。user.handover 写在每个受影响的项目里;其余写在管理日志 */
+  'user.handover': ['{from} 的工作转交给 {who}（删除账号，共 {n} 处）', "{from}'s work handed over to {who} (account deleted, {n} items)"],
+  'user.delete': ['删除账号 {name}：项目 → {toP}，待办 → {toT}，信息清单 → {toC}（涉及 {n} 个项目）',
+    'Deleted account {name}: projects → {toP}, tasks → {toT}, checklist → {toC} ({n} projects affected)'],
+  'perm.change': ['权限表：{role} ·「{mod}」{lvFrom} → {lvTo}', 'Permissions: {role} · "{mod}" {lvFrom} → {lvTo}'],
+  'user.disable': ['停用账号 {name}', 'Deactivated account {name}'],
+  'user.enable': ['启用账号 {name}', 'Reactivated account {name}'],
 };
 
 const SLOT = /\{(\w+)\}/g;

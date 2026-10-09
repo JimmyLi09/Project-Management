@@ -9,7 +9,8 @@ import { appendAudit, appendAuditMerged, getEffectiveTemplate, getProject, inser
 import { currentUser } from '@/server/session';
 import { applyAction, PermissionError, ValidationError } from '@/server/actions';
 import { logZh } from '@/lib/logmsg';
-import { denyUnlessVisible } from '@/server/avguard';
+import { redactProject } from '@/lib/permRedact';
+import { denyUnlessVisible, denyAvModule } from '@/server/avguard';
 
 /* 01 立项询价.
    POST { name, client, location, delivery, notes, lines[] } opens a project with
@@ -20,6 +21,7 @@ import { denyUnlessVisible } from '@/server/avguard';
 export async function GET(req: NextRequest) {
   const user = await currentUser();
   if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
+  { const deny = denyAvModule(user); if (deny) return deny; }
   const projectId = req.nextUrl.searchParams.get('project') ?? '';
   const project = getProject(projectId);
   if (!project) return NextResponse.json({ error: '项目不存在' }, { status: 404 });
@@ -32,6 +34,7 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   const user = await currentUser();
   if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
+  { const deny = denyAvModule(user); if (deny) return deny; }
   if (!canCreate(identityOf(user))) return NextResponse.json({ error: '仅销售 / PD / BD 可立项' }, { status: 403 });
 
   const body = (await req.json().catch(() => ({}))) as Record<string, unknown>;
@@ -78,7 +81,7 @@ export async function POST(req: NextRequest) {
     at: Date.now(), by: user.name,
     text: logZh('av.inquiry', { lines: avLines }), k: 'av.inquiry', p: { lines: avLines },
   }]);
-  return NextResponse.json({ project: p, inquiry });
+  return NextResponse.json({ project: redactProject(identityOf(user), p), inquiry });
 }
 
 /* AV-016 · 01 编辑已有项目,自动保存。PATCH { projectId, name, client, location, delivery, notes }
@@ -101,6 +104,7 @@ function answersOf(body: Record<string, unknown>, cur: InquiryAnswers): InquiryA
 export async function PATCH(req: NextRequest) {
   const user = await currentUser();
   if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
+  { const deny = denyAvModule(user); if (deny) return deny; }
   const body = (await req.json().catch(() => ({}))) as Record<string, unknown>;
   const project = getProject(String(body.projectId || ''));
   if (!project) return NextResponse.json({ error: '项目不存在' }, { status: 404 });
@@ -157,5 +161,5 @@ export async function PATCH(req: NextRequest) {
       return { text: logZh('av.inquiryEdit', q), p: q };
     });
   }
-  return NextResponse.json({ ok: true, changed, savedAt: Date.now(), project: getProject(project.id), inquiry: getInquiry(project.id) });
+  return NextResponse.json({ ok: true, changed, savedAt: Date.now(), project: (() => { const q = getProject(project.id); return q && redactProject(identityOf(user), q); })(), inquiry: getInquiry(project.id) });
 }

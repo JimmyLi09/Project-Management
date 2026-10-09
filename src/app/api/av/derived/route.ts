@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { listProjects } from '@/server/db';
 import { currentUser } from '@/server/session';
+import { denyAvModule } from '@/server/avguard';
 import { identityOf, visibleProjects } from '@/lib/permissions';
 import { latestConfig } from '@/server/avdb';
 import { compute } from '@/av/core/compute';
@@ -35,6 +36,7 @@ export interface AvDerived {
 export async function GET() {
   const user = await currentUser();
   if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
+  { const deny = denyAvModule(user); if (deny) return deny; }
 
   const out: Record<string, AvDerived> = {};
   for (const p of visibleProjects(identityOf(user), listProjects())) {

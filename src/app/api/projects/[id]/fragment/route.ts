@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { appendAudit, getProject, getUserTemplate, saveProjectCAS } from '@/server/db';
 import { currentUser } from '@/server/session';
-import { canEdit, canSeeProject, identityOf } from '@/lib/permissions';
+import { canEdit, canEditModule, canSeeProject, identityOf } from '@/lib/permissions';
+import { redactProject } from '@/lib/permRedact';
 import {
   applyChecklist, applySchedule, extractChecklist, extractSchedule, matchPackage, statFragment,
   type ChecklistFragment, type Fragment, type FragmentKind, type ScheduleFragment,
@@ -36,6 +37,10 @@ export async function POST(req: NextRequest, { params }: Params) {
   const kind = String(body?.kind || '') as FragmentKind;
   const mode = (String(body?.mode || 'replace') === 'append' ? 'append' : 'replace') as 'replace' | 'append';
   if (kind !== 'schedule' && kind !== 'checklist') return NextResponse.json({ error: '无效的内容类型' }, { status: 400 });
+  /* REQ-051: 导入排期 / 清单 = 改这一块,先过权限表 */
+  if (!canEditModule(identityOf(user), kind)) {
+    return NextResponse.json({ error: kind === 'schedule' ? '你的角色没有「排期」的编辑权限 / Your role can\'t edit "Schedule"' : '你的角色没有「信息清单」的编辑权限 / Your role can\'t edit "Checklist"' }, { status: 403 });
+  }
 
   /* 排期按服务包(pkg);REQ-044 起清单在项目上,按标签(scope = 'all' 或某个服务) */
   const pkgIdx = Number(body?.pkg ?? 0);
@@ -91,5 +96,5 @@ export async function POST(req: NextRequest, { params }: Params) {
   const v = saveProjectCAS(p, expectedVersion);
   if (v == null) return NextResponse.json({ error: '此项目刚被他人修改,已为你刷新,请核对后重新操作。', stale: true }, { status: 409 });
   appendAudit(p.id, [{ at: now, by: user.name, text }]);
-  return NextResponse.json({ project: p });
+  return NextResponse.json({ project: redactProject(identityOf(user), p) });
 }

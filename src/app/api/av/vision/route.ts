@@ -3,6 +3,7 @@ import { identityOf, isFull } from '@/lib/permissions';
 import { lastVisionRun } from '@/server/avjudge';
 import { getVisionSettings, saveVisionSettings, validateVisionSettings, visionStatus, type VisionSettings } from '@/server/avvision';
 import { currentUser } from '@/server/session';
+import { denyAvModule } from '@/server/avguard';
 
 /* 规则设置 › 识别服务 (AV-015 §3) — PD / BD only.
    GET: settings + last run. PUT: save settings. POST { warm? }: 检测状态 —
@@ -10,6 +11,7 @@ import { currentUser } from '@/server/session';
 async function admin() {
   const user = await currentUser();
   if (!user) return { error: NextResponse.json({ error: '未登录' }, { status: 401 }) };
+  { const deny = denyAvModule(user); if (deny) return { error: deny }; }
   if (!isFull(identityOf(user))) return { error: NextResponse.json({ error: '仅 PD / BD 可管理识别服务' }, { status: 403 }) };
   return { user };
 }

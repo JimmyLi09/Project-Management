@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useMemo, useState } from 'react';
-import { useStore } from '../store';
+import { useStore, useWho } from '../store';
 import {
   deliverySlack, fmtDate, infoProgress, isRiskDismissed, nextFreeze, overdueItems, parseISO,
   pkgProgress, pkgStart, planDates, plannedFinish, projectHealth, projPoints,
@@ -11,7 +11,7 @@ import { rulePoints, ruleFor } from '@/lib/points';
 import {
   canAssign, canCommercial, canCreate, canDecide, canDelete, canEdit, canEditFinance, isFull,
   canSeeWorkflow, canSeeWorkflowTimeline, canSeeHandoverBlock, canSeeCompletionBlock,
-  canSeeVerifyBlock, canSeeFinanceBlock, isPM, canMeta, canMarkInvoice,
+  canSeeVerifyBlock, canSeeFinanceBlock, isPM, canMeta, canMarkInvoice, canEditIn, canSeeModule,
 } from '@/lib/permissions';
 import { DIFF, STAGES, stageIdx, svcColor, svcName } from '@/lib/templates';
 import { contactRoleTerm, diffTerm, fieldGroupTerm } from '@/lib/terms';
@@ -30,6 +30,7 @@ import type { Project, ProjectContact } from '@/lib/types';
 export default function ProjectDetail() {
   const { projects, view, setView, me, dispatch, removeProject, go, users, refresh, openProject, setToast, rulesFor } = useStore();
   const { lang, t } = useLang();
+  const who = useWho();
   const [exportScope, setExportScope] = useState<null | 'all' | 'schedule' | 'checklist'>(null);
   const [transferFrom, setTransferFrom] = useState<string | null>(null);
   const [assignOpen, setAssignOpen] = useState(false);
@@ -47,7 +48,7 @@ export default function ProjectDetail() {
   const ed = canEdit(me, p);
   /* REQ-038: 这个项目按它创建时生效的那一版积分规则计分 */
   const pts = projPoints(p, rulesFor(p.created));
-  const tab = view.tab || 'overview';
+  const rawTab = view.tab || 'overview';
   const pkgIdx = Math.min(view.pkg || 0, p.packages.length - 1);
   const stage = projStage(p);
   const done = stage === 'complete' || stage === 'invoice';
@@ -58,6 +59,9 @@ export default function ProjectDetail() {
   const daysLeft = del ? Math.round((del.getTime() - t0.getTime()) / 86400000) : null;
 
   const setTab = (tb: 'overview' | 'schedule' | 'checklist' | 'jobrecord') => setView({ ...view, tab: tb });
+  /* REQ-051: 权限表里「不可见」的标签不出现;直接打网址进来的落回概览 */
+  const seeTab = { overview: true, schedule: canSeeModule(me, 'schedule'), checklist: canSeeModule(me, 'checklist'), jobrecord: canSeeModule(me, 'record') };
+  const tab = seeTab[rawTab] ? rawTab : 'overview';
 
   return (
     <>
@@ -208,9 +212,9 @@ export default function ProjectDetail() {
         </div>
         <div className="detail-tabs">
           <button className={`detail-tab ${tab === 'overview' ? 'active' : ''}`} onClick={() => setTab('overview')}>{t('概览', 'Overview')}</button>
-          <button className={`detail-tab ${tab === 'schedule' ? 'active' : ''}`} onClick={() => setTab('schedule')}>{t('排期', 'Schedule')}</button>
-          <button className={`detail-tab ${tab === 'checklist' ? 'active' : ''}`} onClick={() => setTab('checklist')}>{t('信息清单', 'Checklist')}</button>
-          <button className={`detail-tab ${tab === 'jobrecord' ? 'active' : ''}`} onClick={() => setTab('jobrecord')}>{t('Job Record', 'Job Record')}</button>
+          {seeTab.schedule && <button className={`detail-tab ${tab === 'schedule' ? 'active' : ''}`} onClick={() => setTab('schedule')} data-testid="tab-schedule">{t('排期', 'Schedule')}</button>}
+          {seeTab.checklist && <button className={`detail-tab ${tab === 'checklist' ? 'active' : ''}`} onClick={() => setTab('checklist')} data-testid="tab-checklist">{t('信息清单', 'Checklist')}</button>}
+          {seeTab.jobrecord && <button className={`detail-tab ${tab === 'jobrecord' ? 'active' : ''}`} onClick={() => setTab('jobrecord')} data-testid="tab-jobrecord">{t('Job Record', 'Job Record')}</button>}
         </div>
       </div>
 
@@ -261,7 +265,7 @@ export default function ProjectDetail() {
                 <option key={u.name} value={u.name}>{u.name}</option>
               ))}
               {/* 已指派的人后来改了角色 / 停用了,也得让这一栏显示得出他来 */}
-              {p.engineer && !users.some((u) => u.name === p.engineer) && <option value={p.engineer}>{p.engineer}</option>}
+              {p.engineer && !users.some((u) => u.name === p.engineer) && <option value={p.engineer}>{who(p.engineer)}</option>}
             </select>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -376,6 +380,7 @@ function AssignModal({ candidates, onClose, onAssign }: { candidates: string[]; 
 function InvoiceCard({ p }: { p: Project }) {
   const { me, dispatch, setToast } = useStore();
   const { t } = useLang();
+  const who = useWho();   // REQ-051: 已删除的人显示「(已删除)」
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const inv = p.invoiceClose;
@@ -404,7 +409,7 @@ function InvoiceCard({ p }: { p: Project }) {
             <span data-testid="invoice-status" style={{ fontSize: 13 }}>
               <span className="badge" style={{ background: 'var(--hover-bg)', color: 'var(--success)' }}>{t('已开 Invoice', 'Invoice issued')}</span>{' '}
               <b className="tnum">{inv!.invoiceRef}</b>
-              <span style={{ color: 'var(--text2)' }}> · {t('开票日期', 'issued')} {inv!.issuedDate ? fmtDate(parseISO(inv!.issuedDate)) : '—'}{inv!.issuedBy ? ` · ${inv!.issuedBy}` : ''}</span>
+              <span style={{ color: 'var(--text2)' }}> · {t('开票日期', 'issued')} {inv!.issuedDate ? fmtDate(parseISO(inv!.issuedDate)) : '—'}{inv!.issuedBy ? ` · ${who(inv!.issuedBy)}` : ''}</span>
             </span>
             {can && <button className="btn-line sm" data-testid="invoice-undo" disabled={busy} onClick={undo}>{t('撤回开票', 'Withdraw invoice')}</button>}
           </>
@@ -432,6 +437,7 @@ function InvoiceCard({ p }: { p: Project }) {
 function HandoverInbox({ p }: { p: Project }) {
   const { me, dispatch } = useStore();
   const { t } = useLang();
+  const who = useWho();   // REQ-051: 已删除的人显示「(已删除)」
   const [busy, setBusy] = useState(false);
   const h = p.handover;
   /* 只给被指派的那位 PM;PD/BD 在售后卡片里本来就能接 */
@@ -444,7 +450,7 @@ function HandoverInbox({ p }: { p: Project }) {
           📥 {t('这个项目交接给你了', 'This project was handed to you')}
         </span>
         <span style={{ fontSize: 12, color: 'var(--text2)' }}>
-          {h.submittedBy} · {h.submittedAt ? fmtDate(new Date(h.submittedAt)) : ''}
+          {who(h.submittedBy)} · {h.submittedAt ? fmtDate(new Date(h.submittedAt)) : ''}
         </span>
         <div style={{ flex: 1 }} />
         <button className="btn-navy sm" disabled={busy}
@@ -613,8 +619,12 @@ function PointsPanel({ p, canEd }: { p: Project; canEd: boolean }) {
 
 function OverviewTab({ p, onSchedule }: { p: Project; onSchedule: (pkg: number) => void }) {
   const { lang, t } = useLang();
+  const who = useWho();   // REQ-051: 已删除的人显示「(已删除)」
   const { dispatch, me, users, rulesFor } = useStore();
   const canEd = canEdit(me, p);
+  /* REQ-051: 概览里各块分属不同模块 —— 风险 = 项目,交付日 / Buffer = 排期,联系人 = 通讯录 */
+  const edRisk = canEditIn(me, p, 'projects');
+  const edSched = canEditIn(me, p, 'schedule');
   const sp = schedProgress(p);
   const ip = infoProgress(p);
   const od = overdueItems(p); // already excludes dismissed risks
@@ -702,7 +712,7 @@ function OverviewTab({ p, onSchedule }: { p: Project; onSchedule: (pkg: number) 
                 <div style={{ fontSize: 13.5, fontWeight: 600 }}>{r.title}</div>
                 <div style={{ fontSize: 12, color: 'var(--text2)', marginTop: 2 }}>{r.detail}</div>
               </div>
-              {canEd && r.key && (
+              {edRisk && r.key && (
                 <button className="btn-line sm" style={{ flexShrink: 0 }} title={t('标记为已处理,从风险列表清除', 'Mark handled and clear from the risk list')}
                   onClick={() => dispatch(p.id, { type: 'dismissRisk', key: r.key })}>✓ {t('已处理', 'Handled')}</button>
               )}
@@ -711,7 +721,7 @@ function OverviewTab({ p, onSchedule }: { p: Project; onSchedule: (pkg: number) 
           {dismissedKeys.length > 0 && (
             <div style={{ padding: '10px 22px', fontSize: 12, color: 'var(--text2)', display: 'flex', alignItems: 'center', gap: 8, background: 'var(--hover-bg)' }}>
               <span>{t(`已忽略 ${dismissedKeys.length} 项风险`, `${dismissedKeys.length} risk(s) dismissed`)}</span>
-              {canEd && (
+              {edRisk && (
                 <button className="btn-line sm" onClick={() => dismissedKeys.forEach((k) => dispatch(p.id, { type: 'restoreRisk', key: k }))}>
                   ↺ {t('全部恢复', 'Restore all')}
                 </button>
@@ -728,7 +738,7 @@ function OverviewTab({ p, onSchedule }: { p: Project; onSchedule: (pkg: number) 
             <Row k={t('计划完成', 'Planned finish')} v={fin ? fmtDate(fin) : '—'} />
             {/* REQ-039: 交付日 / Buffer 之前只有建项目时能填。Job Record 那张只读表
                 在显示交付日,总得有个地方改得动 —— 就在这里改。 */}
-            {canEd ? (
+            {edSched ? (
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
                 <span style={{ color: 'var(--text2)' }}>{t('交付日', 'Required delivery')}</span>
                 <input className="in sm" type="date" aria-label={t('交付日', 'Required delivery')}
@@ -736,7 +746,7 @@ function OverviewTab({ p, onSchedule }: { p: Project; onSchedule: (pkg: number) 
                   onChange={(e) => dispatch(p.id, { type: 'setDelivery', value: e.target.value })} />
               </div>
             ) : <Row k={t('交付日', 'Required delivery')} v={p.delivery ? fmtDate(parseISO(p.delivery)) : '—'} />}
-            {canEd ? (
+            {edSched ? (
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
                 <span style={{ color: 'var(--text2)' }}>Buffer</span>
                 <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
@@ -768,13 +778,13 @@ function OverviewTab({ p, onSchedule }: { p: Project; onSchedule: (pkg: number) 
           {(p.owners || []).map((n) => (
             <div key={n} style={{ display: 'flex', alignItems: 'center', gap: 11, padding: '9px 0', borderTop: '1px solid var(--row-line2)' }}>
               <Avatar name={n} size={30} />
-              <div style={{ flex: 1 }}><div style={{ fontSize: 13, fontWeight: 600 }}>{n}</div><div style={{ fontSize: 11.5, color: 'var(--text2)' }}>{t('项目经理', 'Project Manager')}</div></div>
+              <div style={{ flex: 1 }}><div style={{ fontSize: 13, fontWeight: 600 }}>{who(n)}</div><div style={{ fontSize: 11.5, color: 'var(--text2)' }}>{t('项目经理', 'Project Manager')}</div></div>
             </div>
           ))}
           {team.map((n) => (
             <div key={n} style={{ display: 'flex', alignItems: 'center', gap: 11, padding: '9px 0', borderTop: '1px solid var(--row-line2)' }}>
               <Avatar name={n} size={30} />
-              <div style={{ flex: 1 }}><div style={{ fontSize: 13, fontWeight: 600 }}>{n}</div><div style={{ fontSize: 11.5, color: 'var(--text2)' }}>{t('制作', 'Production')}</div></div>
+              <div style={{ flex: 1 }}><div style={{ fontSize: 13, fontWeight: 600 }}>{who(n)}</div><div style={{ fontSize: 11.5, color: 'var(--text2)' }}>{t('制作', 'Production')}</div></div>
               <span className="tnum" style={{ fontSize: 11.5, color: 'var(--text2)' }}>
                 {p.packages.reduce((a, pk) => a + pk.schedule.filter((r) => r.assignee === n && r.status !== 'done').length, 0)} {t('项未完成', 'open')}
               </span>
@@ -784,7 +794,7 @@ function OverviewTab({ p, onSchedule }: { p: Project; onSchedule: (pkg: number) 
         </div>
 
         {/* R5-2 联系人 · REQ-030: 默认只读展示,点「编辑」才进编辑态 */}
-        <ContactsPanel p={p} canEd={canEd} />
+        {canSeeModule(me, 'contacts') && <ContactsPanel p={p} canEd={canEditIn(me, p, 'contacts')} />}
 
         <div className="panel" style={{ padding: 20 }}>
           <div className="panel-title" style={{ fontSize: 15, marginBottom: 8, cursor: 'pointer' }} onClick={() => setLogOpen(!logOpen)}>
@@ -795,7 +805,7 @@ function OverviewTab({ p, onSchedule }: { p: Project; onSchedule: (pkg: number) 
             <div key={i} style={{ display: 'flex', gap: 11, padding: '8px 0', borderTop: '1px solid var(--row-line2)' }}>
               <Avatar name={e.by} size={24} />
               <div style={{ flex: 1, lineHeight: 1.4, minWidth: 0 }}>
-                <div style={{ fontSize: 12.5 }}><b style={{ fontWeight: 600 }}>{e.by}</b> {logText(e, lang)}</div>
+                <div style={{ fontSize: 12.5 }}><b style={{ fontWeight: 600 }}>{who(e.by)}</b> {logText(e, lang)}</div>
                 <div className="tnum" style={{ fontSize: 11, color: 'var(--text2)' }}>{fmtDate(new Date(e.at))} {new Date(e.at).toTimeString().slice(0, 5)}</div>
               </div>
             </div>
@@ -839,6 +849,7 @@ function WorkflowPanel({ p, users, me, dispatch }: {
   dispatch: (pid: string, a: import('@/server/actions').ProjectAction) => Promise<boolean>;
 }) {
   const { lang, t } = useLang();
+  const who = useWho();   // REQ-051: 已删除的人显示「(已删除)」
   const h = p.handover;
   const canSubmit = canCommercial(me, p);
   const isAssignedPm = !!h && me.name === h.assignedPmId;
@@ -884,10 +895,10 @@ function WorkflowPanel({ p, users, me, dispatch }: {
   /* §5.1 six-step timeline — each step derives done/current/pending from block timestamps */
   const dz = (ts?: number) => (ts ? fmtDate(new Date(ts)).slice(0, 6) : '');
   const steps: { zh: string; en: string; done: boolean; at: string; who: string }[] = [
-    { zh: '交接', en: 'Handover', done: !!h && h.status === 'accepted', at: dz(h?.submittedAt), who: h?.submittedBy || '' },
-    { zh: '完成包', en: 'Completion', done: !!cr && (cr.status === 'submitted' || cr.approval?.status === 'approved'), at: dz(cr?.submittedAt), who: cr?.submittedBy || '' },
-    { zh: 'PD 审批', en: 'PD approval', done: cr?.approval?.status === 'approved', at: dz(cr?.approval?.decidedAt), who: cr?.approval?.pdId || '' },
-    { zh: 'Sales 核对', en: 'Sales verify', done: sv?.status === 'verified', at: dz(sv?.at), who: sv?.by || '' },
+    { zh: '交接', en: 'Handover', done: !!h && h.status === 'accepted', at: dz(h?.submittedAt), who: who(h?.submittedBy) },
+    { zh: '完成包', en: 'Completion', done: !!cr && (cr.status === 'submitted' || cr.approval?.status === 'approved'), at: dz(cr?.submittedAt), who: who(cr?.submittedBy) },
+    { zh: 'PD 审批', en: 'PD approval', done: cr?.approval?.status === 'approved', at: dz(cr?.approval?.decidedAt), who: who(cr?.approval?.pdId) },
+    { zh: 'Sales 核对', en: 'Sales verify', done: sv?.status === 'verified', at: dz(sv?.at), who: who(sv?.by) },
     { zh: '开票', en: 'Invoice', done: inv?.invoiceStatus === 'issued', at: '', who: inv?.invoiceRef || '' },
     { zh: '收款', en: 'Payment', done: inv?.paymentStatus === 'received', at: '', who: '' },
   ];
@@ -939,9 +950,9 @@ function WorkflowPanel({ p, users, me, dispatch }: {
         /* REQ-022: PM 接收之后「交接即结束」—— 收成一行摘要,想看再展开。
            提交到接收之间不收,那段时间 Sales 还要能改。 */
         <div style={{ border: '1px solid var(--row-line)', borderRadius: 10, padding: '11px 14px', display: 'flex', alignItems: 'center', gap: 9, flexWrap: 'wrap' }}>
-          <span style={{ color: 'var(--success)', fontWeight: 600, fontSize: 12.5 }}>✓ {t('已交接给', 'Handed to')} {h.assignedPmId}</span>
+          <span style={{ color: 'var(--success)', fontWeight: 600, fontSize: 12.5 }}>✓ {t('已交接给', 'Handed to')} {who(h.assignedPmId)}</span>
           <span style={{ fontSize: 12, color: 'var(--text2)' }}>
-            · {h.submittedBy} {h.submittedAt ? fmtDate(new Date(h.submittedAt)) : ''}
+            · {who(h.submittedBy)} {h.submittedAt ? fmtDate(new Date(h.submittedAt)) : ''}
           </span>
           <div style={{ flex: 1 }} />
           <button className="btn-line sm" onClick={() => setHandoverOpen(true)}>{t('展开', 'Expand')}</button>
@@ -977,8 +988,8 @@ function WorkflowPanel({ p, users, me, dispatch }: {
         {h && h.status === 'submitted' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
             <div style={{ fontSize: 12.5 }}>
-              {t('已交接给', 'Handed to')} <b style={{ color: 'var(--navy900)' }}>{h.assignedPmId}</b> · <span style={{ color: 'var(--warning)' }}>{t('待接单', 'awaiting acceptance')}</span>
-              <span style={{ color: 'var(--text2)' }}> · {h.submittedBy} {fmtDate(new Date(h.submittedAt))}</span>
+              {t('已交接给', 'Handed to')} <b style={{ color: 'var(--navy900)' }}>{who(h.assignedPmId)}</b> · <span style={{ color: 'var(--warning)' }}>{t('待接单', 'awaiting acceptance')}</span>
+              <span style={{ color: 'var(--text2)' }}> · {who(h.submittedBy)} {fmtDate(new Date(h.submittedAt))}</span>
             </div>
             {h.salesBrief && <div style={{ fontSize: 12.5, whiteSpace: 'pre-wrap', background: 'var(--hover-bg)', borderRadius: 8, padding: '9px 11px' }}>{h.salesBrief}</div>}
             {(isAssignedPm || isFull(me)) && (
@@ -1022,7 +1033,7 @@ function WorkflowPanel({ p, users, me, dispatch }: {
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             <div style={{ fontSize: 12.5, color: 'var(--success)', fontWeight: 600 }}>
               ✓ {t('已接单 · 进入生产', 'Accepted · in production')}
-              <span style={{ color: 'var(--text2)', fontWeight: 400 }}> · {h.assignedPmId} {h.briefingAt ? fmtDate(new Date(h.briefingAt)) : ''}</span>
+              <span style={{ color: 'var(--text2)', fontWeight: 400 }}> · {who(h.assignedPmId)} {h.briefingAt ? fmtDate(new Date(h.briefingAt)) : ''}</span>
             </div>
             {h.salesBrief && <div style={{ fontSize: 12.5, whiteSpace: 'pre-wrap', background: 'var(--hover-bg)', borderRadius: 8, padding: '9px 11px' }}>{h.salesBrief}</div>}
           </div>
@@ -1064,7 +1075,7 @@ function WorkflowPanel({ p, users, me, dispatch }: {
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
               <div style={{ fontSize: 12.5 }}>
                 <span style={{ color: 'var(--warning)' }}>{t('待 PD 审批', 'Awaiting PD approval')}</span>
-                <span style={{ color: 'var(--text2)' }}> · {cr.submittedBy} {fmtDate(new Date(cr.submittedAt))}</span>
+                <span style={{ color: 'var(--text2)' }}> · {who(cr.submittedBy)} {fmtDate(new Date(cr.submittedAt))}</span>
               </div>
               {cr.summary && <div style={{ fontSize: 12.5, whiteSpace: 'pre-wrap', background: 'var(--hover-bg)', borderRadius: 8, padding: '9px 11px' }}>{cr.summary}</div>}
               {cr.links && <div style={{ fontSize: 12, color: 'var(--navy700)', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>🔗 {cr.links}</div>}
@@ -1084,7 +1095,7 @@ function WorkflowPanel({ p, users, me, dispatch }: {
           {cr.approval?.status === 'approved' && (
             <div style={{ fontSize: 12.5, color: 'var(--success)', fontWeight: 600 }}>
               ✓ {t('PD 已批准 · 制作完成', 'PD approved · production completed')}
-              <span style={{ color: 'var(--text2)', fontWeight: 400 }}> · {cr.approval.pdId} {cr.approval.decidedAt ? fmtDate(new Date(cr.approval.decidedAt)) : ''}</span>
+              <span style={{ color: 'var(--text2)', fontWeight: 400 }}> · {who(cr.approval.pdId)} {cr.approval.decidedAt ? fmtDate(new Date(cr.approval.decidedAt)) : ''}</span>
               {cr.approval.note ? <span style={{ color: 'var(--text2)', fontWeight: 400 }}> — {cr.approval.note}</span> : null}
               <div style={{ fontSize: 11.5, color: 'var(--text2)', fontWeight: 400, marginTop: 4 }}>{t('等待 Sales 核对后开票(下一阶段)。', 'Awaiting Sales verification before invoicing (next stage).')}</div>
             </div>
@@ -1099,7 +1110,7 @@ function WorkflowPanel({ p, users, me, dispatch }: {
           {sv.status === 'verified' ? (
             <div style={{ fontSize: 12.5, color: 'var(--success)', fontWeight: 600 }}>
               ✓ {t('已核对', 'Verified')} · {sv.finalInvoiceAllowed ? t('允许开票', 'invoice allowed') : t('暂不开票', 'invoice held')}
-              <span style={{ color: 'var(--text2)', fontWeight: 400 }}> · {sv.by} {sv.at ? fmtDate(new Date(sv.at)) : ''}</span>
+              <span style={{ color: 'var(--text2)', fontWeight: 400 }}> · {who(sv.by)} {sv.at ? fmtDate(new Date(sv.at)) : ''}</span>
             </div>
           ) : canCommercial(me, p) ? (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -1202,6 +1213,7 @@ function Row({ k, v }: { k: string; v: string }) {
 
 function HistoryModal({ pid, onClose }: { pid: string; onClose: () => void }) {
   const { lang, t } = useLang();
+  const who = useWho();   // REQ-051: 已删除的人显示「(已删除)」
   const [entries, setEntries] = useState<(LogLike & { at: number; by: string })[] | null>(null);
   React.useEffect(() => {
     fetch(`/api/projects/${pid}/audit`).then((r) => r.ok ? r.json() : { entries: [] }).then((d) => setEntries(d.entries));
@@ -1221,7 +1233,7 @@ function HistoryModal({ pid, onClose }: { pid: string; onClose: () => void }) {
           <div key={i} style={{ display: 'flex', gap: 11, padding: '9px 0', borderTop: '1px solid var(--row-line2)' }}>
             <Avatar name={e.by} size={24} />
             <div style={{ flex: 1, lineHeight: 1.4, minWidth: 0 }}>
-              <div style={{ fontSize: 12.5 }}><b style={{ fontWeight: 600 }}>{e.by}</b> {logText(e, lang)}</div>
+              <div style={{ fontSize: 12.5 }}><b style={{ fontWeight: 600 }}>{who(e.by)}</b> {logText(e, lang)}</div>
               <div className="tnum" style={{ fontSize: 11, color: 'var(--text2)' }}>{fmtDate(new Date(e.at))} {new Date(e.at).toTimeString().slice(0, 5)}</div>
             </div>
           </div>

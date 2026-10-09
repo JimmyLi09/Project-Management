@@ -3,6 +3,7 @@ import { getProject, listAudit } from '@/server/db';
 import { currentUser } from '@/server/session';
 import { canSeeProject, identityOf, priceView } from '@/lib/permissions';
 import { redactLog } from '@/server/avredact';
+import { logHiddenFor } from '@/lib/permRedact';
 
 /* Full permanent audit trail for a project (never rotated, unlike the
    200-entry in-document log). Any signed-in user who can see the project. */
@@ -17,5 +18,6 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   if (!canSeeProject(identityOf(user), p)) return NextResponse.json({ error: '非你管理 / 参与的项目' }, { status: 403 });
   /* 字段级隔离:成本确认、提交报价这几条日志带着金额与毛利,按人抹掉 */
   const v = priceView(identityOf(user));
-  return NextResponse.json({ entries: listAudit(id, 2000).map((e) => redactLog(e, v)) });
+  const hidden = logHiddenFor(identityOf(user));   // REQ-051: 「不可见」模块的日志也不给
+  return NextResponse.json({ entries: listAudit(id, 2000).filter((e) => !hidden(e.k)).map((e) => redactLog(e, v)) });
 }

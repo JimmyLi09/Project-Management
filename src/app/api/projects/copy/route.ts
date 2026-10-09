@@ -6,6 +6,7 @@ import { emptyUpdate, migrate, uid } from '@/lib/project';
 import { freshChecklist, trimPackage } from '@/server/fragments';
 import type { Project } from '@/lib/types';
 import { logZh } from '@/lib/logmsg';
+import { redactProject } from '@/lib/permRedact';
 
 /* REQ-012: POST /api/projects/copy  { sourceId, mode }
    Deep-copies a project, trims it to the requested slice, then resets every
@@ -63,5 +64,5 @@ export async function POST(req: NextRequest) {
   const fresh = migrate(copy); // re-derive statuses / fill any defaults
   insertProject(fresh);
   appendAudit(fresh.id, [{ at: now, by: user.name, text: logZh('proj.copy', copyP), k: 'proj.copy', p: copyP }]);
-  return NextResponse.json({ project: fresh });
+  return NextResponse.json({ project: redactProject(identityOf(user), fresh) });
 }

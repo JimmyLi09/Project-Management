@@ -21,7 +21,9 @@ import type { KbDoc } from '@/lib/kb';
    点开一个人能看到四维明细 —— 每一维的原始值、折成几分、由哪些项目算来的。
    KPI 最怕「这分怎么来的说不清」,所以明细里把口径和项目清单都摊开。 */
 export default function KpiView() {
-  const { projects, users, kpiRules, rulesFor, go } = useStore();
+  const { projects, allUsers, kpiRules, rulesFor, go } = useStore();
+  /* REQ-051: KPI 是绩效记录,停用的人照旧算(和以前一样);已删除的不再出现 */
+  const users = useMemo(() => allUsers.filter((u) => !u.deletedAt), [allUsers]);
   const { lang, t } = useLang();
 
   const [pk, setPk] = useState<PeriodKey>('quarter');

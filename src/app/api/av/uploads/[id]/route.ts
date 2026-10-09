@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { identityOf, isFull } from '@/lib/permissions';
-import { denyUnlessVisible } from '@/server/avguard';
+import { denyUnlessVisible, denyAvModule } from '@/server/avguard';
 import { removeFailedUpload, uploadProject } from '@/server/avupload';
 import { getProject } from '@/server/db';
 import { currentUser } from '@/server/session';
@@ -12,6 +12,7 @@ type Params = { params: Promise<{ id: string }> };
 export async function DELETE(_req: NextRequest, { params }: Params) {
   const user = await currentUser();
   if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
+  { const deny = denyAvModule(user); if (deny) return deny; }
   const id = Number((await params).id);
   const pid = Number.isInteger(id) ? uploadProject(id) : null;
   const project = pid ? getProject(pid) : null;

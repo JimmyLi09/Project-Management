@@ -4,7 +4,8 @@
 
 import type { Identity } from '@/lib/permissions';
 import {
-  canAssign, canCommercial, canDecide, canEdit, canEditFinance, canRowEdit, isFull, canDelete , canMeta, canMarkInvoice } from '@/lib/permissions';
+  canAssign, canCommercial, canDecide, canEdit, canEditFinance, canEditModule, canRowEdit, isFull, canDelete , canMeta, canMarkInvoice } from '@/lib/permissions';
+import { ACTION_MODULE, PERM_MODULES } from '@/lib/permTable';
 import { buildPackage, deriveStatuses, fitWindow, newId, parseISO, isoDate, totalDays } from '@/lib/project';
 import { getBuiltinTemplate, SVC, type Template } from '@/lib/templates';
 import { stagesFromTemplate } from '@/lib/calendarStages';
@@ -213,6 +214,12 @@ const svcsText = (svcs: string[]) => svcs.map((s) => SVC[s]?.label || s).join('�
 /* Mutates p in place. Throws PermissionError / ValidationError. */
 export function applyAction(u: Identity, p: Project, a: ProjectAction, ctx: ActionCtx = {}): void {
   const { tplForSvc } = ctx;
+  /* REQ-051: 先过权限表(模块级),再走下面每个动作各自的业务规则 */
+  const mod = ACTION_MODULE[a.type];
+  if (mod && !canEditModule(u, mod)) {
+    const m = PERM_MODULES.find((x) => x.key === mod)!;
+    throw new PermissionError(`你的角色没有「${m.zh}」的编辑权限 / Your role can't edit "${m.en}"`);
+  }
   switch (a.type) {
     case 'toggleDone': {
       const { pk, r } = getRow(p, a.pkg, a.idx);

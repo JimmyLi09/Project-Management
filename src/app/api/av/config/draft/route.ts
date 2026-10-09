@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { canCostProject, identityOf } from '@/lib/permissions';
 import { logZh } from '@/lib/logmsg';
 import { clearDraft, configCount, getDrawing, latestConfig, saveDraft } from '@/server/avdb';
-import { denyUnlessVisible } from '@/server/avguard';
+import { denyUnlessVisible, denyAvModule } from '@/server/avguard';
 import { appendAuditMerged, getProject } from '@/server/db';
 import { currentUser } from '@/server/session';
 
@@ -15,6 +15,7 @@ const MAX = 64 * 1024;
 async function guard(projectId: string) {
   const user = await currentUser();
   if (!user) return { error: NextResponse.json({ error: '未登录' }, { status: 401 }) };
+  { const deny = denyAvModule(user); if (deny) return { error: deny }; }
   const project = getProject(projectId);
   if (!project) return { error: NextResponse.json({ error: '项目不存在' }, { status: 404 }) };
   const denied = denyUnlessVisible(user, project);

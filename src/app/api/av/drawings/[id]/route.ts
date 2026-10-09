@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getDrawing } from '@/server/avdb';
 import { currentUser } from '@/server/session';
 import { getProject } from '@/server/db';
-import { denyUnlessVisible } from '@/server/avguard';
+import { denyUnlessVisible, denyAvModule } from '@/server/avguard';
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -11,6 +11,7 @@ type Params = { params: Promise<{ id: string }> };
 export async function GET(_req: NextRequest, { params }: Params) {
   const user = await currentUser();
   if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
+  { const deny = denyAvModule(user); if (deny) return deny; }
   const drawing = getDrawing(Number((await params).id));
   if (!drawing) return NextResponse.json({ error: '图纸不存在' }, { status: 404 });
   /* REQ-043:这一条原来只查了登录 —— 任何人凭一个数字 id 就能取到任意项目的

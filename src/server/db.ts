@@ -9,6 +9,8 @@ import { getBuiltinTemplate, SVC, type Template } from '@/lib/templates';
 import { applyProjField, projSourceOf } from '@/lib/records';
 import { logZh, type LogParams } from '@/lib/logmsg';
 import { cleanSynonyms, DEFAULT_SYNONYMS, getSynonyms, migrationReport, setSynonyms, type ProjectMigration } from '@/lib/checklistMerge';
+import { defaultPermTable, permDiff, sanitizePermTable, setPermSource, type PermTable } from '@/lib/permTable';
+import { handOverWork, renameInProject } from '@/lib/peopleRefs';
 
 /* On serverless platforms (Vercel) the project directory is read-only and
    ephemeral — keep the demo database in /tmp there. */
@@ -361,6 +363,18 @@ function migrateSchema(d: Database.Database) {
   if (!cols.includes('disabled')) d.exec('ALTER TABLE users ADD COLUMN disabled INTEGER NOT NULL DEFAULT 0');
   if (!cols.includes('avatar')) d.exec("ALTER TABLE users ADD COLUMN avatar TEXT NOT NULL DEFAULT ''");
   if (!cols.includes('point_cap')) d.exec('ALTER TABLE users ADD COLUMN point_cap INTEGER NOT NULL DEFAULT 0');
+  /* REQ-051: 删除用户 = 先转交工作,再打上删除时间。行不删 —— 历史记录里的名字还要认得出是谁,
+     显示「(已删除)」。0 = 没删 */
+  if (!cols.includes('deleted_at')) d.exec('ALTER TABLE users ADD COLUMN deleted_at INTEGER NOT NULL DEFAULT 0');
+  /* REQ-051: 不属于某个项目的管理操作(改权限表、删除用户)记在这里;项目里的照旧进 audit_log */
+  d.exec(`CREATE TABLE IF NOT EXISTS admin_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    at INTEGER NOT NULL,
+    by TEXT NOT NULL,
+    text TEXT NOT NULL,
+    k TEXT,
+    p TEXT
+  )`);
   /* v2.2 §4.2 [P0-3]: optimistic-lock version on projects */
   const pcols = (d.prepare('PRAGMA table_info(projects)').all() as { name: string }[]).map((c) => c.name);
   if (!pcols.includes('version')) d.exec('ALTER TABLE projects ADD COLUMN version INTEGER NOT NULL DEFAULT 0');
@@ -700,7 +714,7 @@ export function getUserByEmail(email: string) {
     .prepare("SELECT * FROM users WHERE email != '' AND lower(email) = ?")
     .get(email.toLowerCase()) as (User & { password_hash: string }) | undefined;
 }
-const USER_COLS = 'id, username, name, role, email, position, must_change_pw AS mustChangePassword, disabled, avatar, point_cap AS pointCap';
+const USER_COLS = 'id, username, name, role, email, position, must_change_pw AS mustChangePassword, disabled, avatar, point_cap AS pointCap, deleted_at AS deletedAt';
 function rowToUser(r: Record<string, unknown> | undefined): User | undefined {
   if (!r) return undefined;
   return {
@@ -709,6 +723,7 @@ function rowToUser(r: Record<string, unknown> | undefined): User | undefined {
     mustChangePassword: !!r.mustChangePassword, disabled: !!r.disabled,
     avatar: (r.avatar as string) || undefined,
     pointCap: (r.pointCap as number) || 0,
+    ...(r.deletedAt ? { deletedAt: r.deletedAt as number } : {}),
   };
 }
 export function getUserById(id: number) {
@@ -1016,19 +1031,99 @@ export function setUserAvatar(id: number, avatar: string): User | undefined {
   return { ...u, avatar: avatar || undefined };
 }
 
+/* 改名:项目里按名字记的所有「职责」都跟着改(清单表见 lib/peopleRefs.ts),培训的指派 / 进度也跟着走。
+   日志、收料记录这类「当时是谁做的」不改。一个事务里做完,中途出错就全不改。
+   REQ-051 补全:以前漏了信息清单负责人、交接给谁、培训。 */
 function propagateRename(oldName: string, newName: string) {
-  for (const p of listProjects()) {
-    let changed = false;
-    if ((p.owners || []).includes(oldName)) { p.owners = p.owners.map((n) => (n === oldName ? newName : n)); changed = true; }
-    if ((p.perm || []).includes(oldName)) { p.perm = p.perm.map((n) => (n === oldName ? newName : n)); changed = true; }
-    if (p.engineer === oldName) { p.engineer = newName; changed = true; }   // REQ-043
-    p.packages.forEach((pk) => {
-      if (pk.owner === oldName) { pk.owner = newName; changed = true; }
-      pk.schedule.forEach((r) => { if (r.assignee === oldName) { r.assignee = newName; changed = true; } });
-    });
-    if (changed) saveProject(p);
-  }
+  const d = getDb();
+  d.transaction(() => {
+    for (const p of listProjects()) if (renameInProject(p, oldName, newName) > 0) saveProject(p);
+    const paths = d.prepare('SELECT id, assignees FROM training_paths').all() as { id: string; assignees: string }[];
+    for (const r of paths) {
+      let list: unknown;
+      try { list = JSON.parse(r.assignees || '[]'); } catch { continue; }
+      if (!Array.isArray(list) || !list.includes(oldName)) continue;
+      const next = [...new Set(list.map((n) => (n === oldName ? newName : n)))];
+      d.prepare('UPDATE training_paths SET assignees = ? WHERE id = ?').run(JSON.stringify(next), r.id);
+    }
+    /* 进度按 (path_id, user_name) 唯一:新名字万一已经有一行(同名的人?)就别覆盖 */
+    d.prepare('UPDATE OR IGNORE training_progress SET user_name = ? WHERE user_name = ?').run(newName, oldName);
+    d.prepare('UPDATE training_attempts SET user_name = ? WHERE user_name = ?').run(newName, oldName);
+  })();
 }
+
+/* ===== REQ-051 删除用户:先转交,再删 =====
+   · 项目职责(PM / 工程师 / 编辑授权 / 服务包负责人 / 待接收的交接)→ to.projects
+   · 没完成的排期任务 → to.tasks;没确认的信息清单项 → to.checklist
+   · 已完成 / 已确认的、日志、收料记录:保留原名,显示「(已删除)」
+   · 账号行不删,打上 deleted_at(同时停用)—— 登录、会话、指派下拉都认这个
+   一个事务:转交和删除要么都成,要么都不成。 */
+export function deleteUserWithHandover(id: number, to: { projects: string; tasks: string; checklist: string }, by: string):
+  { projects: number; tasks: number; checklist: number; touched: number } | undefined {
+  const u = getUserById(id);
+  if (!u || u.deletedAt) return undefined;
+  const d = getDb();
+  const total = { projects: 0, tasks: 0, checklist: 0, touched: 0 };
+  d.transaction(() => {
+    const now = Date.now();
+    for (const p of listProjects()) {
+      const c = handOverWork(p, u.name, to);
+      if (!c.projects && !c.tasks && !c.checklist) continue;
+      const got = [c.projects && to.projects, c.tasks && to.tasks, c.checklist && to.checklist].filter(Boolean) as string[];
+      const params = { from: u.name, who: [...new Set(got)].join('、'), n: c.projects + c.tasks + c.checklist };
+      const e = { at: now, by, text: logZh('user.handover', params), k: 'user.handover', p: params };
+      p.log = p.log || [];
+      p.log.unshift(e);
+      if (p.log.length > 200) p.log.length = 200;
+      saveProject(p);
+      appendAudit(p.id, [e]);
+      total.projects += c.projects; total.tasks += c.tasks; total.checklist += c.checklist; total.touched++;
+    }
+    d.prepare('UPDATE users SET deleted_at = ?, disabled = 1 WHERE id = ?').run(now, id);
+    appendAdminLog(by, 'user.delete', { name: u.name, toP: to.projects, toT: to.tasks, toC: to.checklist, n: total.touched });
+  })();
+  return total;
+}
+
+/* ===== REQ-051 管理日志(不属于某个项目的操作) ===== */
+export function appendAdminLog(by: string, k: string, p?: LogParams) {
+  getDb().prepare('INSERT INTO admin_log (at, by, text, k, p) VALUES (?, ?, ?, ?, ?)')
+    .run(Date.now(), by, logZh(k, p), k, p ? JSON.stringify(p) : null);
+}
+export function listAdminLog(limit = 200): { at: number; by: string; text: string; k?: string; p?: LogParams }[] {
+  const rows = getDb().prepare('SELECT at, by, text, k, p FROM admin_log ORDER BY at DESC, id DESC LIMIT ?')
+    .all(limit) as { at: number; by: string; text: string; k: string | null; p: string | null }[];
+  return rows.map((r) => ({ at: r.at, by: r.by, text: r.text, ...(r.k ? { k: r.k } : {}), ...(r.p ? { p: JSON.parse(r.p) as LogParams } : {}) }));
+}
+
+/* ===== REQ-051 权限表:存在 meta 表 perm.table =====
+   没存过 = 默认值(= 现在代码的规则)。读出来一律过 sanitize:旧版本、手改、缺格都夹回 [下限, 上限]。
+   服务端一次请求里会问很多遍,缓存 2 秒;保存时立刻失效。 */
+const PERM_KEY = 'perm.table';
+let permCache: { at: number; t: PermTable } | null = null;
+export function getPermTable(): PermTable {
+  if (permCache && Date.now() - permCache.at < 2000) return permCache.t;
+  const row = getDb().prepare('SELECT value FROM meta WHERE key = ?').get(PERM_KEY) as { value: string } | undefined;
+  let t = defaultPermTable();
+  if (row) { try { t = sanitizePermTable(JSON.parse(row.value)); } catch { /* 坏了就当默认 */ } }
+  permCache = { at: Date.now(), t };
+  return t;
+}
+/* 保存并记日志(每格一条);返回改了几格 */
+export function savePermTable(raw: unknown, by: string): { table: PermTable; changed: number } {
+  const before = getPermTable();
+  const next = sanitizePermTable(raw);
+  const diff = permDiff(before, next);
+  if (!diff.length) return { table: before, changed: 0 };
+  const d = getDb();
+  d.transaction(() => {
+    d.prepare('INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value').run(PERM_KEY, JSON.stringify(next));
+    for (const c of diff) appendAdminLog(by, 'perm.change', { role: c.role, mod: c.module, lvFrom: c.from, lvTo: c.to });
+  })();
+  permCache = { at: Date.now(), t: next };
+  return { table: next, changed: diff.length };
+}
+setPermSource(getPermTable);
 
 /* ---- default accounts so the system is usable out of the box ---- */
 function seedIfEmpty(d: Database.Database) {

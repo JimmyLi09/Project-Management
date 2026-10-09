@@ -8,7 +8,7 @@ import { DrawingServiceError, renderFile } from '@/server/avdrawing';
 import { currentUser } from '@/server/session';
 import { ledAdvice } from '@/server/avctrl';
 import { getProject } from '@/server/db';
-import { denyUnlessVisible } from '@/server/avguard';
+import { denyUnlessVisible, denyAvModule } from '@/server/avguard';
 
 /* POST { kind: 'dxf' | 'proposal', cfg, packVersion, title, client?, lang? } -> the
    LED layout as DXF, or the technical proposal as Word in Chinese or English. The server recomputes from
@@ -25,6 +25,7 @@ const KINDS = {
 export async function POST(req: NextRequest) {
   const user = await currentUser();
   if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
+  { const deny = denyAvModule(user); if (deny) return deny; }
   if (!canExportLed(identityOf(user))) return NextResponse.json({ error: '仅 PM 可导出图纸与方案书' }, { status: 403 });
   const body = (await req.json().catch(() => ({}))) as { kind?: string; cfg?: LedConfig; packVersion?: string; title?: string; client?: string; lang?: string; projectId?: string };
   const kind = body.kind === 'proposal' || body.kind === 'dxf' ? KINDS[body.kind] : null;

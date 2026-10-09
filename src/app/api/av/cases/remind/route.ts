@@ -3,6 +3,7 @@ import { canEditPrices, identityOf } from '@/lib/permissions';
 import { logZh } from '@/lib/logmsg';
 import { appendCaseLog, setContacted } from '@/server/avdb';
 import { currentUser } from '@/server/session';
+import { denyAvModule } from '@/server/avguard';
 
 /* 保修到期提醒的「已联系」(AV-014 §7 第 1 条的后续)。
    POST { caseKey, contacted: true | false }   —— PD / BD only,与提醒的可见范围一致。
@@ -11,6 +12,7 @@ import { currentUser } from '@/server/session';
 export async function POST(req: NextRequest) {
   const user = await currentUser();
   if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
+  { const deny = denyAvModule(user); if (deny) return deny; }
   if (!canEditPrices(identityOf(user))) return NextResponse.json({ error: '仅 PD / BD 可标记已联系' }, { status: 403 });
 
   const body = (await req.json().catch(() => null)) as { caseKey?: string; contacted?: unknown } | null;

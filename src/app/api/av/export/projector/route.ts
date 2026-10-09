@@ -6,6 +6,7 @@ import { buildPrjDxf } from '@/av/core/prj/views';
 import { canExportLed, identityOf } from '@/lib/permissions';
 import { DrawingServiceError, renderFile } from '@/server/avdrawing';
 import { currentUser } from '@/server/session';
+import { denyAvModule } from '@/server/avguard';
 import { prjLibrary } from '@/server/avdb';
 
 /* AV-020 §3.4:POST { kind: 'dxf' | 'proposal', cfg, packVersion, title?, client?, lang? } -> 投影的
@@ -25,6 +26,7 @@ export async function POST(req: NextRequest) {
   const T = (zh: string, en: string) => (lang === 'en' ? en : zh);
   const user = await currentUser();
   if (!user) return NextResponse.json({ error: T('未登录', 'Not signed in') }, { status: 401 });
+  { const deny = denyAvModule(user); if (deny) return deny; }
   if (!canExportLed(identityOf(user))) return NextResponse.json({ error: T('仅 PM 可导出图纸与方案书', 'Only PMs can export drawings and proposals') }, { status: 403 });
   const kind = body.kind === 'proposal' || body.kind === 'dxf' ? KINDS[body.kind] : null;
   if (!kind) return NextResponse.json({ error: T('未知的导出类型', 'Unknown export type') }, { status: 400 });

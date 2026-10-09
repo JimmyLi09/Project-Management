@@ -18,7 +18,7 @@ import { lineProjectError } from '@/server/avdrawing';
 import { appendAudit, getProject } from '@/server/db';
 import { currentUser } from '@/server/session';
 import { logZh, type LogParams } from '@/lib/logmsg';
-import { denyUnlessVisible } from '@/server/avguard';
+import { denyUnlessVisible, denyAvModule } from '@/server/avguard';
 import { ctrlSummary, ledAdvice } from '@/server/avctrl';
 
 /* 一条审计记录的 text / k / p 三件套 —— 写日志的地方都是这个形状 */
@@ -31,6 +31,7 @@ const lineOf = (v: unknown) => (v === 'projector' || v === 'elv' || v === 'pv' ?
 export async function GET(req: NextRequest) {
   const user = await currentUser();
   if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
+  { const deny = denyAvModule(user); if (deny) return deny; }
   const project = getProject(req.nextUrl.searchParams.get('project') ?? '');
   if (!project) return NextResponse.json({ error: '项目不存在' }, { status: 404 });
   const denied = denyUnlessVisible(user, project);
@@ -54,6 +55,7 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   const user = await currentUser();
   if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
+  { const deny = denyAvModule(user); if (deny) return deny; }
   const body = (await req.json().catch(() => ({}))) as { projectId?: string; line?: string; drawingId?: number | null; cfg?: unknown; upgradePack?: boolean };
   const line = body.line === 'projector' || body.line === 'elv' || body.line === 'pv' ? body.line : 'led';
   const project = getProject(String(body.projectId || ''));

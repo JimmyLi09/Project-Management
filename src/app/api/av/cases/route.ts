@@ -10,6 +10,7 @@ import {
 } from '@/server/avdb';
 import { DrawingServiceError, readCaseWorkbook } from '@/server/avdrawing';
 import { currentUser } from '@/server/session';
+import { denyAvModule } from '@/server/avguard';
 
 /* 历史案例检索与编辑(AV-012 + AV-014).
    GET   ?q=&status=&pitchMin=&pitchMax=&sqmMin=&sqmMax=&years=&clients=&sort=&dir=
@@ -29,6 +30,7 @@ const list = (v: string | null) => (v?.trim() ? v.split(',').map((x) => x.trim()
 export async function GET(req: NextRequest) {
   const user = await currentUser();
   if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
+  { const deny = denyAvModule(user); if (deny) return deny; }
   if (!canViewPrices(identityOf(user))) return NextResponse.json({ error: '无权查看历史案例' }, { status: 403 });
   const p = req.nextUrl.searchParams;
   const num = (k: string) => {
@@ -57,6 +59,7 @@ export async function GET(req: NextRequest) {
 export async function PATCH(req: NextRequest) {
   const user = await currentUser();
   if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
+  { const deny = denyAvModule(user); if (deny) return deny; }
   /* 前端把「编辑」藏起来了,这里再拦一次 —— 直接调接口的绕不过去(§3.4) */
   if (!canEditPrices(identityOf(user))) return NextResponse.json({ error: '仅 PD / BD 可编辑历史案例' }, { status: 403 });
 
@@ -132,6 +135,7 @@ export async function PATCH(req: NextRequest) {
 export async function POST(req: NextRequest) {
   const user = await currentUser();
   if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
+  { const deny = denyAvModule(user); if (deny) return deny; }
   if (!canEditPrices(identityOf(user))) return NextResponse.json({ error: '仅 PD / BD 可导入历史案例' }, { status: 403 });
 
   const form = await req.formData().catch(() => null);

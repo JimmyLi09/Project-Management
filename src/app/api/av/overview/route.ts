@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { listProjects } from '@/server/db';
 import { currentUser } from '@/server/session';
+import { denyAvModule } from '@/server/avguard';
 import { canViewPrices, canViewQuotes, identityOf, visibleProjects } from '@/lib/permissions';
 import { backfillInquiries, listPriceItems } from '@/server/avdb';
 import { projectFlow } from '@/server/avflow';
@@ -16,6 +17,7 @@ import { projectFlow } from '@/server/avflow';
 export async function GET() {
   const user = await currentUser();
   if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
+  { const deny = denyAvModule(user); if (deny) return deny; }
   const me = identityOf(user);
   const money = canViewPrices(me);
   /* AV-018:上线后第一次打开工作台时,把缺立项记录的 AV 项目一次补齐 */

@@ -4,7 +4,7 @@ import { canUploadDrawing, identityOf } from '@/lib/permissions';
 import { ledProjectError } from '@/server/avdrawing';
 import { getProject } from '@/server/db';
 import { currentUser } from '@/server/session';
-import { denyUnlessVisible } from '@/server/avguard';
+import { denyUnlessVisible, denyAvModule } from '@/server/avguard';
 import { IMAGE_EXT } from '@/server/avjudge';
 import { archiveUpload, parseUpload } from '@/server/avupload';
 import { isFull } from '@/lib/permissions';
@@ -23,6 +23,7 @@ const MAX_BYTES = 50 * 1024 * 1024;
 export async function POST(req: NextRequest) {
   const user = await currentUser();
   if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
+  { const deny = denyAvModule(user); if (deny) return deny; }
 
   const form = await req.formData().catch(() => null);
   const projectId = String(form?.get('project') ?? '');

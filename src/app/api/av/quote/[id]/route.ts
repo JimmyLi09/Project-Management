@@ -3,7 +3,7 @@ import { quoteNo, quoteTotals } from '@/av/core/quote';
 import { canApproveQuote, identityOf } from '@/lib/permissions';
 import { decideQuote, getQuote } from '@/server/avdb';
 import { appendAudit, getProject } from '@/server/db';
-import { denyUnlessVisible } from '@/server/avguard';
+import { denyUnlessVisible, denyAvModule } from '@/server/avguard';
 import { currentUser } from '@/server/session';
 import { logZh } from '@/lib/logmsg';
 
@@ -14,6 +14,7 @@ type Params = { params: Promise<{ id: string }> };
 export async function POST(req: NextRequest, { params }: Params) {
   const user = await currentUser();
   if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
+  { const deny = denyAvModule(user); if (deny) return deny; }
   if (!canApproveQuote(identityOf(user))) return NextResponse.json({ error: '仅 PD / BD 可审批报价' }, { status: 403 });
   const quote = getQuote(Number((await params).id));
   if (!quote) return NextResponse.json({ error: '报价不存在' }, { status: 404 });

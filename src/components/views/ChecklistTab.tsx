@@ -2,8 +2,8 @@
 
 import React, { useState } from 'react';
 import { ItemReceipts, ReceivingLog } from './ReceiptLog';
-import { useStore } from '../store';
-import { canEdit } from '@/lib/permissions';
+import { useStore, useWho } from '../store';
+import { canEdit, canEditIn } from '@/lib/permissions';
 import { getBuiltinTemplate, svcColor, svcName } from '@/lib/templates';
 import { parseISO, todayMid } from '@/lib/project';
 import { ALL, clGroups, clStats, inScope, projectSvcs, type ClScope } from '@/lib/sharedChecklist';
@@ -39,6 +39,7 @@ export default function ChecklistTab({ p, scope, onScope, onExport }: {
 }) {
   const { me, dispatch, users, setToast } = useStore();
   const { lang, t, dual } = useLang();
+  const who = useWho();   // REQ-051
   const [editMode, setEditMode] = useState(false);
   /* REQ-005: 信息清单默认只读,点「编辑」才可改字段(状态/日期/备注/图片) */
   const [fieldEdit, setFieldEdit] = useState(false);
@@ -51,7 +52,7 @@ export default function ChecklistTab({ p, scope, onScope, onExport }: {
      展开某一项看它的全部收料历史时记下它的 id。 */
   const [view, setView] = useState<'external' | 'log'>('external');
   const [openRec, setOpenRec] = useState<string | null>(null);
-  const ed = canEdit(me, p);
+  const ed = canEditIn(me, p, 'checklist');   // REQ-051: 再过权限表
   const fe = ed && fieldEdit;
   const assigneeNames = users.filter((u) => u.role !== 'viewer').map((u) => u.name);
   const today = todayMid();
@@ -419,7 +420,7 @@ export default function ChecklistTab({ p, scope, onScope, onExport }: {
                             onBlur={(e) => e.target.value !== (it.owner || '') && dispatch(p.id, { type: 'editCl', item: it.id!, field: 'owner', value: e.target.value })} />
                         ) : it.owner ? (
                           <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7, fontSize: 13, fontWeight: 700, color: 'var(--navy900)' }}>
-                            <Avatar name={it.owner} size={24} />{it.owner}
+                            <Avatar name={it.owner} size={24} />{who(it.owner)}
                           </span>
                         ) : (
                           <span style={{ fontSize: 12, color: '#b6bfc9' }}>{t('未指派', 'Unassigned')}</span>
@@ -631,6 +632,7 @@ function AddItemPanel({ defaults, present, svcs, initial, short, onAdd, onBlank 
 function RemovedItems({ p, scope }: { p: Project; scope: ClScope }) {
   const { dispatch } = useStore();
   const { lang, t } = useLang();
+  const who = useWho();   // REQ-051
   const [open, setOpen] = useState(false);
   const list = p.checklistRemoved || [];
   const why = (r: string) => (r.startsWith('svc:') ? t(`删了业务 ${svcName(r.slice(4), 'zh')}`, `service ${svcName(r.slice(4), 'en')} removed`)
@@ -648,7 +650,7 @@ function RemovedItems({ p, scope }: { p: Project; scope: ClScope }) {
           {list.slice(0, 200).map((r) => (
             <div key={r.item.id} data-testid="cl-removed-row" style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 12.5, borderTop: '1px solid var(--row-line)', paddingTop: 5 }}>
               <span style={{ fontWeight: 600 }}>{lang === 'zh' ? r.item.zh : r.item.en || r.item.zh}</span>
-              <span style={{ color: 'var(--text2)' }}>{lang === 'zh' ? r.group : r.groupEn || r.group} · {why(r.reason)} · {r.by}</span>
+              <span style={{ color: 'var(--text2)' }}>{lang === 'zh' ? r.group : r.groupEn || r.group} · {why(r.reason)} · {who(r.by)}</span>
               <div style={{ flex: 1 }} />
               <button className="btn-line sm" data-testid="cl-restore" onClick={() => dispatch(p.id, { type: 'restoreClItem', item: r.item.id!, scope })}>{t('恢复', 'Restore')}</button>
             </div>

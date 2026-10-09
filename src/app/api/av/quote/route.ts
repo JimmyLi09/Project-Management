@@ -9,7 +9,7 @@ import { createQuote, getInquiry, getMarginFloor, latestConfig, latestCostSheet,
 import { appendAudit, getProject } from '@/server/db';
 import { currentUser } from '@/server/session';
 import { logZh } from '@/lib/logmsg';
-import { denyUnlessVisible } from '@/server/avguard';
+import { denyUnlessVisible, denyAvModule } from '@/server/avguard';
 
 /* 07 报价审批.
    GET ?project=ID   every line the project carries with whether it can be
@@ -30,6 +30,7 @@ function lineRows(projectId: string, svcs: string[]) {
 export async function GET(req: NextRequest) {
   const user = await currentUser();
   if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
+  { const deny = denyAvModule(user); if (deny) return deny; }
   const me = identityOf(user);
   /* 字段级隔离:报价就是售价,PM 不看售价 */
   if (!canViewQuotes(me)) return NextResponse.json({ error: '无权查看报价' }, { status: 403 });
@@ -53,6 +54,7 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   const user = await currentUser();
   if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
+  { const deny = denyAvModule(user); if (deny) return deny; }
   const body = (await req.json().catch(() => ({}))) as { projectId?: string; lines?: unknown; discountPct?: unknown; reason?: unknown };
   const project = getProject(String(body.projectId || ''));
   if (!project) return NextResponse.json({ error: '项目不存在' }, { status: 404 });
