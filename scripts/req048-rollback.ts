@@ -7,9 +7,11 @@
      fromRows     用阶段行生成了日历  → 日历上线后没再保存过:删掉这份日历(旧版本就回到「经典排期」);
                                       保存过:留着(旧版本里也能用),报告里列出来。
      rowsFromCal  用日历重写了阶段行  → 换回原来的行(mig048.prevRows)。上线后在日历上保存过的,
-                                      行上已经是新排的日期 / 负责人 —— 留着,报告里列出来。
+                                      或者行上改过(状态、负责人、延误说明、备注,加过节点 / 特殊行)的,
+                                      行上已经是上线后录的内容 —— 留着,报告里列出来。
      conflict     以阶段行为准重建日历 → 日历没再保存过:换回原来的日历(mig048.prevCalendar)。
-   迁移时挪去留底(scheduleLegacy)的那几行一并去掉;模板管理里被换掉的 CGI / 动画排期换回原样。
+   换回原来的行时,迁移挪去留底(scheduleLegacy)的那几行一并去掉;模板管理里被换掉的 CGI / 动画排期
+   换回原样 —— 上线后 PD 在模板管理里又存过的不换(报告里列出来)。
    最后删掉迁移标记 —— 以后重新上线会再迁移一次、再出报告。
 
    不带参数:只报告会改什么,不写库。加 --apply 才改:先在线备份到
@@ -31,6 +33,27 @@ const args = process.argv.slice(2);
 const apply = args.includes('--apply');
 const DB = args.find((a) => !a.startsWith('--')) || path.join(DATA, 'audax.db');
 
+/* rowsFromCal 的业务上线后行上有没有人改过(没在日历上保存也会改行:勾完成、改状态 / 负责人、加节点)。
+   迁移写出来的行:阶段行状态是「未开始」、没有负责人 / 延误说明,备注 = 日历上那一段的备注;
+   特殊行 / 自定义节点原样从迁移前带过来。返回改了什么(没改 = '') */
+function rowsEditedAfter(rows: any[], prevRows: any[], cal: any): string {
+  const prev = new Map(prevRows.filter((r) => r && r.id).map((r) => [r.id, JSON.stringify(r)] as const));
+  const stageNote = new Map((cal?.stages || []).map((s: any) => [s.id, s.note || ''] as const));
+  const why = new Set<string>();
+  for (const r of rows) {
+    if (r.kind || r.custom) {
+      if (!prev.has(r.id)) why.add('加过节点 / 特殊行');
+      else if (prev.get(r.id) !== JSON.stringify(r)) why.add('改过节点 / 特殊行');
+      continue;
+    }
+    if (r.status && r.status !== 'todo') why.add('状态');
+    if (r.assignee) why.add('负责人');
+    if (r.delayNote) why.add('延误说明');
+    if (stageNote.has(r.id) && (r.note || '') !== stageNote.get(r.id)) why.add('备注');
+  }
+  return [...why].join('、');
+}
+
 async function main() {
   if (!fs.existsSync(DB)) { console.error(`找不到数据库:${DB}`); process.exit(1); }
   const d = new Database(DB, apply ? {} : { readonly: true });
@@ -51,8 +74,12 @@ async function main() {
         if (!saved) { delete pk.calendar; lines.push(`- ${tag}:删掉迁移生成的日历`); }
         else kept.push(`- ${tag}:上线后在日历上保存过,日历留着(阶段行已是新排的)`);
       } else if (m.kind === 'rowsFromCal') {
-        if (!saved && Array.isArray(m.prevRows)) { pk.schedule = m.prevRows; lines.push(`- ${tag}:阶段行换回原来的 ${m.prevRows.length} 行`); }
-        else kept.push(`- ${tag}:上线后在日历上保存过,阶段行留着`);
+        const edited = rowsEditedAfter(pk.schedule || [], m.prevRows || [], pk.calendar);
+        if (!saved && !edited && Array.isArray(m.prevRows)) { pk.schedule = m.prevRows; lines.push(`- ${tag}:阶段行换回原来的 ${m.prevRows.length} 行`); }
+        else {
+          kept.push(`- ${tag}:${saved ? '上线后在日历上保存过' : `上线后行上改过(${edited})`},阶段行留着`);
+          delete pk.mig048; touched = true; return;   // 行没换回,迁移留底的原行也留着
+        }
       } else if (m.kind === 'conflict') {
         if (!saved && m.prevCalendar) { pk.calendar = m.prevCalendar; lines.push(`- ${tag}:日历换回迁移前那份`); }
         else kept.push(`- ${tag}:上线后在日历上保存过,日历留着(迁移前那份仍在「存档」里)`);
@@ -68,6 +95,16 @@ async function main() {
   }
   const prevRow = d.prepare("SELECT value FROM meta WHERE key = 'mig.req048.tplPrev'").get() as { value: string } | undefined;
   const tplPrev: Record<string, string> = prevRow ? JSON.parse(prevRow.value) : {};
+  const tplSkip: Record<string, string> = {};
+  for (const svc of Object.keys(tplPrev)) {
+    const cur = d.prepare('SELECT updated_by FROM templates WHERE svc = ?').get(svc) as { updated_by: string } | undefined;
+    if (cur && cur.updated_by !== 'REQ-048') {
+      /* 迁移之后 PD 在模板管理里又存过:不拿迁移前那份盖掉(迁移前那份留在 meta 里) */
+      tplSkip[svc] = tplPrev[svc];
+      delete tplPrev[svc];
+      kept.push(`- 模板管理「${svc}」:上线后 ${cur.updated_by || '有人'} 存过,没换回(迁移前那份仍在 meta 的 mig.req048.tplPrev)`);
+    }
+  }
   Object.keys(tplPrev).forEach((svc) => lines.push(`- 模板管理「${svc}」的排期换回迁移前那份`));
   const flag = d.prepare("SELECT value FROM meta WHERE key = 'mig.req048.schedule'").get() as { value: string } | undefined;
 
@@ -86,6 +123,7 @@ async function main() {
     for (const x of changed) upd.run(x.data, x.id);
     for (const [svc, data] of Object.entries(tplPrev)) d.prepare('UPDATE templates SET data = ? WHERE svc = ?').run(data, svc);
     d.prepare("DELETE FROM meta WHERE key IN ('mig.req048.schedule', 'mig.req048.tplPrev')").run();
+    if (Object.keys(tplSkip).length) d.prepare("INSERT INTO meta (key, value) VALUES ('mig.req048.tplPrev', ?)").run(JSON.stringify(tplSkip));
   })();
   d.close();
   const mdir = path.join(DATA, 'migrations');

@@ -91,7 +91,18 @@ export function migrateProject050(p: Project, opts: { tplNames?: TplNames; at?: 
   };
   const locs: Loc[] = p.checklist.flatMap((g) => g.items.map((it) => ({ g, it })));
   entry.itemsBefore = locs.length;
-  entry.receiptsBefore = locs.reduce((n, l) => n + (l.it.receipts || []).length, 0);
+  entry.receiptsBefore = locs.reduce((n, l) => n + (l.it.receipts || []).length
+    + Object.values(l.it.cells || {}).reduce((a, c) => a + (c.receipts || []).length, 0), 0);
+  /* 迁移前就已经有分格的项(有人在迁移前用新版本改过清单):这里的合并是按行上的内容重建格,
+     会把格里的内容盖掉 —— 这个项目不自动合并,报告里列出来请 PD 人工看 */
+  const preSplit = locs.filter((l) => l.it.cells).length;
+  if (preSplit) {
+    entry.itemsAfter = locs.length;
+    entry.receiptsAfter = entry.receiptsBefore;
+    entry.problems = [`迁移前已经有 ${preSplit} 项分了格(迁移前有人用新版本改过清单),为免覆盖格里的内容,这个项目的清单没有自动合并 —— 请人工检查「(#2)」项`];
+    p.mig050 = { at, rows: locs.length, merged: 0, cells: preSplit };
+    return entry;
+  }
   const dest = new Map<string, Dest>();   // 原来每一项(按 id)去了哪里 —— 自检用
 
   /* ── 1. inst 项对到服务包 ── */

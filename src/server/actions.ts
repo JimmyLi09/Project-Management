@@ -200,6 +200,12 @@ function unarchiveForInvoice(p: Project): boolean {
 }
 const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/;
 const validDay = (s: string) => ISO_DAY.test(s) && !!parseISO(s) && isoDate(parseISO(s)!) === s;
+/* 排期行上的日期:空 = 没填;否则必须是真实存在的 YYYY-MM-DD(写坏的日期会让日历换算出错) */
+const schedDay = (v: unknown): string => {
+  const s = String(v ?? '').trim();
+  if (s && !validDay(s)) throw new ValidationError('日期格式不对(要 YYYY-MM-DD)');
+  return s;
+};
 
 /* 0922 变更单:资料 patch 里如果有与项目同源的 key(Project detail / Client
    Contact / Handover Date),把它写到项目字段上并记一条日志,返回 true 表示
@@ -289,7 +295,7 @@ export function applyAction(u: Identity, p: Project, a: ProjectAction, ctx: Acti
     case 'editSched': {
       const { r } = getRow(p, a.pkg, a.idx);
       if (!canEdit(u, p)) throw new PermissionError('无编辑权限');
-      (r as any)[a.field] = a.value;
+      (r as any)[a.field] = a.field === 's' || a.field === 'e' ? schedDay(a.value) : a.value;
       if (a.field === 's' || a.field === 'e') logIt(p, u.name, 'sched.date', { task: r.task, field: a.field, value: a.value });
       break;
     }
@@ -1352,7 +1358,7 @@ export function applyAction(u: Identity, p: Project, a: ProjectAction, ctx: Acti
       const row = {
         id: newId(), no: '', phase: name, task: name, taskEn: name,
         owner: '', assignee: String(a.owner || '').slice(0, 120), weeks: 0, typical: '—', gate: '',
-        freeze: false, status: 'todo' as const, note: '', s: String(a.date || ''), e: String(a.date || ''),
+        freeze: false, status: 'todo' as const, note: '', s: schedDay(a.date), e: schedDay(a.date),
         custom: true,
       };
       const at = typeof a.atIdx === 'number' && a.atIdx >= 0 && a.atIdx < pk.schedule.length ? a.atIdx + 1 : pk.schedule.length;
@@ -1377,7 +1383,7 @@ export function applyAction(u: Identity, p: Project, a: ProjectAction, ctx: Acti
       pk.schedule.push({
         id: newId(), no: '', phase: text, task: text, taskEn: text,
         owner: '', assignee: '', weeks: 0, typical: '—', gate: '', freeze: false,
-        status: 'todo', note: '', s: String(a.date || ''), e: String(a.date || ''),
+        status: 'todo', note: '', s: schedDay(a.date), e: schedDay(a.date),
         kind: a.kind,
       });
       logIt(p, u.name, a.kind === 'holiday' ? 'sched.holiday' : 'sched.gate', { text });

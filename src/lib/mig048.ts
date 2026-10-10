@@ -50,6 +50,17 @@ export function migrateProject048(p: Project, at: number, newId: () => string): 
     if (!touched) {
       const prevRows = clone(rows);
       pk.schedule = rowsFromCalendar(rows, cal).rows;
+      /* 「已处理」的风险按行号记(od:包:行)—— 和保存日历时一样按行 id 对到新行号,对不上的不要了 */
+      if (p.dismissedRisks?.length) {
+        const newIdx = new Map(pk.schedule.map((r, j) => [r.id, j] as const));
+        p.dismissedRisks = p.dismissedRisks.flatMap((k) => {
+          const m = /^(od|bl|fz):(\d+):(\d+)$/.exec(k);
+          if (!m || Number(m[2]) !== i) return [k];
+          const id = prevRows[Number(m[3])]?.id;
+          const ni = id ? newIdx.get(id) : undefined;
+          return ni === undefined ? [] : [`${m[1]}:${i}:${ni}`];
+        });
+      }
       pk.scheduleLegacy = [...(pk.scheduleLegacy || []), ...stageRows.map((r) => ({ ...clone(r), removedAt: at }))];
       pk.mig048 = { at, kind: 'rowsFromCal', calVersion: cal.version, prevRows };
       out.push({ project: p.name, pkg: label(pk, i), kind: 'rowsFromCal', stages: cal.stages.length, dated: cal.boundaries.length > 0, adjusted: 0, undated: 0 });
@@ -59,7 +70,7 @@ export function migrateProject048(p: Project, at: number, newId: () => string): 
     const r = calendarFromRows(rows, dates(), { by: 'REQ-048', at });
     const archive = {
       id: `mig048-${at.toString(36)}`, name: '迁移前的日历排期 / Calendar before REQ-048', savedAt: new Date(at).toISOString(),
-      stages: cal.stages.map((s) => ({ id: s.id, name: s.name, ...(s.nameEn ? { nameEn: s.nameEn } : {}), tone: s.tone })),
+      stages: cal.stages.map((s) => ({ id: s.id, name: s.name, ...(s.nameEn ? { nameEn: s.nameEn } : {}), tone: s.tone, ...(typeof s.weeks === 'number' ? { weeks: s.weeks } : {}) })),
       boundaries: cal.boundaries,
     };
     pk.calendar = { ...r.calendar, version: (cal.version || 0) + 1, archives: [archive, ...(cal.archives || [])].slice(0, 30) };

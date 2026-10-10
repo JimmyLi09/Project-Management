@@ -91,6 +91,11 @@ export function calendarFromRows(
 
 export interface ToRowsResult { rows: ScheduleRow[]; moved: ScheduleRow[] }
 
+/* 日历上的阶段名 / 备注有长度上限(60 / 120 / 200),经典模式写的行没有。
+   日历上那段就是行上文字截出来的(没改过)时留行上的全文,不能保存一次就把尾巴剪掉 */
+const keepFull = (full: string | undefined, cut: string, lim: number) =>
+  full && cut.length >= lim && full.trim().length > cut.length && full.trim().startsWith(cut) ? full : cut;
+
 /* 周数(行上的 weeks:导出的「周」列、合计用)按日历的单位折:勾了 Exclude Holidays 是 5 个工作日一周,否则 7 天 */
 export function rowsFromCalendar(rows: ScheduleRow[], cal: Pick<CalendarSchedule, 'stages' | 'boundaries' | 'excludeHolidays'>): ToRowsResult {
   const ex = cal.excludeHolidays !== false;
@@ -108,9 +113,9 @@ export function rowsFromCalendar(rows: ScheduleRow[], cal: Pick<CalendarSchedule
     };
     return {
       ...base,
-      task: st.name,
-      taskEn: st.nameEn || '',
-      note: st.note ?? base.note ?? '',
+      task: keepFull(old?.task, st.name, 60),
+      taskEn: keepFull(old?.taskEn, st.nameEn || '', 120),
+      note: st.note !== undefined ? keepFull(old?.note, st.note, 200) : base.note ?? '',
       s: s.start || '',
       e: s.end || '',
       weeks: units !== null ? round1(units / (ex ? 5 : 7)) : (typeof st.weeks === 'number' ? st.weeks : base.weeks),

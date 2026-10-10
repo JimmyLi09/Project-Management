@@ -35,6 +35,22 @@ export function getDb(): Database.Database {
   if (db) return db;
   fs.mkdirSync(DATA_DIR, { recursive: true });
   db = new Database(path.join(DATA_DIR, 'audax.db'));
+  try {
+    return setupDb(db);
+  } catch (e) {
+    /* 上线迁移没走完(备份失败 / 某一步出错):不带着半迁移的数据接着服务 —— 那样正常的保存会把读时的
+       兜底结果存进库,后面的一次性迁移就跳过或盖掉内容。关掉连接,下一个请求重新试;页面会报错,
+       日志里有原因(多半是磁盘满 / data\backups 没有写权限)。 */
+    console.error('[迁移] 数据库初始化 / 上线迁移没完成,网站暂不服务(数据没动,修好原因后 pm2 restart audax):', e);
+    try { db.close(); } catch { /* 已经关了 */ }
+    db = null;
+    idsBackfilled = false;
+    serialsBackfilled = false;
+    throw e;
+  }
+}
+
+function setupDb(db: Database.Database): Database.Database {
   db.pragma('journal_mode = WAL');
   db.exec(`
     CREATE TABLE IF NOT EXISTS users (
@@ -253,9 +269,8 @@ function migrateSchedules048(d: Database.Database) {
       backup = path.join(dir, `pre-req048-${stamp}.db`);
       d.exec(`VACUUM INTO '${backup.replace(/'/g, "''")}'`);
     } catch (e) {
-      /* 备份不成就不迁移 —— 下次启动再试(读项目时有兜底,页面照样能用) */
-      console.warn('[REQ-048] 迁移前备份失败,这次不迁移:', e);
-      return;
+      /* 备份不成就不迁移,也不带着没迁移的数据开站(见 getDb) */
+      throw new Error(`[REQ-048] 迁移前备份失败,这次不迁移:${e instanceof Error ? e.message : String(e)}`);
     }
   }
   const upd = d.prepare('UPDATE projects SET data = ?, updated_at = ?, version = version + 1 WHERE id = ?');
@@ -344,8 +359,8 @@ function migrateChecklist050(d: Database.Database) {
       backup = path.join(dir, `pre-req050-${stamp}.db`);
       d.exec(`VACUUM INTO '${backup.replace(/'/g, "''")}'`);
     } catch (e) {
-      console.warn('[REQ-050] 迁移前备份失败,这次不迁移:', e);
-      return;
+      /* 备份不成就不迁移,也不带着没迁移的数据开站(见 getDb) */
+      throw new Error(`[REQ-050] 迁移前备份失败,这次不迁移:${e instanceof Error ? e.message : String(e)}`);
     }
   }
   const upd = d.prepare('UPDATE projects SET data = ?, updated_at = ?, version = version + 1 WHERE id = ?');
@@ -404,8 +419,8 @@ function migrateJobRecord049(d: Database.Database) {
       backup = path.join(dir, `pre-req049-${stamp}.db`);
       d.exec(`VACUUM INTO '${backup.replace(/'/g, "''")}'`);
     } catch (e) {
-      console.warn('[REQ-049] 迁移前备份失败,这次不迁移:', e);
-      return;
+      /* 备份不成就不迁移,也不带着没迁移的数据开站(见 getDb) */
+      throw new Error(`[REQ-049] 迁移前备份失败,这次不迁移:${e instanceof Error ? e.message : String(e)}`);
     }
   }
   const upd = d.prepare('UPDATE projects SET data = ?, updated_at = ?, version = version + 1 WHERE id = ?');
