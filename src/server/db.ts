@@ -87,11 +87,13 @@ export function getDb(): Database.Database {
   seedIfEmpty(db);
   maybeSeedDemo(db);
   loadSynonyms(db);
-  migrateSharedChecklist(db);   // REQ-044:要在 backfillIds 之前 —— 它读项目时也会顺手合并,那样就没有报告了
-  /* REQ-048 / 049 同理:migrate() 读项目时会兜底补日历、补 Job Record 默认行;backfillIds 要是先跑、
-     把兜底结果存进库,一次性迁移就以为「已经有了」而跳过(没报告、旧字段也没转成行) */
+  /* 顺序有讲究:migrate() 读项目时会兜底补日历(048)、补 Job Record 默认行(049)、合并清单(044)。
+     谁先把兜底结果存进库,后面的一次性迁移就以为「已经有了」而跳过(没备份、没报告、旧字段也没转成行)。
+     所以 048 / 049 最先跑(它们只认原始数据,和清单无关;048 的整库备份也就是升级前的原样),
+     再 044 合并清单,050 要等清单合成一张之后,backfillIds 放最后。 */
   migrateSchedules048(db);
   migrateJobRecord049(db);
+  migrateSharedChecklist(db);   // REQ-044:要在 backfillIds 之前 —— 它读项目时也会顺手合并,那样就没有报告了
   migrateChecklist050(db);
   backfillIds(db);
   backfillSerials(db);
@@ -482,9 +484,15 @@ function migrateSharedChecklist(d: Database.Database) {
       let o: any;
       try { o = JSON.parse(r.data); } catch { continue; }
       if (Array.isArray(o.checklist)) continue;
+      /* 只存清单这一项改动:migrate() 顺手补的日历 / Job Record 默认行不落库,
+         留给 048 / 049 的一次性迁移(它们万一这次没跑成,下次启动还认得出是老数据) */
+      const hadJob = Array.isArray(o.jobRecord);
+      const hadCal = (o.packages || []).map((pk: any) => !!(pk && pk.calendar && Array.isArray(pk.calendar.stages) && pk.calendar.stages.length));
       let m: ProjectMigration | null = null;
       const p = migrate(o, { onChecklistMigrated: (x) => { m = x; } });
       if (!m) continue;
+      if (!hadJob) delete (p as any).jobRecord;
+      p.packages.forEach((pk, i) => { if (!hadCal[i]) delete (pk as any).calendar; });
       const mm = m as ProjectMigration;
       done.push(mm);
       const k = 'cl.sharedMig', params = { from: mm.sourceItems, to: mm.items };
