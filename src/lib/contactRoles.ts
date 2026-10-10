@@ -31,15 +31,19 @@ export const ROLE_TO_LEGACY: Record<ContactRoleKey, string> = {
   landscape: '景观 Landscape', interior: '室内 Interior', creative: '创意 Creative',
 };
 
-/* 认得的写法(键、旧标签、中文名、英文名,不分大小写)→ 键;认不出的(手填)原样返回 */
+/* 显示用的双语名(1010 确认:两种界面语言都显示「Developer / 发展商」) */
+export const roleBilingual = (r: { zh: string; en: string }) => `${r.en} / ${r.zh}`;
+
+/* 认得的写法(键、旧标签、中文名、英文名、双语名,不分大小写)→ 键;认不出的(手填)原样返回 */
 export function roleKeyOf(v: string | undefined | null): string {
   const s = String(v ?? '').trim();
   if (!s) return '';
   if (BY_KEY.has(s)) return s;
   if (LEGACY_ROLE[s]) return LEGACY_ROLE[s];
-  const low = s.toLowerCase();
+  const low = s.toLowerCase().replace(/\s*\/\s*/g, ' / ');
   for (const r of CONTACT_ROLES) {
-    if (low === r.zh.toLowerCase() || low === r.en.toLowerCase()) return r.key;
+    const names = [r.zh, r.en, roleBilingual(r), `${r.zh} / ${r.en}`].map((x) => x.toLowerCase());
+    if (names.includes(low)) return r.key;
   }
   if (low === '客户' || low === 'client' || low === 'main con' || low === 'main-con' || low === 'maincon') return low.startsWith('main') ? 'maincon' : 'developer';
   return s;
@@ -47,11 +51,12 @@ export function roleKeyOf(v: string | undefined | null): string {
 
 export const isRoleKey = (v: string): v is ContactRoleKey => BY_KEY.has(v);
 
-/* 显示:键 / 旧标签 → 当前语言的名字;手填的原样 */
-export function contactRoleLabel(v: string, lang: 'zh' | 'en'): string {
+/* 显示:键 / 旧标签 → 双语名「Developer / 发展商」(1010 确认:中英界面都这样显示,CSV 也是);
+   手填的原样。lang 留着给以后单独显示一种语言时用 */
+export function contactRoleLabel(v: string, _lang?: 'zh' | 'en'): string {
   const k = roleKeyOf(v);
   const r = BY_KEY.get(k);
-  return r ? (lang === 'en' ? r.en : r.zh) : v;
+  return r ? roleBilingual(r) : v;
 }
 
 /* 是不是发展商(原「客户」)那一条 */

@@ -86,7 +86,8 @@ export const diffTerm = (d: string, lang: Lang): string => pick(DIFF_TERMS[d], l
 
 /* ---- 联系人角色 ----
    REQ-052:存的是键(developer / maincon …,见 contactRoles.ts),旧数据里的中英标签也认;
-   「客户」改名「发展商 / Developer」。手填的角色查不到就按原文(中英混写的拆开)显示。 */
+   「客户」改名「发展商 / Developer」。1010 确认:内置角色中英界面都显示双语「Developer / 发展商」。
+   手填的角色查不到就按原文(中英混写的拆开)显示。 */
 export const contactRoleTerm = (v: string, lang: Lang): string => {
   const k = roleKeyOf(v);
   return isRoleKey(k) ? contactRoleLabel(k, lang) : termOf(v, lang);

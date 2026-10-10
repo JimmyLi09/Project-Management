@@ -47,12 +47,15 @@ test('REQ-052 · 联系人角色:旧标签 → 键;「客户」显示「发展�
   assert.equal(roleKeyOf('Main Contractor'), 'maincon', '新建项目里手填英文名也认');
   assert.equal(roleKeyOf('总包'), 'maincon');
   assert.equal(roleKeyOf('灯光顾问'), '灯光顾问', '手填的原样');
-  assert.equal(contactRoleTerm('developer', 'zh'), '发展商');
-  assert.equal(contactRoleTerm('developer', 'en'), 'Developer');
-  assert.equal(contactRoleTerm('客户 Client', 'zh'), '发展商', '还没迁移的旧数据也显示新名字');
-  assert.equal(contactRoleTerm('总包 Main Con', 'en'), 'Main contractor');
+  /* 1010 确认:内置角色中英界面都显示双语 */
+  assert.equal(contactRoleTerm('developer', 'zh'), 'Developer / 发展商');
+  assert.equal(contactRoleTerm('developer', 'en'), 'Developer / 发展商');
+  assert.equal(contactRoleTerm('客户 Client', 'zh'), 'Developer / 发展商', '还没迁移的旧数据也显示新名字');
+  assert.equal(contactRoleTerm('总包 Main Con', 'en'), 'Main contractor / 总包');
   assert.equal(contactRoleTerm('灯光顾问 Lighting', 'en'), 'Lighting', '手填的中英混写照旧拆开');
-  assert.equal(contactRoleLabel('maincon', 'zh'), '总包');
+  assert.equal(contactRoleLabel('maincon', 'zh'), 'Main contractor / 总包');
+  assert.equal(roleKeyOf('Main contractor / 总包'), 'maincon', '新建项目里从下拉选的双语名存成键');
+  assert.equal(roleKeyOf('总包/Main contractor'), 'maincon');
 });
 
 test('REQ-052 · 上线迁移只换认得的旧标签;回退反过来', () => {
