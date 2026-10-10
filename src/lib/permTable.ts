@@ -125,6 +125,7 @@ export const ACTION_MODULE: Record<string, PermModule> = {
   // 项目档案 / Job Record
   setPkgTier: 'record', addScopeItem: 'record', editScopeItem: 'record', removeScopeItem: 'record', setRecord: 'record',
   addServicePackage: 'record', removeServicePackage: 'record',
+  addJobRow: 'record', editJobRow: 'record', removeJobRow: 'record', pasteJobRows: 'record',
   // 财务 / 开票
   toggleInvoiced: 'finance', markInvoiced: 'finance', undoInvoice: 'finance', editFinance: 'finance', setInvoiceStatus: 'finance',
   setPaymentStatus: 'finance', setPaymentRisk: 'finance',

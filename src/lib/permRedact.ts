@@ -41,6 +41,7 @@ export function redactProject<T extends Project>(u: Identity, p: T): T {
       pk.scopeItems = [];
       pk.resourceLinks = '';
     });
+    q.jobRecord = [];   // REQ-049:Job Record 4 栏表
   }
   if (hide.contacts) {
     q.contacts = [];
@@ -63,7 +64,7 @@ export function logHiddenFor(u: Identity): (k?: string) => boolean {
   return (k?: string) => !!k && (
     (schedule && /^(sched|cal)\./.test(k))
     || (checklist && /^(cl|frag)\./.test(k))
-    || (record && /^record\./.test(k))
+    || (record && /^(record|job)\./.test(k))
     || (contacts && /^contact\./.test(k))
     || (finance && (/^fin\./.test(k) || /^proj\.(invoice|uninvoiced)/.test(k))));
 }

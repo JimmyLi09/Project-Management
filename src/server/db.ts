@@ -12,6 +12,9 @@ import { cleanSynonyms, DEFAULT_SYNONYMS, getSynonyms, migrationReport, setSynon
 import { defaultPermTable, permDiff, sanitizePermTable, setServerPermSource, type PermTable } from '@/lib/permTable';
 import { handOverWork, renameInProject } from '@/lib/peopleRefs';
 import { migrateProject048, type Mig048Entry } from '@/lib/mig048';
+import { migrateProject049, type Mig049Entry } from '@/lib/mig049';
+import { blankRow, clip as clipJob, ensureJobRows, MAX_JOB_ROWS, serviceItemOf, svcForItem, svcFromName } from '@/lib/jobRecord';
+import { baseDefOf, fieldsOf, type FieldDef, type FieldOverrides } from '@/lib/records';
 import { isLegacyFlow } from '@/lib/legacyStages';
 import { TPL } from '@/lib/templates';
 
@@ -83,11 +86,14 @@ export function getDb(): Database.Database {
   maybeSeedDemo(db);
   loadSynonyms(db);
   migrateSharedChecklist(db);   // REQ-044:要在 backfillIds 之前 —— 它读项目时也会顺手合并,那样就没有报告了
+  /* REQ-048 / 049 同理:migrate() 读项目时会兜底补日历、补 Job Record 默认行;backfillIds 要是先跑、
+     把兜底结果存进库,一次性迁移就以为「已经有了」而跳过(没报告、旧字段也没转成行) */
+  migrateSchedules048(db);
+  migrateJobRecord049(db);
   backfillIds(db);
   backfillSerials(db);
   migrateInvoiceArchive(db);
   migrateContactRoles(db);
-  migrateSchedules048(db);
   scheduleBackups(db);
   return db;
 }
@@ -303,6 +309,74 @@ function migrateSchedules048(d: Database.Database) {
     console.log(`[REQ-048] 排期迁移:${done.length} 份业务,报告 ${file}`);
   } catch (e) {
     console.warn('[REQ-048] 迁移报告没写成(数据已迁移,不影响使用):', e);
+  }
+}
+
+/* ===== REQ-049 Job Record 4 栏表 · 上线迁移 =====
+   旧登记表字段(pk.record)里有值的,一个字段转成一行(规则见 lib/mig049.ts);原数据一个不动。
+   先整库备份(VACUUM INTO),一个事务里改,出报告 data/migrations/049-jobrecord-<时间>.md。 */
+const MIG_049 = 'mig.req049.jobRecord';
+function migrateJobRecord049(d: Database.Database) {
+  if (d.prepare('SELECT 1 FROM meta WHERE key = ?').get(MIG_049)) return;
+  const rows = d.prepare('SELECT id, data FROM projects').all() as { id: string; data: string }[];
+  const now = Date.now();
+  const t = new Date(now), pad = (n: number) => String(n).padStart(2, '0');
+  const stamp = `${t.getFullYear()}${pad(t.getMonth() + 1)}${pad(t.getDate())}-${pad(t.getHours())}${pad(t.getMinutes())}${pad(t.getSeconds())}`;
+  /* 字段定义 = 出厂 + PD / BD 在「增减字段」里改过的(record_fields 表) */
+  const ov: FieldOverrides = {};
+  try {
+    for (const r of d.prepare('SELECT svc, fields FROM record_fields').all() as { svc: string; fields: string }[]) {
+      try { ov[r.svc] = JSON.parse(r.fields) as FieldDef[]; } catch { /* 坏行忽略 */ }
+    }
+  } catch { /* 老库还没有这张表 */ }
+  const defsFor = (svc: string) => fieldsOf(baseDefOf(svc), ov);
+  let backup = '';
+  if (rows.length) {
+    try {
+      const dir = path.join(DATA_DIR, 'backups');
+      fs.mkdirSync(dir, { recursive: true });
+      backup = path.join(dir, `pre-req049-${stamp}.db`);
+      d.exec(`VACUUM INTO '${backup.replace(/'/g, "''")}'`);
+    } catch (e) {
+      console.warn('[REQ-049] 迁移前备份失败,这次不迁移:', e);
+      return;
+    }
+  }
+  const upd = d.prepare('UPDATE projects SET data = ?, updated_at = ?, version = version + 1 WHERE id = ?');
+  const done: Mig049Entry[] = [];
+  d.transaction(() => {
+    for (const r of rows) {
+      let o: any;
+      try { o = JSON.parse(r.data); } catch { continue; }
+      if (!Array.isArray(o.packages)) continue;   // 更老的结构:读的时候 migrate() 会补
+      const got = migrateProject049(o, defsFor, now);
+      if (!got) continue;
+      const { updatedAt: _u, version: _v, ...data } = o;
+      upd.run(JSON.stringify(data), now, r.id);
+      done.push(got);
+    }
+    d.prepare('INSERT INTO meta (key, value) VALUES (?, ?)').run(MIG_049, JSON.stringify({
+      at: now, backup, projects: done.length, rows: done.reduce((a, x) => a + x.rows, 0),
+    }));
+  })();
+  if (!done.length) return;
+  try {
+    const dir = path.join(DATA_DIR, 'migrations');
+    fs.mkdirSync(dir, { recursive: true });
+    const file = path.join(dir, `049-jobrecord-${stamp}.md`);
+    const total = done.reduce((a, x) => a + x.rows, 0);
+    const lines = ['# REQ-049 Job Record 改为 4 栏 · 上线迁移报告', '', `时间:${t.toLocaleString('zh-CN')}`,
+      `迁移前备份:${backup || '(库是空的,没备份)'}`, '',
+      `共 ${done.length} 个项目,旧登记表字段 / 服务内容转成 ${total} 行。原来的字段一个没动,Job Record 下方「旧字段(只读)」照旧能看。`,
+      '规则:Service Item = 业务英文名;Detail = 字段名;数量类的值进 Quantity,其余进 Special Notes。没有值的业务给 1 行预填业务名。',
+      '没转的:状态、更新时间、公式字段(由别的字段算出来)、项目名 / 客户联系人 / 交付日(存在项目上)。', '',
+      '| 项目 | 转成几行 | 各业务 |', '|---|---|---|',
+      ...done.map((x) => `| ${x.project.replace(/\|/g, '/')} | ${x.rows} | ${Object.entries(x.bySvc).map(([k, n]) => `${SVC[k]?.label || k} ${n}`).join('、') || '—'} |`),
+      '', '回退:先 pm2 stop audax,再跑 scripts\\req049-rollback.bat(不带参数只报告;--apply 才写库,会先把 4 栏表导出成 CSV)。'];
+    fs.writeFileSync(file, lines.join('\n') + '\n', 'utf8');
+    console.log(`[REQ-049] Job Record 迁移:${done.length} 个项目、${total} 行,报告 ${file}`);
+  } catch (e) {
+    console.warn('[REQ-049] 迁移报告没写成(数据已迁移,不影响使用):', e);
   }
 }
 
@@ -1022,6 +1096,74 @@ export function importRegisterRecords(
   });
   const updated = run();
   return { updated };
+}
+
+/* REQ-049: 项目档案导入 Job Record 4 栏行 —— 同样全有或全无。
+   每行按项目名称(或项目编号)找项目;业务取这一行的「业务」栏,没有就用页签上的业务
+   (页签是「全部」时按 Service Item 对),任何业务都行,不再限内置登记表。
+   项目里还没有这项业务的,先给它加一份(和原来的登记表导入一样),再把行追加到那一组末尾;
+   那一组只有 1 行空白预填行的,直接顶掉它。 */
+export function importJobRows(
+  tabSvc: string,
+  rows: { project?: string; no?: string; svc?: string; item?: string; detail?: string; qty?: string; note?: string }[],
+  actor: string,
+): { updated: number; rows: number } {
+  const d = getDb();
+  const now = Date.now();
+  const run = d.transaction(() => {
+    const all = d.prepare('SELECT id, data FROM projects').all() as { id: string; data: string }[];
+    const byName = new Map<string, { id: string; p: Project }>();
+    const byNo = new Map<string, { id: string; p: Project }>();
+    for (const r of all) {
+      const p = migrate(JSON.parse(r.data));
+      if (p.archived) continue;
+      const key = (p.name || '').trim().toLowerCase();
+      if (key && !byName.has(key)) byName.set(key, { id: r.id, p });
+      if (p.serial) byNo.set(String(p.serial), { id: r.id, p });
+    }
+    const touched = new Map<string, { p: Project; n: number; svcs: Set<string> }>();
+    rows.forEach((row, i) => {
+      const at = `第 ${i + 1} 行`;
+      const no = String(row.no || '').trim().replace(/^0+/, '');
+      const name = String(row.project || '').trim().toLowerCase();
+      if (!no && !name) throw new Error(`${at}:缺少项目名称(导入已全部撤销)`);
+      const hit = (no && byNo.get(no)) || (name && byName.get(name)) || null;
+      if (!hit) throw new Error(`${at}:未找到项目「${row.project || row.no}」(导入已全部撤销)`);
+      const p = hit.p;
+      const item = clipJob(row.item, 200), detail = clipJob(row.detail, 2000), qty = clipJob(row.qty, 80), note = clipJob(row.note, 2000);
+      if (!item && !detail && !qty && !note) return;
+      const svc = svcFromName(row.svc || '') || (tabSvc && tabSvc !== 'all' ? tabSvc : '') || svcForItem(item, p) || svcFromName(item);
+      if (!svc || !SVC[svc]) throw new Error(`${at}:认不出业务「${row.svc || item}」(导入已全部撤销)`);
+      if (!p.packages.some((x) => x.svc === svc)) {
+        p.packages.push({ svc, start: '', delivery: '', buffer: 0, owner: '', status: 'active', schedule: [] });
+        if (!Array.isArray(p.services)) p.services = [];
+        if (!p.services.includes(svc)) p.services.push(svc);
+      }
+      ensureJobRows(p);
+      const list = p.jobRecord!;
+      if (list.length >= MAX_JOB_ROWS) throw new Error(`${at}:项目「${p.name}」超过 ${MAX_JOB_ROWS} 行(导入已全部撤销)`);
+      const r = blankRow(svc, { item: item || serviceItemOf(svc), detail, qty, note });
+      const same = list.filter((x) => x.svc === svc);
+      if (same.length === 1 && !same[0].detail && !same[0].qty && !same[0].note && same[0].item === serviceItemOf(svc)) list.splice(list.indexOf(same[0]), 1, r);
+      else list.splice(same.length ? list.indexOf(same[same.length - 1]) + 1 : list.length, 0, r);
+      const t = touched.get(hit.id) || { p, n: 0, svcs: new Set<string>() };
+      t.n++; t.svcs.add(svc);
+      touched.set(hit.id, t);
+    });
+    const upd = d.prepare('UPDATE projects SET data = ?, updated_at = ?, version = version + 1 WHERE id = ?');
+    let total = 0;
+    for (const [id, { p, n, svcs }] of touched) {
+      const lp = { n, svc: [...svcs].join(', ') } as LogParams;
+      const entry = { at: now, by: actor, text: logZh('job.import', lp), k: 'job.import', p: lp };
+      p.log = [entry, ...((p.log as { at: number; by: string; text: string }[]) || [])].slice(0, 200);
+      const { updatedAt: _u, version: _v, ...pdata } = p;
+      upd.run(JSON.stringify(pdata), now, id);
+      appendAudit(id, [entry]);
+      total += n;
+    }
+    return { updated: touched.size, rows: total };
+  });
+  return run();
 }
 
 /* ---- permanent audit trail (project logs are capped at 200 in-document;

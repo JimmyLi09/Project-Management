@@ -10,6 +10,7 @@ import { buildPackage, deriveStatuses, fitWindow, newId, parseISO, isoDate, tota
 import { getBuiltinTemplate, SVC, type Template } from '@/lib/templates';
 import { stagesFromTemplate } from '@/lib/calendarStages';
 import { applyCalendarToPackage } from '@/lib/scheduleSync';
+import { blankRow, clip, ensureJobRows, MAX_JOB_ROWS, rowsFromPaste, serviceItemOf } from '@/lib/jobRecord';
 import { isLegacyFlow } from '@/lib/legacyStages';
 import { isLegacyCgiStages, type LocalDate } from '@/features/schedule-planner/domain/schedule';
 import { distributeByWeights, layoutFromStart } from '@/features/schedule-planner/domain/duration';
@@ -105,6 +106,11 @@ export type ProjectAction =
   | { type: 'setRecord'; pkg: number; patch: Record<string, string> }
   | { type: 'addServicePackage'; svc: string; patch: Record<string, string>; asNew?: boolean; label?: string }
   | { type: 'removeServicePackage'; pkg: number }
+  /* REQ-049 Job Record 4 栏表 */
+  | { type: 'addJobRow'; svc: string; after?: string; values?: { item?: string; detail?: string; qty?: string; note?: string } }
+  | { type: 'editJobRow'; id: string; field: 'item' | 'detail' | 'qty' | 'note' | 'svc'; value: string }
+  | { type: 'removeJobRow'; id: string }
+  | { type: 'pasteJobRows'; text: string }
   | { type: 'addCustomNode'; pkg: number; name: string; date: string; owner: string; atIdx?: number }
   | { type: 'toggleInvoiced' }
   /* REQ-045 */
@@ -1169,6 +1175,14 @@ export function applyAction(u: Identity, p: Project, a: ProjectAction, ctx: Acti
         }
         if (!Array.isArray(p.services)) p.services = [];
         if (!p.services.includes(svc)) p.services.push(svc);   // services 是类型清单,仍然去重
+        /* REQ-049:Job Record 每种业务至少 1 行;同类加第二份时再加一行,Detail 写实例名(LED-2 这类) */
+        if (!Array.isArray(p.jobRecord)) p.jobRecord = [];
+        const sameSvc = p.jobRecord.filter((r) => r.svc === svc);
+        if (!sameSvc.length) p.jobRecord.push(blankRow(svc));
+        else if (a.asNew) {
+          const last = sameSvc[sameSvc.length - 1];
+          p.jobRecord.splice(p.jobRecord.indexOf(last) + 1, 0, blankRow(svc, { item: last.item, detail: pk.label || `${serviceItemOf(svc)} #${p.packages.filter((x) => x.svc === svc).length}` }));
+        }
       }
       const rec: Record<string, string | number | undefined> = { ...(pk.record || {}) };
       for (const [k, v] of Object.entries(a.patch || {})) {
@@ -1183,6 +1197,82 @@ export function applyAction(u: Identity, p: Project, a: ProjectAction, ctx: Acti
     }
     /* REQ-026: 删掉一份业务实例。整包连排期、信息清单、资料一起没,
        所以按 REQ-008 的口径只放给 Sales / PD / BD,和删项目同一档。 */
+    /* ===== REQ-049 Job Record:一张 4 栏表,按业务分组,每种业务至少 1 行 ===== */
+    case 'addJobRow': {
+      if (!canEdit(u, p)) throw new PermissionError('无编辑权限');
+      ensureJobRows(p);
+      const rows = p.jobRecord!;
+      if (rows.length >= MAX_JOB_ROWS) throw new ValidationError(`最多 ${MAX_JOB_ROWS} 行 / At most ${MAX_JOB_ROWS} rows`);
+      const svc = String(a.svc || '');
+      if (svc && !p.packages.some((x) => x.svc === svc)) throw new ValidationError('这个项目没有这项业务');
+      const same = rows.filter((r) => r.svc === svc);
+      const anchor = (a.after && rows.find((r) => r.id === a.after && r.svc === svc)) || same[same.length - 1];
+      /* 同一组接着加:Service Item 沿用上一行(报价单里一组几行的 Service Item 是同一个)。
+         项目档案页「新增一行」会带上 4 栏的值;那一组只有 1 行空白预填行的,直接填进那一行 */
+      const v = a.values;
+      const row = blankRow(svc, { item: clip(v?.item, 200).trim() || anchor?.item || serviceItemOf(svc) });
+      if (v) { row.detail = clip(v.detail, 2000); row.qty = clip(v.qty, 80); row.note = clip(v.note, 2000); }
+      const lone = same.length === 1 && !same[0].detail && !same[0].qty && !same[0].note && same[0].item === serviceItemOf(svc) ? same[0] : null;
+      if (v && lone) { row.id = lone.id; rows.splice(rows.indexOf(lone), 1, row); }
+      else rows.splice(anchor ? rows.indexOf(anchor) + 1 : rows.length, 0, row);
+      logIt(p, u.name, 'job.add', { svc, item: row.item });
+      break;
+    }
+    case 'editJobRow': {
+      if (!canEdit(u, p)) throw new PermissionError('无编辑权限');
+      ensureJobRows(p);
+      const r = p.jobRecord!.find((x) => x.id === a.id);
+      if (!r) throw new ValidationError('这一行已经不在了,请刷新');
+      if (a.field === 'svc') {
+        const to = String(a.value || '');
+        if (to && !p.packages.some((x) => x.svc === to)) throw new ValidationError('这个项目没有这项业务');
+        if (r.svc && p.packages.some((x) => x.svc === r.svc) && p.jobRecord!.filter((x) => x.svc === r.svc).length <= 1) {
+          throw new ValidationError('每个业务至少保留一行 / Each service keeps at least one row');
+        }
+        r.svc = to;
+        logIt(p, u.name, 'job.move', { item: r.item, svc: to });
+        break;
+      }
+      if (!['item', 'detail', 'qty', 'note'].includes(a.field)) throw new ValidationError('无效的栏位');
+      const was = r[a.field];
+      r[a.field] = clip(a.value, a.field === 'qty' ? 80 : a.field === 'item' ? 200 : 2000);
+      if (was !== r[a.field]) logIt(p, u.name, 'job.edit', { svc: r.svc, item: r.item, col: a.field });
+      break;
+    }
+    case 'removeJobRow': {
+      if (!canEdit(u, p)) throw new PermissionError('无编辑权限');
+      ensureJobRows(p);
+      const r = p.jobRecord!.find((x) => x.id === a.id);
+      if (!r) break;
+      const inProject = p.packages.some((x) => x.svc === r.svc);
+      if (inProject && p.jobRecord!.filter((x) => x.svc === r.svc).length <= 1) {
+        throw new ValidationError('每个业务至少保留一行 / Each service keeps at least one row');
+      }
+      p.jobRecord = p.jobRecord!.filter((x) => x.id !== r.id);
+      logIt(p, u.name, 'job.remove', { svc: r.svc, item: r.item, detail: r.detail });
+      break;
+    }
+    case 'pasteJobRows': {
+      if (!canEdit(u, p)) throw new PermissionError('无编辑权限');
+      ensureJobRows(p);
+      const got = rowsFromPaste(String(a.text || '').slice(0, 200_000), p);
+      if (!got.length) throw new ValidationError('没有认出可以导入的行(从 Excel 复制 Service Item / Detail / Quantity / Special Notes 几栏)');
+      if (p.jobRecord!.length + got.length > MAX_JOB_ROWS) throw new ValidationError(`最多 ${MAX_JOB_ROWS} 行 / At most ${MAX_JOB_ROWS} rows`);
+      /* 按行追加到各自那一组的末尾;一组里只有那 1 行空白预填行的,直接用粘贴的顶掉它 */
+      for (const row of got) {
+        const rows = p.jobRecord!;
+        const same = rows.filter((x) => x.svc === row.svc);
+        if (same.length === 1 && !same[0].detail && !same[0].qty && !same[0].note && same[0].item === serviceItemOf(row.svc) && row.svc) {
+          rows.splice(rows.indexOf(same[0]), 1, row);
+          continue;
+        }
+        const last = same[same.length - 1];
+        rows.splice(last ? rows.indexOf(last) + 1 : rows.length, 0, row);
+      }
+      const unmatched = got.filter((x) => !x.svc).length;
+      logIt(p, u.name, 'job.paste', { n: got.length, unmatched });
+      break;
+    }
     case 'removeServicePackage': {
       if (!canDelete(u)) throw new PermissionError('仅 Sales / PD / BD 可删除业务');
       const pk = p.packages[a.pkg];
