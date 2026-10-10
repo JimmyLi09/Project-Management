@@ -116,7 +116,7 @@ export const ACTION_MODULE: Record<string, PermModule> = {
   saveCalendar: 'schedule', calendarFlow: 'schedule', saveCalendarArchives: 'schedule', addCustomNode: 'schedule',
   setSchedStyle: 'schedule', addSpecialRow: 'schedule', submitCompletion: 'schedule',
   // 信息清单
-  setClStatus: 'checklist', addReceipt: 'checklist', editReceipt: 'checklist', removeReceipt: 'checklist', editCl: 'checklist',
+  setClStatus: 'checklist', addReceipt: 'checklist', editReceipt: 'checklist', removeReceipt: 'checklist', editCl: 'checklist', setClMode: 'checklist',
   renameGroup: 'checklist', removeGroup: 'checklist', setNoCategories: 'checklist', toggleHighlight: 'checklist', addItem: 'checklist',
   removeItem: 'checklist', moveItem: 'checklist', reorderItem: 'checklist', addGroup: 'checklist', resetChecklist: 'checklist',
   setItemSvcs: 'checklist', restoreClItem: 'checklist', attachShot: 'checklist', removeShot: 'checklist',

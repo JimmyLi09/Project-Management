@@ -1,4 +1,5 @@
 import test from 'node:test';
+import { syncCells } from '../clCells.ts';
 import assert from 'node:assert/strict';
 import { buildPackage, infoProgress, migrate, newProject } from '../project.ts';
 import { ALL, clStats, dropSvc, mergeIntoProject, replaceSection, restoreRemoved } from '../sharedChecklist.ts';
@@ -43,17 +44,20 @@ test('REQ-044 加服务包:同名项不重复只加标签;删服务包只去标�
   assert.deepEqual(find(p, restored.zh).svcs, ['cgi'], '原服务已经没了 → 挂当前项目的服务');
 });
 
-test('REQ-044 第二块 LED:重名项单独一条、名字后加实例名;删掉它只移走它自己的', () => {
+test('REQ-044 → REQ-050 第二块 LED:不再另起「(#2)」那一条,规格项同一行多一格;删掉它只少那一格', () => {
   const p = newProject({ name: 'T', client: '', services: ['led'], start: '' } as any);
   const before = names(p).length;
-  p.packages.push({ svc: 'led', label: '户外 LED', start: '', delivery: '', buffer: 0, owner: '', status: 'active', schedule: [] });
-  const r = mergeIntoProject(p, buildPackage('led', '').checklist!, () => ['led'], { inst: '户外 LED' });
-  assert.equal(r.added, before);
-  assert.ok(names(p).includes('电源规格与位置(户外 LED)'));
-  assert.equal(find(p, '电源规格与位置(户外 LED)').inst, '户外 LED');
+  p.packages.push({ id: 'pkB', svc: 'led', label: '户外 LED', start: '', delivery: '', buffer: 0, owner: '', status: 'active', schedule: [] });
+  const r = mergeIntoProject(p, buildPackage('led', '').checklist!, () => ['led']);
+  assert.equal(r.added, 0, '不新增行');
+  syncCells(p, { by: 'pd' });
+  assert.equal(names(p).length, before);
+  assert.ok(!names(p).some((n) => /\(户外 LED\)|\(#2\)/.test(n)));
+  assert.deepEqual(Object.keys(find(p, '电源规格与位置').cells!), [p.packages[0].id, 'pkB']);
+  assert.equal(find(p, '项目地址 + 开发商/Main Con 联系人').cells, undefined, '项目级不分格');
   p.packages.pop();
-  const moved = dropSvc(p, 'led', { by: 'pd', reason: 'svc:led', keepSvc: true, inst: '户外 LED' });
-  assert.equal(moved, before);
+  syncCells(p, { by: 'pd' });
+  assert.equal(find(p, '电源规格与位置').cells, undefined, '只剩一份:收回成一条');
   assert.equal(names(p).length, before);
 });
 

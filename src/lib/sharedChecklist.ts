@@ -7,6 +7,7 @@
 import type { ChecklistGroup, ChecklistItem, Project, RemovedClItem } from './types';
 import { getSynonyms, groupKeys, itemKeys, synonymIndex } from './checklistMerge';
 import { newId, parseISO } from './project';
+import { unitsOf } from './clCells';
 
 export const ALL = 'all';
 /* 'all' 或某个服务 key(cgi / scale / led …) */
@@ -22,7 +23,7 @@ export function projectSvcs(p: { packages: { svc: string }[] }): string[] {
   return out;
 }
 
-/* 同一种服务的第几份:第一份是 '',第二份起是它的名字,没名字就 #2、#3 */
+/* 同一种服务的第几份的叫法(日志用):有实例名用实例名,否则 #2、#3;第一份是 '' */
 export function instOf(p: { packages: { svc: string; label?: string }[] }, pkgIdx: number): string {
   const pk = p.packages[pkgIdx];
   if (!pk) return '';
@@ -39,19 +40,20 @@ export function findClItem(p: { checklist?: ChecklistGroup[] }, id: string) {
   return null;
 }
 
-/* 顶部三张卡 + 进度。N/A 不计;逾期 = 待处理且过了日期(和原来一样) */
-export function clStats(p: { checklist?: ChecklistGroup[] }, scope: ClScope = ALL, today?: Date) {
+/* 顶部三张卡 + 进度。N/A 不计;逾期 = 待处理且过了日期(和原来一样)。
+   REQ-050: 按格算 —— 同步项 1 格;单独填的项和规格项按业务数 / 份数,单个业务标签下只算它的格 */
+export function clStats(p: { checklist?: ChecklistGroup[]; packages: Project['packages'] }, scope: ClScope = ALL, today?: Date) {
   let done = 0, total = 0, pending = 0, overdue = 0;
-  clGroups(p).forEach((g) => g.items.forEach((it) => {
-    if (!inScope(it, scope) || it.status === 'na') return;
+  clGroups(p).forEach((g) => g.items.forEach((it) => unitsOf(p, it, scope).forEach(({ c }) => {
+    if (c.status === 'na') return;
     total++;
-    if (it.status === 'confirmed') done++;
-    if (it.status === 'pending') {
+    if (c.status === 'confirmed') done++;
+    if (c.status === 'pending') {
       pending++;
-      const due = parseISO(it.date);
+      const due = parseISO(c.date);
       if (today && due && due < today) overdue++;
     }
-  }));
+  })));
   return { done, total, pending, overdue, pct: total ? Math.round((done / total) * 100) : 0 };
 }
 
@@ -72,10 +74,10 @@ function groupFor(p: Project, g: { group: string; groupEn: string; color: string
 /* 把一份清单(模板 / 别的项目 / 自定义模板)并进项目清单。
    - 同名项(含同义项)不重复,只给已有项加上服务标签;
    - 没有的新增,放进同名分组(没有就新建分组);
-   - svcsOf 决定每一项挂哪些服务;
-   - inst:同一种服务的第二份起,只属于这一份的项单独一条、名字后加实例名。
+   - svcsOf 决定每一项挂哪些服务。
+   REQ-050: 同一种服务加第二份时不再另起「(#2)」那一条 —— 规格项由 syncCells 在同一行里多一格。
    返回新增 / 加标签的数目。 */
-export function mergeIntoProject(p: Project, groups: ChecklistGroup[], svcsOf: (it: ChecklistItem) => string[], opts: { inst?: string; withContent?: boolean } = {}) {
+export function mergeIntoProject(p: Project, groups: ChecklistGroup[], svcsOf: (it: ChecklistItem) => string[], opts: { withContent?: boolean } = {}) {
   if (!p.checklist) p.checklist = [];
   const syn = synonymIndex(getSynonyms());
   let added = 0, tagged = 0;
@@ -86,19 +88,6 @@ export function mergeIntoProject(p: Project, groups: ChecklistGroup[], svcsOf: (
       if (!svcs.length) continue;
       const keys = itemKeys(src, syn);
       const flat = p.checklist.flatMap((x) => x.items);
-      const inst = opts.inst;
-      if (inst) {
-        /* 第二块屏:只认同一份里的同名项,不并到第一份上 */
-        const own = flat.find((x) => x.inst === inst && itemKeys({ zh: stripInst(x.zh, inst), en: stripInst(x.en, inst) }, syn).some((k) => keys.includes(k)));
-        if (own) continue;
-        const clash = flat.some((x) => itemKeys(x, syn).some((k) => keys.includes(k)));
-        const it = newFrom(src, svcs, opts.withContent);
-        if (clash) { it.zh = `${it.zh}(${inst})`; if (it.en) it.en = `${it.en} (${inst})`; }
-        it.inst = inst;
-        (target ||= groupFor(p, g)).items.push(it);
-        added++;
-        continue;
-      }
       const hit = flat.find((x) => !x.inst && itemKeys(x, syn).some((k) => keys.includes(k)));
       if (hit) {
         const before = (hit.svcs || []).length;
@@ -112,7 +101,6 @@ export function mergeIntoProject(p: Project, groups: ChecklistGroup[], svcsOf: (
   }
   return { added, tagged };
 }
-const stripInst = (s: string | undefined, inst: string) => String(s || '').replace(new RegExp(`\\s*[((]${inst.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}[))]$`), '');
 function newFrom(src: ChecklistItem, svcs: string[], withContent?: boolean): ChecklistItem {
   if (!withContent) return blankItem(src.zh, src.en, svcs);
   return {
@@ -134,8 +122,8 @@ export function moveToRemoved(p: Project, gi: number, ii: number, by: string, re
 }
 
 /* 去掉一个服务标签(删服务包、套用模板时)。
-   - keepSvc:同一种服务还有别的份,标签留着;
-   - inst:删的是第二份起的那一份,只属于它的项整条移走;
+   - keepSvc:同一种服务还有别的份,标签留着(REQ-050:那一份的格由 syncCells 去掉);
+   - inst:REQ-050 之前留下的「(#2)」项(迁移对不上服务包、没动的),删的是那一份时整条移走;
    不再属于任何服务的项进「已移除的项」;空了的分组去掉。返回移走的项数。 */
 export function dropSvc(p: Project, svc: string, opts: { by: string; reason: string; keepSvc?: boolean; inst?: string }): number {
   let moved = 0;

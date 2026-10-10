@@ -6,6 +6,7 @@
 import { newId, planDates } from '@/lib/project';
 import { calendarFromRows } from '@/lib/scheduleSync';
 import { ALL, mergeIntoProject, projectSvcs, replaceSection, sectionOf, type ClScope } from '@/lib/sharedChecklist';
+import { cellsToOrdinal, syncCells } from '@/lib/clCells';
 import type { ChecklistGroup, ChecklistItem, Project, ScheduleRow, ServicePackage } from '@/lib/types';
 
 export type FragmentKind = 'schedule' | 'checklist';
@@ -30,17 +31,27 @@ export function freshSchedule(rows: ScheduleRow[], withContent = false): Schedul
 /* 同上。withContent = true 时保留状态 / 日期 / 备注 / 参考图 / 收料记录,
    等于把这份清单连同它的进度整份搬过去。 */
 export function freshChecklist(groups: ChecklistGroup[], withContent = false): ChecklistGroup[] {
+  /* REQ-050: 分格的项每一格同样处理;修改记录不跟着走(那是原项目这一项的历史) */
+  const blank = { status: 'pending' as const, date: '', remark: '', received: '', shots: [] as string[], highlight: false, updatedAt: undefined, receipts: [] as never[] };
+  const freshCells = (cells: ChecklistItem['cells']) => cells && Object.fromEntries(Object.entries(cells).map(([k, c]) => [k, withContent
+    ? { ...c, receipts: (c.receipts || []).map((r) => ({ ...r, id: newId() })) }
+    : { ...c, ...blank }]));
   return (groups || []).map((g) => ({
     ...g,
-    items: (g.items || []).map((it) => (withContent
-      /* 收料记录的 id 也要换 —— 和上面行 id 同一个道理:同一个 id 出现在
-         两个项目里迟早出事(React key、按 id 找记录改 / 删)。 */
-      ? { ...it, id: newId(), receipts: (it.receipts || []).map((r) => ({ ...r, id: newId() })) }
-      : {
-          ...it, id: newId(), status: 'pending' as const, date: '', remark: '', received: '',
-          shot: undefined, shots: [], highlight: false, updatedAt: undefined,
-          receipts: [],   // REQ-042: 不带内容时收料记录也一并清空
-        })),
+    items: (g.items || []).map((it) => {
+      const { history: _h, ...rest } = it;
+      const cells = freshCells(it.cells);
+      return withContent
+        /* 收料记录的 id 也要换 —— 和上面行 id 同一个道理:同一个 id 出现在
+           两个项目里迟早出事(React key、按 id 找记录改 / 删)。 */
+        ? { ...rest, id: newId(), receipts: (it.receipts || []).map((r) => ({ ...r, id: newId() })), ...(cells ? { cells } : {}) }
+        : {
+            ...rest, id: newId(), status: 'pending' as const, date: '', remark: '', received: '',
+            shot: undefined, shots: [], highlight: false, updatedAt: undefined,
+            receipts: [],   // REQ-042: 不带内容时收料记录也一并清空
+            ...(cells ? { cells } : {}),
+          };
+    }),
   }));
 }
 
@@ -53,6 +64,8 @@ export function extractSchedule(pkg: ServicePackage, schedStyle?: string, withCo
 export function extractChecklist(p: Project, scope: ClScope, withContent = false): ChecklistFragment {
   let groups = sectionOf(p, scope);
   if (!groups.length && scope !== ALL) groups = sectionOf(p, ALL);
+  /* REQ-050: 规格项的格按服务包 id 存,到别的项目对不上 —— 换成「第几份」(@1、@2),套用时再对回去 */
+  groups = groups.map((g) => ({ ...g, items: g.items.map((it) => cellsToOrdinal(p, it)) }));
   return { checklist: freshChecklist(groups, withContent), noCategories: !!p.noCategories };
 }
 
@@ -83,6 +96,7 @@ export function applyChecklist(p: Project, scope: ClScope, frag: ChecklistFragme
     : { moved: 0, ...mergeIntoProject(p, groups, svcsOf, { withContent }) };
   const nc = frag.noCategories;
   if (mode === 'replace' && scope === ALL && typeof nc === 'boolean') p.noCategories = nc;
+  syncCells(p, { by });   // REQ-050: 格对到本项目的服务包 / 业务
   return r;
 }
 
