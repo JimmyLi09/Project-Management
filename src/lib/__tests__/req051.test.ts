@@ -203,3 +203,20 @@ test('REQ-051 改名:清单负责人、交接给谁、已移除的项都跟着�
   assert.equal(p.packages[0].schedule[0].assignee, 'New');
   assert.ok(n >= 5);
 });
+
+import { setServerPermSource } from '../permTable.ts';
+test('REQ-051 修复:服务端把关只认数据库那份;页面服务端渲染时设的快照不能顶掉它', () => {
+  const db = defaultPermTable(); db.pm.record = 'none';
+  setServerPermSource(() => db);
+  use(defaultPermTable());   // StoreProvider 在服务端渲染时设的那一刻的表(还是可编辑)
+  try {
+    const p = newProject({ name: 'T', client: '', services: ['scale'], start: '', owners: ['Pam'] } as never);
+    assert.throws(() => applyAction({ name: 'Pam', role: 'pm' }, p, { type: 'setRecord', pkg: 0, patch: { modelMaker: 'A' } } as never), /编辑权限/, 'PD 收紧之后服务端立刻按新表拦');
+    db.pm.record = 'edit';
+    applyAction({ name: 'Pam', role: 'pm' }, p, { type: 'setRecord', pkg: 0, patch: { modelMaker: 'A' } } as never);
+    assert.equal(p.packages[0].record?.modelMaker, 'A', '放开之后也立刻生效');
+  } finally {
+    setServerPermSource(undefined as never);
+    use(defaultPermTable());
+  }
+});

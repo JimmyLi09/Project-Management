@@ -156,7 +156,8 @@ export function StoreProvider({ user, permTable: initialPerm, children }: { user
   const [permTable, setPermTableState] = useState<PermTable>(() => sanitizePermTable(initialPerm ?? defaultPermTable()));
   const permRef = useRef(permTable);
   permRef.current = permTable;
-  setPermSource(() => permRef.current);
+  /* 只在浏览器里指过去:服务端渲染时这里是页面那一刻的快照,服务端把关读的是数据库(setServerPermSource) */
+  if (typeof window !== 'undefined') setPermSource(() => permRef.current);
   const setPermTable = useCallback((t: PermTable) => setPermTableState(sanitizePermTable(t)), []);
   const refreshPerms = useCallback(async () => {
     const res = await fetch('/api/permissions').catch(() => null);

@@ -87,9 +87,13 @@ export function permDiff(a: PermTable, b: PermTable): { role: PermRole; module: 
 
 /* ---- 当前生效的表从哪儿来:服务端 = 数据库,浏览器 = /api/permissions ---- */
 /* 挂在 globalThis 上:Next 的不同路由各自打包,模块级变量可能有好几份,这样只有一份 */
-const G = globalThis as { __audaxPermSource?: () => PermTable };
-const source = (): PermTable => (G.__audaxPermSource || defaultPermTable)();
+const G = globalThis as { __audaxPermSource?: () => PermTable; __audaxPermServer?: () => PermTable };
+/* 服务端只认数据库那一份(setServerPermSource)。浏览器组件在服务端渲染时也会跑到 setPermSource,
+   那是页面渲染那一刻的快照 —— 要是拿它把关,PD / BD 之后改的表在服务端就一直不生效(直到重启) */
+const source = (): PermTable =>
+  ((typeof window === 'undefined' ? G.__audaxPermServer : undefined) || G.__audaxPermSource || defaultPermTable)();
 export function setPermSource(fn: () => PermTable) { G.__audaxPermSource = fn; }
+export function setServerPermSource(fn: () => PermTable) { G.__audaxPermServer = fn; }
 /* 一次请求里会问很多遍:服务端的 source 自己带缓存,浏览器的就是内存里那一份 */
 export const currentPermTable = (): PermTable => source();
 
