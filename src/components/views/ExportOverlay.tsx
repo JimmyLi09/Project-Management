@@ -274,6 +274,13 @@ export default function ExportOverlay({ p, onClose, scope = 'all', clScope = 'al
     });
     const one = (it: ChecklistItem): ClRow[] => {
       if (!(it.svcs || allSvcs).some((sv) => selSvcs.includes(sv))) return [];
+      /* 迁移时没对上服务包、留下来的「(#2)」/「(实例名)」项:属于哪一份认得出来的,那一份没勾就不导 */
+      if (it.inst && (it.svcs || []).length === 1) {
+        const same = p.packages.filter((x) => x.svc === it.svcs![0]);
+        const m = /^#(\d+)$/.exec(it.inst);
+        const pk = m ? same[Number(m[1]) - 1] : same.find((x) => x.label === it.inst);
+        if (pk?.id && !selIds.has(pk.id)) return [];
+      }
       if (!it.cells) return keepC(it) ? [rowOf(it, it, it.id || '', name(it), (it.svcs || allSvcs).map(svcLabel).join(L === 'zh' ? '、' : ', '))] : [];
       return Object.entries(it.cells)
         .filter(([k]) => (it.mode === 'sep' ? selSvcs.includes(k) : selIds.has(k)))

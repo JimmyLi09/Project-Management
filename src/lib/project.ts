@@ -213,7 +213,8 @@ function normalizeClItem(it: any) {
   /* 空数组也要再看一眼 —— 项目是「先建(那时什么都没收到,种子为空)、
      后填收到内容」的,如果只判 undefined,这些项就永远补不上第一条。 */
   if (!Array.isArray(it.receipts)) it.receipts = [];
-  if (it.receipts.length === 0) {
+  /* REQ-050:分格的项收料记录只在格里,行上那几个字段只是第一格的镜像 —— 不能再凭它补一条 */
+  if (it.receipts.length === 0 && !it.cells) {
     const seed = seedReceipt(it as ChecklistItem);
     if (seed) it.receipts = [seed];
   }

@@ -102,7 +102,11 @@ export function mergeIntoProject(p: Project, groups: ChecklistGroup[], svcsOf: (
   return { added, tagged };
 }
 function newFrom(src: ChecklistItem, svcs: string[], withContent?: boolean): ChecklistItem {
-  if (!withContent) return blankItem(src.zh, src.en, svcs);
+  if (!withContent) {
+    const it = blankItem(src.zh, src.en, svcs);
+    if (src.scope === 'inst' || src.scope === 'proj') it.scope = src.scope;   // REQ-050:模板上 PD 设的范围跟着走
+    return it;
+  }
   return {
     ...src, id: newId(), svcs,
     shots: [...(src.shots || [])],

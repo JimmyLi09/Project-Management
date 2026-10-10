@@ -58,6 +58,9 @@ export async function POST(req: NextRequest) {
      迁移备份、已移除的项都不跟着走 */
   copy.checklist = mode === 'schedule' ? [] : freshChecklist(src.checklist || []);
   delete copy.checklistLegacy;
+  /* REQ-050:迁移前那份清单(含内容、收料记录、参考图)和迁移标记也不跟着走 */
+  delete copy.checklistLegacy050;
+  delete copy.mig050;
   /* REQ-049:Job Record 是这一单的报价内容,和旧资料卡一样不跟着复制 —— 读的时候每种业务补 1 行空白 */
   delete copy.jobRecord;
   delete copy.mig049;

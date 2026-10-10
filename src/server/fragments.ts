@@ -7,6 +7,7 @@ import { newId, planDates } from '@/lib/project';
 import { calendarFromRows } from '@/lib/scheduleSync';
 import { ALL, mergeIntoProject, projectSvcs, replaceSection, sectionOf, type ClScope } from '@/lib/sharedChecklist';
 import { cellsToOrdinal, syncCells } from '@/lib/clCells';
+import type { TplNames } from '@/lib/checklistScope';
 import type { ChecklistGroup, ChecklistItem, Project, ScheduleRow, ServicePackage } from '@/lib/types';
 
 export type FragmentKind = 'schedule' | 'checklist';
@@ -85,7 +86,7 @@ export function applySchedule(pkg: ServicePackage, frag: ScheduleFragment, mode:
    并入时同名项不重复,只加服务标签(已有的内容保留)。
    在某个服务标签下,新项都挂这个服务;在「全部」下沿用来源项的服务标签
    (只认本项目有的服务,一个都对不上就挂全部服务)。 */
-export function applyChecklist(p: Project, scope: ClScope, frag: ChecklistFragment, mode: 'replace' | 'append', withContent: boolean, by: string) {
+export function applyChecklist(p: Project, scope: ClScope, frag: ChecklistFragment, mode: 'replace' | 'append', withContent: boolean, by: string, tplNames?: TplNames) {
   const groups = freshChecklist(frag.checklist || [], withContent);
   const have = projectSvcs(p);
   const svcsOf = scope === ALL
@@ -96,7 +97,7 @@ export function applyChecklist(p: Project, scope: ClScope, frag: ChecklistFragme
     : { moved: 0, ...mergeIntoProject(p, groups, svcsOf, { withContent }) };
   const nc = frag.noCategories;
   if (mode === 'replace' && scope === ALL && typeof nc === 'boolean') p.noCategories = nc;
-  syncCells(p, { by });   // REQ-050: 格对到本项目的服务包 / 业务
+  syncCells(p, { by, tplNames });   // REQ-050: 格对到本项目的服务包 / 业务(规格项按 PD 存过的模板定)
   return r;
 }
 
@@ -151,9 +152,11 @@ export function statFragment(frag: Fragment, kind: FragmentKind): FragmentStats 
   const items = groups.reduce((n, g) => n + (g.items || []).length, 0);
   /* 「有内容」也要把收料记录算进去 —— 一个项只有收料记录、老字段还空着的
      情况是有的(记录是后加的),预览里说「0 项有内容」会骗人。 */
+  /* REQ-050:分格的项每格各算(第二格以后的内容不在行上) */
+  const filled = (c: Pick<ChecklistItem, 'status' | 'date' | 'remark' | 'received' | 'shots' | 'receipts'>) =>
+    c.status !== 'pending' || c.date || c.remark || c.received || (c.shots || []).length || (c.receipts || []).length;
   const withContent = groups.reduce((n, g) => n + (g.items || []).filter(
-    (it) => it.status !== 'pending' || it.date || it.remark || it.received
-      || (it.shots || []).length || (it.receipts || []).length,
+    (it) => (it.cells ? Object.values(it.cells).some(filled) : filled(it)),
   ).length, 0);
   return { groups: groups.length, items, withContent };
 }

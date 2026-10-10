@@ -90,6 +90,14 @@ export function mirrorRow(it: ChecklistItem) {
   it.receipts = [];
 }
 
+/* 收成一条时把某一格的内容放回行上(格里没有的星标 / 更新时间也要清掉,不能留着原来第一格的) */
+function applyToRow(it: ChecklistItem, c: ClCell) {
+  const row = it as unknown as Record<string, unknown>;
+  delete row.highlight;
+  delete row.updatedAt;
+  Object.assign(it, cellOf(c));
+}
+
 const hasContent = (c: ClFields) => (c.status || 'pending') !== 'pending' || !!(c.receipts || []).length || !!(c.remark || '').trim()
   || !!(c.received || '').trim() || !!(c.owner || '').trim() || !!(c.shots || []).length;
 
@@ -116,7 +124,11 @@ export function syncCells(p: Project, opts: { by: string; at?: number; tplNames?
         if (!m) continue;
         const pk = pkgs[Number(m[1]) - 1];
         if (pk?.id && !it.cells[pk.id]) it.cells[pk.id] = it.cells[k];
-        else if (pk?.id) { /* 目标已有这一格:导入的那份记进修改记录 */ if (hasContent(it.cells[k])) pushHistory(it, { at, by: opts.by, k: 'cell.import', text: `导入时「第 ${m[1]} 份」那一格和已有的重了,导入的那份原样记在这里`, cell: `#${m[1]}`, data: it.cells[k] }); }
+        else if (hasContent(it.cells[k])) {
+          /* 目标已有这一格 / 本项目没有第 N 份:导入的那份记进修改记录,不悄悄丢掉 */
+          const why = pk?.id ? '和已有的重了' : `本项目没有第 ${m[1]} 份`;
+          pushHistory(it, { at, by: opts.by, k: 'cell.import', text: `导入时「第 ${m[1]} 份」那一格${why},导入的那份原样记在这里`, cell: `#${m[1]}`, data: it.cells[k] });
+        }
         delete it.cells[k];
       }
     }
@@ -131,7 +143,7 @@ export function syncCells(p: Project, opts: { by: string; at?: number; tplNames?
       }
       const keep = it.cells[prefer];
       delete it.cells;
-      if (keep) Object.assign(it, cellOf(keep));
+      if (keep) applyToRow(it, keep);
       n++;
       continue;
     }
@@ -146,9 +158,17 @@ export function syncCells(p: Project, opts: { by: string; at?: number; tplNames?
       continue;
     }
     const next: Record<string, ClCell> = {};
-    for (const k of keys) next[k] = it.cells[k] || blankCell();
+    const used = new Set<string>();
+    for (const k of keys) {
+      if (it.cells[k]) { next[k] = it.cells[k]; used.add(k); continue; }
+      /* 单独填改回只剩一个业务、这个业务又有两份(格从「按业务」变成「按服务包」):
+         那个业务原来那一格进第一份,不能变成空的 */
+      const sv = cellSvc(p, k);
+      if (sv !== k && it.cells[sv] && !used.has(sv)) { next[k] = it.cells[sv]; used.add(sv); continue; }
+      next[k] = blankCell();
+    }
     for (const [k, c] of Object.entries(it.cells)) {
-      if (keys.includes(k)) continue;
+      if (used.has(k)) continue;
       if (hasContent(c)) pushHistory(it, { at, by: opts.by, k: 'cell.drop', text: `「${nameOf(k)}」那一格去掉了(那一份业务删了),原样记在这里`, cell: nameOf(k), data: c });
     }
     it.cells = next;
@@ -210,7 +230,7 @@ export function setMode(p: Project, it: ChecklistItem, mode: 'sync' | 'sep', opt
   }
   delete it.cells;
   delete it.mode;
-  Object.assign(it, cellOf(keep));
+  applyToRow(it, keep);
 }
 
 /* 导出 / 存为模板时:规格项的格从服务包 id 换成「第几份」(@1、@2),到别的项目再对回去 */

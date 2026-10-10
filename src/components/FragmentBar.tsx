@@ -7,6 +7,7 @@ import { useLang } from '@/lib/i18n';
 import { Icon } from './ui';
 import { freshChecklist, freshSchedule } from '@/server/fragments';
 import { sectionOf } from '@/lib/sharedChecklist';
+import { cellsToOrdinal } from '@/lib/clCells';
 import type { Project } from '@/lib/types';
 
 interface TplRow { id: number; type: string; name: string; created_by: string }
@@ -89,7 +90,8 @@ export default function FragmentBar({ p, pkgIdx, kind, scope = 'all' }: { p: Pro
     /* REQ-044: 存清单 = 存当前标签那一段(「全部」= 整张),每项带着它的服务标签 */
     const payload = kind === 'schedule'
       ? { schedule: freshSchedule(pkg.schedule, withContent), schedStyle: p.schedStyle }
-      : { checklist: freshChecklist(sectionOf(p, scope), withContent), noCategories: !!p.noCategories };
+      /* REQ-050:规格项的格按服务包 id 存,到别的项目对不上 —— 和导出片段一样换成「第几份」 */
+      : { checklist: freshChecklist(sectionOf(p, scope).map((g) => ({ ...g, items: g.items.map((it) => cellsToOrdinal(p, it)) })), withContent), noCategories: !!p.noCategories };
     setBusy(true);
     const res = await fetch('/api/user-templates', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },

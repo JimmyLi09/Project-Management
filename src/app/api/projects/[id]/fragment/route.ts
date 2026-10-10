@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { appendAudit, getProject, getUserTemplate, saveProjectCAS } from '@/server/db';
+import { appendAudit, getEffectiveTemplate, getProject, getUserTemplate, saveProjectCAS } from '@/server/db';
+import { tplNamesFrom } from '@/lib/checklistScope';
 import { currentUser } from '@/server/session';
 import { canEdit, canEditModule, canSeeProject, identityOf } from '@/lib/permissions';
 import { redactProject } from '@/lib/permRedact';
@@ -88,7 +89,8 @@ export async function POST(req: NextRequest, { params }: Params) {
   if (preview) return NextResponse.json({ preview: statFragment(frag, kind), label });
 
   if (kind === 'schedule') applySchedule(dest, frag as ScheduleFragment, mode, withContent, { projectStart: p.start, by: user.name });
-  else applyChecklist(p, scope, frag as ChecklistFragment, mode, withContent, user.name);
+  else applyChecklist(p, scope, frag as ChecklistFragment, mode, withContent, user.name,
+    tplNamesFrom(Object.fromEntries(projectSvcs(p).map((s) => [s, getEffectiveTemplate(s)]))));
   const now = Date.now();
   const text = `${mode === 'replace' ? '覆盖' : '追加'}导入${kind === 'schedule' ? '排期' : '信息清单'}${withContent ? '(含内容)' : ''} ← ${label}`;
   p.log = [{ at: now, by: user.name, text }, ...(p.log || [])].slice(0, 200);

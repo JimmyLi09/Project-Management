@@ -120,7 +120,9 @@ export function scopeOf(it: Pick<ChecklistItem, 'zh' | 'en' | 'scope'>, svcs: st
     if (hit) return { scope: hit, why: 'template' };
   }
   for (const svc of svcs) {
-    const inst = instIndex.get(own(svc) === '_generic' ? '_generic' : svc);
+    /* 规格项表:出厂有专属模板的业务查自己那张;没有专属模板的(TV、MAXHUB……)查通用那张 ——
+       不管 tplNames 里有没有给它单独放一份(服务端动作会把通用模板按业务名放进去) */
+    const inst = instIndex.get(instIndex.has(svc) ? svc : TPL[svc] ? '' : '_generic');
     if (inst && keys.some((k) => inst.has(k))) return { scope: 'inst', why: 'template' };
   }
   for (const svc of svcs) {
