@@ -152,6 +152,39 @@ export interface ChecklistItem {
   /* REQ-044: 同一种服务有两份(大堂 LED / 户外 LED)时,只属于其中一份的项记下是哪一份
      (= 那份的实例名,没有名字时是 #2、#3)。删掉那一份业务时据此把它移进「已移除的项」。 */
   inst?: string;
+  /* REQ-050: 一项的「范围」和「填法」。
+     scope:proj = 项目级(地址、联系人、图纸、时间节点),整个项目一条;
+           inst = 规格项(屏幕尺寸、铁架、放置位置),同一业务的每一份各一格。来自模板。
+     mode: sync = 几个业务共用一份(默认);sep = 单独填,每个业务一格。
+     cells:分格时每格的内容,键 = 服务包 id(规格项)或业务 key(单独填)。没有分格时不存在,
+           内容就在这一项本身上。
+     history:修改记录 —— 合并重复项、改回同步时,没被采用的那份原样留在这里,不丢。 */
+  scope?: 'proj' | 'inst';
+  mode?: 'sync' | 'sep';
+  cells?: Record<string, ClCell>;
+  history?: ClHistory[];
+}
+
+/* REQ-050: 一格的内容(和信息项本身同一套字段) */
+export interface ClCell {
+  status: ChecklistStatus;
+  date: string;
+  remark: string;
+  received?: string;
+  owner?: string;
+  shots?: string[];
+  receipts?: ReceiptRecord[];
+  highlight?: boolean;
+  updatedAt?: number;
+}
+/* REQ-050: 一项的修改记录。data = 当时没被采用的那一份(含收料记录),原样保存 */
+export interface ClHistory {
+  at: number;
+  by: string;
+  k: string;              // 'mig050.merge' 合并重复项 · 'sync' 改回同步 …
+  text: string;           // 一句人话(中文)
+  cell?: string;          // 那一份原来是哪一格 / 哪个实例
+  data?: ClCell & { zh?: string; en?: string; id?: string };
 }
 
 /* REQ-044: 删服务包 / 删分类 / 删项时不直接删,先放进这里,可恢复 */
@@ -222,6 +255,8 @@ export interface ScopeItem {
 }
 
 export interface ServicePackage {
+  /* REQ-050: 服务包 id。信息清单的规格项按它分格(改实例名、删掉前一份都对得上);老数据由迁移补上 */
+  id?: string;
   svc: string;
   start: string;
   delivery: string;
@@ -357,6 +392,9 @@ export interface Project {
   checklist?: ChecklistGroup[];
   noCategories?: boolean;                       // 无固定分类(项目级开关)
   checklistLegacy?: { svc: string; label?: string; checklist?: ChecklistGroup[]; noCategories?: boolean }[];   // 迁移前各服务包的清单原样
+  /* REQ-050: 合并「(#2)」重复项之前的清单原样(回退用),和迁移记录 */
+  checklistLegacy050?: ChecklistGroup[];
+  mig050?: { at: number; rows: number; merged: number; cells: number };
   checklistRemoved?: RemovedClItem[];           // 已移除的项(可恢复)
   /* REQ-049:Job Record 4 栏表(全部业务一张,按业务分组)。上线迁移时由各业务的旧字段 pk.record 转来;
      mig049 记迁移时间和转了几行(回退脚本看它) */
