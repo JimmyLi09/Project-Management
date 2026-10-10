@@ -181,6 +181,8 @@ export const LOG_MSG: Record<string, [string, string]> = {
   'cl.svcs': ['信息项「{item}」适用服务:{svcs}', 'Checklist “{item}” now applies to: {svcs}'],
   'cl.removeItem': ['移除信息项「{item}」(可在「已移除的项」恢复)', 'Checklist item “{item}” removed (restorable)'],
   'cl.restore': ['恢复信息项「{item}」', 'Checklist item “{item}” restored'],
+  'cl.modeSep': ['信息项「{item}」改成单独填({svc} 各一格)', 'Checklist “{item}” filled separately per service ({svc})'],
+  'cl.modeSync': ['信息项「{item}」改回同步,以 {svc} 那份为准', 'Checklist “{item}” synced again, keeping the {svc} version'],
   'cl.resetScope': ['套用默认信息清单:{scope}', 'Default checklist applied: {scope}'],
   'cl.pkgMerge': ['{svc} 的信息项并入共用清单:新增 {added} 项,{tagged} 项加上服务标签', '{svc} checklist merged in: {added} new, {tagged} shared items tagged'],
   'cl.pkgDrop': ['{svc} 的专属信息项移到「已移除的项」:{moved} 项', '{svc}-only checklist items moved to “Removed”: {moved}'],

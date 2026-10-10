@@ -7,6 +7,7 @@ import { fmtDate, parseISO } from '@/lib/project';
 import { CM } from '../ui';
 import { RECEIVE_VIA, viaName } from '@/lib/receipts';
 import { inScope } from '@/lib/sharedChecklist';
+import { cellLabel, unitsOf } from '@/lib/clCells';
 import type { ChecklistStatus, Project, ReceiptRecord } from '@/lib/types';
 
 /* ===== REQ-042: 收料记录 =====
@@ -26,10 +27,12 @@ export function StatusBadge({ s, lang }: { s: string; lang: 'zh' | 'en' }) {
 }
 
 /* ---------- ① 单项历史 ---------- */
-export function ItemReceipts({ p, item, receipts, canEd, onClose }: {
+export function ItemReceipts({ p, item, cell, cellName, receipts, canEd, onClose }: {
   p: Project; item: string;   // REQ-044: 按项 id
+  cell?: string; cellName?: string;   // REQ-050: 分格的项,这是哪一格的记录
   receipts: ReceiptRecord[]; canEd: boolean; onClose: () => void;
 }) {
+  const withCell = cell ? { cell } : {};
   const { dispatch } = useStore();
   const { lang, t } = useLang();
   const who = useWho();   // REQ-051: 已删除的人显示「(已删除)」
@@ -40,7 +43,7 @@ export function ItemReceipts({ p, item, receipts, canEd, onClose }: {
     <div style={{ padding: '12px 24px 16px 44px', background: 'var(--hover-bg)', borderBottom: '1px solid var(--row-line)' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 9, marginBottom: 9, flexWrap: 'wrap' }}>
         <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--navy900)' }}>
-          {t('收料记录', 'Receiving log')} ({receipts.length})
+          {t('收料记录', 'Receiving log')}{cellName ? ` · ${cellName}` : ''} ({receipts.length})
         </span>
         <span style={{ fontSize: 11.5, color: 'var(--text2)' }}>
           {t('每收到一版就追加一条,旧的留在历史里,不会被覆盖。', 'Each delivery is appended — earlier versions stay in the history.')}
@@ -52,7 +55,7 @@ export function ItemReceipts({ p, item, receipts, canEd, onClose }: {
 
       {adding && canEd && (
         <ReceiptForm lang={lang} onCancel={() => setAdding(false)}
-          onSave={async (rec) => { await dispatch(p.id, { type: 'addReceipt', item, rec }); setAdding(false); }} />
+          onSave={async (rec) => { await dispatch(p.id, { type: 'addReceipt', item, rec, ...withCell }); setAdding(false); }} />
       )}
 
       {receipts.length === 0 && !adding && (
@@ -62,7 +65,7 @@ export function ItemReceipts({ p, item, receipts, canEd, onClose }: {
       <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
         {receipts.map((r, i) => editId === r.id && canEd ? (
           <ReceiptForm key={r.id} lang={lang} init={r} onCancel={() => setEditId(null)}
-            onSave={async (rec) => { await dispatch(p.id, { type: 'editReceipt', item, id: r.id, rec }); setEditId(null); }} />
+            onSave={async (rec) => { await dispatch(p.id, { type: 'editReceipt', item, id: r.id, rec, ...withCell }); setEditId(null); }} />
         ) : (
           <div key={r.id} style={{
             border: '1px solid var(--border)', borderRadius: 9, padding: '9px 12px',
@@ -84,7 +87,7 @@ export function ItemReceipts({ p, item, receipts, canEd, onClose }: {
                   <button className="btn-line sm danger" onClick={() => {
                     if (!confirm(t(`删除这条收料记录(${r.fileName || r.date || '无文件名'})?不能撤销。`,
                                    `Delete this record (${r.fileName || r.date || 'unnamed'})? This cannot be undone.`))) return;
-                    dispatch(p.id, { type: 'removeReceipt', item, id: r.id });
+                    dispatch(p.id, { type: 'removeReceipt', item, id: r.id, ...withCell });
                   }}>✕</button>
                 </>
               )}
@@ -164,7 +167,7 @@ function ReceiptForm({ init, lang, onSave, onCancel }: {
 /* ---------- ② 内部收料记录(整表) ---------- */
 export function ReceivingLog({ p, scope, canEd, onOpenItem }: {
   p: Project; scope: string; canEd: boolean;   // REQ-044: 随清单的服务标签筛选,记录本身只有一份
-  onOpenItem: (id: string) => void;
+  onOpenItem: (id: string, cell?: string) => void;
 }) {
   const { lang, t } = useLang();
   const who = useWho();   // REQ-051: 已删除的人显示「(已删除)」
@@ -176,12 +179,13 @@ export function ReceivingLog({ p, scope, canEd, onOpenItem }: {
   /* 全部项的全部记录摊平成一张表 —— 这是「谁什么时候给了什么」的流水账,
      所以按时间倒序排,而不是按清单顺序。 */
   const rows = useMemo(() => {
-    const out: { id: string; item: string; group: string; r: ReceiptRecord; isLatest: boolean }[] = [];
+    const out: { id: string; cell?: string; cellName?: string; item: string; group: string; r: ReceiptRecord; isLatest: boolean }[] = [];
     (p.checklist || []).forEach((g) => g.items.forEach((it) => {
       if (!inScope(it, scope)) return;
-      (it.receipts || []).forEach((r, k) => {
-        out.push({ id: it.id || '', item: lang === 'zh' ? it.zh : (it.en || it.zh), group: lang === 'zh' ? g.group : (g.groupEn || g.group), r, isLatest: k === 0 });
-      });
+      /* REQ-050: 分格的项每格各有记录,标明是哪个业务 / 哪一份 */
+      unitsOf(p, it, scope).forEach(({ key, c }) => (c.receipts || []).forEach((r, k) => {
+        out.push({ id: it.id || '', cell: key, cellName: key ? cellLabel(p, key, lang) : undefined, item: lang === 'zh' ? it.zh : (it.en || it.zh), group: lang === 'zh' ? g.group : (g.groupEn || g.group), r, isLatest: k === 0 });
+      }));
     }));
     return out.sort((a, b) => (b.r.date || '').localeCompare(a.r.date || '') || (b.r.at || 0) - (a.r.at || 0));
   }, [p.checklist, scope, lang]);
@@ -192,7 +196,7 @@ export function ReceivingLog({ p, scope, canEd, onOpenItem }: {
     if (to && (x.r.date || '') > to) return false;
     if (!q.trim()) return true;
     const s = q.trim().toLowerCase();
-    return (x.item + x.group + x.r.fileName + x.r.from + (x.r.receivedBy || '') + x.r.path + x.r.remark).toLowerCase().includes(s);
+    return (x.item + (x.cellName || '') + x.group + x.r.fileName + x.r.from + (x.r.receivedBy || '') + x.r.path + x.r.remark).toLowerCase().includes(s);
   });
 
   function exportCsv() {
@@ -200,7 +204,7 @@ export function ReceivingLog({ p, scope, canEd, onOpenItem }: {
     const head = [t('分类', 'Section'), t('信息项', 'Item'), t('收到日期', 'Date'), t('文件名称', 'File name'),
       t('来自', 'From'), t('收到方式', 'Via'), t('接收人', 'Received by'), t('保存路径', 'Path'),
       t('状态', 'Status'), t('备注', 'Remark'), t('录入人', 'Logged by')];
-    const body = shown.map((x) => [x.group, x.item, x.r.date, x.r.fileName, x.r.from,
+    const body = shown.map((x) => [x.group, x.item + (x.cellName ? ` · ${x.cellName}` : ''), x.r.date, x.r.fileName, x.r.from,
       viaName(x.r.via, lang), x.r.receivedBy || '', x.r.path,
       lang === 'zh' ? statusMeta(x.r.status).zh : statusMeta(x.r.status).label, x.r.remark, x.r.by]);
     const csv = '﻿' + [head, ...body].map((r) => r.map(qt).join(',')).join('\r\n');
@@ -249,14 +253,15 @@ export function ReceivingLog({ p, scope, canEd, onOpenItem }: {
             </thead>
             <tbody>
               {shown.map((x) => (
-                <tr key={x.r.id}>
+                <tr key={`${x.id}:${x.cell || ''}:${x.r.id}`}>
                   <td style={{ ...cell, whiteSpace: 'nowrap' }}>
                     <span className="tnum">{x.r.date ? fmtDate(parseISO(x.r.date)) : '—'}</span>
                     {x.isLatest && <span className="badge" style={{ background: 'var(--navy900)', color: '#fff', marginLeft: 6 }}>Latest</span>}
                   </td>
                   <td style={cell}>
-                    <button style={{ color: 'var(--info)', textAlign: 'left' }} onClick={() => onOpenItem(x.id)}
+                    <button style={{ color: 'var(--info)', textAlign: 'left' }} onClick={() => onOpenItem(x.id, x.cell)}
                       title={t('回清单页看这一项的全部记录', 'Open this item’s history in the checklist')}>{x.item}</button>
+                    {x.cellName && <span className="badge" data-testid="rl-cell" style={{ marginLeft: 5, background: 'var(--hover-bg)', color: 'var(--navy900)' }}>{x.cellName}</span>}
                     <span style={{ display: 'block', fontSize: 11, color: 'var(--text2)' }}>{x.group}</span>
                   </td>
                   <td style={{ ...cell, wordBreak: 'break-all' }}>{x.r.fileName || '—'}</td>

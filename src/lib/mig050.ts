@@ -17,7 +17,7 @@
 
 import { getSynonyms, itemKeys, mergeStatus, synonymIndex } from './checklistMerge';
 import { scopeOf, type ScopeDecision, type TplNames } from './checklistScope';
-import { newId } from './project';
+import { blankCell, cellOf, ensurePkgIds, mirrorRow, pkgLabel } from './clCells';
 import { svcName } from './templates';
 import type { ChecklistGroup, ChecklistItem, ChecklistStatus, ClCell, ClHistory, Project, ReceiptRecord, ServicePackage } from './types';
 
@@ -26,19 +26,7 @@ const rank = (s: string | undefined) => RANK[s || 'pending'] ?? 0;
 export const ST_ZH: Record<string, string> = { pending: '待处理', received: '已收到', confirmed: '已确认', na: 'N/A', revision: '需修订', rejected: '退回' };
 const stZh = (s: string | undefined) => ST_ZH[s || 'pending'] || s || '待处理';
 
-/* 服务包 id;老数据没有就补一个 */
-export function ensurePkgIds(p: Pick<Project, 'packages'>): number {
-  let n = 0;
-  (p.packages || []).forEach((pk) => { if (!pk.id) { pk.id = 'pk' + newId(); n++; } });
-  return n;
-}
-
-/* 一份服务包在界面 / 报告里叫什么:有实例名用实例名;同类只有一份就是业务名;否则「LED-1 / LED-2」 */
-export function pkgLabel(p: Pick<Project, 'packages'>, pk: ServicePackage, lang: 'zh' | 'en' = 'zh'): string {
-  const same = (p.packages || []).filter((x) => x.svc === pk.svc);
-  if (pk.label) return pk.label;
-  return same.length > 1 ? `${svcName(pk.svc, lang)}-${same.indexOf(pk) + 1}` : svcName(pk.svc, lang);
-}
+export { blankCell, cellOf, ensurePkgIds, pkgLabel };
 
 /* 名字最后的「(#2)」「(户外 LED)」去掉(全角半角括号都认) */
 export function stripInst(s: string | undefined, inst: string): string {
@@ -46,18 +34,6 @@ export function stripInst(s: string | undefined, inst: string): string {
   return String(s || '').replace(new RegExp(`\\s*[((]${esc}[))]\\s*$`), '');
 }
 
-export const cellOf = (it: ChecklistItem | ClCell): ClCell => {
-  const c: ClCell = {
-    status: it.status || 'pending', date: it.date || '', remark: it.remark || '',
-    received: it.received || '', owner: it.owner || '',
-    shots: [...(it.shots || [])],
-    receipts: (it.receipts || []).map((r) => ({ ...r })),
-  };
-  if (it.highlight) c.highlight = true;
-  if (it.updatedAt) c.updatedAt = it.updatedAt;
-  return c;
-};
-export const blankCell = (): ClCell => ({ status: 'pending', date: '', remark: '', received: '', owner: '', shots: [], receipts: [] });
 const hasContent = (c: ClCell) => c.status !== 'pending' || !!(c.receipts || []).length || !!c.remark.trim() || !!(c.received || '').trim() || !!(c.owner || '').trim() || !!(c.shots || []).length;
 const latestAt = (c: ClCell) => (c.receipts || [])[0]?.date || c.date || '';
 
@@ -212,8 +188,8 @@ export function migrateProject050(p: Project, opts: { tplNames?: TplNames; at?: 
       }
       fam.result = 'cells';
       row.cells = cells;
-      /* 行上的老字段跟第 1 格(老代码、导出读它们;新代码按格读) */
-      Object.assign(row, cellOf(cells[pkgs[0].id!]));
+      /* 行上的老字段跟第 1 格(老代码、看板读它们;新代码按格读);参考图和收料记录只在格里 */
+      mirrorRow(row);
     } else {
       const list = f.members.map((m) => ({ m, cell: cellOf(m.loc.it) }));
       const w = pickWinner(list);
@@ -256,6 +232,7 @@ export function migrateProject050(p: Project, opts: { tplNames?: TplNames; at?: 
       it.cells![pk.id!] = i === 0 ? cellOf(it) : blankCell();
       if (i > 0) entry.blank.push({ name: it.zh || it.en, label: label(pk) });
     });
+    mirrorRow(it);
     if (it.id) dest.set(it.id, { rowId: it.id, cell: pkgs[0].id });
   }
 

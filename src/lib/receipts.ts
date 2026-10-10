@@ -9,7 +9,10 @@
    追加 / 编辑 / 删除记录之后都要重新同步一次。这样老代码一行不用改,
    新功能也拿得到完整历史。 */
 
-import type { ChecklistItem, ChecklistStatus, ReceiptRecord } from './types';
+import type { ChecklistStatus, ReceiptRecord } from './types';
+
+/* 信息项本身,或 REQ-050 的一格 —— 两者有同一套字段 */
+export interface ReceiptHolder { status: ChecklistStatus; date: string; remark: string; received?: string; receipts?: ReceiptRecord[]; updatedAt?: number }
 
 export const RECEIVE_VIA: [string, string, string][] = [
   ['email', 'Email 邮件', 'Email'],
@@ -32,12 +35,12 @@ export function sortReceipts(list: ReceiptRecord[]): ReceiptRecord[] {
   return [...list].sort((a, b) => (b.date || '').localeCompare(a.date || '') || (b.at || 0) - (a.at || 0));
 }
 
-export const latestOf = (it: ChecklistItem): ReceiptRecord | undefined => (it.receipts || [])[0];
+export const latestOf = (it: ReceiptHolder): ReceiptRecord | undefined => (it.receipts || [])[0];
 
 /* 老数据 → 第一条记录。
    只有真的收到过东西(有文件名 / 日期 / 备注,或状态已经不是 pending)才生成,
    否则一个空项会凭空多出一条什么都没有的「记录」。 */
-export function seedReceipt(it: ChecklistItem): ReceiptRecord | null {
+export function seedReceipt(it: ReceiptHolder): ReceiptRecord | null {
   const has = !!(it.received?.trim() || it.date?.trim() || it.remark?.trim() || (it.status && it.status !== 'pending'));
   if (!has) return null;
   return {
@@ -55,7 +58,7 @@ export function seedReceipt(it: ChecklistItem): ReceiptRecord | null {
 }
 
 /* 把 Latest 同步回 item 的老字段。每次动过 receipts 都要调一次。 */
-export function syncFromLatest(it: ChecklistItem) {
+export function syncFromLatest(it: ReceiptHolder) {
   const l = latestOf(it);
   if (!l) return;
   it.status = l.status;
@@ -70,7 +73,7 @@ export function syncFromLatest(it: ChecklistItem) {
 /* 反方向:有人在清单行上直接改了「状态 / 收到内容 / 日期 / 备注」(老的那套快捷编辑),
    把这次改动落到 Latest 上 —— 一条都没有就现开一条。
    不这么做的话两套表示会分叉:行上写着「已收到 CAD_v01」,展开记录却是空的。 */
-export function syncToLatest(it: ChecklistItem, by: string) {
+export function syncToLatest(it: ReceiptHolder, by: string) {
   if (!Array.isArray(it.receipts)) it.receipts = [];
   const l = it.receipts[0];
   if (!l) {

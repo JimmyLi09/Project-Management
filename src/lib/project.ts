@@ -8,6 +8,8 @@ import { canSeeProject } from './permissions';
 import { roleKeyOf } from './contactRoles';
 import { calendarFromRows, seedCalendar } from './scheduleSync';
 import { blankRow, ensureJobRows } from './jobRecord';
+import { syncCells, unitsOf } from './clCells';
+import { tplItemScope } from './checklistScope';
 import { layoutFromStart } from '@/features/schedule-planner/domain/duration';
 import type {
   ChecklistGroup,
@@ -69,6 +71,7 @@ export interface NewProjectInput {
 export function buildPackage(svc: string, start: string, tpl?: Template): ServicePackage {
   const t = tpl || TPL[svc] || GENERIC;
   const pk: ServicePackage = {
+    id: 'pk' + newId(),   // REQ-050:规格项的格按它关联
     svc,
     start: start || '',
     delivery: '',
@@ -82,7 +85,7 @@ export function buildPackage(svc: string, start: string, tpl?: Template): Servic
     })),
     checklist: t.checklist.map((g) => ({
       group: g[0], groupEn: g[1], color: g[2],
-      items: g[3].map((i) => ({ id: newId(), zh: i[0], en: i[1], status: 'pending' as const, date: '', remark: '', owner: '', shots: [] as string[] })),
+      items: g[3].map((i) => ({ id: newId(), zh: i[0], en: i[1], status: 'pending' as const, date: '', remark: '', owner: '', shots: [] as string[], scope: tplItemScope(svc, i) })),
     })),
   };
   /* REQ-048:排期只在日历上排 —— 新建业务就带一份日历(阶段 = 上面这些行,id 相同);
@@ -106,10 +109,11 @@ export function newProject(o: NewProjectInput, tplLookup?: (svc: string) => Temp
   const services = o.services && o.services.length ? o.services : ['others'];
   const difficulty = (o.difficulty || 'medium') as Project['difficulty'];
   const packages = services.map((svc) => buildPackage(svc, o.start || '', tplLookup ? tplLookup(svc) : undefined));
-  /* REQ-044: 各服务模板的清单并成一张(同名 / 同义项只出现一次,挂上所有用到它的服务) */
-  const merged = mergeChecklists(packages, { tagOf: clTagOf });
+  /* REQ-044: 各服务模板的清单并成一张(同名 / 同义项只出现一次,挂上所有用到它的服务)。
+     REQ-050: 同一业务有两份时模板只并一次(不再出「(#2)」),规格项由 syncCells 每份分一格 */
+  const merged = mergeChecklists(packages.filter((pk, i) => packages.findIndex((x) => x.svc === pk.svc) === i), { tagOf: clTagOf });
   packages.forEach((pk) => { delete pk.checklist; });
-  return {
+  const out: Project = {
     id: uid(),
     name: o.name,
     client: o.client,
@@ -155,6 +159,8 @@ export function newProject(o: NewProjectInput, tplLookup?: (svc: string) => Temp
     /* REQ-049:Job Record 每种业务一行,Service Item 预填业务英文名,其余自己填 */
     jobRecord: [...new Set(packages.map((pk) => pk.svc))].map((svc) => blankRow(svc)),
   };
+  syncCells(out, { by: '' });
+  return out;
 }
 
 /* first company whose role matches, from the dynamic blocks (REQ-010) */
@@ -462,7 +468,8 @@ export function schedProgress(p: Project) {
 /* REQ-044: 整张清单算一次 —— 共用项以前在每个服务包里各算一遍 */
 export function infoProgress(p: Project) {
   let c = 0, t = 0;
-  (p.checklist || []).forEach((g) => g.items.forEach((i) => { if (i.status === 'na') return; t++; if (i.status === 'confirmed') c++; }));
+  /* REQ-050: 按格算 —— 同步项 1 格,规格项 / 单独填按份数 / 业务数 */
+  (p.checklist || []).forEach((g) => g.items.forEach((it) => unitsOf(p, it, 'all').forEach(({ c: i }) => { if (i.status === 'na') return; t++; if (i.status === 'confirmed') c++; })));
   return { done: c, total: t, pct: t ? Math.round((c / t) * 100) : 0 };
 }
 

@@ -14,10 +14,12 @@ import { blankRow, clip, ensureJobRows, MAX_JOB_ROWS, rowsFromPaste, serviceItem
 import { isLegacyFlow } from '@/lib/legacyStages';
 import { isLegacyCgiStages, type LocalDate } from '@/features/schedule-planner/domain/schedule';
 import { distributeByWeights, layoutFromStart } from '@/features/schedule-planner/domain/duration';
+import { cellLabel, labelsBeforeDrop, mirrorRow, setMode, syncCells, targetOf, type ClFields } from '@/lib/clCells';
+import { tplNamesFrom } from '@/lib/checklistScope';
 import {
   ALL, clGroups, dropSvc, findClItem, inScope, instOf, mergeIntoProject, moveToRemoved, projectSvcs, replaceSection, restoreRemoved,
 } from '@/lib/sharedChecklist';
-import type { CalendarSchedule, CalendarStage, ChecklistStatus, Project, ReceiptRecord, ScheduleRow, ScheduleStatus } from '@/lib/types';
+import type { CalendarSchedule, CalendarStage, ChecklistItem, ChecklistStatus, Project, ReceiptRecord, ScheduleRow, ScheduleStatus } from '@/lib/types';
 import { cleanReceipt, sortReceipts, syncFromLatest, syncToLatest } from '@/lib/receipts';
 import { applyProjField, projSourceOf } from '@/lib/records';
 import { logZh, type LogParams } from '@/lib/logmsg';
@@ -41,27 +43,30 @@ export type ProjectAction =
   | { type: 'setSchedStyle'; value: 'classic' | 'weeks' | 'dates' }
   | { type: 'addSpecialRow'; pkg: number; kind: 'milestone' | 'holiday'; text: string; date: string }
   /* REQ-044: 信息清单在项目上(一张),项按 id 定位,分组按它在整张清单里的序号 */
-  | { type: 'setClStatus'; item: string; value: ChecklistStatus }
-  | { type: 'editCl'; item: string; field: 'date' | 'remark' | 'zh' | 'en' | 'owner' | 'received'; value: string }
+  /* REQ-050: 分格的项(规格项 / 单独填)要带 cell = 哪一格(服务包 id 或业务 key) */
+  | { type: 'setClStatus'; item: string; value: ChecklistStatus; cell?: string }
+  | { type: 'editCl'; item: string; field: 'date' | 'remark' | 'zh' | 'en' | 'owner' | 'received'; value: string; cell?: string }
   /* REQ-042: 收料记录(多条、不覆盖) */
-  | { type: 'addReceipt'; item: string; rec: Partial<ReceiptRecord> }
-  | { type: 'editReceipt'; item: string; id: string; rec: Partial<ReceiptRecord> }
-  | { type: 'removeReceipt'; item: string; id: string }
+  | { type: 'addReceipt'; item: string; rec: Partial<ReceiptRecord>; cell?: string }
+  | { type: 'editReceipt'; item: string; id: string; rec: Partial<ReceiptRecord>; cell?: string }
+  | { type: 'removeReceipt'; item: string; id: string; cell?: string }
+  /* REQ-050: 同步(几个业务共用一份)/ 单独填(每个业务一格);改回同步时 from = 以哪一格为准 */
+  | { type: 'setClMode'; item: string; mode: 'sync' | 'sep'; from?: string }
   | { type: 'renameGroup'; gi: number; name: string; nameEn?: string }
   | { type: 'renameProject'; name: string }
   | { type: 'setQuotationNo'; value: string }
   | { type: 'setClient'; value: string }
   | { type: 'removeGroup'; gi: number }
   | { type: 'setNoCategories'; value: boolean }
-  | { type: 'toggleHighlight'; item: string }
+  | { type: 'toggleHighlight'; item: string; cell?: string }
   | { type: 'addItem'; gi: number; items?: { zh: string; en: string }[]; svcs?: string[] }
   | { type: 'removeItem'; item: string }
   | { type: 'moveItem'; item: string; dir: -1 | 1; scope?: string }
   | { type: 'reorderItem'; item: string; to: string }
   | { type: 'addGroup'; name: string; svcs?: string[] }
   | { type: 'resetChecklist'; scope: string }
-  | { type: 'attachShot'; item: string; data: string }
-  | { type: 'removeShot'; item: string; shotIdx?: number }
+  | { type: 'attachShot'; item: string; data: string; cell?: string }
+  | { type: 'removeShot'; item: string; shotIdx?: number; cell?: string }
   | { type: 'setItemSvcs'; item: string; svcs: string[] }
   | { type: 'restoreClItem'; item: string; scope?: string }
   | { type: 'setPkgField'; pkg: number; field: 'start' | 'delivery' | 'owner' | 'resourceLinks'; value: string }
@@ -223,6 +228,15 @@ function getItem(p: Project, id: unknown) {
   if (!hit) throw new ValidationError('找不到这个信息项(可能刚被别人移除),请刷新');
   return hit;
 }
+/* REQ-050: 这次动作改哪一格(不分格的项就是项本身);改完行上的老字段跟第一格 */
+function cellTarget(it: ChecklistItem, cell: unknown) {
+  try { return targetOf(it, typeof cell === 'string' && cell ? cell : undefined); }
+  catch (e) { throw new ValidationError(e instanceof Error ? e.message : '请刷新页面后再改'); }
+}
+const cellName = (p: Project, it: ChecklistItem, cell?: string) => (it.cells && cell ? `${it.zh} · ${cellLabel(p, cell)}` : it.zh);
+/* 模板里写明的范围(PD 在模板管理里设的)—— 规整分格时用 */
+const tplNamesOf = (p: Project, tplForSvc?: (svc: string) => Template) =>
+  tplForSvc ? tplNamesFrom(Object.fromEntries(projectSvcs(p).map((s) => [s, tplForSvc(s)]))) : undefined;
 function getGroup(p: Project, gi: unknown) {
   const g = typeof gi === 'number' ? clGroups(p)[gi] : undefined;
   if (!g) throw new ValidationError('无效的清单栏目');
@@ -330,11 +344,13 @@ export function applyAction(u: Identity, p: Project, a: ProjectAction, ctx: Acti
     case 'setClStatus': {
       if (!canEdit(u, p)) throw new PermissionError('无编辑权限');
       const { it } = getItem(p, a.item);
-      const was = it.status;
-      it.status = a.value;
-      syncToLatest(it, u.name);   // REQ-042: 行上改状态 = 改 Latest 那条
-      it.updatedAt = Date.now();
-      logIt(p, u.name, 'cl.status', { item: it.zh, clFrom: was, clTo: a.value });
+      const t = cellTarget(it, a.cell);
+      const was = t.status;
+      t.status = a.value;
+      syncToLatest(t, u.name);   // REQ-042: 行上改状态 = 改 Latest 那条
+      t.updatedAt = Date.now();
+      mirrorRow(it);
+      logIt(p, u.name, 'cl.status', { item: cellName(p, it, a.cell), clFrom: was, clTo: a.value });
       break;
     }
     /* ===== REQ-042: 每个信息项的多条收料记录 =====
@@ -344,64 +360,74 @@ export function applyAction(u: Identity, p: Project, a: ProjectAction, ctx: Acti
     case 'addReceipt': {
       if (!canEdit(u, p)) throw new PermissionError('无编辑权限');
       const { it } = getItem(p, a.item);
-      if (!Array.isArray(it.receipts)) it.receipts = [];
-      if (it.receipts.length >= 60) throw new ValidationError('一个信息项最多 60 条收料记录');
+      const t = cellTarget(it, a.cell);
+      if (!Array.isArray(t.receipts)) t.receipts = [];
+      if (t.receipts.length >= 60) throw new ValidationError('一个信息项最多 60 条收料记录');
       const fresh = cleanReceipt(a.rec || {}, u.name);
       /* 接收人默认就是录的人(多数时候是同一个),留个默认免得每条都要手填;
          想改在表单里改,编辑时清空就是真清空,服务端不再回填。 */
       if (!fresh.receivedBy) fresh.receivedBy = u.name;
-      it.receipts = sortReceipts([fresh, ...it.receipts]);
-      syncFromLatest(it);
-      it.updatedAt = Date.now();
+      t.receipts = sortReceipts([fresh, ...t.receipts]);
+      syncFromLatest(t);
+      t.updatedAt = Date.now();
+      mirrorRow(it);
       logIt(p, u.name, a.rec?.fileName ? 'cl.receiptAddFile' : 'cl.receiptAdd',
-        { item: it.zh, file: a.rec?.fileName ? String(a.rec.fileName).slice(0, 60) : undefined });
+        { item: cellName(p, it, a.cell), file: a.rec?.fileName ? String(a.rec.fileName).slice(0, 60) : undefined });
       break;
     }
     case 'editReceipt': {
       if (!canEdit(u, p)) throw new PermissionError('无编辑权限');
       const { it } = getItem(p, a.item);
-      const list = it.receipts || [];
+      const t = cellTarget(it, a.cell);
+      const list = t.receipts || [];
       const cur = list.find((r) => r.id === a.id);
       if (!cur) throw new ValidationError('找不到这条收料记录');
       /* 保留原 id 与首次录入人,改的是内容 */
       const next = { ...cleanReceipt(a.rec || {}, cur.by || u.name, cur.id), at: cur.at || Date.now() };
-      it.receipts = sortReceipts(list.map((r) => (r.id === a.id ? next : r)));
-      syncFromLatest(it);
-      it.updatedAt = Date.now();
-      logIt(p, u.name, 'cl.receiptEdit', { item: it.zh });
+      t.receipts = sortReceipts(list.map((r) => (r.id === a.id ? next : r)));
+      syncFromLatest(t);
+      t.updatedAt = Date.now();
+      mirrorRow(it);
+      logIt(p, u.name, 'cl.receiptEdit', { item: cellName(p, it, a.cell) });
       break;
     }
     case 'removeReceipt': {
       if (!canEdit(u, p)) throw new PermissionError('无编辑权限');
       const { it } = getItem(p, a.item);
-      const list = it.receipts || [];
+      const t = cellTarget(it, a.cell);
+      const list = t.receipts || [];
       if (!list.some((r) => r.id === a.id)) throw new ValidationError('找不到这条收料记录');
-      it.receipts = list.filter((r) => r.id !== a.id);
+      t.receipts = list.filter((r) => r.id !== a.id);
       /* 全删光了就把老字段退回未收到,不要留一个「已收到」却查无记录的状态 */
-      if (it.receipts.length) syncFromLatest(it);
-      else { it.status = 'pending'; it.date = ''; it.received = ''; }
-      it.updatedAt = Date.now();
-      logIt(p, u.name, 'cl.receiptRemove', { item: it.zh });
+      if (t.receipts.length) syncFromLatest(t);
+      else { t.status = 'pending'; t.date = ''; t.received = ''; }
+      t.updatedAt = Date.now();
+      mirrorRow(it);
+      logIt(p, u.name, 'cl.receiptRemove', { item: cellName(p, it, a.cell) });
       break;
     }
     case 'editCl': {
       if (!canEdit(u, p)) throw new PermissionError('无编辑权限');
       const { it } = getItem(p, a.item);
-      const was = (it as any)[a.field];
-      (it as any)[a.field] = a.value;
+      if (!['date', 'remark', 'zh', 'en', 'owner', 'received'].includes(a.field)) throw new ValidationError('无效的栏位');
+      /* 名字是整行的;状态 / 内容 / 备注 / 负责人 / 日期是哪一格的(REQ-050) */
+      const t: Record<string, unknown> & ClFields = a.field === 'zh' || a.field === 'en' ? (it as never) : (cellTarget(it, a.cell) as never);
+      const was = t[a.field];
+      t[a.field] = String(a.value ?? '').slice(0, a.field === 'remark' ? 4000 : 500);
       /* REQ-013: filling in "received content / file name" auto-advances the
          item to Received and stamps today's date — but only from Pending and
          only when the field was previously empty, so a manual Status/Date
          always wins and editing a remark never changes the status. */
       if (a.field === 'received' && !String(was || '').trim() && String(a.value || '').trim()) {
-        if (it.status === 'pending') it.status = 'received';
-        if (!it.date) it.date = isoDate(new Date());
+        if (t.status === 'pending') t.status = 'received';
+        if (!t.date) t.date = isoDate(new Date());
       }
       /* REQ-042: 行上直接改「收到内容 / 日期」时,把改动落到 Latest ——
          否则行上写着已收到、展开记录却是空的,两套表示会分叉。
          备注不在其列:清单项备注是对外的,记录备注是内部的,两者不互通。 */
-      if (a.field === 'received' || a.field === 'date') syncToLatest(it, u.name);
-      it.updatedAt = Date.now();
+      if (a.field === 'received' || a.field === 'date') syncToLatest(t, u.name);
+      t.updatedAt = Date.now();
+      mirrorRow(it);
       break;
     }
     /* REQ-028: 改项目名。权限沿用 canMeta —— PD/BD/Sales/PM 可改,viewer 只读。
@@ -471,8 +497,10 @@ export function applyAction(u: Identity, p: Project, a: ProjectAction, ctx: Acti
     case 'toggleHighlight': {
       if (!canEdit(u, p)) throw new PermissionError('无编辑权限');
       const { it } = getItem(p, a.item);
-      it.highlight = !it.highlight;
-      it.updatedAt = Date.now();
+      const t = cellTarget(it, a.cell);
+      t.highlight = !t.highlight;
+      t.updatedAt = Date.now();
+      mirrorRow(it);
       break;
     }
     case 'addItem': {
@@ -487,6 +515,7 @@ export function applyAction(u: Identity, p: Project, a: ProjectAction, ctx: Acti
         .filter((x) => x.zh || x.en);
       if (!toAdd.length) toAdd.push({ zh: '新信息项', en: 'New item' });
       for (const x of toAdd) g.items.push({ id: newId(), zh: x.zh, en: x.en, status: 'pending', date: '', remark: '', owner: '', shots: [], receipts: [], svcs: [...svcs] });
+      syncCells(p, { by: u.name, tplNames: tplNamesOf(p, tplForSvc) });   // REQ-050:规格项在两份以上的业务里直接分格
       break;
     }
     case 'removeItem': {
@@ -543,6 +572,7 @@ export function applyAction(u: Identity, p: Project, a: ProjectAction, ctx: Acti
       } else {
         replaceSection(p, scope, tplGroups[0].groups, () => [scope], { by: u.name, reason: 'reset' });
       }
+      syncCells(p, { by: u.name, tplNames: tplNamesOf(p, tplForSvc) });
       logIt(p, u.name, 'cl.resetScope', { scope: scope === ALL ? '全部' : svcsText([scope]) });
       break;
     }
@@ -551,7 +581,19 @@ export function applyAction(u: Identity, p: Project, a: ProjectAction, ctx: Acti
       const { it } = getItem(p, a.item);
       it.svcs = pickSvcs(p, a.svcs, []);
       it.updatedAt = Date.now();
+      syncCells(p, { by: u.name, tplNames: tplNamesOf(p, tplForSvc) });   // REQ-050:单独填的项少了 / 多了业务,格跟着变
       logIt(p, u.name, 'cl.svcs', { item: it.zh, svcs: svcsText(it.svcs) });
+      break;
+    }
+    case 'setClMode': {
+      /* REQ-050: 同步 / 单独填。改回同步要选以哪一格为准,其余格原样进这一项的修改记录 */
+      if (!canEdit(u, p)) throw new PermissionError('无编辑权限');
+      const { it } = getItem(p, a.item);
+      if (a.mode !== 'sync' && a.mode !== 'sep') throw new ValidationError('无效的填法');
+      try { setMode(p, it, a.mode, { by: u.name, from: a.from, newId }); }
+      catch (e) { throw new ValidationError(e instanceof Error ? e.message : '切换失败'); }
+      it.updatedAt = Date.now();
+      logIt(p, u.name, a.mode === 'sep' ? 'cl.modeSep' : 'cl.modeSync', { item: it.zh, svc: a.mode === 'sync' && a.from ? svcsText([a.from]) : svcsText(it.svcs || []) });
       break;
     }
     case 'restoreClItem': {
@@ -559,6 +601,7 @@ export function applyAction(u: Identity, p: Project, a: ProjectAction, ctx: Acti
       const idx = (p.checklistRemoved || []).findIndex((r) => r.item.id === a.item);
       const it = idx >= 0 ? restoreRemoved(p, idx, String(a.scope || ALL)) : null;
       if (!it) throw new ValidationError('找不到这一项(可能已经恢复过了)');
+      syncCells(p, { by: u.name, tplNames: tplNamesOf(p, tplForSvc) });
       logIt(p, u.name, 'cl.restore', { item: it.zh });
       break;
     }
@@ -567,24 +610,28 @@ export function applyAction(u: Identity, p: Project, a: ProjectAction, ctx: Acti
       if (!/^data:image\/(jpeg|png|webp);base64,/.test(a.data)) throw new ValidationError('无效的图片数据');
       if (a.data.length > 800_000) throw new ValidationError('图片过大,请压缩后上传');
       const { it } = getItem(p, a.item);
-      if (!Array.isArray(it.shots)) it.shots = it.shot ? [it.shot] : [];
-      if (it.shots.length >= 8) throw new ValidationError('每项最多 8 张图片');
-      it.shots.push(a.data);
-      it.shot = undefined;
-      it.updatedAt = Date.now();
-      if (!it.date) it.date = isoDate(new Date());
-      if (it.status === 'pending') it.status = 'received';
-      logIt(p, u.name, 'cl.shot', { item: it.zh });
+      const t = cellTarget(it, a.cell) as ClFields & { shot?: string };
+      if (!Array.isArray(t.shots)) t.shots = t.shot ? [t.shot] : [];
+      if (t.shots.length >= 8) throw new ValidationError('每项最多 8 张图片');
+      t.shots.push(a.data);
+      t.shot = undefined;
+      t.updatedAt = Date.now();
+      if (!t.date) t.date = isoDate(new Date());
+      if (t.status === 'pending') t.status = 'received';
+      mirrorRow(it);
+      logIt(p, u.name, 'cl.shot', { item: cellName(p, it, a.cell) });
       break;
     }
     case 'removeShot': {
       if (!canEdit(u, p)) throw new PermissionError('无编辑权限');
       const { it } = getItem(p, a.item);
-      if (!Array.isArray(it.shots)) it.shots = it.shot ? [it.shot] : [];
-      if (typeof a.shotIdx === 'number' && a.shotIdx >= 0 && a.shotIdx < it.shots.length) it.shots.splice(a.shotIdx, 1);
-      else it.shots = []; // no index → clear all (back-compat)
-      it.shot = undefined;
-      it.updatedAt = Date.now();
+      const t = cellTarget(it, a.cell) as ClFields & { shot?: string };
+      if (!Array.isArray(t.shots)) t.shots = t.shot ? [t.shot] : [];
+      if (typeof a.shotIdx === 'number' && a.shotIdx >= 0 && a.shotIdx < t.shots.length) t.shots.splice(a.shotIdx, 1);
+      else t.shots = []; // no index → clear all (back-compat)
+      t.shot = undefined;
+      t.updatedAt = Date.now();
+      mirrorRow(it);
       break;
     }
     case 'setPkgField': {
@@ -1157,7 +1204,7 @@ export function applyAction(u: Identity, p: Project, a: ProjectAction, ctx: Acti
       let pk = a.asNew ? undefined : p.packages.find((x) => x.svc === svc);
       if (!pk) {
         if (p.packages.length >= 24) throw new ValidationError('一个项目最多 24 份业务');
-        pk = { svc, start: '', delivery: '', buffer: 0, owner: '', status: 'active', schedule: [] };
+        pk = { id: 'pk' + newId(), svc, start: '', delivery: '', buffer: 0, owner: '', status: 'active', schedule: [] };
         const label = String(a.label || '').slice(0, 40).trim();
         if (label) pk.label = label;
         /* 新实例带上该业务的默认排期与信息清单,和建项目时一致 */
@@ -1165,13 +1212,15 @@ export function applyAction(u: Identity, p: Project, a: ProjectAction, ctx: Acti
         p.packages.push(pk);
         if (tpl) {
           const built = buildPackage(svc, '', tpl);
+          built.id = pk.id;
           pk.schedule = built.schedule;
           pk.calendar = built.calendar;   // REQ-048:阶段 = 行,一起带上
           /* REQ-044: 模板清单并进项目的共用清单 —— 同名项不重复,只多一个服务标签。
-             同一种服务的第二份起,只属于它的项单独一条(名字后加实例名) */
+             REQ-050: 同一种服务的第二份起不再另起「(#2)」那一条:规格项同一行里多一格 */
           const inst = instOf(p, p.packages.length - 1);
-          const r = mergeIntoProject(p, built.checklist || [], () => [svc], { inst: inst || undefined });
-          logIt(p, u.name, 'cl.pkgMerge', { svc: svcsText([svc]) + (inst ? ' · ' + inst : ''), added: r.added, tagged: r.tagged });
+          const r = mergeIntoProject(p, built.checklist || [], () => [svc]);
+          const cells = syncCells(p, { by: u.name, tplNames: tplNamesOf(p, tplForSvc) });
+          logIt(p, u.name, 'cl.pkgMerge', { svc: svcsText([svc]) + (inst ? ' · ' + inst : ''), added: r.added, tagged: r.tagged + cells });
         }
         if (!Array.isArray(p.services)) p.services = [];
         if (!p.services.includes(svc)) p.services.push(svc);   // services 是类型清单,仍然去重
@@ -1279,10 +1328,13 @@ export function applyAction(u: Identity, p: Project, a: ProjectAction, ctx: Acti
       if (!pk) throw new ValidationError('无效的服务包');
       if (p.packages.length <= 1) throw new ValidationError('至少要保留一份业务');
       const inst = instOf(p, a.pkg);
+      const labels = labelsBeforeDrop(p, pk);   // REQ-050:删了之后就算不出「LED-2」了
       p.packages.splice(a.pkg, 1);
       /* REQ-044: 只去掉这个服务标签;不再属于任何服务的项进「已移除的项」(可恢复),不直接删 */
       const moved = dropSvc(p, pk.svc, { by: u.name, reason: `svc:${pk.svc}`, keepSvc: p.packages.some((x) => x.svc === pk.svc), inst: inst || undefined });
       if (moved) logIt(p, u.name, 'cl.pkgDrop', { svc: svcsText([pk.svc]) + (inst ? ' · ' + inst : ''), moved });
+      /* REQ-050: 规格项只去掉那一格(有内容的进修改记录);只剩一份了就收回成一条 */
+      syncCells(p, { by: u.name, labels, tplNames: tplNamesOf(p, tplForSvc) });
       /* services 是类型清单:只有该类型一份不剩时才从清单里摘掉 */
       if (!p.packages.some((x) => x.svc === pk.svc)) {
         p.services = (p.services || []).filter((x) => x !== pk.svc);

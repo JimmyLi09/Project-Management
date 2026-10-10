@@ -33,6 +33,7 @@ export function redactProject<T extends Project>(u: Identity, p: T): T {
     q.checklist = [];
     (q.packages || []).forEach((pk) => { if (pk.checklist) pk.checklist = []; });
     delete q.checklistLegacy;
+    delete q.checklistLegacy050;   // REQ-050
     delete q.checklistRemoved;
   }
   if (hide.record) {

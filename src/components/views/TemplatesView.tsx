@@ -7,6 +7,7 @@
 import React, { useEffect, useState } from 'react';
 import { useLang } from '@/lib/i18n';
 import type { Template, TplChecklistGroup, TplScheduleRow } from '@/lib/templates';
+import { tplItemScope } from '@/lib/checklistScope';
 
 interface SvcRow { key: string; label: string; en: string; color: string; customized: boolean }
 
@@ -207,7 +208,13 @@ function TemplateEditor({ svc, onBack }: { svc: string; onBack: () => void }) {
 
       {/* checklist editor */}
       <div className="panel clip">
-        <div className="panel-head"><span className="panel-title" style={{ fontSize: 15 }}>{t('信息清单 Checklist', 'Checklist')}</span></div>
+        <div className="panel-head">
+          <span className="panel-title" style={{ fontSize: 15 }}>{t('信息清单 Checklist', 'Checklist')}</span>
+          <span style={{ fontSize: 11.5, color: 'var(--text2)', marginLeft: 10 }}>
+            {t('每项可选「项目级 / 规格项」:规格项在同一业务加第二份时同一行多一格(LED-1 / LED-2),项目级整个项目只有一条。默认值由开发按现有模板整理,请 PD 复核。只影响之后新加的项。',
+              'Each item is Project-level or Spec: a Spec item gets one cell per instance (LED-1 / LED-2) when the service is added twice. Defaults were set from the current templates — PD please review. Affects items added from now on.')}
+          </span>
+        </div>
         {tpl.checklist.map((g, gi) => (
           <div key={gi} style={{ borderTop: '1px solid var(--row-line)', padding: '12px 16px' }}>
             <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8, flexWrap: 'wrap' }}>
@@ -226,6 +233,13 @@ function TemplateEditor({ svc, onBack }: { svc: string; onBack: () => void }) {
                   onChange={(e) => { const gs = structuredClone(tpl.checklist); gs[gi][3][ii][0] = e.target.value; setCheck(gs); }} />
                 <input className="in sm" style={{ flex: 1 }} value={it[1]} placeholder="Item EN"
                   onChange={(e) => { const gs = structuredClone(tpl.checklist); gs[gi][3][ii][1] = e.target.value; setCheck(gs); }} />
+                {/* REQ-050: 这一项的范围 —— 规格项在同一业务加第二份时每份一格,项目级整个项目一条 */}
+                <select className="in sm" style={{ width: 'auto' }} value={tplItemScope(svc, it)} data-testid={`tpl-scope-${gi}-${ii}`}
+                  title={t('规格项:同一业务有两份(两块 LED)时每份一格;项目级:整个项目只有一条', 'Spec: one cell per instance when the service has two or more; Project-level: one row for the whole project')}
+                  onChange={(e) => { const gs = structuredClone(tpl.checklist); gs[gi][3][ii] = [gs[gi][3][ii][0], gs[gi][3][ii][1], e.target.value as 'proj' | 'inst']; setCheck(gs); }}>
+                  <option value="proj">{t('项目级', 'Project-level')}</option>
+                  <option value="inst">{t('规格项 · 每份一格', 'Spec · per instance')}</option>
+                </select>
                 <button style={{ color: 'var(--danger)', fontWeight: 700 }} onClick={() => { const gs = structuredClone(tpl.checklist); gs[gi][3] = gs[gi][3].filter((_, k) => k !== ii); setCheck(gs); }}>✕</button>
               </div>
             ))}

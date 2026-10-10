@@ -13,6 +13,8 @@ import { defaultPermTable, permDiff, sanitizePermTable, setServerPermSource, typ
 import { handOverWork, renameInProject } from '@/lib/peopleRefs';
 import { migrateProject048, type Mig048Entry } from '@/lib/mig048';
 import { migrateProject049, type Mig049Entry } from '@/lib/mig049';
+import { migrateProject050, report050, type Mig050Entry } from '@/lib/mig050';
+import { tplNamesFrom } from '@/lib/checklistScope';
 import { blankRow, clip as clipJob, ensureJobRows, MAX_JOB_ROWS, serviceItemOf, svcForItem, svcFromName } from '@/lib/jobRecord';
 import { baseDefOf, fieldsOf, type FieldDef, type FieldOverrides } from '@/lib/records';
 import { isLegacyFlow } from '@/lib/legacyStages';
@@ -90,6 +92,7 @@ export function getDb(): Database.Database {
      把兜底结果存进库,一次性迁移就以为「已经有了」而跳过(没报告、旧字段也没转成行) */
   migrateSchedules048(db);
   migrateJobRecord049(db);
+  migrateChecklist050(db);
   backfillIds(db);
   backfillSerials(db);
   migrateInvoiceArchive(db);
@@ -310,6 +313,67 @@ function migrateSchedules048(d: Database.Database) {
   } catch (e) {
     console.warn('[REQ-048] 迁移报告没写成(数据已迁移,不影响使用):', e);
   }
+}
+
+/* ===== REQ-050 信息清单不重复 · 上线迁移 =====
+   「名字(#2)」这类重复项和原项合成一行:规格项同一行每份一格,项目级只留一条(其余进这一项的修改记录)。
+   规则在 lib/mig050.ts(和预演脚本 scripts/req050-dryrun 同一份)。先整库备份(VACUUM INTO),
+   一个事务里改,出报告 data/migrations/050-checklist-<时间>.md。每个项目只跑一次(mig050)。 */
+const MIG_050 = 'mig.req050.checklist';
+function migrateChecklist050(d: Database.Database) {
+  if (d.prepare('SELECT 1 FROM meta WHERE key = ?').get(MIG_050)) return;
+  const rows = d.prepare('SELECT id, data FROM projects').all() as { id: string; data: string }[];
+  const now = Date.now();
+  const t = new Date(now), pad = (n: number) => String(n).padStart(2, '0');
+  const stamp = `${t.getFullYear()}${pad(t.getMonth() + 1)}${pad(t.getDate())}-${pad(t.getHours())}${pad(t.getMinutes())}${pad(t.getSeconds())}`;
+  /* 模板管理里 PD 存过的模板:写明了范围的照它;模板里有、规格项表里没有的算项目级 */
+  const saved: Record<string, Template> = {};
+  try {
+    for (const r of d.prepare('SELECT svc, data FROM templates').all() as { svc: string; data: string }[]) {
+      try { saved[r.svc] = JSON.parse(r.data) as Template; } catch { /* 坏行忽略 */ }
+    }
+  } catch { /* 老库还没有这张表 */ }
+  const tplNames = tplNamesFrom(saved);
+  let backup = '';
+  if (rows.length) {
+    try {
+      const dir = path.join(DATA_DIR, 'backups');
+      fs.mkdirSync(dir, { recursive: true });
+      backup = path.join(dir, `pre-req050-${stamp}.db`);
+      d.exec(`VACUUM INTO '${backup.replace(/'/g, "''")}'`);
+    } catch (e) {
+      console.warn('[REQ-050] 迁移前备份失败,这次不迁移:', e);
+      return;
+    }
+  }
+  const upd = d.prepare('UPDATE projects SET data = ?, updated_at = ?, version = version + 1 WHERE id = ?');
+  const done: Mig050Entry[] = [];
+  d.transaction(() => {
+    for (const r of rows) {
+      let o: any;
+      try { o = JSON.parse(r.data); } catch { continue; }
+      if (!Array.isArray(o.packages) || !Array.isArray(o.checklist)) continue;   // 更老的结构:读的时候 migrate() 会先合成一张
+      const got = migrateProject050(o, { tplNames, at: now });
+      if (!got) continue;
+      const { updatedAt: _u, version: _v, ...data } = o;
+      upd.run(JSON.stringify(data), now, r.id);
+      done.push(got);
+    }
+    d.prepare('INSERT INTO meta (key, value) VALUES (?, ?)').run(MIG_050, JSON.stringify({
+      at: now, backup, projects: done.length,
+      changed: done.filter((m) => m.families.length || m.blank.length).length,
+      merged: done.reduce((a, m) => a + m.families.length, 0),
+      problems: done.reduce((a, m) => a + m.problems.length, 0),
+    }));
+  })();
+  if (!done.length) return;
+  try {
+    const dir = path.join(DATA_DIR, 'migrations');
+    fs.mkdirSync(dir, { recursive: true });
+    const file = path.join(dir, `050-checklist-${stamp}.md`);
+    const md = report050(done, { title: 'REQ-050 信息清单不重复 · 上线迁移报告', when: t.toLocaleString('zh-CN'), db: `迁移前备份:${backup || '(库是空的,没备份)'}` });
+    fs.writeFileSync(file, md + '\n回退:先 pm2 stop audax,再跑 scripts\\req050-rollback.bat(不带参数只报告;--apply 才写库,会先备份)。\n', 'utf8');
+  } catch (e) { console.warn('[REQ-050] 迁移报告写不出来:', e); }
 }
 
 /* ===== REQ-049 Job Record 4 栏表 · 上线迁移 =====
@@ -1061,7 +1125,7 @@ export function importRegisterRecords(
       const p = hit.p;
       let pk = p.packages.find((x) => x.svc === svc);
       if (!pk) {
-        pk = { svc, start: '', delivery: '', buffer: 0, owner: '', status: 'active', schedule: [] };
+        pk = { id: 'pk' + crypto.randomBytes(6).toString('hex'), svc, start: '', delivery: '', buffer: 0, owner: '', status: 'active', schedule: [] };
         p.packages.push(pk);
         if (!Array.isArray(p.services)) p.services = [];
         if (!p.services.includes(svc)) p.services.push(svc);
@@ -1135,7 +1199,7 @@ export function importJobRows(
       const svc = svcFromName(row.svc || '') || (tabSvc && tabSvc !== 'all' ? tabSvc : '') || svcForItem(item, p) || svcFromName(item);
       if (!svc || !SVC[svc]) throw new Error(`${at}:认不出业务「${row.svc || item}」(导入已全部撤销)`);
       if (!p.packages.some((x) => x.svc === svc)) {
-        p.packages.push({ svc, start: '', delivery: '', buffer: 0, owner: '', status: 'active', schedule: [] });
+        p.packages.push({ id: 'pk' + crypto.randomBytes(6).toString('hex'), svc, start: '', delivery: '', buffer: 0, owner: '', status: 'active', schedule: [] });
         if (!Array.isArray(p.services)) p.services = [];
         if (!p.services.includes(svc)) p.services.push(svc);
       }

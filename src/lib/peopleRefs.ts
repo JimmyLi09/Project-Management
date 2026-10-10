@@ -12,16 +12,24 @@
 import type { ChecklistGroup, ChecklistItem, Project } from './types';
 
 const isOpenRow = (status: string) => status !== 'done';
-const isOpenItem = (it: ChecklistItem) => it.status !== 'confirmed' && it.status !== 'na';
+type Owned = Pick<ChecklistItem, 'owner' | 'status'>;
+const isOpenItem = (it: Owned) => it.status !== 'confirmed' && it.status !== 'na';
 
-/* live = 只看正在用的清单(转交、数工作量);否则连迁移前的备份和已移除的项一起(改名) */
-function eachChecklistItem(p: Project, fn: (it: ChecklistItem) => void, live = false) {
-  const groups = (gs?: ChecklistGroup[]) => (gs || []).forEach((g) => (g.items || []).forEach(fn));
+/* live = 只看正在用的清单(转交、数工作量);否则连迁移前的备份和已移除的项一起(改名)。
+   REQ-050: 分格的项每一格各有负责人 —— 每格都算 / 都改(行上那份只是第一格的镜像,不再单算) */
+function eachChecklistItem(p: Project, fn: (it: Owned) => void, live = false) {
+  const one = (it: ChecklistItem) => {
+    if (it.cells) Object.values(it.cells).forEach(fn); else fn(it);
+    if (!live) (it.history || []).forEach((h) => h.data && fn(h.data));
+  };
+  const mirror = (it: ChecklistItem) => { const first = it.cells && Object.values(it.cells)[0]; if (first) it.owner = first.owner; };
+  const groups = (gs?: ChecklistGroup[]) => (gs || []).forEach((g) => (g.items || []).forEach((it) => { one(it); mirror(it); }));
   groups(p.checklist);
   (p.packages || []).forEach((pk) => groups(pk.checklist));
   if (live) return;
   (p.checklistLegacy || []).forEach((l) => groups(l.checklist));
-  (p.checklistRemoved || []).forEach((r) => r.item && fn(r.item));
+  groups(p.checklistLegacy050);
+  (p.checklistRemoved || []).forEach((r) => r.item && one(r.item));
 }
 
 export interface PersonWork { projects: string[]; todos: number; checklist: number }

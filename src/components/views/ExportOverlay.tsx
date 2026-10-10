@@ -7,6 +7,7 @@ import { fmtDate, parseISO, pkgStart, planDates, projCode, projStage, todayMid }
 import { useLang } from '@/lib/i18n';
 import { STAGES, stageIdx, SVC, svcColor } from '@/lib/templates';
 import type { ChecklistItem, Project, ServicePackage } from '@/lib/types';
+import { cellLabel, pkgLabel, type ClFields } from '@/lib/clCells';
 
 /* REQ-016: built-in fallback when no global note has been saved yet.
    0917 收尾:导出是发给客户的,一份文件不该中英各来一段 —— 拆成两份,
@@ -252,29 +253,64 @@ export default function ExportOverlay({ p, onClose, scope = 'all', clScope = 'al
 
   /* ── unified checklist block — REQ-019 template columns ──
      REQ-044: 清单是项目一张,导出也是一张:勾了哪些服务就出适用这些服务的项
-     (共用项只出一次),多一列「适用服务」。 */
-  function ClBlock() {
-    const clStat: Record<string, string> = {
-      pending: T('未收到', 'Pending'), received: T('已收到', 'Received'), confirmed: T('已确认', 'Confirmed'),
-      na: 'N/A', revision: T('需修订', 'Revision'), rejected: T('退回', 'Rejected'),
-    };
-    const svcLabel = (k: string) => (SVC[k] ? (L === 'zh' ? SVC[k].label : SVC[k].en) : k);
-    const selSvcs = [...new Set(selPkgs.map((x) => x.pkg.svc))];
-    const allSvcs = [...new Set(p.packages.map((x) => x.svc))];
-    const partial = selSvcs.length < allSvcs.length;
-    const flat = !!p.noCategories; // REQ-014: export follows the chosen mode
-    const showOwner = !flat;
-    const showSvcs = cols.clSvcs && allSvcs.length > 1;
-    const clSpan = 1 + (showSvcs ? 1 : 0) + (showOwner ? 1 : 0) + (cols.clStatus ? 1 : 0) + (cols.clDate ? 1 : 0) + (cols.clRemark ? 1 : 0);
+     (共用项只出一次),多一列「适用服务」。
+     REQ-050: 同步项导一次,「适用业务」写全部业务;单独填的项和规格项只导所勾业务 / 实例的那几格。 */
+  const clStat: Record<string, string> = {
+    pending: T('未收到', 'Pending'), received: T('已收到', 'Received'), confirmed: T('已确认', 'Confirmed'),
+    na: 'N/A', revision: T('需修订', 'Revision'), rejected: T('退回', 'Rejected'),
+  };
+  const svcLabel = (k: string) => (SVC[k] ? (L === 'zh' ? SVC[k].label : SVC[k].en) : k);
+  const selSvcs = [...new Set(selPkgs.map((x) => x.pkg.svc))];
+  const selIds = new Set(selPkgs.map((x) => x.pkg.id).filter(Boolean) as string[]);
+  const allSvcs = [...new Set(p.packages.map((x) => x.svc))];
+  type ClRow = { key: string; name: string; svcs: string; owner: string; status: string; received: string; date: string; remark: string };
+  function clRows(): { g: { group: string; groupEn: string }; rows: ClRow[] }[] {
     /* REQ-013: blank items are exported too (kept Pending) unless the user
        unticks 「含空白项」. N/A rows are always dropped. */
-    const keep = (it: ChecklistItem) =>
-      it.status !== 'na' && (it.svcs || allSvcs).some((s) => selSvcs.includes(s))
-      && (blanks || !!(it.date || it.remark || it.received) || it.status !== 'pending');
+    const keepC = (c: ClFields) => c.status !== 'na' && (blanks || !!(c.date || c.remark || c.received) || c.status !== 'pending');
+    const name = (it: ChecklistItem) => (L === 'zh' ? it.zh : it.en || it.zh);
+    const rowOf = (it: ChecklistItem, c: ClFields, key: string, nm: string, svcs: string): ClRow => ({
+      key, name: nm, svcs, owner: c.owner || '', status: clStat[c.status] || c.status, received: c.received || '', date: c.date || '', remark: c.remark || '',
+    });
+    const one = (it: ChecklistItem): ClRow[] => {
+      if (!(it.svcs || allSvcs).some((sv) => selSvcs.includes(sv))) return [];
+      if (!it.cells) return keepC(it) ? [rowOf(it, it, it.id || '', name(it), (it.svcs || allSvcs).map(svcLabel).join(L === 'zh' ? '、' : ', '))] : [];
+      return Object.entries(it.cells)
+        .filter(([k]) => (it.mode === 'sep' ? selSvcs.includes(k) : selIds.has(k)))
+        .filter(([, c]) => keepC(c))
+        .map(([k, c]) => rowOf(it, c, `${it.id}:${k}`, `${name(it)} · ${cellLabel(p, k, L)}`, it.mode === 'sep' ? svcLabel(k) : cellLabel(p, k, L)));
+    };
     const cl = p.checklist || [];
-    const groups = flat
-      ? [{ g: { group: '', groupEn: '', color: '', items: [] }, items: cl.flatMap((g) => g.items).filter(keep) }]
-      : cl.map((g) => ({ g, items: g.items.filter(keep) })).filter((x) => x.items.length);
+    return p.noCategories
+      ? [{ g: { group: '', groupEn: '' }, rows: cl.flatMap((g) => g.items).flatMap(one) }]
+      : cl.map((g) => ({ g, rows: g.items.flatMap(one) })).filter((x) => x.rows.length);
+  }
+  /* 导出的文件名带上所选业务(171-50JHS_Checklist_CGI+Animation);打印成 PDF 时浏览器拿 document.title 当文件名 */
+  const pickedNames = selPkgs.map(({ pkg }) => (p.packages.filter((x) => x.svc === pkg.svc).length > 1 ? pkgLabel(p, pkg, 'en') : (SVC[pkg.svc]?.en || pkg.svc)));
+  const fileBase = `${p.name}_${sec === 'checklist' ? 'Checklist' : sec === 'schedule' ? 'Schedule' : 'Export'}_${[...new Set(pickedNames)].join('+') || 'none'}`.replace(/[\\/:*?"<>|]/g, '_');
+  useEffect(() => {
+    const was = document.title;
+    document.title = fileBase;
+    return () => { document.title = was; };
+  }, [fileBase]);
+  function downloadClCsv() {
+    const q = (v: string) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+    const head = [T('分类', 'Section'), T('信息项', 'Item'), T('适用业务', 'Applies to'), T('负责人', 'Owner'), T('状态', 'Status'), T('收到内容', 'Received'), T('收到日期', 'Date received'), T('备注', 'Remark')];
+    const body = clRows().flatMap(({ g, rows }) => rows.map((r) => [L === 'zh' ? g.group : g.groupEn || g.group, r.name, r.svcs, r.owner, r.status, r.received, r.date, r.remark]));
+    const csv = '\ufeff' + [head, ...body].map((r) => r.map(q).join(',')).join('\r\n');
+    const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8;' }));
+    const a = document.createElement('a');
+    a.href = url; a.download = `${fileBase}.csv`;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+  function ClBlock() {
+    const partial = selSvcs.length < allSvcs.length || selIds.size < p.packages.length;
+    const flat = !!p.noCategories; // REQ-014: export follows the chosen mode
+    const showOwner = !flat;
+    const showSvcs = cols.clSvcs && (allSvcs.length > 1 || p.packages.length > 1);
+    const clSpan = 1 + (showSvcs ? 1 : 0) + (showOwner ? 1 : 0) + (cols.clStatus ? 1 : 0) + (cols.clDate ? 1 : 0) + (cols.clRemark ? 1 : 0);
+    const groups = clRows();
     const head = (
       <tr>
         <th>{T('信息项', 'Item')}</th>
@@ -285,36 +321,36 @@ export default function ExportOverlay({ p, onClose, scope = 'all', clScope = 'al
         {cols.clRemark && <th style={{ width: '20%' }}>{T('备注', 'Remark')}</th>}
       </tr>
     );
-    const row = (it: ChecklistItem, ii: number) => (
-      <tr key={it.id || ii}>
-        <td>{L === 'zh' ? it.zh : it.en}</td>
-        {showSvcs && <td>{(it.svcs || allSvcs).map(svcLabel).join(L === 'zh' ? '、' : ', ')}</td>}
-        {showOwner && <td>{it.owner || '—'}</td>}
+    const row = (r: ClRow) => (
+      <tr key={r.key} data-testid="ex-cl-row">
+        <td>{r.name}</td>
+        {showSvcs && <td>{r.svcs}</td>}
+        {showOwner && <td>{r.owner || '—'}</td>}
         {cols.clStatus && (
-          <td style={it.status === 'pending' ? { background: '#fffbeb' } : undefined}>
-            {clStat[it.status] || it.status}{it.received ? ` — ${it.received}` : ''}
+          <td style={r.status === clStat.pending ? { background: '#fffbeb' } : undefined}>
+            {r.status}{r.received ? ` — ${r.received}` : ''}
           </td>
         )}
-        {cols.clDate && <td>{it.date || '—'}</td>}
-        {cols.clRemark && <td style={{ whiteSpace: 'pre-wrap' }}>{it.remark || '—'}</td>}
+        {cols.clDate && <td>{r.date || '—'}</td>}
+        {cols.clRemark && <td style={{ whiteSpace: 'pre-wrap' }}>{r.remark || '—'}</td>}
       </tr>
     );
     return (
       <React.Fragment>
         <h2 style={{ color: selSvcs.length === 1 ? svcColor(selSvcs[0]) : undefined }}>
-          {T('信息清单', 'Information Checklist')}{partial ? ` — ${selSvcs.map(svcLabel).join(L === 'zh' ? '、' : ', ')}` : ''}
+          {T('信息清单', 'Information Checklist')}{partial ? ` — ${[...new Set(selPkgs.map(({ pkg }) => (p.packages.filter((x) => x.svc === pkg.svc).length > 1 ? pkgLabel(p, pkg, L) : svcLabel(pkg.svc))))].join(L === 'zh' ? '、' : ', ')}` : ''}
         </h2>
-        {groups.length === 0 || groups.every((x) => !x.items.length) ? (
+        {groups.length === 0 || groups.every((x) => !x.rows.length) ? (
           <p style={{ color: '#888', fontSize: 12 }}>{T('暂无信息项。', 'No checklist items.')}</p>
         ) : flat ? (
-          <table className="t-fix"><thead>{head}</thead><tbody>{groups[0].items.map(row)}</tbody></table>
-        ) : groups.map(({ g, items }, gi) => (
+          <table className="t-fix"><thead>{head}</thead><tbody>{groups[0].rows.map(row)}</tbody></table>
+        ) : groups.map(({ g, rows }, gi) => (
           <table key={gi} className="t-fix">
             <thead>
               <tr className="grp-h"><td colSpan={clSpan}>{L === 'zh' ? g.group : g.groupEn}</td></tr>
               {head}
             </thead>
-            <tbody>{items.map(row)}</tbody>
+            <tbody>{rows.map(row)}</tbody>
           </table>
         ))}
       </React.Fragment>
@@ -337,7 +373,8 @@ export default function ExportOverlay({ p, onClose, scope = 'all', clScope = 'al
         <button className="btn-line sm" onClick={() => setOrient(orient === 'portrait' ? 'landscape' : 'portrait')}>
           {orient === 'portrait' ? T('A4 纵向', 'A4 Portrait') : T('A4 横向', 'A4 Landscape')} ⇄
         </button>
-        <button className="btn-navy sm" onClick={() => window.print()}>{T('打印 / 另存 PDF', 'Print / Save PDF')}</button>
+        {showCl && <button className="btn-line sm" onClick={downloadClCsv} disabled={!selPkgs.length} data-testid="ex-cl-csv" title={`${fileBase}.csv`}>{T('清单下载 Excel (CSV)', 'Checklist as Excel (CSV)')}</button>}
+        <button className="btn-navy sm" onClick={() => window.print()} title={`${fileBase}.pdf`}>{T('打印 / 另存 PDF', 'Print / Save PDF')}</button>
         <button className="btn-line sm" onClick={onClose}>{T('关闭', 'Close')}</button>
       </div>
 
@@ -355,17 +392,16 @@ export default function ExportOverlay({ p, onClose, scope = 'all', clScope = 'al
           <label className="ex-col"><input type="radio" name="exsec" checked={sec === 'schedule'} onChange={() => setSec('schedule')} /> {T('仅排期', 'Schedule only')}</label>
           <label className="ex-col"><input type="radio" name="exsec" checked={sec === 'checklist'} onChange={() => setSec('checklist')} /> {T('仅清单', 'Checklist only')}</label>
         </span>
-        {multi && (
-          <span className="ex-grp">
-            {T('服务', 'Services')}:
-            {p.packages.map((pkg, pi) => (
-              <label className="ex-col" key={pi}>
-                <input type="checkbox" checked={pkgSel[pi]}
-                  onChange={() => setPkgSel((s) => s.map((v, i) => (i === pi ? !v : v)))} /> {svcName(pkg)}
-              </label>
-            ))}
-          </span>
-        )}
+        {/* REQ-050: 业务选择总是显示;同一业务两份时可以分别勾「LED-1 / LED-2」 */}
+        <span className="ex-grp" data-testid="ex-svcs">
+          {T('服务', 'Services')}:
+          {p.packages.map((pkg, pi) => (
+            <label className="ex-col" key={pi}>
+              <input type="checkbox" checked={pkgSel[pi]} data-testid={`ex-svc-${pi}`}
+                onChange={() => setPkgSel((s) => s.map((v, i) => (i === pi ? !v : v)))} /> {p.packages.filter((x) => x.svc === pkg.svc).length > 1 ? pkgLabel(p, pkg, L) : svcName(pkg)}
+            </label>
+          ))}
+        </span>
         {showSched && (
           <span className="ex-grp">
             {T('排期样式', 'Schedule layout')}:
@@ -389,7 +425,7 @@ export default function ExportOverlay({ p, onClose, scope = 'all', clScope = 'al
         {T('栏位', 'Columns')}:
         {showSched && <span className="ex-grp">{T('排期', 'Schedule')} {colToggle('owner', '负责', 'Owner')}{colToggle('start', '开始', 'Start')}{colToggle('due', '到期', 'Due')}{colToggle('status', '状态', 'Status')}</span>}
         {showCl && (
-          <span className="ex-grp">{T('清单', 'Checklist')} {colToggle('clStatus', '状态', 'Status')}{colToggle('clDate', '日期', 'Date')}{colToggle('clRemark', '备注', 'Remark')}{p.packages.length > 1 && colToggle('clSvcs', '适用服务', 'Applies to')}
+          <span className="ex-grp">{T('清单', 'Checklist')} {colToggle('clStatus', '状态', 'Status')}{colToggle('clDate', '日期', 'Date')}{colToggle('clRemark', '备注', 'Remark')}{(p.packages.length > 1) && colToggle('clSvcs', '适用服务', 'Applies to')}
             <label className="ex-col" title={T('未收到的空白项也一并导出(状态 Pending)', 'Export blank items too (kept Pending)')}>
               <input type="checkbox" checked={blanks} onChange={() => setBlanks(!blanks)} /> {T('含空白项', 'Include blanks')}
             </label>

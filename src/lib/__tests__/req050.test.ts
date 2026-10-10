@@ -1,15 +1,26 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { newProject } from '../project.ts';
-import { applyAction } from '../../server/actions.ts';
-import { getBuiltinTemplate } from '../templates.ts';
+import { buildPackage, newId, newProject } from '../project.ts';
 import { migrateProject050, pkgLabel, report050, stripInst } from '../mig050.ts';
 import { scopeOf, tplNamesFrom } from '../checklistScope.ts';
 import type { ChecklistItem, Project, ReceiptRecord } from '../types.ts';
 
 const PD = { name: 'PD', role: 'director' } as never;
-const addPkg = (p: Project, svc: string, label = '') =>
-  applyAction(PD, p, { type: 'addServicePackage', svc, patch: {}, asNew: true, label } as never, { tplForSvc: getBuiltinTemplate });
+/* 上线前(REQ-044 那一版)加第二份同类业务的样子:模板整份再并一次,重名的项另起一条、
+   名字后加「(#2)」或实例名,打上 inst。服务包也还没有 id。 */
+const addPkg = (p: Project, svc: string, label = '') => {
+  p.packages.push({ svc, label: label || undefined, start: '', delivery: '', buffer: 0, owner: '', status: 'active', schedule: [] });
+  const nth = p.packages.filter((x) => x.svc === svc).length;
+  const inst = label || `#${nth}`;
+  for (const tg of buildPackage(svc, '').checklist!) {
+    const g = p.checklist!.find((x) => x.group === tg.group) || (p.checklist!.push({ ...tg, items: [] }), p.checklist![p.checklist!.length - 1]);
+    for (const src of tg.items) {
+      const clash = items(p).some((x) => x.zh === src.zh || x.zh.startsWith(src.zh + '('));
+      g.items.push({ ...src, id: newId(), svcs: [svc], inst, receipts: [], zh: clash ? `${src.zh}(${inst})` : src.zh, en: clash && src.en ? `${src.en} (${inst})` : src.en, scope: undefined });
+    }
+  }
+  p.packages.forEach((pk) => { delete pk.id; });
+};
 const items = (p: Project) => p.checklist!.flatMap((g) => g.items);
 const find = (p: Project, zh: string) => items(p).find((x) => x.zh.startsWith(zh))!;
 const rc = (id: string, date: string, status: ReceiptRecord['status'], fileName: string): ReceiptRecord =>
@@ -111,6 +122,7 @@ test('REQ-050 迁移:第一块屏删掉后只剩一份,规格项也合成一条;
 
   const q = newProject({ name: 'Q', client: '', services: ['led'], start: '' } as never);
   q.packages.push({ ...JSON.parse(JSON.stringify(q.packages[0])), label: 'Lobby' });   // 老数据:第二份没带 (#N) 项
+  q.packages.forEach((pk) => { delete pk.id; });   // 上线前的服务包没有 id
   const m2 = migrateProject050(q)!;
   assert.equal(Object.keys(find(q, '屏幕尺寸').cells!).length, 2);
   assert.equal(m2.blank.filter((b) => b.label === 'Lobby').length, 6, '6 个规格项各补一格空的');
@@ -135,4 +147,101 @@ test('REQ-050 范围:模板规格项表、PD 存过的模板、按名字猜、�
   assert.deepEqual(scopeOf({ zh: '箱体尺寸', en: '' }, ['led'], saved), { scope: 'proj', why: 'template' }, 'PD 存过的模板里有、规格项表里没有 = 项目级');
   assert.equal(stripInst('电源规格与位置(户外 LED)', '户外 LED'), '电源规格与位置');
   assert.equal(stripInst('Power (#2)', '#2'), 'Power');
+});
+
+import { applyAction } from '../../server/actions.ts';
+import { getBuiltinTemplate } from '../templates.ts';
+import { clStats } from '../sharedChecklist.ts';
+import { applyChecklist, extractChecklist } from '../../server/fragments.ts';
+import { renameInProject } from '../peopleRefs.ts';
+
+const act = (p: Project, a: unknown) => applyAction(PD, p, a as never, { tplForSvc: getBuiltinTemplate });
+const asNew = (p: Project, svc: string, label = '') => act(p, { type: 'addServicePackage', svc, patch: {}, asNew: true, label });
+
+test('REQ-050 验收:再加一块 LED → 规格项多一格 LED-3、不新增行;删掉 LED-2 → 只少那一格', () => {
+  const p = royalPlaza();
+  migrateProject050(p);
+  const rows = items(p).length;
+  asNew(p, 'led');
+  assert.equal(items(p).length, rows, '不新增行');
+  const size = find(p, '屏幕尺寸');
+  assert.deepEqual(Object.keys(size.cells!).map((k) => pkgLabel(p, p.packages.find((x) => x.id === k)!)), ['LED-1', 'LED-2', 'LED-3']);
+  assert.equal(find(p, '项目地址').cells, undefined, '项目级仍是一条');
+  const k2 = p.packages[1].id!;
+  act(p, { type: 'setClStatus', item: size.id, cell: k2, value: 'received' });
+  act(p, { type: 'removeServicePackage', pkg: 1 });
+  const after = find(p, '屏幕尺寸');
+  assert.equal(Object.keys(after.cells!).length, 2, '只少那一格');
+  assert.ok(!after.cells![k2]);
+  assert.equal(after.history![0].cell, 'LED-2', '有内容的那一格进修改记录,标明是哪一份');
+  assert.equal(after.history![0].data!.status, 'received');
+  assert.deepEqual(Object.keys(after.cells!).map((k) => pkgLabel(p, p.packages.find((x) => x.id === k)!)), ['LED-1', 'LED-2'], '标签跟着服务包走(原来的 LED-3 现在是 LED-2)');
+  act(p, { type: 'removeServicePackage', pkg: 1 });
+  assert.equal(find(p, '屏幕尺寸').cells, undefined, '只剩一份:收回成一条');
+});
+
+test('REQ-050 验收:分格的项按格改 —— 不带格会被拒;收料记录记在那一格;统计按格算', () => {
+  const p = newProject({ name: 'Two', client: '', services: ['led', 'led'], start: '' } as never);
+  assert.equal(items(p).filter((x) => /\(#\d\)/.test(x.zh)).length, 0, '新建两块 LED 的项目也不出 (#2)');
+  const size = find(p, '屏幕尺寸');
+  const [k1, k2] = p.packages.map((x) => x.id!);
+  assert.throws(() => act(p, { type: 'setClStatus', item: size.id, value: 'received' }), /分格了/);
+  act(p, { type: 'addReceipt', item: size.id, cell: k2, rec: { date: '2026-10-01', fileName: 'LED2.pdf', status: 'received' } });
+  assert.equal(size.cells![k2].status, 'received');
+  assert.equal(size.cells![k2].receipts!.length, 1);
+  assert.equal(size.cells![k1].receipts!.length, 0);
+  assert.equal(size.status, 'pending', '行上跟第一格');
+  const st = clStats(p, 'led');
+  assert.equal(st.total, 11 + 6, '11 项里 6 项是规格项,各两格');
+  act(p, { type: 'editCl', item: size.id, cell: k1, field: 'remark', value: 'P2.5 4x3m' });
+  assert.equal(size.cells![k1].remark, 'P2.5 4x3m');
+  assert.equal(size.remark, 'P2.5 4x3m');
+  act(p, { type: 'editCl', item: size.id, field: 'zh', value: '屏幕尺寸与类型' });
+  assert.equal(size.zh, '屏幕尺寸与类型', '名字是整行的,不用带格');
+});
+
+test('REQ-050 验收:171-50JHS「景观平面」切成单独填 → 三格各自改状态;改回同步以 CGI 为准,其余进修改记录', () => {
+  const p = newProject({ name: '171-50JHS', client: '', services: ['cgi', 'ani', 'scale'], start: '' } as never);
+  const it = find(p, '景观平面');
+  act(p, { type: 'setItemSvcs', item: it.id, svcs: ['cgi', 'ani', 'scale'] });
+  act(p, { type: 'setClStatus', item: it.id, value: 'received' });
+  /* 同步(默认):在任一标签下改,各标签看到同一份 */
+  for (const s of ['cgi', 'ani', 'scale']) assert.equal(clStats(p, s).total >= 1 && unitsStatus(p, it.id!, s), 'received');
+  act(p, { type: 'setClMode', item: it.id, mode: 'sep' });
+  assert.deepEqual(Object.keys(it.cells!), ['cgi', 'ani', 'scale'], '每个业务一格');
+  assert.ok(Object.values(it.cells!).every((c) => c.status === 'received'), '切换时每个业务先复制一份当前内容');
+  act(p, { type: 'setClStatus', item: it.id, cell: 'cgi', value: 'confirmed' });
+  act(p, { type: 'editCl', item: it.id, cell: 'cgi', field: 'remark', value: 'CGI 用总平' });
+  act(p, { type: 'setClStatus', item: it.id, cell: 'scale', value: 'revision' });
+  act(p, { type: 'editCl', item: it.id, cell: 'scale', field: 'remark', value: '沙盘只要主干树位置' });
+  assert.deepEqual(['cgi', 'ani', 'scale'].map((s) => unitsStatus(p, it.id!, s)), ['confirmed', 'received', 'revision'], '三格各自的状态');
+  act(p, { type: 'setClMode', item: it.id, mode: 'sync', from: 'cgi' });
+  assert.equal(it.cells, undefined);
+  assert.equal(it.status, 'confirmed');
+  assert.equal(it.remark, 'CGI 用总平', '内容变成 CGI 那份');
+  assert.ok(it.history!.some((h) => h.k === 'mode.sync' && h.data?.remark === '沙盘只要主干树位置'), '沙盘那份在修改记录里');
+  assert.ok(it.history!.some((h) => h.k === 'mode.sync' && h.cell === '动画'));
+  assert.ok(p.log!.some((l) => (l as { k?: string }).k === 'cl.modeSync'));
+  assert.throws(() => act(p, { type: 'setClMode', item: find(p, '立面材料分区').id, mode: 'sep' }), /只适用于一个业务/);
+});
+const unitsStatus = (p: Project, id: string, scope: string) => {
+  const it = items(p).find((x) => x.id === id)!;
+  return it.cells ? Object.entries(it.cells).find(([k]) => k === scope)?.[1].status : it.status;
+};
+
+test('REQ-050 从别的项目导入清单:规格项的格按「第几份」对过去;负责人改名每格都改', () => {
+  const a = newProject({ name: 'A', client: '', services: ['led', 'led'], start: '' } as never);
+  const size = find(a, '屏幕尺寸');
+  act(a, { type: 'editCl', item: size.id, cell: a.packages[1].id, field: 'remark', value: '第二块' });
+  act(a, { type: 'editCl', item: size.id, cell: a.packages[1].id, field: 'owner', value: 'Kevin' });
+  const frag = extractChecklist(a, 'led', true);
+  const fragSize = frag.checklist.flatMap((g) => g.items).find((x) => x.zh.startsWith('屏幕尺寸'))!;
+  assert.deepEqual(Object.keys(fragSize.cells!), ['@1', '@2']);
+  const b = newProject({ name: 'B', client: '', services: ['led', 'led'], start: '' } as never);
+  applyChecklist(b, 'led', frag, 'replace', true, 'PD');
+  const bSize = find(b, '屏幕尺寸');
+  assert.deepEqual(Object.keys(bSize.cells!), b.packages.map((x) => x.id));
+  assert.equal(bSize.cells![b.packages[1].id!].remark, '第二块');
+  renameInProject(b, 'Kevin', 'Kevin Lee');
+  assert.equal(bSize.cells![b.packages[1].id!].owner, 'Kevin Lee');
 });

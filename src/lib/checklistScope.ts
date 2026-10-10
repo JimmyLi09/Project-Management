@@ -73,16 +73,19 @@ const keysOf = (it: { zh?: string; en?: string }) => [normName(it.zh), normName(
 const instIndex = new Map<string, Set<string>>();
 for (const [svc, names] of Object.entries(INST_DEFAULTS)) instIndex.set(svc, new Set(names.map((n) => normName(n)).filter(Boolean) as string[]));
 
-/* 业务模板里有哪些项 —— 模板里有的按规格项表定,不再猜 */
-export type TplNames = Map<string, Set<string>>;   // svc → 该业务模板里所有项的名字(规整后)
+/* 业务模板里有哪些项,和模板上写明的范围('' = 没写,按规格项表定) */
+export type TplNames = Map<string, Map<string, '' | ClScopeKind>>;   // svc → 名字(规整后)→ 范围
 /* 出厂模板 + PD 存过的模板(后者覆盖前者)。没有专属模板的业务用通用模板 */
 export function tplNamesFrom(saved: Record<string, Pick<Template, 'checklist'>> = {}): TplNames {
   const out: TplNames = new Map();
   const add = (svc: string, t: Pick<Template, 'checklist'> | undefined) => {
     if (!t) return;
-    const set = new Set<string>();
-    (t.checklist || []).forEach((g) => (g[3] || []).forEach((it) => [it[0], it[1]].forEach((n) => { const k = normName(n); if (k) set.add(k); })));
-    out.set(svc, set);
+    const m = new Map<string, '' | ClScopeKind>();
+    (t.checklist || []).forEach((g) => (g[3] || []).forEach((it) => {
+      const sc = it[2] === 'inst' || it[2] === 'proj' ? it[2] : '';
+      [it[0], it[1]].forEach((n) => { const k = normName(n); if (k && !m.get(k)) m.set(k, sc); });
+    }));
+    out.set(svc, m);
   };
   Object.entries(TPL).forEach(([svc, t]) => add(svc, t));
   Object.entries(saved).forEach(([svc, t]) => add(svc, t));
@@ -91,6 +94,13 @@ export function tplNamesFrom(saved: Record<string, Pick<Template, 'checklist'>> 
 }
 let builtin: TplNames | null = null;
 const builtinNames = () => (builtin ||= tplNamesFrom());
+
+/* 模板里一项的范围(编辑模板时显示的默认值):写明了照写的,否则按规格项表 */
+export function tplItemScope(svc: string, it: { 0: string; 1: string; 2?: string }): ClScopeKind {
+  if (it[2] === 'inst' || it[2] === 'proj') return it[2];
+  const inst = instIndex.get(instIndex.has(svc) ? svc : TPL[svc] ? '' : '_generic');
+  return inst && [normName(it[0]), normName(it[1])].some((k) => k && inst.has(k)) ? 'inst' : 'proj';
+}
 
 export interface ScopeDecision { scope: ClScopeKind; why: 'item' | 'template' | 'hint' | 'default' }
 
@@ -103,6 +113,12 @@ export function scopeOf(it: Pick<ChecklistItem, 'zh' | 'en' | 'scope'>, svcs: st
   if (it.scope === 'proj' || it.scope === 'inst') return { scope: it.scope, why: 'item' };
   const keys = keysOf(it);
   const own = (svc: string) => (tplNames.has(svc) ? svc : '_generic');   // 没有专属模板 = 通用模板
+  /* PD 在模板上写明了的优先 */
+  for (const svc of svcs) {
+    const names = tplNames.get(own(svc));
+    const hit = names && keys.map((k) => names.get(k)).find((x) => x);
+    if (hit) return { scope: hit, why: 'template' };
+  }
   for (const svc of svcs) {
     const inst = instIndex.get(own(svc) === '_generic' ? '_generic' : svc);
     if (inst && keys.some((k) => inst.has(k))) return { scope: 'inst', why: 'template' };

@@ -57,8 +57,11 @@ export const diffPoints = (d: string) => (DIFF[d] ? DIFF[d][1] : 1);
 export type TplScheduleRow =
   | [string, string, string, string, string, number, string, string, boolean]
   | [string, string, string, string, string, number, string, string, boolean, string, string];
-/* Template checklist group: [group, groupEn, color, items[[zh,en]]] */
-export type TplChecklistGroup = [string, string, string, [string, string][]];
+/* Template checklist group: [group, groupEn, color, items[[zh,en]]]
+   REQ-050: 每项可选第三位「范围」—— 'inst' 规格项(同一业务多份时每份一格)/ 'proj' 项目级。
+   没写的按出厂规格项表(checklistScope.ts)定。 */
+export type TplChecklistItem = [string, string] | [string, string, 'proj' | 'inst'];
+export type TplChecklistGroup = [string, string, string, TplChecklistItem[]];
 export interface Template {
   schedule: TplScheduleRow[];
   checklist: TplChecklistGroup[];
