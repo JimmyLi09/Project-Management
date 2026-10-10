@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useMemo, useState } from 'react';
-import { CONTACT_ROLES as CONTACT_ROLE_DEFS } from '@/lib/contactRoles';
+import { CONTACT_ROLES as CONTACT_ROLE_DEFS, roleBilingual } from '@/lib/contactRoles';
 import { useStore } from '../store';
 import { fmtDate, isoDate, missingInvoiceRef, parseISO, projectHealth, projPoints, projStage, schedProgress } from '@/lib/project';
 import { canAssign, canCreate, isScopedRole } from '@/lib/permissions';
@@ -397,7 +397,8 @@ function ProjectCard({ p, onOpen }: { p: Project; onOpen: () => void }) {
    dynamic add/remove company blocks, each carrying person/phone/email. */
 interface CompanyDraft { role: string; company: string; person: string; phone: string; email: string }
 /* REQ-052:这里只是输入提示,填进去的名字在建项目时换成键(roleKeyOf) */
-const COMPANY_ROLES: [string, string][] = CONTACT_ROLE_DEFS.filter((r) => r.key !== 'developer').map((r) => [r.zh, r.en]);
+/* 1010 确认:角色名双语显示(「Main contractor / 总包」);选了存成键,手填的原样 */
+const COMPANY_ROLES: string[] = CONTACT_ROLE_DEFS.filter((r) => r.key !== 'developer').map(roleBilingual);
 
 export function NewProjectModal({ onClose }: { onClose: () => void }) {
   const { me, users, createProject, openProject } = useStore();
@@ -500,7 +501,7 @@ export function NewProjectModal({ onClose }: { onClose: () => void }) {
             <button className="btn-line sm danger" style={{ marginTop: 6 }} onClick={() => setCompanies((cs) => cs.filter((_, ci) => ci !== i))}>− {t('删除此公司', 'Remove company')}</button>
           </div>
         ))}
-        <datalist id="company-roles">{COMPANY_ROLES.map(([zh, en]) => <option key={zh} value={lang === 'zh' ? zh : en} />)}</datalist>
+        <datalist id="company-roles">{COMPANY_ROLES.map((v) => <option key={v} value={v} />)}</datalist>
         <button className="btn-line sm" style={{ borderStyle: 'dashed', marginBottom: 4 }}
           onClick={() => setCompanies((cs) => [...cs, { role: '', company: '', person: '', phone: '', email: '' }])}>
           ＋ {t('添加相关公司', 'Add company')}
