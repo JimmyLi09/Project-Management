@@ -5,7 +5,7 @@
 import type { Identity } from '@/lib/permissions';
 import {
   canAssign, canCommercial, canDecide, canEdit, canEditFinance, canEditModule, canRowEdit, isFull, canDelete , canMeta, canMarkInvoice } from '@/lib/permissions';
-import { ACTION_MODULE, PERM_MODULES } from '@/lib/permTable';
+import { ACTION_MODULE, PERM_MODULES, type PermModule } from '@/lib/permTable';
 import { buildPackage, deriveStatuses, fitWindow, newId, parseISO, isoDate, totalDays } from '@/lib/project';
 import { getBuiltinTemplate, SVC, type Template } from '@/lib/templates';
 import { stagesFromTemplate } from '@/lib/calendarStages';
@@ -214,6 +214,8 @@ const schedDay = (v: unknown): string => {
 function routeProjSourced(p: Project, u: Identity, key: string, value: unknown): boolean {
   const src = projSourceOf(key);
   if (!src) return false;
+  /* REQ-051:这几格写的是别的模块的字段(项目名 / 交付日 / 客户联系人)—— 也要过那个模块的编辑权限 */
+  needModule(u, src === 'name' ? 'projects' : src === 'delivery' ? 'schedule' : 'contacts');
   const r = applyProjField(p, src, String(value ?? ''));
   if (!r.ok) throw new ValidationError(r.error);
   if (r.log) logIt(p, u.name, r.log.k, r.log.p);
@@ -257,15 +259,19 @@ function pickSvcs(p: Project, list: unknown, fallback: string[]): string[] {
 }
 const svcsText = (svcs: string[]) => svcs.map((s) => SVC[s]?.label || s).join('、');
 
+/* REQ-051:权限表里这个模块的编辑权限 */
+function needModule(u: Identity, mod: PermModule) {
+  if (canEditModule(u, mod)) return;
+  const m = PERM_MODULES.find((x) => x.key === mod)!;
+  throw new PermissionError(`你的角色没有「${m.zh}」的编辑权限 / Your role can't edit "${m.en}"`);
+}
+
 /* Mutates p in place. Throws PermissionError / ValidationError. */
 export function applyAction(u: Identity, p: Project, a: ProjectAction, ctx: ActionCtx = {}): void {
   const { tplForSvc } = ctx;
   /* REQ-051: 先过权限表(模块级),再走下面每个动作各自的业务规则 */
-  const mod = ACTION_MODULE[a.type];
-  if (mod && !canEditModule(u, mod)) {
-    const m = PERM_MODULES.find((x) => x.key === mod)!;
-    throw new PermissionError(`你的角色没有「${m.zh}」的编辑权限 / Your role can't edit "${m.en}"`);
-  }
+  const mod = Object.prototype.hasOwnProperty.call(ACTION_MODULE, a.type) ? ACTION_MODULE[a.type] : undefined;   // 「constructor」之类的名字不能查到原型上
+  if (mod) needModule(u, mod);
   switch (a.type) {
     case 'toggleDone': {
       const { pk, r } = getRow(p, a.pkg, a.idx);
@@ -642,6 +648,7 @@ export function applyAction(u: Identity, p: Project, a: ProjectAction, ctx: Acti
     }
     case 'setPkgField': {
       if (!canEdit(u, p)) throw new PermissionError('无编辑权限');
+      if (a.field === 'resourceLinks') needModule(u, 'record');   // 资料链接属于项目档案
       const pk = p.packages[a.pkg];
       if (!pk) throw new ValidationError('无效的服务包');
       pk[a.field] = a.value;

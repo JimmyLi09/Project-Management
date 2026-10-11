@@ -89,3 +89,24 @@ test('050:迁移前就有分格的项 → 这个项目不自动合并(不盖掉�
   assert.equal(size.cells![k2].remark, '格里的内容');
   assert.ok(p.checklist!.flatMap((g) => g.items).some((x) => x.id === 'x2'), '(#2) 项原样留着');
 });
+
+import { csvCell, csvUnguard } from '../csv.ts';
+
+test('日历写回阶段行:特殊行跟着它前面那个阶段,不沉到最后;最前面的还在最前面', () => {
+  const rows = [row('top', { kind: 'holiday' } as never), row('A'), row('CNY', { kind: 'holiday' } as never), row('B'), row('gate', { kind: 'milestone' } as never), row('C')];
+  const stageRows = rows.filter((r) => !r.kind);
+  const cal = { stages: stageRows.map((r) => ({ id: r.id!, name: r.task, tone: 'coral' })), boundaries: ['2026-10-01', '2026-10-05', '2026-10-10', '2026-10-15'] };
+  assert.deepEqual(rowsFromCalendar(rows, cal).rows.map((r) => r.task), ['top', 'A', 'CNY', 'B', 'gate', 'C']);
+  /* 删掉 B:B 后面的里程碑跟着 A(更前面一个还在的) */
+  const cal2 = { stages: [cal.stages[0], cal.stages[2]], boundaries: ['2026-10-01', '2026-10-05', '2026-10-15'] };
+  assert.deepEqual(rowsFromCalendar(rows, cal2).rows.map((r) => r.task), ['top', 'A', 'CNY', 'gate', 'C']);
+});
+
+test('CSV:开头是 = + - @ 的垫 \',Excel 不当公式;普通数字不垫;导回来去掉', () => {
+  assert.equal(csvCell('- 项目一'), `"'- 项目一"`);
+  assert.equal(csvCell('=HYPERLINK("x")'), `"'=HYPERLINK(""x"")"`);
+  assert.equal(csvCell('-5'), '"-5"');
+  assert.equal(csvCell('2'), '"2"');
+  assert.equal(csvUnguard("'- 项目一"), '- 项目一');
+  assert.equal(csvUnguard("'普通"), "'普通", '不是垫的 \' 不去');
+});

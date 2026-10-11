@@ -122,8 +122,21 @@ export function rowsFromCalendar(rows: ScheduleRow[], cal: Pick<CalendarSchedule
     };
   });
   const moved = rows.filter((r) => isStageRow(r) && !(r.id && used.has(r.id)) && rowHasInfo(r));
-  const special = rows.filter((r) => !isStageRow(r));
-  return { rows: [...out, ...special], moved };
+  /* 特殊行(里程碑、假期带、临时节点)跟着它前面那个阶段走(那个阶段删了就跟更前面一个还在的;
+     前面的都删了就放最后),不能每保存一次都沉到最后 —— 导出是按行的顺序打印的。
+     本来就在所有阶段之前的还在最前面。 */
+  const END = '\u0000end';
+  const after = new Map<string, ScheduleRow[]>();
+  let anchor = '';
+  for (const r of rows) {
+    if (isStageRow(r)) { anchor = r.id && used.has(r.id) ? r.id : anchor || END; continue; }
+    if (!after.has(anchor)) after.set(anchor, []);
+    after.get(anchor)!.push(r);
+  }
+  const ordered = [...(after.get('') || [])];
+  for (const r of out) ordered.push(r, ...(r.id && r.id !== END ? after.get(r.id) || [] : []));
+  ordered.push(...(after.get(END) || []));
+  return { rows: ordered, moved };
 }
 
 /* 保存日历:写回阶段行,删掉的有内容的行留底 */

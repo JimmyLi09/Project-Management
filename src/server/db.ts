@@ -1175,6 +1175,8 @@ export function importRegisterRecords(
         ...notes.map((n) => ({ at: now, by: actor, text: logZh(n.k, n.p), k: n.k, p: n.p as LogParams })),
       ];
       p.log = [...entries, ...((p.log as { at: number; by: string; text: string }[]) || [])].slice(0, 200);
+      /* REQ-049:新加的业务也要有 Job Record 那 1 行 —— 不存的话每次读都补一行新 id 的,改 / 删都对不上 */
+      ensureJobRows(p);
       const { updatedAt: _u, version: _v, ...pdata } = p;
       upd.run(JSON.stringify(pdata), now, hit.id);
       updated++;
@@ -1201,10 +1203,12 @@ export function importJobRows(
     const all = d.prepare('SELECT id, data FROM projects').all() as { id: string; data: string }[];
     const byName = new Map<string, { id: string; p: Project }>();
     const byNo = new Map<string, { id: string; p: Project }>();
+    const dupName = new Set<string>();   // 项目名不要求唯一:重名的只能按项目编号对
     for (const r of all) {
       const p = migrate(JSON.parse(r.data));
       if (p.archived) continue;
       const key = (p.name || '').trim().toLowerCase();
+      if (key && byName.has(key)) dupName.add(key);
       if (key && !byName.has(key)) byName.set(key, { id: r.id, p });
       if (p.serial) byNo.set(String(p.serial), { id: r.id, p });
     }
@@ -1214,6 +1218,7 @@ export function importJobRows(
       const no = String(row.no || '').trim().replace(/^0+/, '');
       const name = String(row.project || '').trim().toLowerCase();
       if (!no && !name) throw new Error(`${at}:缺少项目名称(导入已全部撤销)`);
+      if (!(no && byNo.get(no)) && name && dupName.has(name)) throw new Error(`${at}:有不止一个项目叫「${row.project}」,请在「项目编号」一栏填编号(导入已全部撤销)`);
       const hit = (no && byNo.get(no)) || (name && byName.get(name)) || null;
       if (!hit) throw new Error(`${at}:未找到项目「${row.project || row.no}」(导入已全部撤销)`);
       const p = hit.p;

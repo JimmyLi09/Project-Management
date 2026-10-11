@@ -6,6 +6,7 @@ import { svcName } from '@/lib/templates';
 import { fmtDate, parseISO, projCode } from '@/lib/project';
 import { jobGroups, JOB_HEAD_EN, JOB_HEAD_ZH } from '@/lib/jobRecord';
 import type { Project } from '@/lib/types';
+import { csvCell } from '@/lib/csv';
 
 /* ===== REQ-039 / REQ-049: Job Record 整份下载 =====
    导的就是页面上那张 4 栏表(Service Item / Detail / Quantity / Special Notes),所有业务都在,
@@ -35,7 +36,7 @@ export default function JobRecordExport({ p, onClose }: { p: Project; onClose: (
 
   /* ── CSV(Excel)── 一行一条,前面带项目和业务列,Excel 里好筛选 / 透视 */
   function downloadCsv() {
-    const q = (s: string) => `"${String(s ?? '').replace(/"/g, '""')}"`;
+    const q = csvCell;   // 开头是 = + - @ 的不让 Excel 当公式
     const rows: string[][] = [[T('项目编号', 'Project no.'), T('项目名称', 'Project name'), T('客户', 'Client'), T('业务', 'Service'), ...head]];
     groups.forEach((g) => g.rows.forEach((r) => {
       rows.push([projCode(p) || '', p.name, p.client || '', g.svc ? svcName(g.svc, lang) : '', r.item, r.detail, r.qty, r.note]);

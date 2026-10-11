@@ -9,6 +9,7 @@ import { useLang } from '@/lib/i18n';
 import { Icon } from '../ui';
 import { jobGroups, jobHeaderMap, jobImportCols, serviceItemOf, svcFromName, JOB_HEAD_EN, JOB_HEAD_ZH, type JobField } from '@/lib/jobRecord';
 import type { JobRow, Project } from '@/lib/types';
+import { csvCell, csvUnguard } from '@/lib/csv';
 
 /* ===== REQ-049 · 项目档案 = 各项目 Job Record 4 栏表汇总 =====
    Job Record 改成一张 4 栏表(Service Item / Detail / Quantity / Special Notes)后,
@@ -104,7 +105,7 @@ export default function RegistersView() {
 
   const head = lang === 'zh' ? JOB_HEAD_ZH : JOB_HEAD_EN;
   function exportCsv() {
-    const esc = (v: string) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+    const esc = csvCell;   // 开头是 = + - @ 的不让 Excel 当公式
     const h = [t('项目编号', 'Project no.'), t('项目', 'Project'), t('客户', 'Client'), 'PM', t('业务', 'Service'), ...head];
     const body = rows.map((x) => [projCode(x.p), x.p.name, x.p.client || '', (x.p.owners || []).join(' / '), x.svc ? svcName(x.svc, lang) : '', x.r.item, x.r.detail, x.r.qty, x.r.note]);
     const csv = [h, ...body].map((r) => r.map(esc).join(',')).join('\r\n');
@@ -270,7 +271,7 @@ function fileInput(projects: Project[], onReady: (pv: ImportPreview) => void) {
     if (!f) return;
     const reader = new FileReader();
     reader.onload = () => {
-      const grid = parseCsv(String(reader.result || ''));
+      const grid = parseCsv(String(reader.result || '')).map((r) => r.map(csvUnguard));   // 导出时垫的 ' 去掉
       const m = grid.length ? jobHeaderMap(grid[0]) : null;
       const c = grid.length ? jobImportCols(grid[0]) : { project: -1, no: -1, svc: -1 };
       if (!m || (c.project < 0 && c.no < 0)) {
@@ -283,9 +284,12 @@ function fileInput(projects: Project[], onReady: (pv: ImportPreview) => void) {
         item: at(cols, m.item), detail: at(cols, m.detail), qty: at(cols, m.qty), note: at(cols, m.note),
       })).filter((r) => (r.project || r.no) && (r.item || r.detail || r.qty || r.note));
       const live = projects.filter((p) => !p.archived);
-      const found = (r: ImportRow) => live.some((p) => (r.no && projCode(p) && String(p.serial) === r.no.replace(/^0+/, '')) || (r.project && p.name.trim().toLowerCase() === r.project.toLowerCase()));
+      const byNo = (r: ImportRow) => !!r.no && live.some((p) => projCode(p) && String(p.serial) === r.no!.replace(/^0+/, ''));
+      /* 项目名不要求唯一:重名的(没填编号时)和服务端一样算对不上,提示填编号 */
+      const sameName = (r: ImportRow) => (r.project ? live.filter((p) => p.name.trim().toLowerCase() === r.project!.toLowerCase()).length : 0);
+      const found = (r: ImportRow) => byNo(r) || sameName(r) === 1;
       const bad = rows.filter((r) => !found(r));
-      onReady({ rows, matched: rows.length - bad.length, unmatched: [...new Set(bad.map((r) => r.project || r.no))] });
+      onReady({ rows, matched: rows.length - bad.length, unmatched: [...new Set(bad.map((r) => (sameName(r) > 1 ? `${r.project}(重名,请填项目编号 / duplicate name, add project no.)` : r.project || r.no)))] });
     };
     reader.readAsText(f);
   };

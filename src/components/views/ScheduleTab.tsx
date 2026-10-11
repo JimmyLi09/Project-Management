@@ -12,7 +12,7 @@ import { useStore, useWho } from '../store';
 import CalendarScheduleTab from './CalendarScheduleTab';
 import ScheduleGantt from './ScheduleGantt';
 import { fmtDate, parseISO, pkgStart, planDates, pkgSuffix } from '@/lib/project';
-import { canEditIn, canSubmitCompletionHere } from '@/lib/permissions';
+import { canEditIn, canSeeModule, canSubmitCompletionHere } from '@/lib/permissions';
 import { svcColor, svcName } from '@/lib/templates';
 import { isStageRow } from '@/lib/scheduleSync';
 import { useLang } from '@/lib/i18n';
@@ -63,6 +63,9 @@ function PackageSchedule({ p, pkgIdx }: { p: Project; pkgIdx: number }) {
   const { lang, t } = useLang();
   const who = useWho();
   const ed = canEditIn(me, p, 'schedule');   // REQ-051: 再过权限表
+  /* 资料链接属于项目档案(record):档案不可见时接口不给它,这里也不显示 —— 否则空框一填就把看不到的链接盖掉 */
+  const seeLinks = canSeeModule(me, 'record');
+  const edLinks = ed && canEditIn(me, p, 'record');
   const pkg = p.packages[pkgIdx];
   const cal = pkg.calendar;
   const lastEnd = cal && cal.boundaries.length === cal.stages.length + 1 ? cal.boundaries[cal.boundaries.length - 1] : '';
@@ -149,11 +152,11 @@ function PackageSchedule({ p, pkgIdx }: { p: Project; pkgIdx: number }) {
       )}
 
       {/* C5: resource links — web links / network paths to renders, VR, drone, models */}
-      <div className="panel" style={{ padding: '12px 16px', marginTop: 14 }}>
+      {seeLinks && <div className="panel" style={{ padding: '12px 16px', marginTop: 14 }}>
         <div className="mini-label" style={{ marginBottom: 6, display: 'flex', alignItems: 'center', gap: 6, fontWeight: 700, color: 'var(--navy900)' }}>
           🔗 {t('资料链接(效果图 / VR / 航拍 / 模型 的网盘或路径)', 'Resource links (cloud/paths to renders, VR, drone, models)')}
         </div>
-        {ed ? (
+        {edLinks ? (
           <textarea className="in" style={{ width: '100%', minHeight: 44, fontSize: 12.5 }}
             defaultValue={pkg.resourceLinks || ''} placeholder={t('每行一个链接或路径,例如 \\\\NAS\\Project\\renders 或 https://drive...', 'One link/path per line, e.g. \\\\NAS\\Project\\renders or https://drive...')}
             onBlur={(e) => e.target.value !== (pkg.resourceLinks || '') && dispatch(p.id, { type: 'setPkgField', pkg: pkgIdx, field: 'resourceLinks', value: e.target.value })} />
@@ -162,7 +165,7 @@ function PackageSchedule({ p, pkgIdx }: { p: Project; pkgIdx: number }) {
             {pkg.resourceLinks || t('（未填写）', '(none)')}
           </div>
         )}
-      </div>
+      </div>}
 
       {/* R5-3 服务内容 / 交付清单:有数据才显示,只读(交付内容以 Job Record 为准) */}
       {(pkg.scopeItems?.length || 0) > 0 && (
