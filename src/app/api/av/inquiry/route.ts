@@ -11,6 +11,7 @@ import { applyAction, PermissionError, ValidationError } from '@/server/actions'
 import { logZh } from '@/lib/logmsg';
 import { redactProject } from '@/lib/permRedact';
 import { denyUnlessVisible, denyAvEdit, denyAvModule } from '@/server/avguard';
+import { localDay } from '@/lib/localDate';
 
 /* 01 立项询价.
    POST { name, client, location, delivery, notes, lines[] } opens a project with
@@ -59,7 +60,7 @@ export async function POST(req: NextRequest) {
     name,
     client: String(body.client || '').trim(),
     services: chosen.map((l) => l.svc!),
-    start: new Date().toISOString().slice(0, 10),
+    start: localDay(),
     delivery,
   }, getEffectiveTemplate);
   p.log.unshift({ at: Date.now(), by: user.name, text: logZh('proj.createAv'), k: 'proj.createAv' });

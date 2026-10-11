@@ -1,6 +1,7 @@
 /* ===== Isomorphic domain logic (used by both server and client) ===== */
 
 import { GENERIC, TPL, diffPoints, STAGES, stageIdx, svcName, type Template } from './templates';
+import { localDay } from './localDate';
 import { rulePoints, type PointRules } from './points';
 import { seedReceipt } from './receipts';
 import { mergeChecklists, migrateProjectChecklist, type ProjectMigration } from './checklistMerge';
@@ -44,8 +45,7 @@ export function parseISO(s: string | null | undefined): Date | null {
 }
 /* 本地时区的 YYYY-MM-DD(和 parseISO 配对)。以前用 toISOString —— 那是 UTC,
    服务器 / 浏览器在 UTC+8 时 parseISO('2026-10-10') 转回来变成 2026-10-09 */
-export const isoDate = (d: Date) =>
-  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+export const isoDate = (d: Date) => localDay(d);
 
 export interface NewProjectInput {
   name: string;

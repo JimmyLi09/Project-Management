@@ -116,3 +116,17 @@ test('CSV:开头是 = + - @ 的垫 \',Excel 不当公式;普通数字不垫;导�
   assert.equal(csvUnguard("'- 项目一"), '- 项目一');
   assert.equal(csvUnguard("'普通"), "'普通", '不是垫的 \' 不去');
 });
+
+import { localDay } from '../localDate.ts';
+import { rulesAt } from '../points.ts';
+import { kpiRulesAt } from '../kpi.ts';
+
+test('UTC+8:「今天」、规则生效日按本地那一天(凌晨 0–8 点不算成前一天)', () => {
+  const early = new Date(2026, 9, 11, 2, 0);   // 本地 2026-10-11 02:00 = UTC 10-10 18:00
+  assert.equal(localDay(early), '2026-10-11');
+  const v = (version: number, effectiveFrom: string) =>
+    ({ version, effectiveFrom, rules: { tag: `v${version}` }, note: '', createdAt: 0, createdBy: '' }) as never;
+  assert.deepEqual(rulesAt([v(1, ''), v(2, '2026-10-11')], early.getTime()), { tag: 'v2' }, '生效当天凌晨建的项目用新规则');
+  assert.deepEqual(kpiRulesAt([v(1, ''), v(2, '2026-10-11')], early.getTime()), { tag: 'v2' });
+  assert.deepEqual(rulesAt([v(1, ''), v(2, '2026-10-12')], early.getTime()), { tag: 'v1' });
+});

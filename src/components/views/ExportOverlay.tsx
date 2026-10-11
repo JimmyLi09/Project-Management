@@ -8,6 +8,7 @@ import { useLang } from '@/lib/i18n';
 import { STAGES, stageIdx, SVC, svcColor } from '@/lib/templates';
 import type { ChecklistItem, Project, ServicePackage } from '@/lib/types';
 import { cellLabel, pkgLabel, type ClFields } from '@/lib/clCells';
+import { csvCell } from '@/lib/csv';
 
 /* REQ-016: built-in fallback when no global note has been saved yet.
    0917 收尾:导出是发给客户的,一份文件不该中英各来一段 —— 拆成两份,
@@ -303,7 +304,7 @@ export default function ExportOverlay({ p, onClose, scope = 'all', clScope = 'al
     return () => { document.title = was; };
   }, [fileBase]);
   function downloadClCsv() {
-    const q = (v: string) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+    const q = csvCell;   // 开头是 = + - @ 的不让 Excel 当公式(电话「+65 …」、备注「- …」)
     const head = [T('分类', 'Section'), T('信息项', 'Item'), T('适用业务', 'Applies to'), T('负责人', 'Owner'), T('状态', 'Status'), T('收到内容', 'Received'), T('收到日期', 'Date received'), T('备注', 'Remark')];
     const body = clRows().flatMap(({ g, rows }) => rows.map((r) => [L === 'zh' ? g.group : g.groupEn || g.group, r.name, r.svcs, r.owner, r.status, r.received, r.date, r.remark]));
     const csv = '\ufeff' + [head, ...body].map((r) => r.map(q).join(',')).join('\r\n');

@@ -21,6 +21,7 @@ import { logText } from '@/lib/logmsg';
 import { caseFieldTerm } from '@/lib/terms';
 import { useLang } from '@/lib/i18n';
 import { useStore } from '../store';
+import { localDay } from '@/lib/localDate';
 
 type Library = { count: number; importedBy: string; importedAt: number };
 type Facets = { years: { year: string; n: number }[]; clients: { client: string; n: number }[]; warranty: Record<string, number> };
@@ -261,7 +262,7 @@ export default function AvCasesView() {
     const m = Number(form.warrantyMonths || DEFAULT_WARRANTY_MONTHS);
     if (!d || !Number.isFinite(m)) return null;
     const e = new Date(d); e.setMonth(e.getMonth() + m);
-    return { date: e, months: m, w: warranty(e.toISOString().slice(0, 10)) };
+    return { date: e, months: m, w: warranty(localDay(e)) };
   })();
   /* 面积与长×高对不上就提醒(统计表本身有 6 行是这样,AV-012 记过) */
   const sqmWarn = (() => {

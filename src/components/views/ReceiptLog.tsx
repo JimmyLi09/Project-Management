@@ -9,6 +9,8 @@ import { RECEIVE_VIA, viaName } from '@/lib/receipts';
 import { inScope } from '@/lib/sharedChecklist';
 import { cellLabel, unitsOf } from '@/lib/clCells';
 import type { ChecklistStatus, Project, ReceiptRecord } from '@/lib/types';
+import { localDay } from '@/lib/localDate';
+import { csvCell } from '@/lib/csv';
 
 /* ===== REQ-042: 收料记录 =====
    两块:
@@ -115,7 +117,7 @@ function ReceiptForm({ init, lang, onSave, onCancel }: {
      不是的话改掉即可。编辑已有记录时保持原值,不去覆盖。 */
   const [d, setD] = useState<Partial<ReceiptRecord>>(() => init
     ? { ...init }
-    : { date: new Date().toISOString().slice(0, 10), status: 'received' as ChecklistStatus, fileName: '', from: '', via: 'email', path: '', remark: '', receivedBy: me.name });
+    : { date: localDay(), status: 'received' as ChecklistStatus, fileName: '', from: '', via: 'email', path: '', remark: '', receivedBy: me.name });
   const [busy, setBusy] = useState(false);
   const set = (k: keyof ReceiptRecord, v: string) => setD((x) => ({ ...x, [k]: v }));
 
@@ -200,7 +202,7 @@ export function ReceivingLog({ p, scope, canEd, onOpenItem }: {
   });
 
   function exportCsv() {
-    const qt = (s: string) => `"${String(s ?? '').replace(/"/g, '""')}"`;
+    const qt = csvCell;   // 开头是 = + - @ 的不让 Excel 当公式(电话「+65 …」、备注「- …」)
     const head = [t('分类', 'Section'), t('信息项', 'Item'), t('收到日期', 'Date'), t('文件名称', 'File name'),
       t('来自', 'From'), t('收到方式', 'Via'), t('接收人', 'Received by'), t('保存路径', 'Path'),
       t('状态', 'Status'), t('备注', 'Remark'), t('录入人', 'Logged by')];
