@@ -5,6 +5,7 @@ import { denyAvModule } from '@/server/avguard';
 import { canViewPrices, canViewQuotes, identityOf, visibleProjects } from '@/lib/permissions';
 import { backfillInquiries, listPriceItems } from '@/server/avdb';
 import { projectFlow } from '@/server/avflow';
+import { localDay } from '@/lib/localDate';
 
 /* ===== 0929 AV 工作台 =====
    AV 的每个接口都是「按项目取一份」。工作台要的是横着看一眼:几个项目卡在
@@ -53,7 +54,7 @@ export async function GET() {
   const live = rows.filter((r) => r.stage !== 'done');
   /* 过期物料:有有效期、且已经过了今天的在用条目。没有有效期的不算过期 ——
      价格表里很多行本来就不填有效期,当成过期会天天报警。 */
-  const today = new Date().toISOString().slice(0, 10);
+  const today = localDay();
   const expired = money
     ? listPriceItems().filter((it) => it.active && it.validUntil && it.validUntil < today).length
     : null;

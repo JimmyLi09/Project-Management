@@ -19,6 +19,7 @@ import { blankRow, clip as clipJob, ensureJobRows, MAX_JOB_ROWS, serviceItemOf, 
 import { baseDefOf, fieldsOf, type FieldDef, type FieldOverrides } from '@/lib/records';
 import { isLegacyFlow } from '@/lib/legacyStages';
 import { TPL } from '@/lib/templates';
+import { localDay } from '@/lib/localDate';
 
 /* On serverless platforms (Vercel) the project directory is read-only and
    ephemeral — keep the demo database in /tmp there. */
@@ -563,7 +564,7 @@ function scheduleBackups(d: Database.Database) {
 async function backupNow(d: Database.Database) {
   const dir = path.join(DATA_DIR, 'backups');
   fs.mkdirSync(dir, { recursive: true });
-  const today = new Date().toISOString().slice(0, 10);
+  const today = localDay();
   const target = path.join(dir, `audax-${today}.db`);
   if (!fs.existsSync(target)) {
     await d.backup(target); // online-safe snapshot via SQLite backup API

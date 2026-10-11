@@ -6,9 +6,10 @@ import type Database from 'better-sqlite3';
 import { newProject } from '@/lib/project';
 import type { Project } from '@/lib/types';
 import { hashPassword } from './db';
+import { localDay } from '@/lib/localDate';
 
 const day = 86400000;
-const iso = (offsetDays: number) => new Date(Date.now() + offsetDays * day).toISOString().slice(0, 10);
+const iso = (offsetDays: number) => localDay(new Date(Date.now() + offsetDays * day));
 
 export function shouldSeedDemo(): boolean {
   return process.env.AUDAX_DEMO === '1' || !!process.env.VERCEL;

@@ -11,6 +11,7 @@ import {
   DEFAULT_KPI_RULES, DIMENSIONS, SCORE_MODES, dimName, weightSum,
   type Dimension, type DimRule, type KpiRuleSet, type KpiRules,
 } from '@/lib/kpi';
+import { localDay } from '@/lib/localDate';
 
 /* ===== REQ-037B: KPI 规则设置 =====
    一套规则 = 适用范围(角色 / 业务)+ 四个维度各自的 开关 / 权重 / 阈值 / 评分方式。
@@ -24,7 +25,7 @@ export default function KpiRulesTab() {
   const isAdmin = me.role === 'director' || me.role === 'bd';
 
   const [draft, setDraft] = useState<KpiRules>(() => clone(kpiRules));
-  const [eff, setEff] = useState(() => new Date().toISOString().slice(0, 10));
+  const [eff, setEff] = useState(() => localDay());
   const [note, setNote] = useState('');
   const [busy, setBusy] = useState(false);
   const [histOpen, setHistOpen] = useState(false);

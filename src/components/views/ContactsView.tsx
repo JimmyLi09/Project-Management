@@ -8,6 +8,7 @@ import { useLang } from '@/lib/i18n';
 import { contactRoleTerm } from '@/lib/terms';
 import { Ell, Icon } from '../ui';
 import type { Project } from '@/lib/types';
+import { csvCell } from '@/lib/csv';
 
 interface Row {
   project: string;
@@ -85,7 +86,7 @@ export default function ContactsView() {
   const filtered = !!(fRole || fCompany || fProject || fYear);
 
   function downloadCsv() {
-    const esc = (v: string) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+    const esc = csvCell;   // 开头是 = + - @ 的不让 Excel 当公式(电话「+65 …」、备注「- …」)
     /* REQ-052:和表格同一个列顺序 */
     const header = [t('公司', 'Company'), t('联系人', 'Contact'), t('电话', 'Phone'), t('邮箱', 'Email'), t('年份', 'Year'), t('项目编号', 'Project No.'), t('角色', 'Role')];
     const body = shown.map((r) => [r.company, r.person, r.phone, r.email, r.year, projText(r), r.role ? contactRoleTerm(r.role, lang) : '']);

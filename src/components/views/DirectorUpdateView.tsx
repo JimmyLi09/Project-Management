@@ -8,6 +8,7 @@ import { useLang } from '@/lib/i18n';
 import { Avatar, Drill, Ell, HM, Icon, Pill } from '../ui';
 import type { Focus } from '@/lib/focus';
 import type { Project } from '@/lib/types';
+import { csvCell } from '@/lib/csv';
 
 const UF: [keyof UFields, string, string][] = [
   ['done', '本周完成', 'Done this week'],
@@ -195,7 +196,7 @@ function WeeklyExportOverlay({ list, filter, onClose }: { list: Project[]; filte
 
   /* D14: export the same data as a CSV that opens in Excel / WPS */
   function downloadCsv() {
-    const esc = (v: string) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+    const esc = csvCell;   // 开头是 = + - @ 的不让 Excel 当公式(电话「+65 …」、备注「- …」)
     const header = [
       T('项目', 'Project'), T('负责人', 'PM'), T('客户', 'Client'), T('健康度', 'Health'), T('更新状态', 'Update state'),
       ...UF.map(([, zh, en]) => T(zh, en)), 'Director',

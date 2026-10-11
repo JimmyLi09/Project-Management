@@ -15,6 +15,7 @@ import { appendAudit, getProject } from '@/server/db';
 import { currentUser } from '@/server/session';
 import { logZh } from '@/lib/logmsg';
 import { denyUnlessVisible, denyAvModule } from '@/server/avguard';
+import { localDay } from '@/lib/localDate';
 
 /* 06 成本核算, per business line.
    GET ?project=ID&line=led|projector|elv|pv  the line's latest saved configuration,
@@ -25,7 +26,7 @@ import { denyUnlessVisible, denyAvModule } from '@/server/avguard';
         price the latest configuration and save a sheet; unit prices are
         snapshotted, confirming requires no blocking check. */
 
-const today = () => new Date().toISOString().slice(0, 10);
+const today = () => localDay();
 const COSTED: BusinessLine[] = ['led', 'projector', 'elv', 'pv'];
 const lineOf = (v: unknown): BusinessLine => (v === 'projector' || v === 'elv' || v === 'pv' ? v : 'led');
 type AnySummary = LedSummary | PrjSummary | ElvSummary | PvSummary;

@@ -7,6 +7,7 @@ import { canEditFinance } from '@/lib/permissions';
 import { useLang } from '@/lib/i18n';
 import { Ell, Icon } from '../ui';
 import type { Project } from '@/lib/types';
+import { csvCell } from '@/lib/csv';
 
 /* Commercial-status vocabulary — same labels/colors as the workflow panel. */
 const COMM: Record<string, [string, string, string]> = {
@@ -76,7 +77,7 @@ export default function FinanceView() {
   });
 
   function exportCsv() {
-    const esc = (v: string) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+    const esc = csvCell;   // 开头是 = + - @ 的不让 Excel 当公式(电话「+65 …」、备注「- …」)
     const header = [t('项目', 'Project'), t('客户', 'Client'), t('发票号', 'Invoice Ref'), t('开票日', 'Issued'), t('到期日', 'Due'), t('商业状态', 'Commercial'), t('收款状态', 'Payment'), t('备注', 'Note')];
     const body = rows.map((p) => {
       const inv = p.invoiceClose;

@@ -26,6 +26,7 @@ import { fmtDate } from '@/lib/project';
 import { useLang } from '@/lib/i18n';
 import { useStore } from '../store';
 import { useFlowRefresh } from './AvFlow';
+import { localDay } from '@/lib/localDate';
 
 type Line = 'led' | 'projector' | 'elv' | 'pv';
 interface Sheet {
@@ -55,7 +56,7 @@ const AUTO_KEYS: Record<Line, string[]> = {
 };
 const money = (v: number) => `S$ ${v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const pct = (v: number | null) => (v === null ? '—' : `${(v * 100).toFixed(1)}%`);
-const today = () => new Date().toISOString().slice(0, 10);
+const today = () => localDay();
 /* 看不到成本价的人,浏览器这边算不出这几条 —— 成本价在回包里是 null,
    照算会给每一行都报「缺少成本价」。确认时服务端拿真价再查一遍,漏不掉。 */
 const PRICE_CHECKS = new Set(['COST-PRICE', 'COST-STALE', 'COST-MARGIN']);

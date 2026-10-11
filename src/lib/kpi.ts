@@ -15,6 +15,7 @@
 import { parseISO, plannedFinish, projPoints } from './project';
 import type { PointRules } from './points';
 import type { Project } from './types';
+import { localDay } from './localDate';
 
 export type Dimension = 'points' | 'onTime' | 'quality' | 'load';
 export type ScoreMode = 'threshold' | 'linear' | 'banded';
@@ -111,7 +112,7 @@ export type PeriodKey = 'month' | 'quarter' | 'year' | 'custom';
 export interface Period { from: string; to: string }
 
 export function periodOf(key: PeriodKey, today = new Date(), custom?: Period): Period {
-  const iso = (d: Date) => d.toISOString().slice(0, 10);
+  const iso = (d: Date) => d.toISOString().slice(0, 10);   // 和下面的 Date.UTC 配对 —— 时区无关,不要换成本地
   const y = today.getFullYear(), m = today.getMonth();
   if (key === 'custom' && custom) return custom;
   if (key === 'month') return { from: iso(new Date(Date.UTC(y, m, 1))), to: iso(new Date(Date.UTC(y, m + 1, 0))) };
@@ -128,7 +129,7 @@ export function anchorDate(p: Project): string {
   const fin = actualFinish(p);
   if (fin) return fin;
   if (p.delivery) return p.delivery;
-  return new Date(p.created).toISOString().slice(0, 10);
+  return localDay(new Date(p.created));
 }
 
 /* 实际完工日:所有排期行都做完时,取最晚的那个实际结束日。
@@ -259,7 +260,7 @@ export const weightSum = (set: KpiRuleSet) =>
 export function kpiRulesAt(versions: KpiRuleVersion[], at: number): KpiRules {
   if (!versions.length) return DEFAULT_KPI_RULES;
   const sorted = [...versions].sort((a, b) => a.version - b.version);
-  const day = new Date(at).toISOString().slice(0, 10);
+  const day = localDay(new Date(at));   // 生效日按本地那一天比
   let pick = sorted[0];
   for (const v of sorted) if (!v.effectiveFrom || v.effectiveFrom <= day) pick = v;
   return pick.rules;

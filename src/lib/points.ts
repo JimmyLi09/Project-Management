@@ -15,6 +15,7 @@
    关着的时候完全不参与计算。 */
 
 import type { Project, ServicePackage } from './types';
+import { localDay } from './localDate';
 
 export type MatchOp = 'lte' | 'gte' | 'range';
 
@@ -239,7 +240,7 @@ export const round1 = (n: number) => Math.round(n * 10) / 10;
 export function rulesAt(versions: PointRuleVersion[], at: number): PointRules {
   if (!versions.length) return DEFAULT_POINT_RULES;
   const sorted = [...versions].sort((a, b) => a.version - b.version);
-  const day = new Date(at).toISOString().slice(0, 10);
+  const day = localDay(new Date(at));   // 生效日按本地那一天比
   let pick = sorted[0];
   for (const v of sorted) if (!v.effectiveFrom || v.effectiveFrom <= day) pick = v;
   return pick.rules;

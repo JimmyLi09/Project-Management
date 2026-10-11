@@ -11,6 +11,7 @@ import {
 } from '@/lib/points';
 import KpiRulesTab from './KpiRulesTab';
 import VisionSettingsTab from './VisionSettingsTab';
+import { localDay } from '@/lib/localDate';
 
 /* ===== REQ-038: 规则设置 · 积分规则 =====
    出厂值来自《项目积分算法》,但这里改的那一版才是准的。
@@ -38,7 +39,7 @@ function PointRulesTab() {
   const isAdmin = me.role === 'director' || me.role === 'bd';
 
   const [draft, setDraft] = useState<PointRules>(() => clone(pointRules));
-  const [eff, setEff] = useState(() => new Date().toISOString().slice(0, 10));
+  const [eff, setEff] = useState(() => localDay());
   const [note, setNote] = useState('');
   const [busy, setBusy] = useState(false);
   const [histOpen, setHistOpen] = useState(false);
