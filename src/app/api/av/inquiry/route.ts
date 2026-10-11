@@ -10,7 +10,7 @@ import { currentUser } from '@/server/session';
 import { applyAction, PermissionError, ValidationError } from '@/server/actions';
 import { logZh } from '@/lib/logmsg';
 import { redactProject } from '@/lib/permRedact';
-import { denyUnlessVisible, denyAvModule } from '@/server/avguard';
+import { denyUnlessVisible, denyAvEdit, denyAvModule } from '@/server/avguard';
 
 /* 01 立项询价.
    POST { name, client, location, delivery, notes, lines[] } opens a project with
@@ -34,7 +34,7 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   const user = await currentUser();
   if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
-  { const deny = denyAvModule(user); if (deny) return deny; }
+  { const deny = denyAvModule(user) || denyAvEdit(user); if (deny) return deny; }
   if (!canCreate(identityOf(user))) return NextResponse.json({ error: '仅销售 / PD / BD 可立项' }, { status: 403 });
 
   const body = (await req.json().catch(() => ({}))) as Record<string, unknown>;
@@ -104,7 +104,7 @@ function answersOf(body: Record<string, unknown>, cur: InquiryAnswers): InquiryA
 export async function PATCH(req: NextRequest) {
   const user = await currentUser();
   if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
-  { const deny = denyAvModule(user); if (deny) return deny; }
+  { const deny = denyAvModule(user) || denyAvEdit(user); if (deny) return deny; }
   const body = (await req.json().catch(() => ({}))) as Record<string, unknown>;
   const project = getProject(String(body.projectId || ''));
   if (!project) return NextResponse.json({ error: '项目不存在' }, { status: 404 });

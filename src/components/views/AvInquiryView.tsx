@@ -10,7 +10,7 @@ import React, { useEffect, useRef, useState } from 'react';
 
 import { isAvailable, LINES, projectLines } from '@/av/core/lines';
 import type { BusinessLine } from '@/av/core/types';
-import { canCreate, canEdit, canMeta } from '@/lib/permissions';
+import { canCreate, canEdit, canEditModule, canMeta } from '@/lib/permissions';
 import { useLang } from '@/lib/i18n';
 import { PC_LABEL, USE_LABEL } from '@/av/core/controller';
 import { PRJ_ENVS, PRJ_INTERACTS, PRJ_SCENES } from '@/av/core/prj/inquiry';
@@ -66,12 +66,14 @@ function NewInquiry() {
     go('ledingest');
   }
 
-  if (!canCreate(me)) {
+  if (!canCreate(me) || !canEditModule(me, 'avcost')) {
     return (
       <>
         <div className="panel" style={{ padding: '18px 20px', fontSize: 13, color: 'var(--text2)' }}>
-          {t('立项询价由销售、PD 或 BD 发起。你可以在「02–04 图纸 · 解析 · 校核」里处理已立项的项目。',
-            'Inquiries are opened by Sales, PD or BD.')}
+          {canCreate(me)
+            ? t('你的角色对「AV 方案成本」只读,不能新建询价。', 'Your role has read-only access to "AV design & cost" and cannot open inquiries.')
+            : t('立项询价由销售、PD 或 BD 发起。你可以在「02–04 图纸 · 解析 · 校核」里处理已立项的项目。',
+              'Inquiries are opened by Sales, PD or BD.')}
         </div>
       </>
     );
@@ -179,7 +181,7 @@ function EditInquiry({ project }: { project: Project }) {
   const { t } = useLang();
   const packOf = useLinePack();
   const refreshFlow = useFlowRefresh();
-  const may = canMeta(me, project);
+  const may = canMeta(me, project) && canEditModule(me, 'avcost');   // REQ-051:「AV 方案成本」只读就只读
   const [inq, setInq] = useState<{ location: string; notes: string; lines: BusinessLine[]; packs: Partial<Record<BusinessLine, string>> } | null | undefined>(undefined);
   const [form, setForm] = useState<Fields>({ name: project.name, client: project.client || '', location: '', delivery: project.delivery || '', notes: '', play_use: '', pc_by: '', ...PRJ_EMPTY });
   const [st, setSt] = useState<{ saving: boolean; at: number; error: string }>({ saving: false, at: 0, error: '' });
@@ -267,7 +269,7 @@ function EditInquiry({ project }: { project: Project }) {
         {st.saving && <span style={{ color: 'var(--warning)' }} data-testid="inq-autosave">{t('● 正在保存…', '● Saving…')}</span>}
         {!st.saving && st.at > 0 && <span style={{ color: 'var(--success)' }} data-testid="inq-autosave">{t(`✓ 已自动保存 · ${new Date(st.at).toTimeString().slice(0, 5)}`, `✓ Saved automatically · ${new Date(st.at).toTimeString().slice(0, 5)}`)}</span>}
         {st.error && <span style={{ color: 'var(--danger)' }} data-testid="inq-autosave-error">{st.error}</span>}
-        {canCreate(me) && (
+        {canCreate(me) && canEditModule(me, 'avcost') && (
           <button className="btn-line sm" style={{ marginLeft: 'auto' }} onClick={() => setView({ name: 'avinquiry', sub: 'new' })} data-testid="inq-new">
             ＋ {t('新建询价', 'New inquiry')}
           </button>

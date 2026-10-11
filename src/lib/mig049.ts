@@ -23,7 +23,12 @@ const isQtyField = (f: FieldDef) => f.type === 'number' || /^(quantity|qty|数�
 export interface Mig049Entry { project: string; rows: number; bySvc: Record<string, number> }
 
 export function migrateProject049(p: Project, defsFor: (svc: string) => FieldDef[], at: number): Mig049Entry | null {
-  if (Array.isArray(p.jobRecord)) return null;   // 已经有了(新建的项目 / 迁移过)
+  if (p.mig049) return null;   // 迁移过
+  /* 已经有人填过的 Job Record(新建的项目 / 上线后录的)不动。只有兜底补的空白行(只预填了业务名)
+     的不算 —— 迁移前读写过一次就会存下这种空白行,旧字段照样要转 */
+  const blankRow = (r: JobRow) => !String(r.detail || '').trim() && !String(r.qty || '').trim() && !String(r.note || '').trim()
+    && (!String(r.item || '').trim() || r.item === serviceItemOf(r.svc));
+  if (Array.isArray(p.jobRecord) && !p.jobRecord.every(blankRow)) return null;
   const rows: JobRow[] = [];
   const bySvc: Record<string, number> = {};
   (p.packages || []).forEach((pk) => {
@@ -60,6 +65,8 @@ export function migrateProject049(p: Project, defsFor: (svc: string) => FieldDef
       push(s.item || '', s.qty || '', s.note || '');
     }
   });
+  /* 已经有那几行空白行、又没有旧字段可转(新建的项目):原样不动,报告里也不列 */
+  if (Array.isArray(p.jobRecord) && !rows.length) return null;
   p.jobRecord = rows;
   const added = ensureJobRows(p);   // 一个值都没有的业务:给 1 行预填业务名
   p.mig049 = { at, rows: rows.length - added };

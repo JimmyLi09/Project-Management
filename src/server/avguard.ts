@@ -12,7 +12,7 @@
    看全部,PM 与 Engineer 只看自己的。 */
 
 import { NextResponse } from 'next/server';
-import { canSeeModule, canSeeProject, identityOf } from '@/lib/permissions';
+import { canEditModule, canSeeModule, canSeeProject, identityOf } from '@/lib/permissions';
 import type { Project, User } from '@/lib/types';
 
 export const AV_DENY = '非你管理 / 参与的项目';
@@ -31,4 +31,9 @@ export function denyUnlessVisible(user: User, project: Project | null | undefine
 export const AV_MODULE_DENY = '你的角色看不到「AV 方案成本」/ Your role has no access to "AV design & cost"';
 export function denyAvModule(user: User): NextResponse | null {
   return canSeeModule(identityOf(user), 'avcost') ? null : NextResponse.json({ error: AV_MODULE_DENY }, { status: 403 });
+}
+/* 「AV 方案成本」只读的角色:看得到、改不了(01 立项问答这类只查了 canMeta 的写接口用) */
+export const AV_EDIT_DENY = '你的角色对「AV 方案成本」只读 / Your role has read-only access to "AV design & cost"';
+export function denyAvEdit(user: User): NextResponse | null {
+  return canEditModule(identityOf(user), 'avcost') ? null : NextResponse.json({ error: AV_EDIT_DENY }, { status: 403 });
 }

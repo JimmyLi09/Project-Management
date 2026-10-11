@@ -35,6 +35,22 @@ export function getDb(): Database.Database {
   if (db) return db;
   fs.mkdirSync(DATA_DIR, { recursive: true });
   db = new Database(path.join(DATA_DIR, 'audax.db'));
+  try {
+    return setupDb(db);
+  } catch (e) {
+    /* 上线迁移没走完(备份失败 / 某一步出错):不带着半迁移的数据接着服务 —— 那样正常的保存会把读时的
+       兜底结果存进库,后面的一次性迁移就跳过或盖掉内容。关掉连接,下一个请求重新试;页面会报错,
+       日志里有原因(多半是磁盘满 / data\backups 没有写权限)。 */
+    console.error('[迁移] 数据库初始化 / 上线迁移没完成,网站暂不服务(数据没动,修好原因后 pm2 restart audax):', e);
+    try { db.close(); } catch { /* 已经关了 */ }
+    db = null;
+    idsBackfilled = false;
+    serialsBackfilled = false;
+    throw e;
+  }
+}
+
+function setupDb(db: Database.Database): Database.Database {
   db.pragma('journal_mode = WAL');
   db.exec(`
     CREATE TABLE IF NOT EXISTS users (
@@ -87,11 +103,13 @@ export function getDb(): Database.Database {
   seedIfEmpty(db);
   maybeSeedDemo(db);
   loadSynonyms(db);
-  migrateSharedChecklist(db);   // REQ-044:要在 backfillIds 之前 —— 它读项目时也会顺手合并,那样就没有报告了
-  /* REQ-048 / 049 同理:migrate() 读项目时会兜底补日历、补 Job Record 默认行;backfillIds 要是先跑、
-     把兜底结果存进库,一次性迁移就以为「已经有了」而跳过(没报告、旧字段也没转成行) */
+  /* 顺序有讲究:migrate() 读项目时会兜底补日历(048)、补 Job Record 默认行(049)、合并清单(044)。
+     谁先把兜底结果存进库,后面的一次性迁移就以为「已经有了」而跳过(没备份、没报告、旧字段也没转成行)。
+     所以 048 / 049 最先跑(它们只认原始数据,和清单无关;048 的整库备份也就是升级前的原样),
+     再 044 合并清单,050 要等清单合成一张之后,backfillIds 放最后。 */
   migrateSchedules048(db);
   migrateJobRecord049(db);
+  migrateSharedChecklist(db);   // REQ-044:要在 backfillIds 之前 —— 它读项目时也会顺手合并,那样就没有报告了
   migrateChecklist050(db);
   backfillIds(db);
   backfillSerials(db);
@@ -251,9 +269,8 @@ function migrateSchedules048(d: Database.Database) {
       backup = path.join(dir, `pre-req048-${stamp}.db`);
       d.exec(`VACUUM INTO '${backup.replace(/'/g, "''")}'`);
     } catch (e) {
-      /* 备份不成就不迁移 —— 下次启动再试(读项目时有兜底,页面照样能用) */
-      console.warn('[REQ-048] 迁移前备份失败,这次不迁移:', e);
-      return;
+      /* 备份不成就不迁移,也不带着没迁移的数据开站(见 getDb) */
+      throw new Error(`[REQ-048] 迁移前备份失败,这次不迁移:${e instanceof Error ? e.message : String(e)}`);
     }
   }
   const upd = d.prepare('UPDATE projects SET data = ?, updated_at = ?, version = version + 1 WHERE id = ?');
@@ -342,8 +359,8 @@ function migrateChecklist050(d: Database.Database) {
       backup = path.join(dir, `pre-req050-${stamp}.db`);
       d.exec(`VACUUM INTO '${backup.replace(/'/g, "''")}'`);
     } catch (e) {
-      console.warn('[REQ-050] 迁移前备份失败,这次不迁移:', e);
-      return;
+      /* 备份不成就不迁移,也不带着没迁移的数据开站(见 getDb) */
+      throw new Error(`[REQ-050] 迁移前备份失败,这次不迁移:${e instanceof Error ? e.message : String(e)}`);
     }
   }
   const upd = d.prepare('UPDATE projects SET data = ?, updated_at = ?, version = version + 1 WHERE id = ?');
@@ -402,8 +419,8 @@ function migrateJobRecord049(d: Database.Database) {
       backup = path.join(dir, `pre-req049-${stamp}.db`);
       d.exec(`VACUUM INTO '${backup.replace(/'/g, "''")}'`);
     } catch (e) {
-      console.warn('[REQ-049] 迁移前备份失败,这次不迁移:', e);
-      return;
+      /* 备份不成就不迁移,也不带着没迁移的数据开站(见 getDb) */
+      throw new Error(`[REQ-049] 迁移前备份失败,这次不迁移:${e instanceof Error ? e.message : String(e)}`);
     }
   }
   const upd = d.prepare('UPDATE projects SET data = ?, updated_at = ?, version = version + 1 WHERE id = ?');
@@ -482,9 +499,15 @@ function migrateSharedChecklist(d: Database.Database) {
       let o: any;
       try { o = JSON.parse(r.data); } catch { continue; }
       if (Array.isArray(o.checklist)) continue;
+      /* 只存清单这一项改动:migrate() 顺手补的日历 / Job Record 默认行不落库,
+         留给 048 / 049 的一次性迁移(它们万一这次没跑成,下次启动还认得出是老数据) */
+      const hadJob = Array.isArray(o.jobRecord);
+      const hadCal = (o.packages || []).map((pk: any) => !!(pk && pk.calendar && Array.isArray(pk.calendar.stages) && pk.calendar.stages.length));
       let m: ProjectMigration | null = null;
       const p = migrate(o, { onChecklistMigrated: (x) => { m = x; } });
       if (!m) continue;
+      if (!hadJob) delete (p as any).jobRecord;
+      p.packages.forEach((pk, i) => { if (!hadCal[i]) delete (pk as any).calendar; });
       const mm = m as ProjectMigration;
       done.push(mm);
       const k = 'cl.sharedMig', params = { from: mm.sourceItems, to: mm.items };
@@ -1152,6 +1175,8 @@ export function importRegisterRecords(
         ...notes.map((n) => ({ at: now, by: actor, text: logZh(n.k, n.p), k: n.k, p: n.p as LogParams })),
       ];
       p.log = [...entries, ...((p.log as { at: number; by: string; text: string }[]) || [])].slice(0, 200);
+      /* REQ-049:新加的业务也要有 Job Record 那 1 行 —— 不存的话每次读都补一行新 id 的,改 / 删都对不上 */
+      ensureJobRows(p);
       const { updatedAt: _u, version: _v, ...pdata } = p;
       upd.run(JSON.stringify(pdata), now, hit.id);
       updated++;
@@ -1178,10 +1203,12 @@ export function importJobRows(
     const all = d.prepare('SELECT id, data FROM projects').all() as { id: string; data: string }[];
     const byName = new Map<string, { id: string; p: Project }>();
     const byNo = new Map<string, { id: string; p: Project }>();
+    const dupName = new Set<string>();   // 项目名不要求唯一:重名的只能按项目编号对
     for (const r of all) {
       const p = migrate(JSON.parse(r.data));
       if (p.archived) continue;
       const key = (p.name || '').trim().toLowerCase();
+      if (key && byName.has(key)) dupName.add(key);
       if (key && !byName.has(key)) byName.set(key, { id: r.id, p });
       if (p.serial) byNo.set(String(p.serial), { id: r.id, p });
     }
@@ -1191,6 +1218,7 @@ export function importJobRows(
       const no = String(row.no || '').trim().replace(/^0+/, '');
       const name = String(row.project || '').trim().toLowerCase();
       if (!no && !name) throw new Error(`${at}:缺少项目名称(导入已全部撤销)`);
+      if (!(no && byNo.get(no)) && name && dupName.has(name)) throw new Error(`${at}:有不止一个项目叫「${row.project}」,请在「项目编号」一栏填编号(导入已全部撤销)`);
       const hit = (no && byNo.get(no)) || (name && byName.get(name)) || null;
       if (!hit) throw new Error(`${at}:未找到项目「${row.project || row.no}」(导入已全部撤销)`);
       const p = hit.p;

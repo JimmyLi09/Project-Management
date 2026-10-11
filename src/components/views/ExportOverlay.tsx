@@ -14,6 +14,8 @@ import { cellLabel, pkgLabel, type ClFields } from '@/lib/clCells';
    按导出时的语言出对应那一份,各自可编辑、各自存全局默认。 */
 const DEFAULT_NOTES_ZH = '注:资料不齐可能影响交付时间;确认后如需多次修改,可能酌收修改费。';
 const DEFAULT_NOTES_EN = 'Note: incomplete information may affect the delivery schedule; repeated revisions after confirmation may incur additional charges.';
+/* 周数合计:每行是一位小数(1 天 = 0.1 周),加起来会出 4.300000000000001 */
+const round1 = (n: number) => Math.round(n * 10) / 10;
 
 /* 拆之前那一版是中英拼在一起的一整段。库里存的如果**一字不差**就是这一段,
    说明没人改过,可以放心拆开;改过的就是人家自己写的东西,不拆 —— 见下面
@@ -125,7 +127,7 @@ export default function ExportOverlay({ p, onClose, scope = 'all', clScope = 'al
   function SchedBlock({ pkg, pi }: { pkg: ServicePackage; pi: number }) {
     const pd = planDates(pkg, pkgStart(p, pkg));
     const style = schedStyle;
-    const sub = pkg.schedule.filter((r) => !r.kind).reduce((n, r) => n + (Number(r.weeks) || 0), 0);
+    const sub = round1(pkg.schedule.filter((r) => !r.kind).reduce((n, r) => n + (Number(r.weeks) || 0), 0));
     const band = (r: { phase: string; task: string; taskEn: string }) => {
       const s = `${r.phase} ${r.task} ${r.taskEn}`.toLowerCase();
       if (/交接|移交|签收|handover|sign-?off/.test(s)) return 2;
@@ -274,6 +276,13 @@ export default function ExportOverlay({ p, onClose, scope = 'all', clScope = 'al
     });
     const one = (it: ChecklistItem): ClRow[] => {
       if (!(it.svcs || allSvcs).some((sv) => selSvcs.includes(sv))) return [];
+      /* 迁移时没对上服务包、留下来的「(#2)」/「(实例名)」项:属于哪一份认得出来的,那一份没勾就不导 */
+      if (it.inst && (it.svcs || []).length === 1) {
+        const same = p.packages.filter((x) => x.svc === it.svcs![0]);
+        const m = /^#(\d+)$/.exec(it.inst);
+        const pk = m ? same[Number(m[1]) - 1] : same.find((x) => x.label === it.inst);
+        if (pk?.id && !selIds.has(pk.id)) return [];
+      }
       if (!it.cells) return keepC(it) ? [rowOf(it, it, it.id || '', name(it), (it.svcs || allSvcs).map(svcLabel).join(L === 'zh' ? '、' : ', '))] : [];
       return Object.entries(it.cells)
         .filter(([k]) => (it.mode === 'sep' ? selSvcs.includes(k) : selIds.has(k)))
@@ -505,8 +514,8 @@ export default function ExportOverlay({ p, onClose, scope = 'all', clScope = 'al
               <tr>
                 <td style={{ textAlign: 'right', fontWeight: 700, background: '#f0f2f5' }}>{T('Sum · 合计 Overall duration', 'Sum · Overall duration')}</td>
                 <td style={{ width: '13%', fontWeight: 700, background: '#f0f2f5' }}>
-                  {T(`${selPkgs.reduce((n, x) => n + x.pkg.schedule.filter((r) => !r.kind).reduce((m, r) => m + (Number(r.weeks) || 0), 0), 0)} 周`,
-                     `${selPkgs.reduce((n, x) => n + x.pkg.schedule.filter((r) => !r.kind).reduce((m, r) => m + (Number(r.weeks) || 0), 0), 0)} weeks`)}
+                  {T(`${round1(selPkgs.reduce((n, x) => n + x.pkg.schedule.filter((r) => !r.kind).reduce((m, r) => m + (Number(r.weeks) || 0), 0), 0))} 周`,
+                     `${round1(selPkgs.reduce((n, x) => n + x.pkg.schedule.filter((r) => !r.kind).reduce((m, r) => m + (Number(r.weeks) || 0), 0), 0))} weeks`)}
                 </td>
               </tr>
             </tbody>

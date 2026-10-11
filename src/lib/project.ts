@@ -35,10 +35,17 @@ export function fmtDate(d: Date | null | undefined): string {
   const m = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
   return d.getDate().toString().padStart(2, '0') + '-' + m[d.getMonth()] + '-' + d.getFullYear();
 }
+/* 本地时区的那一天(00:00)。写坏的日期(「2025-6-1」「TBC」)算没有日期 —— 不能变成 Invalid Date
+   一路传下去(日历换算会抛错,一个项目就能让整个列表读不出来) */
 export function parseISO(s: string | null | undefined): Date | null {
-  return s ? new Date(s + 'T00:00:00') : null;
+  if (!s) return null;
+  const d = new Date(s + 'T00:00:00');
+  return Number.isNaN(d.getTime()) ? null : d;
 }
-export const isoDate = (d: Date) => d.toISOString().slice(0, 10);
+/* 本地时区的 YYYY-MM-DD(和 parseISO 配对)。以前用 toISOString —— 那是 UTC,
+   服务器 / 浏览器在 UTC+8 时 parseISO('2026-10-10') 转回来变成 2026-10-09 */
+export const isoDate = (d: Date) =>
+  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 
 export interface NewProjectInput {
   name: string;
@@ -213,7 +220,8 @@ function normalizeClItem(it: any) {
   /* 空数组也要再看一眼 —— 项目是「先建(那时什么都没收到,种子为空)、
      后填收到内容」的,如果只判 undefined,这些项就永远补不上第一条。 */
   if (!Array.isArray(it.receipts)) it.receipts = [];
-  if (it.receipts.length === 0) {
+  /* REQ-050:分格的项收料记录只在格里,行上那几个字段只是第一格的镜像 —— 不能再凭它补一条 */
+  if (it.receipts.length === 0 && !it.cells) {
     const seed = seedReceipt(it as ChecklistItem);
     if (seed) it.receipts = [seed];
   }

@@ -245,3 +245,68 @@ test('REQ-050 从别的项目导入清单:规格项的格按「第几份」对�
   renameInProject(b, 'Kevin', 'Kevin Lee');
   assert.equal(bSize.cells![b.packages[1].id!].owner, 'Kevin Lee');
 });
+
+import { migrate } from '../project.ts';
+import { statFragment } from '../../server/fragments.ts';
+
+test('REQ-050 复查:没有专属模板的业务(TV)在动作里也按通用规格项表分格,和建项目 / 迁移一致', () => {
+  assert.equal(scopeOf({ zh: '需求 / 规格', en: '' }, ['tv'], tplNamesFrom({ tv: getBuiltinTemplate('tv') })).scope, 'inst',
+    '服务端动作把通用模板按业务名放进 tplNames 时也要认通用规格项表');
+  const p = newProject({ name: 'TV', client: '', services: ['tv'], start: '' } as never);
+  const spec = find(p, '需求 / 规格');
+  delete spec.scope;   // 老数据 / 手加的项:项上没写范围
+  asNew(p, 'tv');
+  assert.equal(Object.keys(find(p, '需求 / 规格').cells || {}).length, 2, '加第二台 TV:规格项分两格');
+});
+
+test('REQ-050 复查:单独填改回只剩一个业务(这个业务有两份)—— 原来那个业务的格进第一份,不变成空的', () => {
+  const p = newProject({ name: 'LP', client: '', services: ['led', 'led', 'projector'], start: '' } as never);
+  const it = find(p, '屏幕尺寸');
+  act(p, { type: 'setItemSvcs', item: it.id, svcs: ['led', 'projector'] });
+  assert.equal(it.cells, undefined, '两个业务、同步:一条');
+  act(p, { type: 'setClMode', item: it.id, mode: 'sep' });
+  act(p, { type: 'editCl', item: it.id, cell: 'led', field: 'remark', value: 'LED 那份' });
+  act(p, { type: 'editCl', item: it.id, cell: 'projector', field: 'remark', value: '投影那份' });
+  act(p, { type: 'setItemSvcs', item: it.id, svcs: ['led'] });
+  const [k1, k2] = p.packages.filter((x) => x.svc === 'led').map((x) => x.id!);
+  assert.deepEqual(Object.keys(it.cells!), [k1, k2]);
+  assert.equal(it.cells![k1].remark, 'LED 那份');
+  assert.equal(it.cells![k2].remark, '');
+  assert.ok(it.history!.some((h) => h.k === 'cell.drop' && h.data?.remark === '投影那份'), '投影那份进修改记录');
+  assert.ok(!it.history!.some((h) => h.k === 'cell.drop' && h.data?.remark === 'LED 那份'));
+});
+
+test('REQ-050 复查:导入的第 2 份在本项目没有对应 → 进修改记录;改回同步星标跟着留下的那格', () => {
+  const a = newProject({ name: 'A', client: '', services: ['led', 'led'], start: '' } as never);
+  const size = find(a, '屏幕尺寸');
+  act(a, { type: 'setClStatus', item: size.id, cell: a.packages[1].id, value: 'received' });
+  act(a, { type: 'editCl', item: size.id, cell: a.packages[1].id, field: 'remark', value: '第二块' });
+  const b = newProject({ name: 'B', client: '', services: ['led'], start: '' } as never);
+  applyChecklist(b, 'led', extractChecklist(a, 'led', true), 'replace', true, 'PD');
+  const bSize = find(b, '屏幕尺寸');
+  assert.equal(bSize.cells, undefined, '本项目只有一块:一条');
+  assert.ok(bSize.history?.some((h) => h.k === 'cell.import' && h.data?.remark === '第二块'), '第 2 份那一格没有悄悄丢掉');
+
+  const p = newProject({ name: 'C', client: '', services: ['cgi', 'ani'], start: '' } as never);
+  const it = find(p, '景观平面');
+  act(p, { type: 'setItemSvcs', item: it.id, svcs: ['cgi', 'ani'] });
+  act(p, { type: 'setClMode', item: it.id, mode: 'sep' });
+  act(p, { type: 'toggleHighlight', item: it.id, cell: 'cgi' });
+  assert.equal(it.highlight, true, '行上跟第一格(CGI)');
+  act(p, { type: 'setClMode', item: it.id, mode: 'sync', from: 'ani' });
+  assert.equal(it.highlight, undefined, '以动画那格为准:动画没加星,行上也不能留着');
+});
+
+test('REQ-050 复查:分格的项读的时候不凭行上的镜像补收料记录;片段预览按格数「有内容」', () => {
+  const p = newProject({ name: 'Two', client: '', services: ['led', 'led'], start: '' } as never);
+  const size = find(p, '屏幕尺寸');
+  act(p, { type: 'setClStatus', item: size.id, cell: p.packages[0].id, value: 'received' });
+  act(p, { type: 'editCl', item: size.id, cell: p.packages[0].id, field: 'received', value: 'LED1.pdf' });
+  assert.equal(size.status, 'received');
+  const again = migrate(JSON.parse(JSON.stringify(p)));
+  assert.deepEqual(again.checklist!.flatMap((g) => g.items).find((x) => x.id === size.id)!.receipts, [], '行上不多出一条收料记录');
+  const q = newProject({ name: 'Q', client: '', services: ['led', 'led'], start: '' } as never);
+  const qs = find(q, '屏幕尺寸');
+  act(q, { type: 'editCl', item: qs.id, cell: q.packages[1].id, field: 'remark', value: '只有第二格有内容' });
+  assert.equal(statFragment(extractChecklist(q, 'led', true), 'checklist').withContent, 1);
+});

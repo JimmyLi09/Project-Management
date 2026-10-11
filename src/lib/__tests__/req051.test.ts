@@ -220,3 +220,33 @@ test('REQ-051 修复:服务端把关只认数据库那份;页面服务端渲染�
     use(defaultPermTable());
   }
 });
+
+test('REQ-051 复查:同源字段 / 资料链接按自己的模块过权限;排期不可见时撤销备份也不下发;怪 action 名不炸', () => {
+  const t = defaultPermTable();
+  t.pm.projects = 'read';
+  t.pm.record = 'edit';
+  t.pm.schedule = 'edit';
+  use(t);
+  const p = proj();
+  const pam = { name: 'Pam', role: 'pm' as Role };
+  /* Job Record 能编辑、项目列表只读:档案里那一格「Project detail」写的是项目名,不能借道改 */
+  assert.throws(() => applyAction(pam, p, { type: 'setRecord', pkg: 0, patch: { projectDetail: '改名' } } as never), /项目列表|Projects/);
+  assert.equal(p.name, 'T');
+  /* 项目档案不可见:排期页上的资料链接不能写(接口不给它,空框一填就把看不到的链接盖掉) */
+  t.pm.record = 'none';
+  use(t);
+  assert.throws(() => applyAction(pam, p, { type: 'setPkgField', pkg: 0, field: 'resourceLinks', value: 'x' } as never), PermissionError);
+  applyAction(pam, p, { type: 'setPkgField', pkg: 0, field: 'owner', value: 'Pam' } as never);
+  /* 排期不可见:048 迁移的回退备份、「换成新阶段」的撤销备份里都是任务名 / 备注 */
+  const pk = p.packages[0] as any;
+  pk.mig048 = { at: 1, kind: 'rowsFromCal', calVersion: 0, prevRows: [{ task: '秘密任务' }] };
+  pk.calendar.flowUndo = { stages: [{ name: '秘密阶段' }] };
+  t.member.schedule = 'none';
+  use(t);
+  const q = redactProject({ name: 'Mo', role: 'member' }, p) as any;
+  assert.equal(q.packages[0].mig048, undefined);
+  assert.equal(q.packages[0].calendar.flowUndo, undefined);
+  assert.ok(!JSON.stringify(q.packages[0]).includes('秘密'));
+  assert.throws(() => applyAction({ name: 'Boss', role: 'director' }, p, { type: 'constructor' } as never), /未知操作/);
+  use(defaultPermTable());
+});

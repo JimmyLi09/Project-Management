@@ -585,7 +585,7 @@ export default function ChecklistTab({ p, scope, onScope, onExport }: {
                   )}
                   {/* REQ-042: 展开这一项(这一格)的全部收料记录(Item History) */}
                   {openRec && openRec.id === it.id && (
-                    <ItemReceipts p={p} item={it.id!} cell={openRec.cell} cellName={openRec.cell ? cellLabel(p, openRec.cell, lang) : undefined}
+                    <ItemReceipts key={`${it.id}:${openRec.cell || ''}`} p={p} item={it.id!} cell={openRec.cell} cellName={openRec.cell ? cellLabel(p, openRec.cell, lang) : undefined}
                       receipts={(openRec.cell ? it.cells?.[openRec.cell]?.receipts : it.receipts) || []} canEd={ed}
                       onClose={() => setOpenRec(null)} />
                   )}

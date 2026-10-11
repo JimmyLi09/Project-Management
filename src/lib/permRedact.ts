@@ -25,8 +25,12 @@ export function redactProject<T extends Project>(u: Identity, p: T): T {
     (q.packages || []).forEach((pk) => {
       pk.schedule = (pk.schedule || []).map((r) => ({ ...r, task: '', taskEn: '', note: '', delayNote: '' }));
       /* 日历的阶段名、备注也是排期内容(REQ-048 起它就是排期本体),一样清空;分界点留着 */
-      if (pk.calendar) pk.calendar = { ...pk.calendar, stages: pk.calendar.stages.map((st) => ({ ...st, name: '', nameEn: '', note: '' })), archives: [] };
+      if (pk.calendar) {
+        pk.calendar = { ...pk.calendar, stages: pk.calendar.stages.map((st) => ({ ...st, name: '', nameEn: '', note: '' })), archives: [] };
+        delete pk.calendar.flowUndo;   // 「换成新阶段」的撤销备份:整份旧阶段 + 行
+      }
       delete pk.scheduleLegacy;
+      delete pk.mig048;   // 048 迁移的回退备份(原来的行 / 日历,含任务名、备注、负责人)
     });
   }
   if (hide.checklist) {
