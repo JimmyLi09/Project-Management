@@ -65,6 +65,8 @@ export function migrateProject049(p: Project, defsFor: (svc: string) => FieldDef
       push(s.item || '', s.qty || '', s.note || '');
     }
   });
+  /* 已经有那几行空白行、又没有旧字段可转(新建的项目):原样不动,报告里也不列 */
+  if (Array.isArray(p.jobRecord) && !rows.length) return null;
   p.jobRecord = rows;
   const added = ensureJobRows(p);   // 一个值都没有的业务:给 1 行预填业务名
   p.mig049 = { at, rows: rows.length - added };

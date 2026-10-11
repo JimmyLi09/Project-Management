@@ -74,6 +74,12 @@ test('049:迁移前存下的只是兜底空白行 → 旧字段照样转;有人�
   q.packages[0].record = { scaleRatio: '1:100' };
   assert.equal(migrateProject049(q, () => [], 1), null);
   assert.equal(q.jobRecord.length, 1);
+  /* 新建的项目:只有空白行、也没有旧字段 → 不动,报告里不列 */
+  const n = newProject({ name: 'N', client: 'C', services: ['cgi', 'ani'], start: '' } as never);
+  delete (n as { mig049?: unknown }).mig049;
+  const before = JSON.stringify(n.jobRecord);
+  assert.equal(migrateProject049(n, () => [], 1), null);
+  assert.equal(JSON.stringify(n.jobRecord), before);
 });
 
 test('050:迁移前就有分格的项 → 这个项目不自动合并(不盖掉格里的内容),报告里列为问题', () => {
