@@ -9,31 +9,35 @@ import { useLang } from '@/lib/i18n';
 import { Icon } from '../ui';
 import {
   baseDefOf, hasRecordDef, statusFamily, statusMeta, defaultStatus, recordVal, fieldVal, isIncomplete, fieldsOf, FIELD_TYPES, formulaText, optionLabel,
-  isDerivedKey, isOverridden, derivedVal,
+  isDerivedKey, isOverridden, derivedVal, ledSizeIssues,
   type FieldDef, type FieldType, type RegisterDef,
 } from '@/lib/records';
 import type { AvDerived } from '@/lib/records';
-import { jobGroups, rowsFromPaste, JOB_HEAD_EN, JOB_HEAD_ZH, type JobField } from '@/lib/jobRecord';
+import { extraRowsOf, jobGroups, rowsFromPaste, JOB_HEAD_EN, JOB_HEAD_ZH, type JobField } from '@/lib/jobRecord';
+import { isHw } from '@/lib/jobFormat';
 import type { JobRow, Project, ServicePackage } from '@/lib/types';
 import JobRecordExport from './JobRecordExport';
 import KbLinks from '../KbLinks';
 import { fieldGroupTerm } from '@/lib/terms';
 
-/* ===== REQ-049 · Job Record = 一张 4 栏表 =====
-   Service Item / Detail / Quantity / Special Notes,和 Sales 报价表一致,内容全部自定义。
-   行按业务分组(同类两份显示「LED × 2」),每组「＋ 加一行」,每种业务至少保留 1 行。
-   可以从 Excel 复制报价单的 4 栏(或 3 栏)直接粘贴到表上,按行追加并归到对应业务。
-   原来各业务登记表的字段不删,在下面「旧字段(只读)」里看。 */
+/* ===== REQ-049 · Job Record = 一张 4 栏表 / REQ-053 · 硬件回到登记表 =====
+   软件业务(效果图、动画、沙盘、无人机…):4 栏表 Service Item / Detail / Quantity / Special Notes,和 Sales 报价表一致,
+   按业务分组(同类两份显示「LED × 2」),每组「＋ 加一行」,每个业务至少保留 1 行;可以从 Excel 粘贴。
+   硬件业务(LED、投影、TV、MAXHUB、灯箱、AV、弱电、光伏、3D VR/720,以登记表管理里的分类为准):
+   每份服务包一张登记表卡(LED ① / LED ②),字段直接改、公式自动算;下面可选加几行 4 栏「额外项目」。
+   页面顺序:上面软件,下面硬件;项目只有一类就只显示那一块。 */
 export default function JobRecordTab({ p }: { p: Project }) {
   const { lang, t } = useLang();
-  const { me } = useStore();
+  const { me, jobFormats } = useStore();
   const canEd = canEditIn(me, p, 'record');   // REQ-051: 再过权限表
   const [exporting, setExporting] = useState(false);
   const [pasteOpen, setPasteOpen] = useState(false);
   const [legacyOpen, setLegacyOpen] = useState(false);
+  const hwPkgs = p.packages.map((pk, i) => ({ pk, i })).filter(({ pk }) => isHw(pk.svc, jobFormats));
+  const swGroups = useMemo(() => jobGroups(p, { hw: false, ov: jobFormats }), [p, jobFormats]);
 
-  /* 旧字段:有值的业务才列出来(没值的没什么可查) */
-  const legacy = p.packages.map((pk, i) => ({ pk, i })).filter(({ pk }) =>
+  /* 旧字段:软件业务里登记表还有值的才列出来(硬件的就在上面的登记表卡上) */
+  const legacy = p.packages.map((pk, i) => ({ pk, i })).filter(({ pk }) => !isHw(pk.svc, jobFormats) &&
     hasRecordDef(pk.svc) && Object.entries(pk.record || {}).some(([k, v]) => k !== 'status' && k !== 'updatedAt' && String(v ?? '').trim()));
 
   if (exporting) return <JobRecordExport p={p} onClose={() => setExporting(false)} />;
@@ -42,10 +46,10 @@ export default function JobRecordTab({ p }: { p: Project }) {
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
         <div style={{ fontSize: 12.5, color: 'var(--text2)', flex: 1, minWidth: 240 }}>
-          {t('Job Record 只保留 4 栏（Service Item / Detail / Quantity / Special Notes），和 Sales 报价表一致；内容全部自定义。「项目档案」读的也是这张表。',
-             'Job Record keeps four columns (Service Item / Detail / Quantity / Special Notes), same as the sales quotation; all content is free-form. The Registers page reads this table too.')}
+          {t('软件业务（效果图、动画、沙盘…）是 4 栏表，和 Sales 报价表一致；硬件业务（LED、投影、TV…）是登记表卡，字段直接改，下面可选加几行 4 栏额外项目。分类由 PD / BD 在「项目档案 → 登记表管理」里定。',
+             'Software services (CGI, animation, scale model…) use the 4-column table, same as the sales quotation; hardware services (LED, projector, TV…) use a register card you edit in place, with optional 4-column extra items. PD / BD set the type under Registers → Register management.')}
         </div>
-        {canEd && (
+        {canEd && swGroups.length > 0 && (
           <button className="btn-line sm" onClick={() => setPasteOpen(true)} data-testid="job-paste-btn">
             📋 {t('从报价单粘贴', 'Paste from quotation')}
           </button>
@@ -86,7 +90,19 @@ export default function JobRecordTab({ p }: { p: Project }) {
         </table>
       </div>
 
-      <JobTable p={p} canEd={canEd} />
+      {swGroups.length > 0 && (
+        <>
+          <SectionHead kind="sw" />
+          <JobTable p={p} canEd={canEd} groups={swGroups} />
+        </>
+      )}
+
+      {hwPkgs.length > 0 && (
+        <>
+          <SectionHead kind="hw" />
+          {hwPkgs.map(({ pk, i }) => <HwCard key={pk.id || i} p={p} pk={pk} pkgIdx={i} canEd={canEd} />)}
+        </>
+      )}
 
       <ServicesBar p={p} canEd={canEd} />
 
@@ -96,8 +112,8 @@ export default function JobRecordTab({ p }: { p: Project }) {
             {legacyOpen ? '▾' : '▸'} {t(`旧字段（只读）· ${legacy.length} 份业务`, `Old fields (read-only) · ${legacy.length} services`)}
           </button>
           <div style={{ fontSize: 11.5, color: 'var(--text2)', marginTop: 4 }}>
-            {t('改版前各业务登记表里填的字段，原样保留供查历史；上线时有值的字段已经各转成了上面的一行。',
-              'Fields from the per-service registers before this change, kept for reference; each filled field became a row above at go-live.')}
+            {t('改版前这几项软件业务登记表里填的字段，原样保留供查历史；上线时有值的字段已经各转成了上面的一行。',
+              'Fields from these software services\' registers before the change, kept for reference; each filled field became a row above at go-live.')}
           </div>
           {legacyOpen && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginTop: 10 }}>
@@ -112,14 +128,31 @@ export default function JobRecordTab({ p }: { p: Project }) {
   );
 }
 
+/* REQ-053:「软件 · 制作类 · 4 栏」/「硬件 · 安装类 · 登记表」小标题 */
+function SectionHead({ kind }: { kind: 'sw' | 'hw' }) {
+  const { t } = useLang();
+  const sw = kind === 'sw';
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 10, margin: '4px 0 -6px', flexWrap: 'wrap' }} data-testid={`job-sec-${kind}`}>
+      <span style={{ fontSize: 14.5, fontWeight: 700, color: 'var(--navy900)' }}>{sw ? t('软件 · 制作类', 'Software · production') : t('硬件 · 安装类', 'Hardware · installation')}</span>
+      <span className="badge" style={sw ? { background: '#e8eff9', color: '#2c5aa0', fontWeight: 700 } : { background: '#fdf1e6', color: '#b85c1e', fontWeight: 700 }}>
+        {sw ? t('4 栏', '4 columns') : t('登记表', 'Register')}
+      </span>
+      <span style={{ fontSize: 12, color: 'var(--text2)' }}>
+        {sw ? t('Service Item / Detail / Quantity / Special Notes，和 Sales 报价表一致', 'Service Item / Detail / Quantity / Special Notes, same as the sales quotation')
+          : t('每份一张卡；同类两份分开两张（LED ① / LED ②）', 'One card per package; two of the same type get two cards (LED ① / LED ②)')}
+      </span>
+    </div>
+  );
+}
+
 /* ---------- 4 栏表 ---------- */
 const COL_W = ['20%', '34%', '12%', 'auto'];
 const FIELDS: JobField[] = ['item', 'detail', 'qty', 'note'];
 
-function JobTable({ p, canEd }: { p: Project; canEd: boolean }) {
+function JobTable({ p, canEd, groups }: { p: Project; canEd: boolean; groups: ReturnType<typeof jobGroups> }) {
   const { dispatch, setToast } = useStore();
   const { lang, t } = useLang();
-  const groups = useMemo(() => jobGroups(p), [p]);
   const head = JOB_HEAD_EN;
   const svcsInProject = groups.filter((g) => g.inProject).map((g) => g.svc);
 
@@ -162,7 +195,7 @@ function JobTable({ p, canEd }: { p: Project; canEd: boolean }) {
                     <span style={{ fontWeight: 400, color: 'var(--text2)' }}>· {t(`${g.rows.length} 行`, `${g.rows.length} rows`)}</span>
                   </span>
                   {canEd && g.inProject && (
-                    <button className="btn-line sm" style={{ padding: '2px 9px' }} data-testid={`job-add-${g.svc}`}
+                    <button className="btn-line sm" style={{ padding: '2px 9px', whiteSpace: 'nowrap' }} data-testid={`job-add-${g.svc}`}
                       onClick={() => dispatch(p.id, { type: 'addJobRow', svc: g.svc })}>＋ {t('加一行', 'Add row')}</button>
                   )}
                   </div>
@@ -225,6 +258,207 @@ function Cell({ row, field, p }: { row: JobRow; field: JobField; p: Project }) {
   return field === 'note' || field === 'detail'
     ? <textarea key={k} {...common} rows={rows} style={{ ...common.style, minHeight: 30, resize: 'vertical' }} onBlur={(e) => save(e.target.value)} />
     : <input key={k} {...common} onBlur={(e) => save(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }} />;
+}
+
+/* ===== REQ-053 · 硬件登记表卡 =====
+   和上线前项目里的「资料」卡一样的字段和分组,但直接在卡上改:文本 / 数字失焦保存,下拉 / 日期选了就存;
+   公式字段跟着输入实时重算(ƒ)。状态在卡头选。LED 多一个尺寸自检。下面是可选的 4 栏「额外项目」。 */
+function HwCard({ p, pk, pkgIdx, canEd }: { p: Project; pk: ServicePackage; pkgIdx: number; canEd: boolean }) {
+  const { dispatch, me, recordFields, avDerived, setToast } = useStore();
+  const { lang, t } = useLang();
+  const [fieldEdit, setFieldEdit] = useState(false);
+  const [draft, setDraft] = useState<Record<string, string>>({});
+  const base = baseDefOf(pk.svc);
+  const fields = useMemo(() => fieldsOf(base, recordFields), [base, recordFields]);
+  const def: RegisterDef = { ...base, fields };
+  const rec = pk.record;
+  const derived = avDerived[p.id];
+  const merged = { ...(rec || {}), ...draft };
+  const status = (rec?.status as string) || defaultStatus(def.kind);
+  const sm = statusMeta(def.kind, status);
+  const incomplete = fields.length > 0 && isIncomplete(def, rec, undefined, p);
+  const updated = rec?.updatedAt ? new Date(rec.updatedAt as number) : null;
+  const shown = (f: FieldDef) => (f.key in draft ? draft[f.key] : fieldVal(f, rec, p, derived));
+  const extras = extraRowsOf(p, pk);
+
+  async function save(key: string, v: string, fix?: { key: string; from: string; to: string } | 'ignore') {
+    const f = fields.find((x) => x.key === key);
+    const was = f ? fieldVal(f, rec, p, derived) : String(rec?.[key] ?? '');
+    if (v === was && !fix) { setDraft((d) => { const n = { ...d }; delete n[key]; return n; }); return; }
+    const ok = await dispatch(p.id, { type: 'setRecord', pkg: pkgIdx, patch: { [key]: v }, ...(fix ? { fix } : {}) });
+    if (ok) setDraft((d) => { const n = { ...d }; delete n[key]; return n; });
+  }
+
+  /* LED 尺寸自检:数量 L / H 可能是方案配置带过来的,按页面上显示的值算 */
+  const dimField = (k: string) => fields.find((f) => f.key === k);
+  const sizeIssues = pk.svc === 'led' && !String(rec?.dimCheckIgnored ?? '').trim()
+    ? ledSizeIssues(Object.fromEntries(['dimL', 'dimH', 'qtyL', 'qtyH'].map((k) => [k, dimField(k) ? shown(dimField(k)!) : '']))) : [];
+
+  async function onExtraPaste(e: React.ClipboardEvent) {
+    if (!canEd) return;
+    const text = e.clipboardData.getData('text/plain');
+    if (!/\t/.test(text)) return;
+    e.preventDefault();
+    const n = rowsFromPaste(text, p).length;
+    if (!n) { setToast(t('没有认出可以导入的行', 'No rows recognised')); return; }
+    if (await dispatch(p.id, { type: 'pasteJobRows', text, pk: pk.id })) setToast(t(`已追加 ${n} 行额外项目`, `${n} extra rows added`));
+  }
+
+  const th: React.CSSProperties = { padding: '7px 8px', fontSize: 10.5, fontWeight: 700, letterSpacing: '.04em', textTransform: 'uppercase', color: 'var(--text2)', background: 'var(--hover-bg)', textAlign: 'left' };
+  const td: React.CSSProperties = { padding: '4px 5px', borderTop: '1px solid var(--row-line)', verticalAlign: 'top', fontSize: 13 };
+  return (
+    <div className="panel clip" data-testid="hw-card" data-svc={pk.svc}>
+      <div className="panel-head" style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+        <span style={{ width: 10, height: 10, borderRadius: '50%', background: svcColor(pk.svc) }} />
+        <span className="panel-title" data-testid="hw-card-title">
+          {svcName(pk.svc, lang)}
+          {pkgSuffix(p, pkgIdx) && <span style={{ color: 'var(--bronze)', marginLeft: 6 }}>{pkgSuffix(p, pkgIdx)}</span>}
+          <span style={{ color: 'var(--text2)', fontWeight: 400 }}> · {t('资料', 'Record')}</span>
+        </span>
+        {incomplete && <span className="badge" style={{ background: '#fef3c7', color: '#92600a', fontSize: 10.5 }}><Icon name="alert" size={11} />{t('资料不完整', 'incomplete')}</span>}
+        <div style={{ flex: 1 }} />
+        {canAdmin(me) && (
+          <button className="btn-line sm" style={fieldEdit ? { borderColor: 'var(--navy700)', color: 'var(--navy900)', fontWeight: 600 } : undefined}
+            onClick={() => setFieldEdit(!fieldEdit)} data-testid="hw-fields-btn">
+            {fieldEdit ? t('完成', 'Done') : t('增减字段', 'Edit fields')}
+          </button>
+        )}
+        {canEd ? (
+          <select className="in sm" value={status} style={{ width: 'auto', color: sm[3], fontWeight: 600 }} data-testid="hw-status"
+            onChange={(e) => save('status', e.target.value)}>
+            {statusFamily(def.kind).map((s2) => <option key={s2[0]} value={s2[0]}>● {lang === 'zh' ? s2[1] : s2[2]}</option>)}
+          </select>
+        ) : (
+          <span className="badge" style={{ background: 'var(--hover-bg)', color: sm[3] }}><span className="bdot" style={{ background: sm[3] }} />{lang === 'zh' ? sm[1] : sm[2]}</span>
+        )}
+      </div>
+
+      {fieldEdit && <FieldEditor svc={pk.svc} builtin={base.fields} current={fields} onClose={() => setFieldEdit(false)} />}
+
+      {fields.length === 0 ? (
+        <div style={{ padding: '14px 18px', fontSize: 12.5, color: 'var(--danger)' }} data-testid="hw-no-fields">
+          {t('还没有字段，需要先建', 'No fields yet — create them first')}
+          {canAdmin(me) && !fieldEdit && <button className="btn-line sm" style={{ marginLeft: 10 }} onClick={() => setFieldEdit(true)}>＋ {t('建字段', 'Create fields')}</button>}
+        </div>
+      ) : (
+        <div style={{ padding: '2px 0 6px' }}>
+          {groupFields(fields).map(([gname, gfields]) => (
+            <div key={gname || '_'}>
+              {gname && <div style={{ padding: '10px 18px 4px', fontSize: 11, fontWeight: 700, letterSpacing: '.05em', textTransform: 'uppercase', color: 'var(--text2)' }}>{fieldGroupTerm(gname, lang)}</div>}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(260px,1fr))', gap: '0 18px', padding: '0 18px' }}>
+                {gfields.map((f) => {
+                  const isF = f.type === 'formula';
+                  const val = isF ? formulaText(f, fields, merged, derived) : shown(f);
+                  const missing = !isF && f.required && !String(val).trim();
+                  const key = !!f.highlight || isF;
+                  const bad = sizeIssues.some((x) => x.key === f.key);
+                  return (
+                    <div key={f.key} style={{ display: 'flex', gap: 10, alignItems: 'center', padding: '5px 0', borderBottom: '1px solid var(--row-line)', minWidth: 0, gridColumn: f.type === 'textarea' ? '1 / -1' : undefined }}>
+                      <span style={{ flex: '0 0 40%', fontSize: 12, color: key ? 'var(--navy900)' : 'var(--text2)', fontWeight: key ? 700 : 600 }}>
+                        {lang === 'zh' ? f.zh : f.en}
+                        {f.required && <span style={{ color: 'var(--danger)' }}> *</span>}
+                        {isF && <span title={f.formula} style={{ marginLeft: 5, fontSize: 10, color: 'var(--bronze)' }}>ƒ</span>}
+                      </span>
+                      <span style={{ flex: 1, minWidth: 0, fontSize: 13 }} data-testid={`hw-f-${f.key}`}>
+                        {isF ? <b className="tnum" style={{ color: val === '—' ? '#b6bfc9' : 'var(--navy900)' }}>{val}</b>
+                          : canEd ? <InlineField f={f} value={String(val)} lang={lang} bad={bad || missing}
+                              onDraft={(v) => setDraft((d) => ({ ...d, [f.key]: v }))} onCommit={(v) => save(f.key, v)} />
+                          : val ? <FieldValue f={f} val={String(val)} lang={lang} /> : <span style={{ color: '#b6bfc9' }}>—</span>}
+                        <DerivedMark fkey={f.key} rec={rec} d={derived} />
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {sizeIssues.map((x) => (
+        <div key={x.key} data-testid="hw-size-warn" style={{ margin: '6px 18px', background: '#fdf1e6', border: '1px solid #f0c9a5', color: '#7c3a10', borderRadius: 8, padding: '7px 10px', fontSize: 12.5, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+          <span style={{ flex: 1, minWidth: 220 }}>
+            ⚠ {x.key === 'dimL'
+              ? t(`长 ${x.dim} mm ÷ 数量 L ${x.qty} = 每块 ${x.per} mm，不像正常箱体尺寸。`, `Length ${x.dim} mm ÷ Qty L ${x.qty} = ${x.per} mm per cabinet — not a usual cabinet size.`)
+              : t(`高 ${x.dim} mm ÷ 数量 H ${x.qty} = 每块 ${x.per} mm，不像正常箱体尺寸。`, `Height ${x.dim} mm ÷ Qty H ${x.qty} = ${x.per} mm per cabinet — not a usual cabinet size.`)}
+            {x.fix ? <b> {t(`是不是 ${x.fix}？`, `Did you mean ${x.fix}?`)}</b> : null}
+          </span>
+          {canEd && x.fix ? (
+            <button className="btn-line sm" data-testid="hw-size-fix" onClick={() => save(x.key, String(x.fix), { key: lang === 'zh' ? (dimField(x.key)?.zh || x.key) : (dimField(x.key)?.en || x.key), from: String(x.dim), to: String(x.fix) })}>
+              {t(`改成 ${x.fix}`, `Change to ${x.fix}`)}
+            </button>
+          ) : null}
+          {canEd && <button className="btn-line sm" data-testid="hw-size-ignore" onClick={() => save('dimCheckIgnored', '1', 'ignore')}>{t('没错，忽略', 'Correct, ignore')}</button>}
+        </div>
+      ))}
+
+      {/* 额外项目:报价单上登记表没有的(安装、运输、保养…),可以一行都没有 */}
+      <div style={{ borderTop: '1px dashed var(--row-line)', marginTop: 8, padding: '8px 18px 12px' }} onPaste={onExtraPaste} data-testid="hw-extra">
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          <b style={{ fontSize: 12.5, color: 'var(--navy900)' }}>{t('额外项目', 'Extra items')}</b>
+          <span style={{ fontSize: 11.5, color: 'var(--text2)', flex: 1 }}>{t('4 栏 · 可选 · 记报价单上登记表没有的项目（安装、运输、保养…）；也可以从 Excel 复制 4 栏在这里 Ctrl+V', '4 columns · optional · items on the quotation the register does not cover (installation, transport, maintenance…); you can also paste 4 columns from Excel here')}</span>
+          {canEd && <button className="btn-line sm" style={{ whiteSpace: 'nowrap' }} data-testid="hw-extra-add" onClick={() => dispatch(p.id, { type: 'addJobRow', svc: pk.svc, pk: pk.id })}>＋ {t('加一行', 'Add row')}</button>}
+        </div>
+        {extras.length > 0 ? (
+          <table style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed', marginTop: 6 }}>
+            <colgroup>{COL_W.map((w, i) => <col key={i} style={{ width: w }} />)}{canEd && <col style={{ width: 34 }} />}</colgroup>
+            <thead><tr>{JOB_HEAD_EN.map((h, i) => <th key={i} style={th}>{h}</th>)}{canEd && <th style={th} />}</tr></thead>
+            <tbody>
+              {extras.map((r) => (
+                <tr key={r.id} data-testid="hw-extra-row">
+                  {FIELDS.map((f) => (
+                    <td key={f} style={td}>
+                      {canEd ? <Cell row={r} field={f} p={p} />
+                        : <div style={{ padding: '4px 4px', whiteSpace: 'pre-wrap', wordBreak: 'break-word', color: r[f] ? 'var(--text)' : '#b6bfc9' }}>{r[f] || '—'}</div>}
+                    </td>
+                  ))}
+                  {canEd && (
+                    <td style={{ ...td, textAlign: 'center' }}>
+                      <button title={t('删除这一行', 'Delete this row')} data-testid="hw-extra-del" style={{ color: 'var(--danger)', fontWeight: 700, padding: '4px 6px' }}
+                        onClick={() => dispatch(p.id, { type: 'removeJobRow', id: r.id })}>×</button>
+                    </td>
+                  )}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        ) : (
+          <div style={{ fontSize: 12, color: 'var(--text2)', marginTop: 4 }}>{t('没有额外项目。硬件可以一行都没有。', 'No extra items. A hardware service can have none.')}</div>
+        )}
+      </div>
+
+      <KbLinks svc={pk.svc} compact />
+      <div style={{ padding: '7px 18px', fontSize: 11, color: 'var(--text2)', borderTop: '1px solid var(--row-line)' }}>
+        {t('最后更新', 'Updated')} {updated ? `${updated.toLocaleDateString()} ${updated.toTimeString().slice(0, 5)}` : '—'}
+      </div>
+    </div>
+  );
+}
+
+/* 卡上就地改的一格:文本 / 数字 / 多行失焦保存,下拉 / 日期选了就存;Esc 放弃 */
+function InlineField({ f, value, lang, bad, onDraft, onCommit }: {
+  f: FieldDef; value: string; lang: 'zh' | 'en'; bad?: boolean; onDraft: (v: string) => void; onCommit: (v: string) => void;
+}) {
+  const style: React.CSSProperties = { width: '100%', ...(bad ? { borderColor: '#e0a070', background: '#fff7ef' } : {}) };
+  if (f.type === 'select') {
+    const opts = f.options || [];
+    const legacy = value && !opts.some((o) => o[0] === value);
+    return (
+      <select className="in sm" value={value} style={style} onChange={(e) => { onDraft(e.target.value); onCommit(e.target.value); }}>
+        <option value="">—</option>
+        {opts.map((o) => <option key={o[0]} value={o[0]}>{lang === 'zh' ? o[1] : o[2]}</option>)}
+        {legacy && <option value={value}>{value}（{lang === 'zh' ? '原值' : 'existing'}）</option>}
+      </select>
+    );
+  }
+  if (f.type === 'date') return <input className="in sm" type="date" value={value} style={{ ...style, maxWidth: 190 }} onChange={(e) => { onDraft(e.target.value); onCommit(e.target.value); }} />;
+  const common = {
+    className: 'in sm', value, style,
+    onChange: (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => onDraft(e.target.value),
+    onBlur: (e: React.FocusEvent<HTMLInputElement | HTMLTextAreaElement>) => onCommit(e.target.value),
+  };
+  if (f.type === 'textarea') return <textarea {...common} style={{ ...style, minHeight: 34, resize: 'vertical' }} />;
+  return <input {...common} type={f.type === 'number' ? 'number' : 'text'} onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }} />;
 }
 
 /* 打开一个框粘贴:先预览会追加哪些行、归到哪个业务,再确认 */
@@ -291,7 +525,7 @@ function ServicesBar({ p, canEd }: { p: Project; canEd: boolean }) {
     const sameLeft = p.packages.some((x, j) => j !== i && x.svc === pk.svc);
     const own = sameLeft ? 0 : (p.checklist || []).reduce((n, g) => n + g.items.filter((it) => (it.svcs || []).length === 1 && it.svcs![0] === pk.svc).length, 0);
     if (!confirm(t(
-      `删除业务「${name}」?\n它的 ${sched} 个排期阶段会一起删掉,不能撤销。\n信息清单里只属于它的 ${own} 项移到「已移除的项」(可恢复),共用的项保留。\nJob Record 里这项业务的行留着(标「项目里已没有这项业务」),需要的话自己删。`,
+      `删除业务「${name}」?\n它的 ${sched} 个排期阶段会一起删掉,不能撤销。\n信息清单里只属于它的 ${own} 项移到「已移除的项」(可恢复),共用的项保留。\nJob Record 里这项业务的 4 栏行 / 额外项目留着(同类还有别的份就归到那一份,否则标「项目里已没有这项业务」),需要的话自己删。`,
       `Remove "${name}"? Its ${sched} schedule phases go with it. This cannot be undone.\nIts ${own} checklist-only items move to “Removed” (restorable); shared items stay.\nIts Job Record rows stay (marked "service no longer in the project") — delete them yourself if needed.`))) return;
     await dispatch(p.id, { type: 'removeServicePackage', pkg: i });
   }
@@ -311,7 +545,7 @@ function ServicesBar({ p, canEd }: { p: Project; canEd: boolean }) {
       {canEd && (
         <div style={{ display: 'flex', alignItems: 'center', gap: 9, flexWrap: 'wrap', marginTop: 10, paddingTop: 10, borderTop: '1px dashed var(--row-line)' }}>
           <span style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--navy900)' }}>＋ {t('添加业务', 'Add service')}</span>
-          <span style={{ fontSize: 11.5, color: 'var(--text2)' }}>{t('加一个业务 = 加一组 1 行（Service Item 预填业务名，其余自己填）；排期和信息清单照常生成', 'Adding a service adds one row (Service Item pre-filled); its schedule and checklist are created as usual')}</span>
+          <span style={{ fontSize: 11.5, color: 'var(--text2)' }}>{t('软件业务加一组 1 行（Service Item 预填业务名）；硬件业务加一张登记表卡；排期和信息清单照常生成', 'A software service adds one row (Service Item pre-filled); a hardware service adds a register card; its schedule and checklist are created as usual')}</span>
           <div style={{ flex: 1 }} />
           <select className="in sm" value={svc} onChange={(e) => setSvc(e.target.value)} style={{ width: 'auto' }} data-testid="job-add-svc">
             <option value="">{t('— 选择业务 —', '— select service —')}</option>

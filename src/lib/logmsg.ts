@@ -60,9 +60,12 @@ const CL_STATUS: Record<string, [string, string]> = {
 };
 
 const svcTerm = (k: string, lang: Lang) => {
-  const v = SVC[k];
-  return v ? (lang === 'zh' ? v.label : v.en) : k;
+  /* REQ-053:「led · #2」这种带份号的也认,业务名照样按语言翻 */
+  const [key, ...inst] = k.split(' · ');
+  const v = SVC[key];
+  return v ? (lang === 'zh' ? v.label : v.en) + (inst.length ? ' · ' + inst.join(' · ') : '') : k;
 };
+const JOB_FMT: Record<string, [string, string]> = { hw: ['硬件 · 登记表', 'hardware · register'], sw: ['软件 · 4 栏', 'software · 4 columns'] };
 
 const enumTerm = (map: Record<string, [string, string]>, v: string, lang: Lang) =>
   (map[v] ? map[v][lang === 'zh' ? 0 : 1] : v);
@@ -91,6 +94,8 @@ const TRANSLATED: Record<string, (v: string, lang: Lang) => string> = {
   cl: (v, l) => enumTerm(CL_STATUS, v, l),
   clFrom: (v, l) => enumTerm(CL_STATUS, v, l),
   clTo: (v, l) => enumTerm(CL_STATUS, v, l),
+  fmtFrom: (v, l) => enumTerm(JOB_FMT, v, l),   // REQ-053 Job Record 格式
+  fmtTo: (v, l) => enumTerm(JOB_FMT, v, l),
   /* AV-014:改的是哪个字段(cf),以及状态字段的两个取值。fv / tv 里放的多半是
      数字或自由文本,CASE_STATUS_TERMS 认不出来的原样填。
      槽位名别用 field —— sched.date / pkg.field / fin.edit 早就在用 {field},
@@ -195,6 +200,9 @@ export const LOG_MSG: Record<string, [string, string]> = {
   'pkg.addRecord': ['新增登记记录 {svc}{label}', 'Register record added: {svc}{label}'],
   'pkg.remove': ['删除业务 {svc}{label}', 'Service removed: {svc}{label}'],
   'record.update': ['更新资料 Record:{svc}', 'Record updated: {svc}'],
+  'job.format': ['登记表管理:{svc} 的 Job Record 格式 {fmtFrom} → {fmtTo}', 'Register management: {svc} Job Record format {fmtFrom} → {fmtTo}'],
+  'record.dimFix': ['登记表尺寸自检:{svc}「{dimField}」{dimFrom} → {dimTo}', 'Register size check: {svc} “{dimField}” {dimFrom} → {dimTo}'],
+  'record.dimIgnore': ['登记表尺寸自检:{svc} 标为「没错,忽略」', 'Register size check: {svc} marked “correct, ignore”'],
   /* REQ-049 Job Record 4 栏表。{col} = item / detail / qty / note */
   'job.add': ['Job Record {svc} 加一行「{item}」', 'Job Record {svc}: row added “{item}”'],
   'job.edit': ['Job Record {svc}「{item}」改了 {col}', 'Job Record {svc} “{item}”: {col} edited'],

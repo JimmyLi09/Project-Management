@@ -2,10 +2,13 @@
    Service Item / Detail / Quantity / Special Notes,和 Sales 报价表一致,内容全部自定义。
    行存在项目上(p.jobRecord),每行带它属于哪种业务(svc),页面上按业务分组:
    组标题 = 业务名(同类两份显示「LED × 2」),每组「＋ 加一行」,每种业务至少 1 行。
-   原来各业务登记表的字段(pk.record)不删,只读显示在下面「旧字段」里;上线迁移把有值的字段转成行。 */
+   原来各业务登记表的字段(pk.record)不删,只读显示在下面「旧字段」里;上线迁移把有值的字段转成行。
+   REQ-053:硬件业务(lib/jobFormat)回到登记表 —— 4 栏表只放软件业务;硬件的 4 栏行是某一份服务包的
+   「额外项目」(行上带 pk),可以一行都没有。「每个业务至少一行」只对软件。 */
 
 import { SVC } from './templates';
-import type { JobRow, Project } from './types';
+import { isHw, type JobFormatMap } from './jobFormat';
+import type { JobRow, Project, ServicePackage } from './types';
 
 /* 加一种业务时预填的 Service Item(业务的英文名,和报价单上的叫法一致) */
 export const SVC_ITEM: Record<string, string> = {
@@ -38,22 +41,40 @@ export function projectSvcCounts(p: Pick<Project, 'packages'>): { svc: string; c
   return out;
 }
 
-/* 页面上的分组:先按项目里的业务顺序,再是行上有、项目里已经没有的(删了业务 / 粘贴时没对上的,svc = '') */
-export function jobGroups(p: Pick<Project, 'packages' | 'jobRecord'>): { svc: string; count: number; inProject: boolean; rows: JobRow[] }[] {
+/* 页面上的分组:先按项目里的业务顺序,再是行上有、项目里已经没有的(删了业务 / 粘贴时没对上的,svc = '')。
+   REQ-053:hw = false 时不要项目里的硬件业务(它们的行在各自那张登记表卡下面);
+   项目里已经没有的硬件业务的行照样列出来(否则就看不到、删不掉了)。项目档案页要全部行,不传。 */
+export function jobGroups(p: Pick<Project, 'packages' | 'jobRecord'>, opts: { hw?: boolean; ov?: JobFormatMap } = {}): { svc: string; count: number; inProject: boolean; rows: JobRow[] }[] {
   const rows = p.jobRecord || [];
-  const groups = projectSvcCounts(p).map((g) => ({ ...g, inProject: true, rows: rows.filter((r) => r.svc === g.svc) }));
+  const groups = projectSvcCounts(p)
+    .filter((g) => opts.hw !== false || !isHw(g.svc, opts.ov))
+    .map((g) => ({ ...g, inProject: true, rows: rows.filter((r) => r.svc === g.svc) }));
+  const inProject = new Set(projectSvcCounts(p).map((g) => g.svc));
   for (const r of rows) {
     if (groups.some((g) => g.svc === r.svc)) continue;
+    if (opts.hw === false && inProject.has(r.svc)) continue;   // 项目里的硬件业务:在登记表卡下面
     groups.push({ svc: r.svc, count: 0, inProject: false, rows: rows.filter((x) => x.svc === r.svc) });
   }
   return groups;
 }
 
-/* 项目里的每种业务至少有 1 行(读项目时兜底;新加业务时服务端也会加) */
-export function ensureJobRows(p: Project): number {
+/* REQ-053:硬件业务的这一行属于哪一份服务包 —— 行上记了 pk 且还在就是它;没记(迁移前的行、
+   从 4 栏表粘贴进来的)或那一份删了,就归到这个业务的第一份 */
+export function jobRowPkg(p: Pick<Project, 'packages'>, r: JobRow): ServicePackage | undefined {
+  const same = (p.packages || []).filter((x) => x.svc === r.svc);
+  return (r.pk && same.find((x) => x.id === r.pk)) || same[0];
+}
+/* 一份硬件服务包下面的「额外项目」行 */
+export function extraRowsOf(p: Pick<Project, 'packages' | 'jobRecord'>, pk: ServicePackage): JobRow[] {
+  return (p.jobRecord || []).filter((r) => r.svc === pk.svc && jobRowPkg(p, r) === pk);
+}
+
+/* 项目里的每种软件业务至少有 1 行(读项目时兜底;新加业务时服务端也会加)。硬件可以一行都没有 */
+export function ensureJobRows(p: Project, ov?: JobFormatMap): number {
   if (!Array.isArray(p.jobRecord)) p.jobRecord = [];
   let added = 0;
   for (const { svc } of projectSvcCounts(p)) {
+    if (isHw(svc, ov)) continue;
     if (!p.jobRecord.some((r) => r.svc === svc)) { p.jobRecord.push(blankRow(svc)); added++; }
   }
   return added;

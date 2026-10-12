@@ -245,6 +245,8 @@ export interface JobRow {
   detail: string;  // Detail
   qty: string;     // Quantity(文本:2 / 180s / 1 set / 5 spots)
   note: string;    // Special Notes
+  /* REQ-053:硬件业务的「额外项目」行,记它属于哪一份服务包(packages[i].id)。软件行没有 */
+  pk?: string;
 }
 
 /* R5-3: a scope / quotation line for a service package (from the sales job record) */
@@ -400,6 +402,10 @@ export interface Project {
      mig049 记迁移时间和转了几行(回退脚本看它) */
   jobRecord?: JobRow[];
   mig049?: { at: number; rows: number };
+  /* REQ-053:硬件回到登记表 —— 迁移删掉的 4 栏行原样留在这里(回退脚本放回去);
+     mig053 记迁移时间、删了几行、哪些行转成了额外项目(加了 pk) */
+  jobRecordLegacy053?: (JobRow & { at: number; idx: number })[];
+  mig053?: { at: number; removed: number; kept: string[] };
   /* ===== v2.2 Version 1A post-sales workflow ===== */
   version?: number; // server-injected optimistic-lock counter (CAS)
   workflowVersion?: number; // schema version of the workflow blocks below (1)

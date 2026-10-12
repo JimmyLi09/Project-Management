@@ -47,6 +47,7 @@ export function redactProject<T extends Project>(u: Identity, p: T): T {
       pk.resourceLinks = '';
     });
     q.jobRecord = [];   // REQ-049:Job Record 4 栏表
+    delete q.jobRecordLegacy053;   // REQ-053:迁移删掉的那些行(回退用)
   }
   if (hide.contacts) {
     q.contacts = [];

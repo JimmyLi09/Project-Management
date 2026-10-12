@@ -11,8 +11,10 @@ test('REQ-049 每种业务至少 1 行,Service Item 预填英文业务名;同类
   delete p.jobRecord;
   ensureJobRows(p);
   const g = jobGroups(p);
-  assert.deepEqual(g.map((x) => [x.svc, x.count, x.rows.length]), [['cgi', 1, 1], ['ani', 1, 1], ['led', 2, 1], ['drone', 1, 1]]);
-  assert.deepEqual(g.map((x) => x.rows[0].item), ['Perspectives', 'Animation', 'LED Display', 'Drone & 360 IPM']);
+  /* REQ-053:LED 是硬件(登记表卡),不补 4 栏行;4 栏表上也不出 LED 这一组 */
+  assert.deepEqual(g.map((x) => [x.svc, x.count, x.rows.length]), [['cgi', 1, 1], ['ani', 1, 1], ['led', 2, 0], ['drone', 1, 1]]);
+  assert.deepEqual(jobGroups(p, { hw: false }).map((x) => x.svc), ['cgi', 'ani', 'drone']);
+  assert.deepEqual(g.filter((x) => x.rows.length).map((x) => x.rows[0].item), ['Perspectives', 'Animation', 'Drone & 360 IPM']);
   assert.equal(ensureJobRows(p), 0, '已经有了不再加');
   assert.equal(serviceItemOf('scale'), 'Scale Model');
 });
@@ -53,6 +55,8 @@ import { migrateProject049 } from '../mig049.ts';
 import { baseDefOf, fieldsOf } from '../records.ts';
 
 test('REQ-049 上线迁移:有值的旧字段一个字段一行,数量进 Quantity,其余进 Special Notes;原数据不动', () => {
+  /* REQ-053 起 LED 默认是硬件(字段留在登记表上,不拆);这里把它当软件,测 049 拆行本身的规则 */
+  setServerJobFormatSource(() => ({ led: 'sw' }));
   const p = proj(['led', 'led', 'drone', 'cgi']);
   delete p.jobRecord;
   p.packages[0].record = { status: 'installed', updatedAt: 1, siteAddress: '1 Marina Blvd', dimL: '6400', ledType: 'indoor', handoverDate: 'x' } as never;
@@ -75,9 +79,19 @@ test('REQ-049 上线迁移:有值的旧字段一个字段一行,数量进 Quanti
   assert.equal(r.rows, rows.length - 1);
   assert.equal(p.mig049!.rows, r.rows);
   assert.equal(migrateProject049(p, () => [], 6), null, '只跑一次');
+  setServerJobFormatSource(() => ({}));
+  /* 默认(LED = 硬件):LED 的登记表字段不拆成行,服务内容照样转成那一份的额外项目 */
+  const q = proj(['led', 'cgi']);
+  delete q.jobRecord;
+  q.packages[0].record = { siteAddress: '1 Marina Blvd', dimL: '6400' } as never;
+  q.packages[0].scopeItems = [{ item: 'Installation', qty: '1', note: '' }];
+  migrateProject049(q, (svc) => fieldsOf(baseDefOf(svc), {}), 7);
+  const qled = q.jobRecord!.filter((x) => x.svc === 'led');
+  assert.deepEqual(qled.map((x) => [x.detail, x.qty, x.pk]), [['Installation', '1', q.packages[0].id]], 'LED 只有服务内容那一行,挂在这一份上');
 });
 
 import { applyAction } from '../../server/actions.ts';
+import { setServerJobFormatSource } from '../jobFormat.ts';
 import { svcFromName, jobImportCols } from '../jobRecord.ts';
 
 const PD = { name: 'PD', role: 'director' } as never;
