@@ -59,7 +59,7 @@ export async function POST(req: NextRequest) {
   const body = (await req.json().catch(() => ({}))) as { projectId?: string; line?: string; drawingId?: number | null; cfg?: unknown; upgradePack?: boolean };
   const line = body.line === 'projector' || body.line === 'elv' || body.line === 'pv' ? body.line : 'led';
   const project = getProject(String(body.projectId || ''));
-  const denied = denyUnlessVisible(user, project);   // REQ-043
+  const denied = denyUnlessVisible(user, project, true);   // REQ-043
   if (denied) return denied;
   const bad = lineProjectError(project, line, { led: ' LED ', projector: '投影', elv: '弱电', pv: '光伏' }[line]);
   if (bad) return NextResponse.json({ error: bad }, { status: 400 });

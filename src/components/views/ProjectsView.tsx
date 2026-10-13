@@ -4,7 +4,9 @@ import React, { useMemo, useState } from 'react';
 import { CONTACT_ROLES as CONTACT_ROLE_DEFS, roleBilingual } from '@/lib/contactRoles';
 import { useStore } from '../store';
 import { fmtDate, isoDate, missingInvoiceRef, parseISO, projectHealth, projPoints, projStage, schedProgress } from '@/lib/project';
-import { canAssign, canCreate, isScopedRole } from '@/lib/permissions';
+import { canAssign, canCreate, canSeeModule, isScopedRole } from '@/lib/permissions';
+import { APPROACH_BADGE, approachProjects, approachTag } from '@/lib/approach';
+import { ApproachTable } from './ApproachList';
 import InvoiceModal, { invoiceTag } from '../InvoiceModal';
 import { focusLabel, focusWantsArchived, matchFocus } from '@/lib/focus';
 import { DIFF, SVC, stageIdx, svcColor, svcName } from '@/lib/templates';
@@ -16,7 +18,7 @@ import type { Project } from '@/lib/types';
 type ViewMode = 'cards' | 'compact' | 'list';
 
 export default function ProjectsView({ search = '' }: { search?: string }) {
-  const { projects, me, openProject, view, setView, rulesFor } = useStore();
+  const { projects, allProjects, me, openProject, view, setView, rulesFor } = useStore();
   /* 0922 变更单:从统计 / 汇报某个数字点进来时带的口径。它只是一层预设过滤,
      上面那排 chip 照样能再收窄。 */
   const focus = view.name === 'projects' ? view.focus : undefined;
@@ -36,6 +38,11 @@ export default function ProjectsView({ search = '' }: { search?: string }) {
     return (localStorage.getItem('audax.projectsView') as ViewMode) || 'cards';
   });
   const setView2 = (m: ViewMode) => { setViewMode(m); try { localStorage.setItem('audax.projectsView', m); } catch {} };
+  /* REQ-054:正式项目 / 售前接洽 / 已关闭。看不到「AV 方案成本」的角色服务端就不下发售前记录,标签也不出 */
+  const [tab, setTab] = useState<'formal' | 'approach' | 'closed'>(() => (view.name === 'projects' && view.sub === 'approach' ? 'approach' : 'formal'));
+  const openAp = useMemo(() => approachProjects(allProjects, 'open').sort((a, b) => (b.approach?.createdAt || 0) - (a.approach?.createdAt || 0)), [allProjects]);
+  const closedAp = useMemo(() => approachProjects(allProjects, ['lost', 'merged']).sort((a, b) => ((b.approach?.lostAt || b.approach?.mergedAt || 0) - (a.approach?.lostAt || a.approach?.mergedAt || 0))), [allProjects]);
+  const showTabs = canSeeModule(me, 'avcost') && !focus;
 
   const archivedCount = projects.filter((p) => p.archived).length;
 
@@ -67,6 +74,8 @@ export default function ProjectsView({ search = '' }: { search?: string }) {
     if (!mixArchived && !!p.archived !== showArchived) return false; // archived tab is separate
     return matches(p);
   });
+  /* REQ-054:全局搜索 —— 售前接洽里匹配的也列出来(带「售前」标签) */
+  const apHits = needle ? approachProjects(allProjects).filter((p) => (p.name + ' ' + p.client).toLowerCase().includes(needle)) : [];
   /* 搜索时,被「默认不看归档」挡掉的有几个 */
   const hiddenArch = needle && !mixArchived && !showArchived ? projects.filter((p) => p.archived && matches(p)).length : 0;
   /* REQ-045: 旧「已开票」开关标过、没有 Invoice 号的 —— 交给 PD / BD 补号 */
@@ -124,6 +133,17 @@ export default function ProjectsView({ search = '' }: { search?: string }) {
         </div>
       )}
       {fillFor && <InvoiceModal p={fillFor} onClose={() => setFillFor(null)} />}
+      {showTabs && (
+        <div style={{ display: 'flex', gap: 8, marginBottom: 16, alignItems: 'center', flexWrap: 'wrap' }} data-testid="proj-tabs">
+          {([['formal', t('正式项目', 'Formal projects'), projects.filter((p) => !p.archived).length], ['approach', t('售前接洽', 'Approach'), openAp.length], ['closed', t('已关闭', 'Closed'), closedAp.length]] as ['formal' | 'approach' | 'closed', string, number][]).map(([k, lb, n]) => (
+            <button key={k} className={`chip ${tab === k ? 'active' : ''}`} onClick={() => setTab(k)} data-testid={`proj-tab-${k}`}>{lb} <span style={{ opacity: 0.65 }}>{n}</span></button>
+          ))}
+          <span style={{ fontSize: 12, color: 'var(--text2)', marginLeft: 6 }}>{t('售前接洽 = AV 立项询价建的、还没转正式的记录,没有编号', 'Approach = records opened from an AV inquiry, not yet a formal project (no number)')}</span>
+        </div>
+      )}
+      {showTabs && tab !== 'formal' ? (
+        <ApproachTable rows={tab === 'approach' ? openAp : closedAp} mode={tab === 'approach' ? 'open' : 'closed'} />
+      ) : (<>
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginBottom: 22 }}>
         <div className="searchbox" style={{ background: 'var(--card)', width: 260 }}>
           <Icon name="search" size={16} />
@@ -189,6 +209,20 @@ export default function ProjectsView({ search = '' }: { search?: string }) {
           </button>
         </div>
       )}
+      {apHits.length > 0 && (
+        <div className="panel" style={{ marginTop: 18, padding: '10px 16px' }} data-testid="search-approach">
+          <div style={{ fontSize: 12.5, color: 'var(--text2)', marginBottom: 6 }}>{t(`售前接洽里也有 ${apHits.length} 条`, `${apHits.length} more in Approach`)}</div>
+          {apHits.map((p) => (
+            <div key={p.id} style={{ display: 'flex', gap: 8, alignItems: 'center', padding: '5px 0', borderTop: '1px solid var(--row-line)' }} data-testid="search-approach-row">
+              <span className="badge" style={APPROACH_BADGE}>{approachTag(lang)}</span>
+              <button className="link-button" style={{ fontWeight: 600, color: 'var(--navy900)' }} onClick={() => openProject(p.id)}>{p.name}</button>
+              <span style={{ fontSize: 12, color: 'var(--text2)' }}>{p.client || '—'}</span>
+              {p.approach?.status !== 'open' && <span style={{ fontSize: 11.5, color: 'var(--text2)' }}>· {p.approach?.status === 'lost' ? t('未成交', 'Lost') : t('已并入', 'Merged')}</span>}
+            </div>
+          ))}
+        </div>
+      )}
+      </>)}
     </>
   );
 }

@@ -28,7 +28,7 @@ export async function POST(req: NextRequest) {
   const form = await req.formData().catch(() => null);
   const projectId = String(form?.get('project') ?? '');
   const project = getProject(projectId);
-  const denied = denyUnlessVisible(user, project);   // REQ-043
+  const denied = denyUnlessVisible(user, project, true);   // REQ-043
   if (denied) return denied;
   const bad = ledProjectError(project);
   if (bad) return NextResponse.json({ error: bad }, { status: 400 });

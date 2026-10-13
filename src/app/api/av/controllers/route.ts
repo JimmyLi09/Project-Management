@@ -20,7 +20,7 @@ export async function POST(req: NextRequest) {
   let projectId: string | null = null;
   if (body.projectId) {
     const project = getProject(String(body.projectId));
-    const denied = denyUnlessVisible(user, project);
+    const denied = denyUnlessVisible(user, project, true);
     if (denied) return denied;
     projectId = project!.id;
   }

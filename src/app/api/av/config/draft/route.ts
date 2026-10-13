@@ -18,7 +18,7 @@ async function guard(projectId: string) {
   { const deny = denyAvModule(user); if (deny) return { error: deny }; }
   const project = getProject(projectId);
   if (!project) return { error: NextResponse.json({ error: '项目不存在' }, { status: 404 }) };
-  const denied = denyUnlessVisible(user, project);
+  const denied = denyUnlessVisible(user, project, true);
   if (denied) return { error: denied };
   if (!canCostProject(identityOf(user), project)) return { error: NextResponse.json({ error: '仅该项目的 PM 或 PD / BD 可以保存方案' }, { status: 403 }) };
   return { user, project };

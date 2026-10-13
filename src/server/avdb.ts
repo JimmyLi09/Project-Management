@@ -23,6 +23,8 @@ import { isAvailable, projectLines } from '@/av/core/lines';
 import { categoryCode } from './avprice';
 import type { LedConfig } from '@/av/core/types';
 import { logZh } from '@/lib/logmsg';
+import { isClosedApproach } from '@/lib/approach';
+import type { Project } from '@/lib/types';
 import type { DrawingElement, DrawingExtra, DrawingSummary, IngestRecord, IngestResult, StoredDrawing } from '@/av/core/handoff';
 import type { CostLine, LedSummary, PriceItem, SavedConfig, SummaryBase } from '@/av/core/pricing';
 import type { QuoteSection } from '@/av/core/quote';
@@ -605,9 +607,10 @@ export function setInquiryPack(projectId: string, line: BusinessLine, pack: stri
    于是 01 的「项目地点」「需求补充说明」是灰的、改了也存不进去,02 还提示「未经 01 立项询价」。
    现在缺了就补建一条:业务线按项目已有的服务包推断;每条线的规则包取这条线最新正式方案用的
    那一版(没有方案就取当前最新)—— 和原来「没有记录就按最新算」的结果一致,只是从此记下来。 */
-export function ensureInquiry(p: { id: string; packages: { svc: string }[] }, by = '系统补建'): Inquiry | null {
+export function ensureInquiry(p: { id: string; packages: { svc: string }[] } & Pick<Project, 'approach'>, by = '系统补建'): Inquiry | null {
   const cur = getInquiry(p.id);
   if (cur) return cur;
+  if (isClosedApproach(p)) return null;   // REQ-054:已并入的售前记录,立项记录合并到别的项目去了 —— 不补建
   const lines = projectLines(p.packages.map((k) => k.svc)).filter(isAvailable);
   if (!lines.length) return null;
   const packs = Object.fromEntries(lines.map((l) => [l.line, latestConfig(p.id, l.line)?.packVersion || latestPackOf(l)])) as Partial<Record<BusinessLine, string>>;

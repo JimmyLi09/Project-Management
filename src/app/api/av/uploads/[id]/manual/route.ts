@@ -16,7 +16,7 @@ export async function POST(_req: NextRequest, { params }: Params) {
   const pid = Number.isInteger(id) ? uploadProject(id) : null;
   const project = pid ? getProject(pid) : null;
   if (!project) return NextResponse.json({ error: '留档不存在' }, { status: 404 });
-  const denied = denyUnlessVisible(user, project);
+  const denied = denyUnlessVisible(user, project, true);
   if (denied) return denied;
   if (!canUploadDrawing(identityOf(user), project)) return NextResponse.json({ error: '无权为该项目处理图纸' }, { status: 403 });
   const out = await manualUpload(id, user.name, isFull(identityOf(user)));

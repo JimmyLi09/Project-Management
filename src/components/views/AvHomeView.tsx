@@ -16,6 +16,7 @@ import { fmtDate, parseISO } from '@/lib/project';
 import { useStore, type View } from '../store';
 import { Ell } from '../ui';
 import AvShell from './AvShell';
+import { APPROACH_BADGE, approachTag } from '@/lib/approach';
 import { lastLine } from './AvFlow';
 
 type Stage = 'info' | 'upload' | 'failed' | 'review' | 'config' | 'costing' | 'quoting' | 'done';
@@ -30,6 +31,7 @@ interface Row {
   steps?: Record<StepKey, StepS>;
   uploaded?: boolean;
   lastUpdate?: (LogLike & { at: number; by: string }) | null;
+  approach?: boolean;   // REQ-054:售前记录(没有编号)
 }
 
 interface Overview {
@@ -58,6 +60,12 @@ const STAGES: Record<Stage, { zh: string; en: string; tone: 'grey' | 'amber' | '
     next: { view: 'avcostquote', sub: 'quote' }, goZh: '去报价', goEn: 'Quote' },
   done:    { zh: '已报价', en: 'Quoted', tone: 'green',
     next: { view: 'avcostquote', sub: 'quote' }, goZh: '查看报价', goEn: 'View quote' },
+};
+
+/* REQ-054:售前接洽列表里的「AV 进度」用同一套叫法 */
+export const avStageText = (stage: string, lang: 'zh' | 'en') => {
+  const s = STAGES[stage as Stage];
+  return s ? (lang === 'zh' ? s.zh : s.en) : '—';
 };
 
 /* 上面五个数字,各管哪几个阶段 */
@@ -92,6 +100,8 @@ export default function AvHomeView() {
   const [err, setErr] = useState('');
   /* AV-016 ③:点上面的数字,下面的表只看那一个阶段;再点一下取消 */
   const [only, setOnly] = useState<Tile | null>(null);
+  /* REQ-054:全部 / 售前接洽 / 正式项目 */
+  const [kind, setKind] = useState<'all' | 'approach' | 'formal'>('all');
 
   const load = useCallback(async () => {
     const r = await fetch('/api/av/overview').catch(() => null);
@@ -120,7 +130,9 @@ export default function AvHomeView() {
     setView({ name: n.view, sub });
   };
 
-  const live = (data?.projects || []).filter((r) => r.stage !== 'done' && (!only || TILE_STAGES[only].includes(r.stage)));
+  const live = (data?.projects || []).filter((r) => r.stage !== 'done' && (!only || TILE_STAGES[only].includes(r.stage))
+    && (kind === 'all' || (kind === 'approach') === !!r.approach));
+  const nAp = (data?.projects || []).filter((r) => r.stage !== 'done' && r.approach).length;
 
   return (
     <AvShell
@@ -160,6 +172,13 @@ export default function AvHomeView() {
           <span className="panel-title">{t('进行中的 AV 项目', 'AV projects in flight')}</span>
           {only && <button className="btn-line sm" onClick={() => setOnly(null)} data-testid="av-filter-clear">
             {t(`只看「${TILE_LABEL[only][0]}」 ×`, `Only “${TILE_LABEL[only][1]}” ×`)}</button>}
+          <div style={{ flex: 1 }} />
+          {/* REQ-054:售前记录(AV 立项询价建的、还没转正式)和正式项目分开看 */}
+          <span style={{ display: 'inline-flex', gap: 6 }} data-testid="av-kind">
+            {([['all', t('全部', 'All')], ['approach', t(`售前接洽 ${nAp}`, `Approach ${nAp}`)], ['formal', t('正式项目', 'Formal projects')]] as ['all' | 'approach' | 'formal', string][]).map(([k, lb]) => (
+              <button key={k} className={`chip ${kind === k ? 'active' : ''}`} onClick={() => setKind(k)} data-testid={`av-kind-${k}`}>{lb}</button>
+            ))}
+          </span>
         </div>
 
         <div className="av-row av-row-head">
@@ -189,7 +208,10 @@ export default function AvHomeView() {
           return (
             <div key={r.id} className="av-row" data-testid="av-project-row" data-stage={r.stage}>
               <div style={{ minWidth: 0 }}>
-                <Ell style={{ fontSize: 13.5, fontWeight: 500 }}>{r.name}</Ell>
+                <Ell style={{ fontSize: 13.5, fontWeight: 500 }}>
+                  {r.approach && <span className="badge" style={APPROACH_BADGE} data-testid="av-approach-tag">{approachTag(lang)}</span>}
+                  {r.name}
+                </Ell>
                 <Ell style={{ fontSize: 12, color: 'var(--text2)', marginTop: 2 }}>{r.client || '—'}</Ell>
               </div>
               <Ell style={{ fontSize: 13, color: 'var(--text2)' }}>

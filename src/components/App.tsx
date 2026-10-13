@@ -88,7 +88,7 @@ const PAGE_META: Record<string, { title: [string, string]; sub: [string, string]
 };
 
 function Shell() {
-  const { user, me, view, go, projects, allUsers, setView } = useStore();
+  const { user, me, view, go, projects, allProjects, allUsers, setView } = useStore();
   /* C6: name→photo map so every <Avatar> shows real uploaded photos
      (REQ-051: 用全部账号 —— 停用的人在历史记录里也还是他的头像) */
   const avatarMap = useMemo(() => {
@@ -128,7 +128,7 @@ function Shell() {
     || (view.name === 'avlibrary' && view.sub === 'prjconst' && PAGE_META.avlibrary_prjconst)
     || PAGE_META[view.name] || PAGE_META.overview;
   const inFlow = !!stepOf(view);
-  const project = isProject ? projects.find((p) => p.id === view.pid) : undefined;
+  const project = isProject ? allProjects.find((p) => p.id === view.pid) : undefined;   // REQ-054:售前记录也能打开
 
   /* REQ-051: 页面属于权限表的哪个模块。「不可见」的不出现在菜单里,直接打网址进来也只看到一句「没有权限」
      (数据那一层由接口挡:项目接口不下发、AV 接口直接拒绝) */

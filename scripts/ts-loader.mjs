@@ -45,6 +45,11 @@ export async function resolve(specifier, context, next) {
 }
 
 export async function load(url, context, next) {
+  /* src 里 import 的 JSON(价格库种子等)Next 打包时直接认;Node 要 import attribute —— 包成一个默认导出的模块 */
+  if (url.startsWith(SRC.href) && /\.json$/.test(new URL(url).pathname) && !context.importAttributes?.type) {
+    const json = await readFile(fileURLToPath(url), 'utf8');
+    return { format: 'module', source: `export default ${json.trim() || 'null'};`, shortCircuit: true };
+  }
   if (!/\.(ts|mts|tsx)$/.test(new URL(url).pathname)) return next(url, context);
   const t = await typescript();
   const file = fileURLToPath(url);

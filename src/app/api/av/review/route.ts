@@ -26,7 +26,7 @@ export async function POST(req: NextRequest) {
   const current = body?.id ? getDrawing(Number(body.id)) : null;
   if (!current) return NextResponse.json({ error: '图纸不存在' }, { status: 404 });
   const reviewProject = getProject(current.project_id);
-  const denied = denyUnlessVisible(user, reviewProject);   // REQ-043
+  const denied = denyUnlessVisible(user, reviewProject, true);   // REQ-043
   if (denied) return denied;
   if (!canReviewDrawing(identityOf(user), reviewProject)) {
     return NextResponse.json({ error: '仅该项目的 PM 可执行人工校核' }, { status: 403 });

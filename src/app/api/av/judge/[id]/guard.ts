@@ -17,7 +17,7 @@ export async function judgeAccess(rawId: string, write: boolean):
   const projectId = Number.isInteger(id) ? judgeProject(id) : null;
   const project = projectId ? getProject(projectId) : null;
   if (!project) return { error: NextResponse.json({ error: '判读记录不存在' }, { status: 404 }) };
-  const denied = denyUnlessVisible(user, project);
+  const denied = denyUnlessVisible(user, project, write);
   if (denied) return { error: denied };
   if (write && !canReviewDrawing(identityOf(user), project)) {
     return { error: NextResponse.json({ error: '仅该项目的 PM 可确认图片判读' }, { status: 403 }) };

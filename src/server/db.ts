@@ -16,6 +16,8 @@ import { migrateProject048, type Mig048Entry } from '@/lib/mig048';
 import { migrateProject049, type Mig049Entry } from '@/lib/mig049';
 import { migrateProject050, report050, type Mig050Entry } from '@/lib/mig050';
 import { migrateProject053, report053, type Mig053Entry } from '@/lib/mig053';
+import { isApproach } from '@/lib/approach';
+import { applyMig054, approachFails, MIG054_DEFAULT_IDS, planMig054, report054 } from '@/lib/mig054';
 import { tplNamesFrom } from '@/lib/checklistScope';
 import { blankRow, clip as clipJob, ensureJobRows, MAX_JOB_ROWS, serviceItemOf, svcForItem, svcFromName } from '@/lib/jobRecord';
 import { baseDefOf, fieldsOf, type FieldDef, type FieldOverrides } from '@/lib/records';
@@ -115,6 +117,7 @@ function setupDb(db: Database.Database): Database.Database {
   migrateJobRecord053(db);      // REQ-053:要删行时,等 scripts\req053-dryrun 预演确认过才跑
   migrateSharedChecklist(db);   // REQ-044:要在 backfillIds 之前 —— 它读项目时也会顺手合并,那样就没有报告了
   migrateChecklist050(db);
+  migrateApproach054(db);       // REQ-054:要改编号时,等 scripts\req054-dryrun 预演确认过才跑;放在补编号之前
   backfillIds(db);
   backfillSerials(db);
   migrateInvoiceArchive(db);
@@ -167,6 +170,8 @@ function backfillSerials(d: Database.Database) {
   const upd = d.prepare('UPDATE projects SET data = ? WHERE id = ?');
   for (const { id, o } of parsed) {
     if (typeof o.serial === 'number' && o.serial > 0) continue;
+    /* REQ-054:售前记录不占编号 —— 以前 AV 立项询价建的项目一重启就在这里拿到了号(049 就是这么来的) */
+    if (isApproach(o)) continue;
     o.serial = ++max;
     const { updatedAt: _u, version: _v, ...data } = o;
     upd.run(JSON.stringify(data), id);
@@ -555,6 +560,69 @@ function migrateJobRecord053(d: Database.Database) {
     fs.writeFileSync(file, md + '\n回退:先 pm2 stop audax,再跑 scripts\\req053-rollback.bat(不带参数只报告;--apply 才写库,会先备份)。\n', 'utf8');
     console.log(`[REQ-053] 硬件回到登记表:${done.length} 个项目,报告 ${file}`);
   } catch (e) { console.warn('[REQ-053] 迁移报告写不出来:', e); }
+}
+
+/* ===== REQ-054 售前接洽 · 上线迁移 =====
+   AV 立项询价建的项目去掉编号、变回售前记录。规则在 lib/mig054.ts(和 scripts/req054-dryrun 同一份)。
+   **要改编号时必须先预演、确认**:scripts\req054-dryrun.bat 出报告,JM 看过后
+   scripts\req054-dryrun.bat --approve [--include 046] 在库里记一笔(mig.req054.approved,带确认过的项目 id),
+   这里才真跑,而且只改确认过、此刻仍然符合条件的那几个。没有要改的(新装的库)直接记标记。
+   先整库备份,原编号存进 approach.legacySerial,出报告。 */
+const MIG_054 = 'mig.req054.approach';
+export const APPROVE_054 = 'mig.req054.approved';
+function migrateApproach054(d: Database.Database) {
+  if (d.prepare('SELECT 1 FROM meta WHERE key = ?').get(MIG_054)) return;
+  const rows = d.prepare('SELECT id, data FROM projects ORDER BY created_at ASC').all() as { id: string; data: string }[];
+  const list: Project[] = [];
+  for (const r of rows) { try { const o = JSON.parse(r.data); if (o && Array.isArray(o.packages)) list.push(o); } catch { /* 坏行跳过 */ } }
+  const ar = d.prepare('SELECT value FROM meta WHERE key = ?').get(APPROVE_054) as { value: string } | undefined;
+  let approved: { at: number; by?: string; ids: string[]; report?: string } | null = null;
+  if (ar) { try { approved = JSON.parse(ar.value); } catch { approved = null; } }
+  const plan = planMig054(list, approved ? approved.ids.filter((x) => !MIG054_DEFAULT_IDS.includes(x)) : []);
+  const want = plan.filter((r) => r.action === 'change' && (!approved || approved.ids.includes(r.id)));
+  if (want.length && !approved) {
+    console.log(`[REQ-054] 有 ${want.length} 个项目要去掉编号、改为售前记录(${want.map((r) => String(r.serial).padStart(3, '0')).join('、')})—— 等预演确认:先跑 scripts\\req054-dryrun.bat,JM 看过报告后 scripts\\req054-dryrun.bat --approve,再 pm2 restart audax。在那之前编号不动。`);
+    return;
+  }
+  const now = Date.now();
+  const t = new Date(now), pad = (n: number) => String(n).padStart(2, '0');
+  const stamp = `${t.getFullYear()}${pad(t.getMonth() + 1)}${pad(t.getDate())}-${pad(t.getHours())}${pad(t.getMinutes())}${pad(t.getSeconds())}`;
+  let backup = '';
+  if (want.length) {
+    try {
+      const dir = path.join(DATA_DIR, 'backups');
+      fs.mkdirSync(dir, { recursive: true });
+      backup = path.join(dir, `pre-req054-${stamp}.db`);
+      d.exec(`VACUUM INTO '${backup.replace(/'/g, "''")}'`);
+    } catch (e) {
+      throw new Error(`[REQ-054] 迁移前备份失败,这次不迁移:${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+  const upd = d.prepare('UPDATE projects SET data = ?, updated_at = ?, version = version + 1 WHERE id = ?');
+  const changed: { id: string; name: string; serial: number }[] = [];
+  d.transaction(() => {
+    for (const r of want) {
+      const o = list.find((x) => x.id === r.id)!;
+      if (approachFails(o).length) continue;   // 预演之后又有了负责人 / 交接之类:不改
+      const was = applyMig054(o, now);
+      const { updatedAt: _u, version: _v, ...data } = o;
+      upd.run(JSON.stringify(data), now, o.id);
+      changed.push({ id: o.id, name: o.name, serial: was });
+    }
+    d.prepare('INSERT INTO meta (key, value) VALUES (?, ?)').run(MIG_054, JSON.stringify({ at: now, backup, changed, approved }));
+  })();
+  if (!changed.length && !want.length) return;
+  try {
+    const dir = path.join(DATA_DIR, 'migrations');
+    fs.mkdirSync(dir, { recursive: true });
+    const file = path.join(dir, `054-approach-${stamp}.md`);
+    const after = planMig054(list, approved ? approved.ids : []).map((r) => (changed.some((c) => c.id === r.id) ? { ...r, action: 'change' as const, why: '已去掉编号,改为售前记录' } : r));
+    let max = 0;
+    for (const o of list) if (typeof o.serial === 'number' && o.serial > max) max = o.serial;
+    const md = report054(after, { title: 'REQ-054 售前接洽 · 上线迁移报告', when: t.toLocaleString('zh-CN'), db: `迁移前备份:${backup || '(没有要改的,没备份)'}`, next: max + 1 });
+    fs.writeFileSync(file, md + '\n回退:先 pm2 stop audax,再跑 scripts\\req054-rollback.bat(不带参数只报告;--apply 才写库,会先备份)。\n', 'utf8');
+    console.log(`[REQ-054] 售前接洽:${changed.length} 个项目去掉编号(${changed.map((c) => String(c.serial).padStart(3, '0')).join('、') || '无'}),报告 ${file}`);
+  } catch (e) { console.warn('[REQ-054] 迁移报告写不出来:', e); }
 }
 
 /* ===== REQ-044 一个项目一张信息清单 =====
@@ -1231,7 +1299,7 @@ export function importRegisterRecords(
     const dupName = new Set<string>();   // 项目名不要求唯一:重名的对不上是哪一个,不能猜
     for (const r of all) {
       const p = migrate(JSON.parse(r.data));
-      if (p.archived) continue;
+      if (p.archived || isApproach(p)) continue;   // REQ-054:售前记录不参与按项目名 / 编号对项目(147-Senja Close 售前和 007 同名)
       const key = (p.name || '').trim().toLowerCase();
       if (key && byName.has(key)) dupName.add(key);
       if (key && !byName.has(key)) byName.set(key, { id: r.id, p });
@@ -1305,7 +1373,7 @@ export function importJobRows(
     const dupName = new Set<string>();   // 项目名不要求唯一:重名的只能按项目编号对
     for (const r of all) {
       const p = migrate(JSON.parse(r.data));
-      if (p.archived) continue;
+      if (p.archived || isApproach(p)) continue;   // REQ-054:售前记录不参与按项目名 / 编号对项目(147-Senja Close 售前和 007 同名)
       const key = (p.name || '').trim().toLowerCase();
       if (key && byName.has(key)) dupName.add(key);
       if (key && !byName.has(key)) byName.set(key, { id: r.id, p });

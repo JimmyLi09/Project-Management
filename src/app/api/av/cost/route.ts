@@ -128,7 +128,7 @@ export async function POST(req: NextRequest) {
   const project = getProject(String(body.projectId || ''));
   const bad = lineProjectError(project, info.svc!, info.label);
   if (bad) return NextResponse.json({ error: bad }, { status: 400 });
-  const deniedW = denyUnlessVisible(user, project);
+  const deniedW = denyUnlessVisible(user, project, true);
   if (deniedW) return deniedW;
   if (!canCostProject(identityOf(user), project)) return NextResponse.json({ error: '仅该项目的 PM 可核算成本' }, { status: 403 });
   /* 确认成本要看着毛利才确认得了 —— PM 看不到成本以后,确认改由 PD / BD 做 */

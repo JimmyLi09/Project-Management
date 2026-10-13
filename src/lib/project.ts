@@ -10,6 +10,7 @@ import { roleKeyOf } from './contactRoles';
 import { calendarFromRows, seedCalendar } from './scheduleSync';
 import { blankRow, ensureJobRows } from './jobRecord';
 import { isHw } from './jobFormat';
+import { approachTag, isApproach } from './approach';
 import { syncCells, unitsOf } from './clCells';
 import { tplItemScope } from './checklistScope';
 import { layoutFromStart } from '@/features/schedule-planner/domain/duration';
@@ -105,7 +106,9 @@ export function buildPackage(svc: string, start: string, tpl?: Template): Servic
 /* REQ-006: display code for a project's sequential NO. (zero-padded to 3).
    projLabel prefixes the name, e.g. "020 · Lentor Mansion". */
 export const projCode = (p: { serial?: number }): string => (p.serial ? String(p.serial).padStart(3, '0') : '');
-export const projLabel = (p: { serial?: number; name: string }): string => {
+/* REQ-054:售前记录没有编号,前面写「售前」/ Approach */
+export const projLabel = (p: { serial?: number; name: string } & Pick<Project, 'approach'>, lang: 'zh' | 'en' = 'zh'): string => {
+  if (isApproach(p)) return `${approachTag(lang)} · ${p.name}`;
   const c = projCode(p);
   return c ? `${c} · ${p.name}` : p.name;
 };

@@ -33,7 +33,7 @@ const DEFAULT: PvConfig = {
 };
 
 export default function PvStudioView() {
-  const { me, projects, ledProjectId, setView } = useStore();
+  const { me, avProjects: projects, ledProjectId, setView } = useStore();
   const { t } = useLang();
   const [cfg, setCfg] = useState<PvConfig>(DEFAULT);
   const [open, setOpen] = useState<string | null>(null);

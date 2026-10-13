@@ -21,6 +21,8 @@ import { useLang } from '@/lib/i18n';
 import type { ProjectFlow, StepKey, StepState } from '@/server/avflow';
 import { useStore, type View } from '../store';
 import { stamp } from './DraftNotice';
+import { approachTag, isApproach } from '@/lib/approach';
+import { projCode } from '@/lib/project';
 
 export interface FlowGuard {
   line: string;
@@ -98,7 +100,7 @@ const TONE: Record<StepState | 'cur', { bg: string; fg: string; bd: string }> = 
 };
 
 export default function AvFlow({ children }: { children: React.ReactNode }) {
-  const { view, setView, projects, ledProjectId, setLedProjectId, canBack, back, setToast } = useStore();
+  const { view, setView, avProjects: projects, ledProjectId, setLedProjectId, canBack, back, setToast } = useStore();
   const { t, lang } = useLang();
   const tt = (s: { zh: string; en: string }) => (lang === 'zh' ? s.zh : s.en);
   const step = stepOf(view)!;
@@ -221,7 +223,8 @@ export default function AvFlow({ children }: { children: React.ReactNode }) {
             <select id="av-project" className="in sm" value={project ? project.id : ''} data-testid="flow-project"
               onChange={(e) => setLedProjectId(e.target.value)} style={{ minWidth: 260, color: 'var(--text)' }}>
               <option value="">{t('— 选择项目 —', '— choose a project —')}</option>
-              {avProjects.map((p) => <option key={p.id} value={p.id}>{p.name}{p.client ? ` · ${p.client}` : ''}</option>)}
+              {/* REQ-054:售前记录和同名的正式项目要分得开(147-Senja Close 售前 / 007) */}
+              {avProjects.map((p) => <option key={p.id} value={p.id}>{isApproach(p) ? `${approachTag(lang)} · ` : projCode(p) ? `${projCode(p)} · ` : ''}{p.name}{p.client ? ` · ${p.client}` : ''}</option>)}
             </select>
           </label>
           <span style={{ fontSize: 12, color: 'var(--text2)' }} data-testid="flow-last">

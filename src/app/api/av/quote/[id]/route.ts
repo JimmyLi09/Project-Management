@@ -20,7 +20,7 @@ export async function POST(req: NextRequest, { params }: Params) {
   if (!quote) return NextResponse.json({ error: '报价不存在' }, { status: 404 });
   /* 审批只有 PD/BD 做得了,他们本来就看全部 —— 这一句现在拦不到任何人,
      留着是因为审批权一旦放宽,这里就是漏的那一处。 */
-  const denied = denyUnlessVisible(user, getProject(quote.projectId));
+  const denied = denyUnlessVisible(user, getProject(quote.projectId), true);
   if (denied) return denied;
   const body = (await req.json().catch(() => ({}))) as { action?: string; note?: unknown };
   const note = String(body.note ?? '').trim();

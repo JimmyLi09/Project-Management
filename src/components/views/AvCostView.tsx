@@ -62,7 +62,7 @@ const today = () => localDay();
 const PRICE_CHECKS = new Set(['COST-PRICE', 'COST-STALE', 'COST-MARGIN']);
 
 export default function AvCostView() {
-  const { me, projects, ledProjectId, view, setView, go } = useStore();
+  const { me, avProjects: projects, ledProjectId, view, setView, go } = useStore();
   const { t } = useLang();
   /* AV-017:从 05 某条线「下一步」过来就落在那条线 */
   const initial = (['led', 'projector', 'elv', 'pv'] as const).find((l) => l === view.line) ?? 'led';

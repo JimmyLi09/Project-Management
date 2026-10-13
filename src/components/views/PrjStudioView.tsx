@@ -41,7 +41,7 @@ const DEFAULT: PrjConfig = {
 const DEFAULT_V2: PrjGroupsConfig = prjSample('single');
 
 export default function PrjStudioView() {
-  const { me, projects, ledProjectId, setView } = useStore();
+  const { me, avProjects: projects, ledProjectId, setView } = useStore();
   const { t } = useLang();
   const [cfg, setCfg] = useState<PrjConfig | PrjGroupsConfig>(DEFAULT_V2);
   const [upgradeOf, setUpgrade] = useState('');   // AV-020:点了「预览并升级」的项目 id

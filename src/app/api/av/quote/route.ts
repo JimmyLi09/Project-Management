@@ -58,7 +58,7 @@ export async function POST(req: NextRequest) {
   const body = (await req.json().catch(() => ({}))) as { projectId?: string; lines?: unknown; discountPct?: unknown; reason?: unknown };
   const project = getProject(String(body.projectId || ''));
   if (!project) return NextResponse.json({ error: '项目不存在' }, { status: 404 });
-  const deniedW = denyUnlessVisible(user, project);   // REQ-043
+  const deniedW = denyUnlessVisible(user, project, true);   // REQ-043
   if (deniedW) return deniedW;
   if (!canSubmitQuote(identityOf(user), project)) return NextResponse.json({ error: '仅销售或 PD / BD 可提交报价' }, { status: 403 });
   const seesCost = canSeeCost(identityOf(user));

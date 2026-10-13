@@ -34,7 +34,7 @@ const AV_SVCS = LINES.map((l) => l.svc).filter(Boolean) as string[];
 
 export default function AvQuoteView() {
   const refreshFlow = useFlowRefresh();
-  const { me, projects, ledProjectId, setLedProjectId, go } = useStore();
+  const { me, avProjects: projects, ledProjectId, setLedProjectId, go } = useStore();
   const { t } = useLang();
   const [state, setState] = useState<State | null>(null);
   const [picked, setPicked] = useState<BusinessLine[]>([]);

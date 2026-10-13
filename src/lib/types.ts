@@ -352,6 +352,23 @@ export type Difficulty = 'easy' | 'medium' | 'hard' | 'complex';
    subtotals; dates = the Scale-Model date-range template. */
 export type SchedStyle = 'classic' | 'weeks' | 'dates';
 
+/* ===== REQ-054 售前接洽(Approach)=====
+   open:在「售前接洽」列表;lost(未成交)/ merged(已并入别的项目):只读,在「已关闭」里;
+   converted:转成了新的正式项目,从此和普通项目一样(编号在 serial 上)。 */
+export type ApproachStatus = 'open' | 'lost' | 'converted' | 'merged';
+export interface Approach {
+  status: ApproachStatus;
+  source: 'av';                  // 以后别的入口也能建,先只有 AV 立项询价
+  createdAt: number;
+  convertedAt?: number; convertedBy?: string;
+  mergedInto?: string;           // 并入的项目 id
+  mergedAt?: number; mergedBy?: string;
+  lostAt?: number; lostBy?: string; lostReason?: string;
+  reopenedAt?: number; reopenedBy?: string;
+  legacySerial?: number;         // 上线迁移时去掉的原编号(回退用)
+  inquiryLegacy?: Record<string, unknown>;   // 并入时合并掉的那条 AV 立项记录原样
+}
+
 export interface Project {
   id: string;
   serial?: number; // REQ-006: sequential project NO. (auto-assigned on create)
@@ -406,6 +423,9 @@ export interface Project {
      mig053 记迁移时间、删了几行、哪些行转成了额外项目(加了 pk) */
   jobRecordLegacy053?: (JobRow & { at: number; idx: number })[];
   mig053?: { at: number; removed: number; kept: string[] };
+  /* REQ-054:售前接洽(AV 立项询价建的)—— 有这个字段、且没转成正式项目的,就是售前记录:没有编号、
+     不进正式项目的列表和统计(lib/approach.ts) */
+  approach?: Approach;
   /* ===== v2.2 Version 1A post-sales workflow ===== */
   version?: number; // server-injected optimistic-lock counter (CAS)
   workflowVersion?: number; // schema version of the workflow blocks below (1)

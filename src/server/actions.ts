@@ -12,6 +12,7 @@ import { stagesFromTemplate } from '@/lib/calendarStages';
 import { applyCalendarToPackage } from '@/lib/scheduleSync';
 import { blankRow, clip, ensureJobRows, jobRowPkg, MAX_JOB_ROWS, rowsFromPaste, serviceItemOf } from '@/lib/jobRecord';
 import { isHw } from '@/lib/jobFormat';
+import { APPROACH_BLOCK_MSG, APPROACH_CLOSED_MSG, isApproach, isClosedApproach } from '@/lib/approach';
 import { isLegacyFlow } from '@/lib/legacyStages';
 import { isLegacyCgiStages, type LocalDate } from '@/features/schedule-planner/domain/schedule';
 import { distributeByWeights, layoutFromStart } from '@/features/schedule-planner/domain/duration';
@@ -268,11 +269,22 @@ function needModule(u: Identity, mod: PermModule) {
 }
 
 /* Mutates p in place. Throws PermissionError / ValidationError. */
+/* REQ-054:售前记录上不能做的动作(按钮也藏起来,这里是后端那一道) */
+const APPROACH_BLOCKED = new Set<string>([
+  'addOwner', 'setEngineer', 'transferProject',
+  'submitHandover', 'editHandover', 'acceptHandover', 'submitCompletion', 'decideCompletion', 'salesVerify', 'raiseVariation',
+  'toggleInvoiced', 'markInvoiced', 'undoInvoice', 'editFinance', 'setInvoiceStatus', 'setPaymentStatus', 'setPaymentRisk',
+  'setArchived',
+]);
+
 export function applyAction(u: Identity, p: Project, a: ProjectAction, ctx: ActionCtx = {}): void {
   const { tplForSvc } = ctx;
   /* REQ-051: 先过权限表(模块级),再走下面每个动作各自的业务规则 */
   const mod = Object.prototype.hasOwnProperty.call(ACTION_MODULE, a.type) ? ACTION_MODULE[a.type] : undefined;   // 「constructor」之类的名字不能查到原型上
   if (mod) needModule(u, mod);
+  /* REQ-054:已关闭的售前记录(未成交 / 已并入)只读;开着的售前记录不能指派 PM、走交接 / 完工 / 开票 / 收款 —— 先转为正式项目 */
+  if (isClosedApproach(p)) throw new ValidationError(APPROACH_CLOSED_MSG);
+  if (isApproach(p) && APPROACH_BLOCKED.has(a.type)) throw new ValidationError(APPROACH_BLOCK_MSG);
   switch (a.type) {
     case 'toggleDone': {
       const { pk, r } = getRow(p, a.pkg, a.idx);

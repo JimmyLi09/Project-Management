@@ -66,6 +66,7 @@ export async function POST(req: NextRequest) {
   delete copy.mig049;
   delete copy.jobRecordLegacy053;   // REQ-053
   delete copy.mig053;
+  delete copy.approach;   // REQ-054:复制出来的一律是正式项目(有编号),复制售前记录也一样
   delete copy.checklistRemoved;
   if (mode !== 'entire') copy.schedStyle = src.schedStyle; // template style still travels
 

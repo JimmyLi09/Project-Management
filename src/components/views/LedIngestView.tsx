@@ -64,7 +64,7 @@ const REASON: Record<string, [string, string]> = {
 
 export default function LedIngestView() {
   const refreshFlow = useFlowRefresh();
-  const { me, projects, ledProjectId, setLedProjectId, ledIngest, setLedIngest, setLedHandoff, go } = useStore();
+  const { me, avProjects: projects, ledProjectId, setLedProjectId, ledIngest, setLedIngest, setLedHandoff, go } = useStore();
   const { t, lang } = useLang();
   const [file, setFile] = useState<File | null>(null);
   const [scale, setScale] = useState('');

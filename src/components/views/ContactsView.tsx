@@ -5,6 +5,7 @@ import { useStore } from '../store';
 import { fmtDate, projCode, todayMid } from '@/lib/project';
 import { isDeveloperRole, roleKeyOf } from '@/lib/contactRoles';
 import { useLang } from '@/lib/i18n';
+import { approachTag, isApproach } from '@/lib/approach';
 import { contactRoleTerm } from '@/lib/terms';
 import { Ell, Icon } from '../ui';
 import type { Project } from '@/lib/types';
@@ -24,7 +25,7 @@ interface Row {
 
 /* R5-4: aggregate every project's contacts (+ legacy client / parties strings
    as a fallback) into one directory, searchable and exportable to CSV/Excel. */
-function collect(projects: Project[]): Row[] {
+function collect(projects: Project[], lang: 'zh' | 'en'): Row[] {
   const out: Row[] = [];
   /* REQ-052:兜底行也用键,和存进库的一样(以前这里写「总包 Main Con」、库里是「总包 Main-con」,筛选里两个总包) */
   const PARTY_ROLES: [keyof Project['parties'], string][] = [
@@ -33,8 +34,10 @@ function collect(projects: Project[]): Row[] {
   ];
   projects.forEach((p) => {
     if (p.archived) return;
+    if (p.approach?.status === 'merged') return;   // REQ-054:已并入的售前记录,联系人已经并到目标项目里了
     const seen = new Set<string>();
-    const base = { project: p.name, pid: p.id, code: projCode(p), year: projectYear(p) };
+    /* REQ-054:售前记录没有编号,编号栏写「售前」/ Approach */
+    const base = { project: p.name, pid: p.id, code: isApproach(p) ? approachTag(lang) : projCode(p), year: projectYear(p) };
     (p.contacts || []).forEach((c) => {
       if (!c.company && !c.person && !c.phone && !c.email && !c.role) return;
       out.push({ ...base, role: roleKeyOf(c.role), company: c.company || '', person: c.person || '', phone: c.phone || '', email: c.email || '' });
@@ -59,14 +62,14 @@ export function projectYear(p: Pick<Project, 'created' | 'start'>): string {
 const projText = (r: Row) => (r.code ? `${r.code} · ${r.project}` : r.project);
 
 export default function ContactsView() {
-  const { projects, openProject } = useStore();
+  const { allProjects: projects, openProject } = useStore();
   const { lang, t } = useLang();
   const [q, setQ] = useState('');
   const [fRole, setFRole] = useState('');
   const [fCompany, setFCompany] = useState('');
   const [fProject, setFProject] = useState('');
   const [fYear, setFYear] = useState('');
-  const rows = useMemo(() => collect(projects), [projects]);
+  const rows = useMemo(() => collect(projects, lang), [projects, lang]);
 
   /* §4: filter options built from the aggregated rows */
   const roleOpts = useMemo(() => [...new Set(rows.map((r) => r.role).filter(Boolean))].sort(), [rows]);

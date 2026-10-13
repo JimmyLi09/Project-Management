@@ -54,7 +54,7 @@ const parseLib = (s: string): Size[] =>
 const fmtLib = (lib: Size[]) => lib.map((s) => `${s[0]}x${s[1]}`).join(', ');
 
 export default function LedStudioView() {
-  const { me, projects, ledProjectId, ledHandoff, setLedHandoff, setView, go } = useStore();
+  const { me, avProjects: projects, ledProjectId, ledHandoff, setLedHandoff, setView, go } = useStore();
   const { t, lang } = useLang();
   const refreshFlow = useFlowRefresh();
 
