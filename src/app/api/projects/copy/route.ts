@@ -64,6 +64,8 @@ export async function POST(req: NextRequest) {
   /* REQ-049:Job Record 是这一单的报价内容,和旧资料卡一样不跟着复制 —— 读的时候每种业务补 1 行空白 */
   delete copy.jobRecord;
   delete copy.mig049;
+  delete copy.jobRecordLegacy053;   // REQ-053
+  delete copy.mig053;
   delete copy.checklistRemoved;
   if (mode !== 'entire') copy.schedStyle = src.schedStyle; // template style still travels
 

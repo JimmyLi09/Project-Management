@@ -10,15 +10,27 @@
    排期页那张「服务内容 / 交付清单」(pk.scopeItems:item / qty / note)也是报价单上的东西,一条转成一行。
    不转的:状态、更新时间(结构性的)、公式字段(由别的字段算出来)、项目名 / 客户联系人 / 交付日
    (这三项其实存在项目上,项目页里一直看得到)。
-   原数据一个不动:pk.record、pk.scopeItems 原样留着,Job Record 下方「旧字段(只读)」照旧能看。 */
+   原数据一个不动:pk.record、pk.scopeItems 原样留着,Job Record 下方「旧字段(只读)」照旧能看。
+   REQ-053:硬件业务回到登记表 —— 它的 pk.record 字段不再拆成行(就在登记表卡上);
+   服务内容照样转,作为那一份服务包的「额外项目」(行上带 pk)。 */
 
 import { ensureJobRows, jobRowId, serviceItemOf } from './jobRecord';
+import { isHw } from './jobFormat';
 import { optionLabel, projSourceOf, type FieldDef } from './records';
 import type { JobRow, Project } from './types';
 
 const CIRCLED = ['①', '②', '③', '④', '⑤', '⑥', '⑦', '⑧', '⑨', '⑩'];
 const looksQty = (v: string) => /^\s*\d+([.,]\d+)?\s*(x|×|pcs?|nos?\.?|sets?|spots?|s|sec|min(ute)?s?|m|mm|cm|sqm|m2|㎡|units?|个|套|块|台|张|秒|分钟|部)?\s*$/i.test(v);
 const isQtyField = (f: FieldDef) => f.type === 'number' || /^(quantity|qty|数量)$/i.test(f.en || '') || /^(quantity|qty)$/i.test(f.key) || /数量/.test(f.zh || '');
+
+/* 一个登记表字段转成行时的 Detail(字段名)和值 —— REQ-053 的迁移要认出「这一行是 049 迁移写的」,
+   用的是同一套写法。字段名中英都带上;中文名里本来就带英文的(「Model Maker 模型师」「Length 长 (mm)」)不再重复 */
+export function fieldRowName(f: FieldDef): string {
+  const zh = (f.zh || '').trim(), en = (f.en || '').trim();
+  return zh && en && !/[A-Za-z]{3,}/.test(zh) && !en.includes(zh) ? `${zh} ${en}` : zh || en || f.key;
+}
+export const fieldRowValue = (f: FieldDef, raw: unknown) => (f.type === 'select' ? optionLabel(f, String(raw), 'zh') : String(raw ?? '').trim());
+export const CIRCLED_NO = CIRCLED;
 
 export interface Mig049Entry { project: string; rows: number; bySvc: Record<string, number> }
 
@@ -37,24 +49,22 @@ export function migrateProject049(p: Project, defsFor: (svc: string) => FieldDef
     const item = serviceItemOf(pk.svc);
     const rec = pk.record || {};
     const fields = defsFor(pk.svc);
+    const hw = isHw(pk.svc);
     const push = (detail: string, qty: string, note: string) => {
-      rows.push({ id: jobRowId(), svc: pk.svc, item, detail: (inst ? `${inst} · ` : '') + detail, qty, note });
+      rows.push({ id: jobRowId(), svc: pk.svc, item, detail: (inst && !hw ? `${inst} · ` : '') + detail, qty, note, ...(hw && pk.id ? { pk: pk.id } : {}) });
       bySvc[pk.svc] = (bySvc[pk.svc] || 0) + 1;
     };
     const seen = new Set<string>();
-    for (const f of fields) {
+    for (const f of hw ? [] : fields) {
       seen.add(f.key);
       if (f.type === 'formula' || projSourceOf(f.key)) continue;
       const raw = rec[f.key];
       if (raw === undefined || raw === null || String(raw).trim() === '') continue;
-      const v = f.type === 'select' ? optionLabel(f, String(raw), 'zh') : String(raw).trim();
-      /* 字段名中英都带上;中文名里本来就带英文的(「Model Maker 模型师」「Length 长 (mm)」)不再重复 */
-      const zh = (f.zh || '').trim(), en = (f.en || '').trim();
-      const name = zh && en && !/[A-Za-z]{3,}/.test(zh) && !en.includes(zh) ? `${zh} ${en}` : zh || en || f.key;
-      if (isQtyField(f) || looksQty(v)) push(name, v, ''); else push(name, '', v);
+      const v = fieldRowValue(f, raw);
+      if (isQtyField(f) || looksQty(v)) push(fieldRowName(f), v, ''); else push(fieldRowName(f), '', v);
     }
     /* 字段定义里已经没有、但值还存着的(PD 删过的列):照样转,字段名用 key */
-    for (const [k, raw] of Object.entries(rec)) {
+    for (const [k, raw] of hw ? [] : Object.entries(rec)) {
       if (seen.has(k) || k === 'status' || k === 'updatedAt' || projSourceOf(k)) continue;
       const v = String(raw ?? '').trim();
       if (!v) continue;

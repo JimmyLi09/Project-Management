@@ -10,10 +10,12 @@ import { applyProjField, projSourceOf } from '@/lib/records';
 import { logZh, type LogParams } from '@/lib/logmsg';
 import { cleanSynonyms, DEFAULT_SYNONYMS, getSynonyms, migrationReport, setSynonyms, type ProjectMigration } from '@/lib/checklistMerge';
 import { defaultPermTable, permDiff, sanitizePermTable, setServerPermSource, type PermTable } from '@/lib/permTable';
+import { cleanJobFormats, formatOf, setServerJobFormatSource, type JobFormat, type JobFormatMap } from '@/lib/jobFormat';
 import { handOverWork, renameInProject } from '@/lib/peopleRefs';
 import { migrateProject048, type Mig048Entry } from '@/lib/mig048';
 import { migrateProject049, type Mig049Entry } from '@/lib/mig049';
 import { migrateProject050, report050, type Mig050Entry } from '@/lib/mig050';
+import { migrateProject053, report053, type Mig053Entry } from '@/lib/mig053';
 import { tplNamesFrom } from '@/lib/checklistScope';
 import { blankRow, clip as clipJob, ensureJobRows, MAX_JOB_ROWS, serviceItemOf, svcForItem, svcFromName } from '@/lib/jobRecord';
 import { baseDefOf, fieldsOf, type FieldDef, type FieldOverrides } from '@/lib/records';
@@ -110,6 +112,7 @@ function setupDb(db: Database.Database): Database.Database {
      再 044 合并清单,050 要等清单合成一张之后,backfillIds 放最后。 */
   migrateSchedules048(db);
   migrateJobRecord049(db);
+  migrateJobRecord053(db);      // REQ-053:要删行时,等 scripts\req053-dryrun 预演确认过才跑
   migrateSharedChecklist(db);   // REQ-044:要在 backfillIds 之前 —— 它读项目时也会顺手合并,那样就没有报告了
   migrateChecklist050(db);
   backfillIds(db);
@@ -460,6 +463,98 @@ function migrateJobRecord049(d: Database.Database) {
   } catch (e) {
     console.warn('[REQ-049] 迁移报告没写成(数据已迁移,不影响使用):', e);
   }
+}
+
+/* ===== REQ-053 硬件回到登记表 · 上线迁移 =====
+   删掉硬件业务里 049 拆出来、没人改过的 4 栏行和只预填了业务名的空行;改过 / 新加的留下当「额外项目」。
+   规则在 lib/mig053.ts(和 scripts/req053-dryrun 同一份)。
+   **要删行时必须先预演、确认**:scripts\req053-dryrun.bat 出报告,JM 看过后 scripts\req053-dryrun.bat --approve
+   在库里记一笔(mig.req053.approved),这里才真跑 —— 050 那次是正式迁移先跑、预演后跑,预演显示 0。
+   没有要删的(新装的库、049 之前的老库)直接跑完记标记。先整库备份,删掉的行存进 jobRecordLegacy053,出报告。 */
+const MIG_053 = 'mig.req053.jobRecord';
+export const APPROVE_053 = 'mig.req053.approved';
+export const LED_DIMH_OLD = { zh: 'Width 宽 (mm)', en: 'Width (mm)' };
+function migrateJobRecord053(d: Database.Database) {
+  if (d.prepare('SELECT 1 FROM meta WHERE key = ?').get(MIG_053)) return;
+  const rows = d.prepare('SELECT id, data FROM projects').all() as { id: string; data: string }[];
+  const ov: FieldOverrides = {};
+  try {
+    for (const r of d.prepare('SELECT svc, fields FROM record_fields').all() as { svc: string; fields: string }[]) {
+      try { ov[r.svc] = JSON.parse(r.fields) as FieldDef[]; } catch { /* 坏行忽略 */ }
+    }
+  } catch { /* 老库还没有这张表 */ }
+  let fm: JobFormatMap = {};
+  const fr = d.prepare('SELECT value FROM meta WHERE key = ?').get('job.formats') as { value: string } | undefined;
+  if (fr) { try { fm = cleanJobFormats(JSON.parse(fr.value), (k) => !!SVC[k]); } catch { /* 当默认 */ } }
+  const opts = (at: number) => ({ defsFor: (svc: string) => fieldsOf(baseDefOf(svc), ov), isHw: (svc: string) => formatOf(svc, fm) === 'hw', at });
+  /* 先在副本上数一遍:要删几行 */
+  let toRemove = 0;
+  for (const r of rows) {
+    let o: any;
+    try { o = JSON.parse(r.data); } catch { continue; }
+    if (!Array.isArray(o.packages)) continue;
+    const m = migrateProject053(o, opts(0));
+    if (m) toRemove += m.split.length + m.blank.length;
+  }
+  const approved = d.prepare('SELECT value FROM meta WHERE key = ?').get(APPROVE_053) as { value: string } | undefined;
+  if (toRemove && !approved) {
+    console.log(`[REQ-053] 有 ${toRemove} 行硬件的 4 栏行要删 —— 等预演确认:先跑 scripts\\req053-dryrun.bat,JM 看过报告后 scripts\\req053-dryrun.bat --approve,再 pm2 restart audax。在那之前这些行显示在登记表卡下的「额外项目」里。`);
+    return;
+  }
+  const now = Date.now();
+  const t = new Date(now), pad = (n: number) => String(n).padStart(2, '0');
+  const stamp = `${t.getFullYear()}${pad(t.getMonth() + 1)}${pad(t.getDate())}-${pad(t.getHours())}${pad(t.getMinutes())}${pad(t.getSeconds())}`;
+  let backup = '';
+  if (rows.length) {
+    try {
+      const dir = path.join(DATA_DIR, 'backups');
+      fs.mkdirSync(dir, { recursive: true });
+      backup = path.join(dir, `pre-req053-${stamp}.db`);
+      d.exec(`VACUUM INTO '${backup.replace(/'/g, "''")}'`);
+    } catch (e) {
+      /* 备份不成就不迁移,也不带着没迁移的数据开站(见 getDb) */
+      throw new Error(`[REQ-053] 迁移前备份失败,这次不迁移:${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+  const upd = d.prepare('UPDATE projects SET data = ?, updated_at = ?, version = version + 1 WHERE id = ?');
+  const done: Mig053Entry[] = [];
+  let ledLabel = '';
+  d.transaction(() => {
+    for (const r of rows) {
+      let o: any;
+      try { o = JSON.parse(r.data); } catch { continue; }
+      if (!Array.isArray(o.packages)) continue;
+      const got = migrateProject053(o, opts(now));
+      if (!got) continue;
+      const { updatedAt: _u, version: _v, ...data } = o;
+      upd.run(JSON.stringify(data), now, r.id);
+      done.push(got);
+    }
+    /* LED 的「Width 宽 (mm)」改名「Height 高 (mm)」:PD 在增减字段里存过 LED 那一套的,覆盖表里也改(只改还是旧名的那一格) */
+    const led = ov.led;
+    const f = led && led.find((x) => x.key === 'dimH' && (x.zh === LED_DIMH_OLD.zh || x.en === LED_DIMH_OLD.en));
+    if (led && f) {
+      d.prepare('INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value').run('mig.req053.ledFieldsPrev', JSON.stringify(led));
+      const next = led.map((x) => (x === f ? { ...x, zh: x.zh === LED_DIMH_OLD.zh ? 'Height 高 (mm)' : x.zh, en: x.en === LED_DIMH_OLD.en ? 'Height (mm)' : x.en } : x));
+      d.prepare('UPDATE record_fields SET fields = ?, updated_at = ?, updated_by = ? WHERE svc = ?').run(JSON.stringify(next), now, 'REQ-053', 'led');
+      ledLabel = 'LED 登记表(增减字段里存过的那一套)的「Width 宽 (mm)」改名为「Height 高 (mm)」,原来那份在 meta 的 mig.req053.ledFieldsPrev';
+    }
+    d.prepare('INSERT INTO meta (key, value) VALUES (?, ?)').run(MIG_053, JSON.stringify({
+      at: now, backup, projects: done.length,
+      split: done.reduce((a, m) => a + m.split.length, 0), blank: done.reduce((a, m) => a + m.blank.length, 0),
+      kept: done.reduce((a, m) => a + m.kept.length, 0), problems: done.reduce((a, m) => a + m.problems.length, 0),
+      approved: approved ? JSON.parse(approved.value) : null, ledLabel: !!ledLabel,
+    }));
+  })();
+  if (!done.length && !ledLabel) return;
+  try {
+    const dir = path.join(DATA_DIR, 'migrations');
+    fs.mkdirSync(dir, { recursive: true });
+    const file = path.join(dir, `053-jobrecord-${stamp}.md`);
+    const md = report053(done, { title: 'REQ-053 Job Record 硬件回到登记表 · 上线迁移报告', when: t.toLocaleString('zh-CN'), db: `迁移前备份:${backup || '(库是空的,没备份)'}`, ledLabel });
+    fs.writeFileSync(file, md + '\n回退:先 pm2 stop audax,再跑 scripts\\req053-rollback.bat(不带参数只报告;--apply 才写库,会先备份)。\n', 'utf8');
+    console.log(`[REQ-053] 硬件回到登记表:${done.length} 个项目,报告 ${file}`);
+  } catch (e) { console.warn('[REQ-053] 迁移报告写不出来:', e); }
 }
 
 /* ===== REQ-044 一个项目一张信息清单 =====
@@ -1133,10 +1228,12 @@ export function importRegisterRecords(
   const run = d.transaction(() => {
     const all = d.prepare('SELECT id, data FROM projects').all() as { id: string; data: string }[];
     const byName = new Map<string, { id: string; p: Project }>();
+    const dupName = new Set<string>();   // 项目名不要求唯一:重名的对不上是哪一个,不能猜
     for (const r of all) {
       const p = migrate(JSON.parse(r.data));
       if (p.archived) continue;
       const key = (p.name || '').trim().toLowerCase();
+      if (key && byName.has(key)) dupName.add(key);
       if (key && !byName.has(key)) byName.set(key, { id: r.id, p });
     }
     const upd = d.prepare('UPDATE projects SET data = ?, updated_at = ?, version = version + 1 WHERE id = ?');
@@ -1144,6 +1241,7 @@ export function importRegisterRecords(
     rows.forEach((row, i) => {
       const key = String(row.project || '').trim().toLowerCase();
       if (!key) throw new Error(`第 ${i + 1} 行:缺少项目名称`);
+      if (dupName.has(key)) throw new Error(`第 ${i + 1} 行:有不止一个项目叫「${row.project}」,这一类登记表按项目名对,对不上是哪一个(导入已全部撤销)`);
       const hit = byName.get(key);
       if (!hit) throw new Error(`第 ${i + 1} 行:未找到项目「${row.project}」(导入已全部撤销)`);
       const p = hit.p;
@@ -1447,6 +1545,34 @@ export function savePermTable(raw: unknown, by: string): { table: PermTable; cha
   return { table: next, changed: diff.length };
 }
 setServerPermSource(getPermTable);
+
+/* ===== REQ-053 · 每种业务的 Job Record 格式(硬件 = 登记表 / 软件 = 4 栏)=====
+   默认值在 lib/jobFormat.ts;PD / BD 在「登记表管理」里改过的存 meta(job.formats),只存和默认不一样的。
+   改格式只是换显示方式,pk.record 和 4 栏行两种数据都不动。 */
+const JOB_FMT_KEY = 'job.formats';
+let jobFmtCache: { at: number; m: JobFormatMap } | null = null;
+export function getJobFormats(): JobFormatMap {
+  if (jobFmtCache && Date.now() - jobFmtCache.at < 2000) return jobFmtCache.m;
+  const row = getDb().prepare('SELECT value FROM meta WHERE key = ?').get(JOB_FMT_KEY) as { value: string } | undefined;
+  let m: JobFormatMap = {};
+  if (row) { try { m = cleanJobFormats(JSON.parse(row.value), (k) => !!SVC[k]); } catch { /* 坏了就当默认 */ } }
+  jobFmtCache = { at: Date.now(), m };
+  return m;
+}
+export function setJobFormat(svc: string, format: JobFormat, by: string): JobFormatMap {
+  const before = getJobFormats();
+  const from = formatOf(svc, before);
+  const next = cleanJobFormats({ ...before, [svc]: format }, (k) => !!SVC[k]);
+  if (from === format) return before;
+  const d = getDb();
+  d.transaction(() => {
+    d.prepare('INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value').run(JOB_FMT_KEY, JSON.stringify(next));
+    appendAdminLog(by, 'job.format', { svc, fmtFrom: from, fmtTo: format });
+  })();
+  jobFmtCache = { at: Date.now(), m: next };
+  return next;
+}
+setServerJobFormatSource(getJobFormats);
 
 /* ---- default accounts so the system is usable out of the box ---- */
 function seedIfEmpty(d: Database.Database) {

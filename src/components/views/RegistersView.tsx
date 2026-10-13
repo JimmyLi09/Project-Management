@@ -2,7 +2,7 @@
 
 import React, { useMemo, useState } from 'react';
 import { useStore } from '../store';
-import { canEditIn, isFull } from '@/lib/permissions';
+import { canAdmin, canEditIn, isFull } from '@/lib/permissions';
 import { SVC, svcName, svcColor } from '@/lib/templates';
 import { todayMid, fmtDate, projCode } from '@/lib/project';
 import { useLang } from '@/lib/i18n';
@@ -10,13 +10,19 @@ import { Icon } from '../ui';
 import { jobGroups, jobHeaderMap, jobImportCols, serviceItemOf, svcFromName, JOB_HEAD_EN, JOB_HEAD_ZH, type JobField } from '@/lib/jobRecord';
 import type { JobRow, Project } from '@/lib/types';
 import { csvCell, csvUnguard } from '@/lib/csv';
+import { formatOf, isHw } from '@/lib/jobFormat';
+import { REGISTERS, baseDefOf, customRegisterSvcs, fieldsOf, hasRecordDef } from '@/lib/records';
+import RegisterTable from './RegisterTable';
+import { FieldEditor } from './JobRecordTab';
 
 /* ===== REQ-049 · 项目档案 = 各项目 Job Record 4 栏表汇总 =====
    Job Record 改成一张 4 栏表(Service Item / Detail / Quantity / Special Notes)后,
    这里跨项目读的也是它:所有业务都在(无人机这类自定义业务也一样),按业务分页签,
    可筛选、排序、就地改、导出 CSV;PD / BD 可以按 4 栏表头批量导入。
    原来各业务的登记表字段(pk.record)不删,在每个项目 Job Record 下方「旧字段(只读)」里看;
-   上线迁移时有值的字段已经各转成了一行,所以在这里也搜得到。 */
+   上线迁移时有值的字段已经各转成了一行,所以在这里也搜得到。
+   REQ-053:硬件业务(LED、投影、TV…)的页签照旧读登记表(RegisterTable);软件业务读 4 栏表;
+   「全部业务」是所有 4 栏行(软件行 + 硬件的额外项目)。PD / BD 在「登记表管理」里定每种业务是硬件还是软件。 */
 
 interface Row { p: Project; r: JobRow; svc: string; inProject: boolean; idx: number }
 const PAGE = 50;
@@ -25,7 +31,8 @@ const SORT_KEYS = ['project', 'client', 'pm', 'svc', 'item', 'detail', 'qty', 'n
 type SortKey = (typeof SORT_KEYS)[number];
 
 export default function RegistersView() {
-  const { projects, me, dispatch, openProject, refresh, setToast } = useStore();
+  const { projects, me, dispatch, openProject, refresh, setToast, jobFormats, recordFields } = useStore();
+  const [manage, setManage] = useState(false);
   const { lang, t } = useLang();
   const [svc, setSvc] = useState('all');
   const [q, setQ] = useState('');
@@ -51,10 +58,15 @@ export default function RegistersView() {
   }, [projects]);
   const tabs = useMemo(() => {
     const n: Record<string, number> = {};
-    every.forEach((x) => { n[x.svc] = (n[x.svc] || 0) + 1; });
+    every.forEach((x) => { if (!x.svc || !isHw(x.svc, jobFormats)) n[x.svc] = (n[x.svc] || 0) + 1; });
+    /* 硬件业务:有登记表(内置 / PD 建过字段)或有项目用到的都给一个页签,数的是服务包份数 */
+    const used = new Set(projects.filter((p) => !p.archived).flatMap((p) => p.packages.map((pk) => pk.svc)));
+    const hwSvcs = [...new Set([...REGISTERS.map((r) => r.svc), ...customRegisterSvcs(recordFields), ...used])].filter((k) => isHw(k, jobFormats) && (hasRecordDef(k, recordFields) || used.has(k)));
+    hwSvcs.forEach((k) => { n[k] = projects.filter((p) => !p.archived).reduce((a, p) => a + p.packages.filter((pk) => pk.svc === k).length, 0); });
     const order = Object.keys(SVC);
-    return Object.keys(n).sort((a, b) => (order.indexOf(a) + 1 || 999) - (order.indexOf(b) + 1 || 999)).map((k) => ({ svc: k, n: n[k] }));
-  }, [every]);
+    return Object.keys(n).sort((a, b) => (order.indexOf(a) + 1 || 999) - (order.indexOf(b) + 1 || 999)).map((k) => ({ svc: k, n: n[k], hw: !!k && isHw(k, jobFormats) }));
+  }, [every, projects, jobFormats, recordFields]);
+  const hwTab = svc !== 'all' && !!svc && isHw(svc, jobFormats);
   const all = useMemo(() => (svc === 'all' ? every : every.filter((x) => x.svc === svc)), [every, svc]);
 
   const pms = useMemo(() => [...new Set(all.flatMap((x) => x.p.owners || []))].sort(), [all]);
@@ -121,14 +133,26 @@ export default function RegistersView() {
         <button className={`chip ${svc === 'all' ? 'active' : ''}`} onClick={() => setSvc('all')} data-testid="reg-tab-all">
           {t('全部业务', 'All services')} <span style={{ opacity: 0.6 }}>{every.length}</span>
         </button>
-        {tabs.map(({ svc: sv, n }) => (
+        {tabs.map(({ svc: sv, n, hw }) => (
           <button key={sv || '_'} className={`chip ${svc === sv ? 'active' : ''}`} onClick={() => setSvc(sv)} data-testid={`reg-tab-${sv || 'none'}`}
+            title={hw ? t('硬件 · 登记表', 'Hardware · register') : t('软件 · 4 栏', 'Software · 4 columns')}
             style={svc === sv && sv ? { borderColor: svcColor(sv), boxShadow: `inset 0 0 0 1px ${svcColor(sv)}` } : undefined}>
-            <span style={{ width: 8, height: 8, borderRadius: 2, background: sv ? svcColor(sv) : '#aaa', display: 'inline-block' }} />
+            <span style={{ width: 8, height: 8, borderRadius: hw ? '50%' : 2, background: sv ? svcColor(sv) : '#aaa', display: 'inline-block' }} />
             {sv ? svcName(sv, lang) : t('未对应业务', 'Not matched')} <span style={{ opacity: 0.6 }}>{n}</span>
           </button>
         ))}
+        <div style={{ flex: 1 }} />
+        {canAdmin(me) && (
+          <button className="btn-line sm" style={manage ? { borderColor: 'var(--navy700)', color: 'var(--navy900)', fontWeight: 600 } : undefined}
+            onClick={() => setManage((v) => !v)} data-testid="reg-manage">
+            {manage ? t('完成', 'Done') : t('登记表管理', 'Register management')}
+          </button>
+        )}
       </div>
+
+      {manage && canAdmin(me) && <RegisterManager />}
+
+      {hwTab ? <RegisterTable key={svc} svc={svc} /> : <>
 
       <div className="kpi-grid four">
         {kpi.map(([label, val, color], i) => (
@@ -240,6 +264,8 @@ export default function RegistersView() {
           if (await dispatch(p.id, { type: 'addJobRow', svc: sv, values })) { setAdding(false); setToast(t('已新增一行', 'Row added')); }
         }} />}
 
+      </>}
+
       {imp && <ImportModal preview={imp} tabSvc={svc} onClose={() => setImp(null)}
         onConfirm={async () => {
           try {
@@ -260,6 +286,70 @@ export default function RegistersView() {
 
 type ImportRow = { project: string; no: string; svc: string; item: string; detail: string; qty: string; note: string };
 interface ImportPreview { rows: ImportRow[]; error?: string; matched: number; unmatched: string[] }
+
+/* ===== REQ-053 · 登记表管理(PD / BD)=====
+   每种业务一行:Job Record 格式(硬件 · 登记表 / 软件 · 4 栏)+ 登记表字段的情况 + 编辑字段。
+   改分类不删数据 —— pk.record 和 4 栏行都留着,只是换一种显示;改了写管理日志。 */
+function RegisterManager() {
+  const { jobFormats, refreshJobFormats, recordFields, setToast } = useStore();
+  const { lang, t } = useLang();
+  const [busy, setBusy] = useState('');
+  const [editing, setEditing] = useState('');
+  async function setFmt(svc: string, format: 'hw' | 'sw') {
+    if (formatOf(svc, jobFormats) === format) return;
+    setBusy(svc);
+    const res = await fetch('/api/job-formats', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ svc, format }) });
+    setBusy('');
+    const d = await res.json().catch(() => ({}));
+    if (!res.ok) { setToast(d.error || t('保存失败', 'Save failed')); return; }
+    await refreshJobFormats();
+    setToast(format === 'hw'
+      ? t(`${svcName(svc, 'zh')} 改为硬件 · 登记表(4 栏行都还在,显示在登记表卡下的额外项目里)`, `${svcName(svc, 'en')} is now hardware · register (its 4-column rows are kept as extra items)`)
+      : t(`${svcName(svc, 'zh')} 改为软件 · 4 栏(登记表字段都还在)`, `${svcName(svc, 'en')} is now software · 4 columns (register fields are kept)`));
+  }
+  const pill = (on: boolean): React.CSSProperties => ({ border: '1px solid var(--row-line)', borderRadius: 14, padding: '3px 11px', fontSize: 12.5, cursor: 'pointer', background: on ? 'var(--navy900)' : '#fff', color: on ? '#fff' : 'var(--text)', borderColor: on ? 'var(--navy900)' : undefined });
+  return (
+    <div className="panel clip" style={{ marginBottom: 16 }} data-testid="reg-manager">
+      <div style={{ padding: '10px 16px', fontSize: 12.5, color: '#7c3a10', background: '#fffaf2', borderBottom: '1px solid var(--row-line)' }}>
+        {t('每种业务选一次 Job Record 格式:硬件 = 登记表 + 可选额外 4 栏行,软件 = 4 栏。改了分类不会删数据,两种数据都留着,只是换一种显示。',
+           'Choose each service\'s Job Record format once: hardware = register + optional 4-column extra rows, software = 4 columns. Changing it never deletes data; both kinds are kept and only the display changes.')}
+      </div>
+      <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+        <thead><tr>{[t('业务', 'Service'), t('Job Record 格式', 'Job Record format'), t('登记表字段', 'Register fields'), ''].map((h, i) => <th key={i} style={{ ...cell, fontSize: 11, color: 'var(--text2)', textAlign: 'left', background: 'var(--hover-bg)' }}>{h}</th>)}</tr></thead>
+        <tbody>
+          {Object.keys(SVC).map((k) => {
+            const hw = isHw(k, jobFormats);
+            const n = fieldsOf(baseDefOf(k), recordFields).length;
+            return (
+              <React.Fragment key={k}>
+                <tr data-testid={`reg-mg-${k}`}>
+                  <td style={{ ...cell, whiteSpace: 'nowrap' }}><span className="bdot" style={{ background: svcColor(k), display: 'inline-block', width: 9, height: 9, borderRadius: 3, marginRight: 6 }} />{svcName(k, lang)} <span style={{ color: 'var(--text2)', fontSize: 11.5 }}>{lang === 'zh' ? SVC[k]?.en : ''}</span></td>
+                  <td style={cell}>
+                    <span style={{ display: 'inline-flex', gap: 6 }}>
+                      <button disabled={busy === k} style={pill(hw)} onClick={() => setFmt(k, 'hw')} data-testid={`reg-mg-hw-${k}`}>{t('硬件 · 登记表', 'Hardware · register')}</button>
+                      <button disabled={busy === k} style={pill(!hw)} onClick={() => setFmt(k, 'sw')} data-testid={`reg-mg-sw-${k}`}>{t('软件 · 4 栏', 'Software · 4 columns')}</button>
+                    </span>
+                  </td>
+                  <td style={{ ...cell, fontSize: 12.5, color: hw && !n ? 'var(--danger)' : 'var(--text2)' }} data-testid={`reg-mg-fields-${k}`}>
+                    {n ? t(`${n} 个字段`, `${n} fields`) : hw ? t('还没有字段,需要先建', 'No fields yet — create them first') : '—'}
+                  </td>
+                  <td style={{ ...cell, textAlign: 'right' }}>
+                    <button className="btn-line sm" onClick={() => setEditing(editing === k ? '' : k)} data-testid={`reg-mg-edit-${k}`}>{editing === k ? t('收起', 'Close') : t('编辑字段', 'Edit fields')}</button>
+                  </td>
+                </tr>
+                {editing === k && (
+                  <tr><td colSpan={4} style={{ padding: 0 }}>
+                    <FieldEditor svc={k} builtin={baseDefOf(k).fields} current={fieldsOf(baseDefOf(k), recordFields)} onClose={() => setEditing('')} />
+                  </td></tr>
+                )}
+              </React.Fragment>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
 
 /* 选文件 → 解析 CSV → 认 4 栏表头(中英都认)+ 项目 / 项目编号 / 业务栏 */
 function fileInput(projects: Project[], onReady: (pv: ImportPreview) => void) {

@@ -12,6 +12,7 @@ import type { Focus } from '@/lib/focus';
 import { DEFAULT_POINT_RULES, rulesAt, type PointRuleVersion, type PointRules } from '@/lib/points';
 import { DEFAULT_KPI_RULES, kpiRulesAt, type KpiRuleVersion, type KpiRules } from '@/lib/kpi';
 import { defaultPermTable, sanitizePermTable, setPermSource, type PermTable } from '@/lib/permTable';
+import { setJobFormatSource, type JobFormatMap } from '@/lib/jobFormat';
 import { useLang } from '@/lib/i18n';
 
 export interface View {
@@ -125,6 +126,9 @@ interface Store {
   /* REQ-023: 用户改过的资料卡字段定义,按服务类型覆盖出厂默认 */
   recordFields: FieldOverrides;
   refreshRecordFields: () => Promise<void>;
+  /* REQ-053:每种业务的 Job Record 格式覆盖值(hw = 硬件 · 登记表,sw = 软件 · 4 栏);默认值在 lib/jobFormat */
+  jobFormats: JobFormatMap;
+  refreshJobFormats: () => Promise<void>;
   /* REQ-039:资料卡上数量 L/H、电源线、数据线由 LED 方案配置带过来。
      按项目 id 存一份,登记表跨项目一张表也只取这一次。 */
   avDerived: Record<string, AvDerived>;
@@ -166,6 +170,10 @@ export function StoreProvider({ user, permTable: initialPerm, children }: { user
     setPermTableState((cur) => (JSON.stringify(cur) === JSON.stringify(t) ? cur : sanitizePermTable(t)));
   }, []);
   const [recordFields, setRecordFields] = useState<FieldOverrides>({});
+  const [jobFormats, setJobFormats] = useState<JobFormatMap>({});
+  const fmtRef = useRef(jobFormats);
+  fmtRef.current = jobFormats;
+  if (typeof window !== 'undefined') setJobFormatSource(() => fmtRef.current);
   const [avDerived, setAvDerived] = useState<Record<string, AvDerived>>({});
   const [pointRuleVersions, setPointRuleVersions] = useState<PointRuleVersion[]>([]);
   const [kpiRuleVersions, setKpiRuleVersions] = useState<KpiRuleVersion[]>([]);
@@ -257,6 +265,14 @@ export function StoreProvider({ user, permTable: initialPerm, children }: { user
     if (res.ok) setRecordFields(((await res.json()).overrides || {}) as FieldOverrides);
   }, []);
 
+  const refreshJobFormats = useCallback(async () => {
+    const res = await fetch('/api/job-formats');
+    if (res.ok) {
+      const m = ((await res.json()).overrides || {}) as JobFormatMap;
+      setJobFormats((cur) => (JSON.stringify(cur) === JSON.stringify(m) ? cur : m));
+    }
+  }, []);
+
   /* REQ-039: LED 方案配置算出来的那几个数,一次取全 */
   const refreshAvDerived = useCallback(async () => {
     const res = await fetch('/api/av/derived');
@@ -278,13 +294,14 @@ export function StoreProvider({ user, permTable: initialPerm, children }: { user
     refresh();
     refreshUsers();
     refreshRecordFields();
+    refreshJobFormats();
     refreshAvDerived();
     refreshPointRules();
     refreshKpiRules();
     /* light polling so teammates' changes appear without manual reload */
     const t = setInterval(() => { refresh(); refreshPerms(); }, 30_000);
     return () => clearInterval(t);
-  }, [refresh, refreshUsers, refreshRecordFields, refreshAvDerived, refreshPointRules, refreshKpiRules, refreshPerms]);
+  }, [refresh, refreshUsers, refreshRecordFields, refreshJobFormats, refreshAvDerived, refreshPointRules, refreshKpiRules, refreshPerms]);
 
   const dispatch = useCallback((pid: string, action: ProjectAction) => {
     /* v2.2 [P0-3] strict optimistic lock. Serialize per project so a user's own
@@ -382,6 +399,8 @@ export function StoreProvider({ user, permTable: initialPerm, children }: { user
     setLedHandoff,
     recordFields,
     refreshRecordFields,
+    jobFormats,
+    refreshJobFormats,
     avDerived,
     refreshAvDerived,
     pointRuleVersions,
@@ -391,7 +410,7 @@ export function StoreProvider({ user, permTable: initialPerm, children }: { user
     kpiRuleVersions,
     kpiRules: kpiRuleVersions.length ? kpiRulesAt(kpiRuleVersions, Date.now()) : DEFAULT_KPI_RULES,
     refreshKpiRules,
-  }), [user, projects, users, allUsers, permTable, setPermTable, view, histIdx, setView, setLedProjectId, toast, dispatch, createProject, removeProject, refresh, refreshUsers, recordFields, refreshRecordFields, avDerived, refreshAvDerived, pointRuleVersions, refreshPointRules, kpiRuleVersions, refreshKpiRules, ledProjectId, ledIngest, ledHandoff]);
+  }), [user, projects, users, allUsers, permTable, setPermTable, view, histIdx, setView, setLedProjectId, toast, dispatch, createProject, removeProject, refresh, refreshUsers, recordFields, refreshRecordFields, jobFormats, refreshJobFormats, avDerived, refreshAvDerived, pointRuleVersions, refreshPointRules, kpiRuleVersions, refreshKpiRules, ledProjectId, ledIngest, ledHandoff]);
 
   return <Ctx.Provider value={store}>{children}</Ctx.Provider>;
 }

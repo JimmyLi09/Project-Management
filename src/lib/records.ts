@@ -146,7 +146,8 @@ export const REGISTERS: RegisterDef[] = [
       { key: 'speaker', zh: 'Speaker 音箱', en: 'Speaker', type: 'select', group: G_BASIC, options: YES_NO },
 
       { key: 'dimL', zh: 'Length 长 (mm)', en: 'Length (mm)', type: 'number', group: G_DIM, highlight: true },
-      { key: 'dimH', zh: 'Width 宽 (mm)', en: 'Width (mm)', type: 'number', group: G_DIM, highlight: true },
+      /* REQ-053:这一格其实是屏幕高度(参与 SQM = 长 × 高),原来标成「Width 宽」,143 LED ② 就因此填错。key 不变 */
+      { key: 'dimH', zh: 'Height 高 (mm)', en: 'Height (mm)', type: 'number', group: G_DIM, highlight: true },
       { key: 'sqm', zh: 'SQM 面积 (㎡)', en: 'SQM', type: 'formula', formula: 'dimL * dimH / 1000000', decimals: 3, group: G_DIM, highlight: true },
       { key: 'qtyL', zh: '数量 L', en: 'Qty L', type: 'number', group: G_DIM },
       { key: 'qtyH', zh: '数量 H', en: 'Qty H', type: 'number', group: G_DIM },
@@ -230,6 +231,30 @@ export const REGISTERS: RegisterDef[] = [
     ],
   },
 ];
+
+/* ===== REQ-053:硬件业务都要有登记表(JM 1012 确认)=====
+   TV 用 MAXHUB 那套;灯箱新建一套;弱电、光伏先用 AV 那套。都是安装类,PD / BD 可以在「登记表管理」里改字段。 */
+const fieldsOfSvc = (svc: string) => REGISTERS.find((r) => r.svc === svc)!.fields.map((f) => ({ ...f }));
+REGISTERS.push(
+  { svc: 'tv', kind: 'install', confirmed: true, fields: fieldsOfSvc('maxhub') },
+  {
+    svc: 'lightbox', kind: 'install', confirmed: true,
+    fields: [
+      { key: 'siteAddress', zh: 'Address 地址', en: 'Address', type: 'text', required: true },
+      { key: 'mainCon', zh: 'Main Con', en: 'Main Con', type: 'text' },
+      { key: 'sizeWH', zh: 'Size 尺寸 (W×H mm)', en: 'Size (W×H mm)', type: 'text' },
+      { key: 'quantity', zh: 'Quantity 数量', en: 'Quantity', type: 'text' },
+      { key: 'printMaterial', zh: '画面材料 Print Material', en: 'Print Material', type: 'text' },
+      { key: 'lighting', zh: '灯光 Lighting', en: 'Lighting', type: 'select',
+        options: opt(['backlit', 'LED 背光', 'LED backlit'], ['edgelit', '侧光', 'Edge-lit'], ['none', '不发光', 'Non-illuminated']) },
+      { key: 'installation', zh: 'Installation 安装日期', en: 'Installation', type: 'date' },
+      { key: 'signedOff', zh: 'Signed Off 签收', en: 'Signed Off', type: 'date' },
+      { key: 'remarks', zh: 'Remarks 备注', en: 'Remarks', type: 'textarea' },
+    ],
+  },
+  { svc: 'elv', kind: 'install', confirmed: true, fields: fieldsOfSvc('av') },
+  { svc: 'pv', kind: 'install', confirmed: true, fields: fieldsOfSvc('av') },
+);
 
 export const REGISTER_SVCS = REGISTERS.map((r) => r.svc);
 export const registerDef = (svc: string): RegisterDef | undefined => REGISTERS.find((r) => r.svc === svc);
@@ -500,6 +525,26 @@ export function applyProjField(p: Project, src: ProjSource, raw: string): ProjFi
   const was = c.person;
   c.person = person;
   return { ok: true, log: { k: 'contact.person', p: { from: was, to: person } } };
+}
+
+/* ===== REQ-053 · LED 尺寸自检 =====
+   每块箱体 = 长 ÷ 数量 L、高 ÷ 数量 H。不在常见箱体尺寸里(误差 ±1 mm)就提示;
+   把值 ×10 或 ÷10 就对得上的,给出建议值(143 LED ② 高 304 ÷ 19 = 16 → 是不是 3040?)。
+   以后有新的箱体尺寸,加进这张表就行。 */
+export const LED_MODULE_SIZES = [160, 192, 240, 250, 256, 320, 384, 480, 500, 512, 576, 640, 768, 960, 1000];
+export interface LedSizeIssue { key: 'dimL' | 'dimH'; qtyKey: 'qtyL' | 'qtyH'; dim: number; qty: number; per: number; fix?: number }
+const isModule = (mm: number) => LED_MODULE_SIZES.some((x) => Math.abs(x - mm) <= 1);
+export function ledSizeIssues(v: { dimL?: unknown; dimH?: unknown; qtyL?: unknown; qtyH?: unknown }): LedSizeIssue[] {
+  const out: LedSizeIssue[] = [];
+  for (const [key, qtyKey] of [['dimL', 'qtyL'], ['dimH', 'qtyH']] as const) {
+    const dim = Number(v[key]), qty = Number(v[qtyKey]);
+    if (!(dim > 0) || !(qty > 0)) continue;
+    const per = dim / qty;
+    if (isModule(per)) continue;
+    const fix = [dim * 10, dim / 10].find((d) => Number.isInteger(d) && isModule(d / qty));
+    out.push({ key, qtyKey, dim, qty, per: Math.round(per * 10) / 10, ...(fix ? { fix } : {}) });
+  }
+  return out;
 }
 
 /* a required field is blank → the record is "incomplete" (also true when draft) */

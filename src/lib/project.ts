@@ -9,6 +9,7 @@ import { canSeeProject } from './permissions';
 import { roleKeyOf } from './contactRoles';
 import { calendarFromRows, seedCalendar } from './scheduleSync';
 import { blankRow, ensureJobRows } from './jobRecord';
+import { isHw } from './jobFormat';
 import { syncCells, unitsOf } from './clCells';
 import { tplItemScope } from './checklistScope';
 import { layoutFromStart } from '@/features/schedule-planner/domain/duration';
@@ -164,7 +165,8 @@ export function newProject(o: NewProjectInput, tplLookup?: (svc: string) => Temp
     packages,
     checklist: merged.checklist,
     /* REQ-049:Job Record 每种业务一行,Service Item 预填业务英文名,其余自己填 */
-    jobRecord: [...new Set(packages.map((pk) => pk.svc))].map((svc) => blankRow(svc)),
+    /* REQ-049:每种软件业务 1 行预填业务名;REQ-053:硬件业务是登记表卡,不加 4 栏行 */
+    jobRecord: [...new Set(packages.map((pk) => pk.svc))].filter((svc) => !isHw(svc)).map((svc) => blankRow(svc)),
   };
   syncCells(out, { by: '' });
   return out;
