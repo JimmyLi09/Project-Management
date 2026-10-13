@@ -14,16 +14,19 @@
 import { NextResponse } from 'next/server';
 import { canEditModule, canSeeModule, canSeeProject, identityOf } from '@/lib/permissions';
 import type { Project, User } from '@/lib/types';
+import { APPROACH_CLOSED_MSG, isClosedApproach } from '@/lib/approach';
 
 export const AV_DENY = '非你管理 / 参与的项目';
 
 /* 看得见就返回 null,看不见就返回可以直接 return 的 403。
    项目不存在时返回 null —— 各路由本来就有自己的「项目不存在」分支,
    这里不抢它的活,也不因此泄漏「这个 id 存在不存在」。 */
-export function denyUnlessVisible(user: User, project: Project | null | undefined): NextResponse | null {
+export function denyUnlessVisible(user: User, project: Project | null | undefined, write = false): NextResponse | null {
   if (!project) return null;
-  if (canSeeProject(identityOf(user), project)) return null;
-  return NextResponse.json({ error: AV_DENY }, { status: 403 });
+  if (!canSeeProject(identityOf(user), project)) return NextResponse.json({ error: AV_DENY }, { status: 403 });
+  /* REQ-054:已关闭的售前记录(未成交 / 已并入)只读 —— 写接口传 write = true */
+  if (write && isClosedApproach(project)) return NextResponse.json({ error: APPROACH_CLOSED_MSG }, { status: 400 });
+  return null;
 }
 
 /* REQ-051: 权限表里「AV 方案成本」对这个角色是「不可见」时,AV 的接口一律拒绝 ——

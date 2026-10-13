@@ -38,7 +38,7 @@ const SUBSYSTEMS = [
 ] as const;
 
 export default function ElvStudioView() {
-  const { me, projects, ledProjectId, setView } = useStore();
+  const { me, avProjects: projects, ledProjectId, setView } = useStore();
   const { t } = useLang();
   const [cfg, setCfg] = useState<ElvConfig>(DEFAULT);
   const [open, setOpen] = useState<string | null>(null);

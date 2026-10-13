@@ -65,6 +65,10 @@ const svcTerm = (k: string, lang: Lang) => {
   const v = SVC[key];
   return v ? (lang === 'zh' ? v.label : v.en) + (inst.length ? ' · ' + inst.join(' · ') : '') : k;
 };
+const AP_FIELD: Record<string, [string, string]> = {
+  client: ['客户', 'client'], delivery: ['交付日', 'delivery date'], quotationNo: ['报价号', 'quotation no.'],
+  location: ['地点', 'location'], notes: ['补充说明', 'notes'],
+};
 const JOB_FMT: Record<string, [string, string]> = { hw: ['硬件 · 登记表', 'hardware · register'], sw: ['软件 · 4 栏', 'software · 4 columns'] };
 
 const enumTerm = (map: Record<string, [string, string]>, v: string, lang: Lang) =>
@@ -96,6 +100,8 @@ const TRANSLATED: Record<string, (v: string, lang: Lang) => string> = {
   clTo: (v, l) => enumTerm(CL_STATUS, v, l),
   fmtFrom: (v, l) => enumTerm(JOB_FMT, v, l),   // REQ-053 Job Record 格式
   fmtTo: (v, l) => enumTerm(JOB_FMT, v, l),
+  svcList: (v, l) => v.split(',').filter(Boolean).map((k) => svcTerm(k, l)).join(l === 'zh' ? '、' : ', '),   // REQ-054
+  apField: (v, l) => enumTerm(AP_FIELD, v, l),
   /* AV-014:改的是哪个字段(cf),以及状态字段的两个取值。fv / tv 里放的多半是
      数字或自由文本,CASE_STATUS_TERMS 认不出来的原样填。
      槽位名别用 field —— sched.date / pkg.field / fin.edit 早就在用 {field},
@@ -125,6 +131,16 @@ export const LOG_MSG: Record<string, [string, string]> = {
   'proj.create': ['创建项目 (NO. {no})', 'Project created (NO. {no})'],
   'proj.createAv': ['立项询价创建项目', 'Project opened from an AV inquiry'],
   'proj.copy': ['复制自「{from}」({mode}) · NO. {no}', 'Copied from “{from}” ({mode}) · NO. {no}'],
+  /* REQ-054 售前接洽 */
+  'approach.convert': ['售前转为正式项目,编号 {no}', 'Approach converted to a formal project, NO. {no}'],
+  'approach.lost': ['售前标为未成交', 'Approach marked as lost'],
+  'approach.lostWhy': ['售前标为未成交:{reason}', 'Approach marked as lost: {reason}'],
+  'approach.reopen': ['售前记录重新打开', 'Approach reopened'],
+  'approach.merged': ['已并入 {target}', 'Merged into {target}'],
+  'approach.mergeIn': ['并入售前记录「{name}」({svcList})', 'Merged in approach “{name}” ({svcList})'],
+  'approach.mergeKeep': ['并入时{apField}以本项目为准;售前那份是「{value}」', 'On merge, kept this project’s {apField}; the approach had “{value}”'],
+  'approach.mergePack': ['并入的 {svc} 方案按售前那份的规则包 {pack}(本项目原来是 {was})', 'Merged {svc} design keeps the approach’s rule pack {pack} (this project had {was})'],
+  'approach.mig': ['上线迁移:去掉编号 {no},改为售前记录', 'Go-live migration: NO. {no} removed; now an approach'],
   'proj.rename': ['项目更名:「{from}」→「{to}」', 'Renamed: “{from}” → “{to}”'],
   'proj.client': ['客户:「{from}」→「{to}」', 'Client: “{from}” → “{to}”'],
   'proj.quotationNo': ['报价号 Quotation No.={value}', 'Quotation No. = {value}'],

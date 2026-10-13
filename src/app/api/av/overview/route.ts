@@ -6,6 +6,7 @@ import { canViewPrices, canViewQuotes, identityOf, visibleProjects } from '@/lib
 import { backfillInquiries, listPriceItems } from '@/server/avdb';
 import { projectFlow } from '@/server/avflow';
 import { localDay } from '@/lib/localDate';
+import { isApproach, isClosedApproach } from '@/lib/approach';
 
 /* ===== 0929 AV 工作台 =====
    AV 的每个接口都是「按项目取一份」。工作台要的是横着看一眼:几个项目卡在
@@ -26,13 +27,16 @@ export async function GET() {
 
   /* AV-017:阶段判定抽到 server/avflow.ts,步骤条和工作台用同一个函数 */
   const rows = visibleProjects(me, listProjects())
-    .filter((p) => !p.archived)
+    .filter((p) => !p.archived && !isClosedApproach(p))   // REQ-054:已关闭的售前记录不在工作台
     .map((p) => {
       const f = projectFlow(p, me);
       if (!f) return null;   // 不是 AV 项目
       return {
         id: p.id,
         name: p.name,
+        /* REQ-054:售前记录(没有编号)—— 工作台按「售前接洽 / 正式项目」筛选,行上标「售前」 */
+        approach: isApproach(p),
+        serial: p.serial || 0,
         client: p.client || '',
         delivery: p.delivery || '',
         lines: f.lines,

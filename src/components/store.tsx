@@ -13,6 +13,7 @@ import { DEFAULT_POINT_RULES, rulesAt, type PointRuleVersion, type PointRules } 
 import { DEFAULT_KPI_RULES, kpiRulesAt, type KpiRuleVersion, type KpiRules } from '@/lib/kpi';
 import { defaultPermTable, sanitizePermTable, setPermSource, type PermTable } from '@/lib/permTable';
 import { setJobFormatSource, type JobFormatMap } from '@/lib/jobFormat';
+import { formalProjects, isClosedApproach } from '@/lib/approach';
 import { useLang } from '@/lib/i18n';
 
 export interface View {
@@ -91,7 +92,14 @@ const AV_PROJECT_KEY = 'audax.avProject';
 interface Store {
   user: User;
   me: Identity;
+  /* REQ-054:projects = 正式项目(总览、待办、负载、统计、KPI、收款、汇报、项目档案…默认都只看它);
+     allProjects = 连售前记录(售前接洽)一起 —— 只有项目列表的三个标签、AV 各页、通讯录、打开单个项目用 */
   projects: Project[];
+  allProjects: Project[];
+  /* AV 各页的项目选择:正式项目 + 还开着的售前记录(已关闭的不在 AV 里) */
+  avProjects: Project[];
+  /* REQ-054:售前记录的「转为正式项目 / 并入 / 未成交 / 重新打开」;成功返回 true */
+  approachOp: (body: { op: 'convert' | 'merge' | 'lost' | 'reopen'; id: string; target?: string; quotationNo?: string; pm?: string; reason?: string }) => Promise<boolean>;
   /* REQ-051: users = 还能用的账号(指派下拉、团队负载、KPI 都用它,停用 / 已删除的不出现);
      allUsers = 全部(用户管理、历史记录认名字用) */
   users: User[];
@@ -358,6 +366,17 @@ export function StoreProvider({ user, permTable: initialPerm, children }: { user
     return null;
   }, []);
 
+  const approachOp = useCallback(async (body: { op: string; id: string; target?: string; quotationNo?: string; pm?: string; reason?: string }) => {
+    const res = await fetch('/api/approach', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    if (res.status === 401) { location.href = '/login'; return false; }
+    const d = await res.json().catch(() => ({}));
+    if (!res.ok) { alert(d.error || '操作失败'); if (d.stale) refresh(); return false; }
+    const got = [d.project, d.target].filter(Boolean) as Project[];
+    for (const x of got) if (typeof x.version === 'number') versionsRef.current[x.id] = x.version;
+    setProjects((list) => list.map((p) => got.find((x) => x.id === p.id) || p));
+    return true;
+  }, [refresh]);
+
   const removeProject = useCallback(async (pid: string) => {
     const res = await fetch(`/api/projects/${pid}`, { method: 'DELETE' });
     if (res.ok) {
@@ -369,10 +388,15 @@ export function StoreProvider({ user, permTable: initialPerm, children }: { user
     return false;
   }, []);
 
+  const formal = useMemo(() => formalProjects(projects), [projects]);
+  const avProjects = useMemo(() => projects.filter((p) => !isClosedApproach(p)), [projects]);
   const store = useMemo<Store>(() => ({
     user,
     me: { name: user.name, role: user.role },
-    projects,
+    projects: formal,
+    allProjects: projects,
+    avProjects,
+    approachOp,
     users,
     allUsers,
     permTable,
@@ -410,7 +434,7 @@ export function StoreProvider({ user, permTable: initialPerm, children }: { user
     kpiRuleVersions,
     kpiRules: kpiRuleVersions.length ? kpiRulesAt(kpiRuleVersions, Date.now()) : DEFAULT_KPI_RULES,
     refreshKpiRules,
-  }), [user, projects, users, allUsers, permTable, setPermTable, view, histIdx, setView, setLedProjectId, toast, dispatch, createProject, removeProject, refresh, refreshUsers, recordFields, refreshRecordFields, jobFormats, refreshJobFormats, avDerived, refreshAvDerived, pointRuleVersions, refreshPointRules, kpiRuleVersions, refreshKpiRules, ledProjectId, ledIngest, ledHandoff]);
+  }), [user, projects, formal, avProjects, approachOp, users, allUsers, permTable, setPermTable, view, histIdx, setView, setLedProjectId, toast, dispatch, createProject, removeProject, refresh, refreshUsers, recordFields, refreshRecordFields, jobFormats, refreshJobFormats, avDerived, refreshAvDerived, pointRuleVersions, refreshPointRules, kpiRuleVersions, refreshKpiRules, ledProjectId, ledIngest, ledHandoff]);
 
   return <Ctx.Provider value={store}>{children}</Ctx.Provider>;
 }

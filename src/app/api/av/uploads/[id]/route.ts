@@ -17,7 +17,7 @@ export async function DELETE(_req: NextRequest, { params }: Params) {
   const pid = Number.isInteger(id) ? uploadProject(id) : null;
   const project = pid ? getProject(pid) : null;
   if (!project) return NextResponse.json({ error: '留档不存在' }, { status: 404 });
-  const denied = denyUnlessVisible(user, project);
+  const denied = denyUnlessVisible(user, project, true);
   if (denied) return denied;
   if (!isFull(identityOf(user))) return NextResponse.json({ error: '只有 PD / BD 可以删除留档' }, { status: 403 });
   if (!(await removeFailedUpload(id, user.name))) return NextResponse.json({ error: '只有解析失败的留档可以移除' }, { status: 409 });

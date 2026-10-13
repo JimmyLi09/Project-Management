@@ -28,7 +28,7 @@ const PANES: Record<string, React.ComponentType> = {
 };
 
 export default function AvConfigView() {
-  const { view, setView, projects, ledProjectId } = useStore();
+  const { view, setView, avProjects: projects, ledProjectId } = useStore();
   const { t } = useLang();
 
   const project = projects.find((p) => p.id === ledProjectId);

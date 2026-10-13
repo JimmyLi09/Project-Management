@@ -64,6 +64,8 @@ export async function POST(req: NextRequest) {
     delivery,
   }, getEffectiveTemplate);
   p.log.unshift({ at: Date.now(), by: user.name, text: logZh('proj.createAv'), k: 'proj.createAv' });
+  /* REQ-054:AV 立项询价建的是售前记录 —— 不给编号(启动时补编号也跳过它),转为正式项目时才编号 */
+  p.approach = { status: 'open', source: 'av', createdAt: p.created };
 
   /* AV-020:投影 prj@1.0 发布以后新项目绑 1.0(发布记在数据库里) */
   const packs = Object.fromEntries(chosen.map((l) => [l.line, latestPackOf(l)])) as Partial<Record<BusinessLine, string>>;
@@ -109,7 +111,7 @@ export async function PATCH(req: NextRequest) {
   const body = (await req.json().catch(() => ({}))) as Record<string, unknown>;
   const project = getProject(String(body.projectId || ''));
   if (!project) return NextResponse.json({ error: '项目不存在' }, { status: 404 });
-  const denied = denyUnlessVisible(user, project);
+  const denied = denyUnlessVisible(user, project, true);
   if (denied) return denied;
   if (!canMeta(identityOf(user), project)) return NextResponse.json({ error: '你不能修改这个项目的立项信息' }, { status: 403 });
   if (project.archived) return NextResponse.json({ error: '项目已归档，不能修改' }, { status: 400 });

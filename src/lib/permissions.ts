@@ -8,6 +8,7 @@
 import type { Project, Role, ScheduleRow, User } from './types';
 import { ROLE_TERMS } from './terms';
 import { permAllows, type PermModule } from './permTable';
+import { isApproach, isClosedApproach } from './approach';
 
 /* ===== REQ-051:按角色的权限表 =====
    下面每个函数 = 权限表这一格放行(模块级:不可见 / 只读 / 可编辑)且原有业务规则放行。
@@ -30,8 +31,8 @@ export const isFull = (u: Identity) => u.role === 'director' || u.role === 'bd';
 /* REQ-043: 项目上被点名的工程师,对这个项目和 PM 一样能改生产内容
    —— 「每个项目单独一个 engineer」,他就是这个项目的人,不是路过帮忙勾一行的。
    老项目没有 engineer 字段,这一条对它们恒为假,行为一个字没变。 */
-export const canEdit = (u: Identity, p: Project) =>
-  isFull(u) || (p.owners || []).includes(u.name) || (p.perm || []).includes(u.name) || p.engineer === u.name;
+export const canEdit = (u: Identity, p: Project) => !isClosedApproach(p) &&   // REQ-054:已关闭的售前记录只读
+  (isFull(u) || (p.owners || []).includes(u.name) || (p.perm || []).includes(u.name) || p.engineer === u.name);
 
 export const canCommercial = (u: Identity, _p?: Project) => isFull(u) || u.role === 'sales';
 
@@ -53,12 +54,15 @@ export const isOnProject = (u: Identity, p: Project) =>
   || (p.perm || []).includes(u.name)
   || (p.packages || []).some((pk) => (pk.schedule || []).some((r) => r.assignee === u.name));
 
-export const canSeeProject = (u: Identity, p: Project) => !isScopedRole(u) || isOnProject(u, p);
+/* REQ-054:售前记录(还没转正式的)只给看得到「AV 方案成本」模块的人;REQ-043 的范围照旧 ——
+   PM / Engineer 只看自己负责的,售前记录没有负责人,所以他们看不到 */
+const approachOk = (u: Identity, p: Project) => !isApproach(p) || canSeeModule(u, 'avcost');
+export const canSeeProject = (u: Identity, p: Project) => (!isScopedRole(u) || isOnProject(u, p)) && approachOk(u, p);
 
 /* 服务端取项目、客户端过列表都走这一个口子 —— 列表 / 待办 / 统计 / 汇报 /
    档案 / 搜索全是从同一份 projects 派生出来的,所以在这里过一次就够了。 */
 export const visibleProjects = <T extends Project>(u: Identity, ps: T[]): T[] =>
-  (isScopedRole(u) ? ps.filter((p) => isOnProject(u, p)) : ps);
+  ps.filter((p) => (!isScopedRole(u) || isOnProject(u, p)) && approachOk(u, p));
 
 /* v2.2 §6/§7: Finance may edit invoice/payment status only (not production).
    PD/BD can view finance info but only Finance may change it (§7.2). */
@@ -68,12 +72,13 @@ export const canEditFinance = (u: Identity) => u.role === 'finance' && canEditMo
    信息或点「已开票」的人)。PM / Engineer 没有。 */
 export const canMarkInvoice = (u: Identity, _p?: Project) => (isFinance(u) || canCommercial(u)) && canEditModule(u, 'finance');
 
-export const canAssign = (u: Identity, _p?: Project) => isFull(u);
+/* REQ-054:售前记录不能指派 PM / 工程师、转交、归档(先转为正式项目) */
+export const canAssign = (u: Identity, p?: Project) => isFull(u) && !(p && isApproach(p));
 
 export const canStageTo = (u: Identity, p: Project, s: string) =>
   s === 'presales' || s === 'invoice' ? canCommercial(u, p) : canEdit(u, p);
 
-export const canMeta = (u: Identity, p: Project) => (canEdit(u, p) || canCommercial(u, p)) && canEditModule(u, 'projects');
+export const canMeta = (u: Identity, p: Project) => !isClosedApproach(p) && (canEdit(u, p) || canCommercial(u, p)) && canEditModule(u, 'projects');
 
 export const canRowEdit = (u: Identity, p: Project, row?: ScheduleRow) =>
   canEditModule(u, 'schedule') && (canEdit(u, p) || (u.role === 'member' && !!row && row.assignee === u.name));

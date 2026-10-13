@@ -18,11 +18,12 @@ import { LATEST_PRJ_PACK } from '@/av/core/prj/rulepack';
 import type { Project } from '@/lib/types';
 import { useStore } from '../store';
 import { useFlowRefresh } from './AvFlow';
+import { ApproachBanner } from './ApproachList';
 
 /* AV-016:选了项目进 01 = 编辑这个项目的立项信息(改了自动保存);
    「＋ 新建询价」(工作台右上角、本页右上角)= 空白表单立新项目 */
 export default function AvInquiryView() {
-  const { view, projects, ledProjectId } = useStore();
+  const { view, avProjects: projects, ledProjectId } = useStore();
   const project = view.sub === 'new' ? undefined
     : projects.find((p) => p.id === ledProjectId && !p.archived && projectLines(p.packages.map((k) => k.svc)).length > 0);
   return project ? <EditInquiry key={project.id} project={project} /> : <NewInquiry />;
@@ -264,6 +265,8 @@ function EditInquiry({ project }: { project: Project }) {
 
   return (
     <div>
+      {/* REQ-054:AV 立项询价建的是售前记录 —— 顶上一条「售前记录 · 未编号」和「转为正式项目」 */}
+      <ApproachBanner p={project} />
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12, fontSize: 12.5, flexWrap: 'wrap' }}>
         <span style={{ color: 'var(--text2)' }}>{may ? t('编辑立项信息，改了会自动保存。', 'Editing the inquiry — changes save automatically.') : t('只读：立项信息由项目负责人、销售或 PD / BD 修改。', 'Read-only: the project lead, Sales or PD / BD edit the inquiry.')}</span>
         {st.saving && <span style={{ color: 'var(--warning)' }} data-testid="inq-autosave">{t('● 正在保存…', '● Saving…')}</span>}

@@ -25,10 +25,12 @@ import JobRecordTab from './JobRecordTab';
 import ExportOverlay from './ExportOverlay';
 import TransferModal from '../TransferModal';
 import InvoiceModal from '../InvoiceModal';
+import { ApproachBanner } from './ApproachList';
+import { isApproach } from '@/lib/approach';
 import type { Project, ProjectContact } from '@/lib/types';
 
 export default function ProjectDetail() {
-  const { projects, view, setView, me, dispatch, removeProject, go, users, refresh, openProject, setToast, rulesFor } = useStore();
+  const { allProjects: projects, view, setView, me, dispatch, removeProject, go, users, refresh, openProject, setToast, rulesFor } = useStore();
   const { lang, t } = useLang();
   const who = useWho();
   const [exportScope, setExportScope] = useState<null | 'all' | 'schedule' | 'checklist'>(null);
@@ -68,6 +70,8 @@ export default function ProjectDetail() {
 
   return (
     <>
+      {/* REQ-054:售前记录 —— 未编号 / 已并入 / 未成交,和「转为正式项目」 */}
+      <ApproachBanner p={p} />
       {/* header card */}
       <div className="panel" style={{ padding: '22px 24px 0', marginBottom: 20 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 16, flexWrap: 'wrap', paddingBottom: 18 }}>
@@ -294,7 +298,7 @@ export default function ProjectDetail() {
       {/* REQ-022: 售后卡片对 PM 整块隐藏后,「接受交接」这个按钮也跟着没了。
           给被指派的 PM 一条独立的接单横幅 —— 他要的只是这一个动作,
           不需要为此把整套售后流程重新摆到他面前。 */}
-      <HandoverInbox p={p} />
+      {!isApproach(p) && <HandoverInbox p={p} />}
 
       {!ed && (
         <div className="panel" style={{ padding: '11px 18px', marginBottom: 20, fontSize: 12.5, color: 'var(--text2)', display: 'flex', gap: 8, alignItems: 'center' }}>
@@ -671,8 +675,15 @@ function OverviewTab({ p, onSchedule }: { p: Project; onSchedule: (pkg: number) 
   return (
     <div className="grid-2col" style={{ display: 'grid', gridTemplateColumns: '1.5fr 1fr', gap: 20, alignItems: 'start' }}>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 20, minWidth: 0 }}>
-        <InvoiceCard p={p} />
-        <WorkflowPanel p={p} users={users} me={me} dispatch={dispatch} />
+        {/* REQ-054:售前记录没有交接 / 完工 / 开票 —— 先转为正式项目 */}
+        {isApproach(p) ? (
+          <div className="panel" style={{ padding: '14px 20px', fontSize: 12.5, color: 'var(--text2)' }} data-testid="approach-workflow-note">
+            {t('售前记录:指派 PM、交接、完工、开 Invoice 请先「转为正式项目」。', 'Approach record: PM assignment, handover, completion and invoicing open once it is converted to a formal project.')}
+          </div>
+        ) : (<>
+          <InvoiceCard p={p} />
+          <WorkflowPanel p={p} users={users} me={me} dispatch={dispatch} />
+        </>)}
         <div className="panel clip">
           <div className="panel-head" style={{ padding: '16px 22px' }}>
             <span className="panel-title" style={{ fontSize: 15 }}>{t('服务包', 'Service Packages')}</span>
