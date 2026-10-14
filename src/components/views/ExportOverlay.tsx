@@ -8,7 +8,7 @@ import { useLang } from '@/lib/i18n';
 import { STAGES, stageIdx, SVC, svcColor } from '@/lib/templates';
 import type { ChecklistItem, Project, ServicePackage } from '@/lib/types';
 import { cellLabel, pkgLabel, type ClFields } from '@/lib/clCells';
-import { csvCell } from '@/lib/csv';
+import type { XBook, XCover, XHead, XRow, XSection, XSheet, XStyle, XTable } from '@/lib/exportXlsx';
 
 /* REQ-016: built-in fallback when no global note has been saved yet.
    0917 收尾:导出是发给客户的,一份文件不该中英各来一段 —— 拆成两份,
@@ -37,7 +37,7 @@ function resolveNotes(zhRaw: string | null, enRaw: string | null): { zh: string;
   return { zh, en };
 }
 
-type Cols = { owner: boolean; start: boolean; due: boolean; status: boolean; clStatus: boolean; clDate: boolean; clRemark: boolean; clSvcs: boolean };
+type Cols = { owner: boolean; start: boolean; due: boolean; status: boolean; clOwner: boolean; clStatus: boolean; clDate: boolean; clRemark: boolean; clSvcs: boolean };
 export type ExportScope = 'all' | 'schedule' | 'checklist';
 type Order = 'byPkg' | 'schedFirst' | 'clFirst';
 
@@ -52,7 +52,8 @@ export default function ExportOverlay({ p, onClose, scope = 'all', clScope = 'al
   const { lang: appLang } = useLang();
   const { me, setToast } = useStore();
   const [lang, setLang] = useState<'en' | 'zh'>(appLang);
-  const [cols, setCols] = useState<Cols>({ owner: true, start: true, due: true, status: true, clStatus: true, clDate: true, clRemark: true, clSvcs: true });
+  /* REQ-055:清单的「负责人」也有开关了 —— 默认和以前一样:有分类就出,无分类(REQ-014)不出 */
+  const [cols, setCols] = useState<Cols>({ owner: true, start: true, due: true, status: true, clOwner: !p.noCategories, clStatus: true, clDate: true, clRemark: true, clSvcs: true });
   const [sec, setSec] = useState<ExportScope>(scope);
   const [order, setOrder] = useState<Order>('byPkg');
   const [orient, setOrient] = useState<'portrait' | 'landscape'>('portrait');
@@ -74,6 +75,7 @@ export default function ExportOverlay({ p, onClose, scope = 'all', clScope = 'al
      改了中文英文就跟着变了。 */
   const [enOwn, setEnOwn] = useState(true);
   const [notesEdit, setNotesEdit] = useState(false);
+  const [xBusy, setXBusy] = useState(false); // REQ-055:Excel 生成中(第一次要先加载 exceljs)
   useEffect(() => {
     const get = (k: string) => fetch(`/api/settings?key=${k}`)
       .then((r) => (r.ok ? r.json() : null)).then((d) => (d && d.value) || null).catch(() => null);
@@ -107,7 +109,7 @@ export default function ExportOverlay({ p, onClose, scope = 'all', clScope = 'al
 
   const colToggle = (c: keyof Cols, zh: string, en: string) => (
     <label className="ex-col" key={c}>
-      <input type="checkbox" checked={cols[c]} onChange={() => setCols({ ...cols, [c]: !cols[c] })} /> {T(zh, en)}
+      <input type="checkbox" checked={cols[c]} onChange={() => setCols({ ...cols, [c]: !cols[c] })} data-testid={`ex-col-${c}`} /> {T(zh, en)}
     </label>
   );
   const svcName = (pkg: ServicePackage) => (SVC[pkg.svc] ? (L === 'zh' ? SVC[pkg.svc].label : SVC[pkg.svc].en) : pkg.svc);
@@ -124,8 +126,28 @@ export default function ExportOverlay({ p, onClose, scope = 'all', clScope = 'al
   @bottom-right { content: counter(page) " / " counter(pages); font-size: 9px; color: #999; }
 }`;
 
+  /* REQ-055:预览 / PDF 和 Excel 共用同一份表 —— 下面的 schedTable / clTable 出数据,
+     预览按它画 <table>,Excel(lib/exportXlsx)按它画工作表,两边不再各拼各的 */
+  const cssOf = (st?: XStyle): React.CSSProperties | undefined => (st ? {
+    textAlign: st.align, fontWeight: st.bold ? 700 : undefined, color: st.color, background: st.fill,
+    letterSpacing: st.spacing ? '.06em' : undefined, whiteSpace: st.pre ? 'pre-wrap' : undefined,
+  } : undefined);
+  const headRow = (heads: XHead[]) => (
+    <tr>{heads.map((h, i) => <th key={i} style={h.w ? { width: h.w } : undefined}>{h.v}</th>)}</tr>
+  );
+  /* 打印时表格是 table-layout: fixed,列宽只看第一行 —— 清单每组第一行是合并的分组标题,
+     表头上的宽度就不算了,PDF 里几栏一样宽。用 <colgroup> 把宽度直接给到列上,PDF 和预览一样。 */
+  const colGroup = (heads: XHead[]) => (
+    <colgroup>{heads.map((h, i) => <col key={i} style={h.w ? { width: h.w } : undefined} />)}</colgroup>
+  );
+  const bodyRow = (row: XRow, testid?: string) => (
+    <tr key={row.key} data-testid={testid}>
+      {row.cells.map((c, i) => <td key={i} colSpan={c.span} style={cssOf(c.st)}>{c.v}</td>)}
+    </tr>
+  );
+
   /* ── unified schedule block (per package) — follows the project's REQ-018 template ── */
-  function SchedBlock({ pkg, pi }: { pkg: ServicePackage; pi: number }) {
+  function schedTable(pkg: ServicePackage): { heading: string; color: string; table: XTable; scope: XTable | null } {
     const pd = planDates(pkg, pkgStart(p, pkg));
     const style = schedStyle;
     const sub = round1(pkg.schedule.filter((r) => !r.kind).reduce((n, r) => n + (Number(r.weeks) || 0), 0));
@@ -136,117 +158,110 @@ export default function ExportOverlay({ p, onClose, scope = 'all', clScope = 'al
       return 0;
     };
     const BAND_L: [string, string][] = [['制作 Production', 'Production'], ['交付 Delivery', 'Delivery'], ['交接 Handover', 'Handover']];
-    let lastBand = -1;
+    const task = (r: { task: string; taskEn: string }) => (L === 'zh' ? r.task : r.taskEn || r.task);
+    const key = (r: { id?: string }, i: number) => r.id || String(i);
+    let table: XTable;
+    if (style === 'dates') {
+      /* REQ-018 style B: date-based (Scale Model) */
+      let lastBand = -1;
+      table = {
+        heads: [
+          { v: T('日期区间 Date Range', 'Date Range'), w: '26%', xw: 26 },
+          { v: T('任务 Task', 'Task'), xw: 34 },
+          { v: T('时长', 'Duration'), w: '11%', xw: 12 },
+          { v: T('阶段', 'Stage'), w: '17%', xw: 18 },
+        ],
+        rows: pkg.schedule.map((r, i): XRow => {
+          if (r.kind === 'holiday') return { key: key(r, i), cells: [{ v: task(r).toUpperCase(), span: 4, st: { align: 'center', color: '#b23a32', bold: true, fill: '#fdecec', spacing: true } }] };
+          if (r.kind === 'milestone') return { key: key(r, i), cells: [{ v: `⚑ ${task(r)}${r.s ? ` · ${r.s}` : ''}`, span: 4, st: { color: '#b23a32', bold: true, fill: '#fff5f5' } }] };
+          const d = pd[i];
+          const b = band(r); const showBand = b !== lastBand; lastBand = b;
+          return { key: key(r, i), cells: [
+            { v: d ? `${fmtDate(d.start)} – ${fmtDate(d.end)}` : '—' },
+            { v: `${task(r)}${r.freeze ? ' ★' : ''}` },
+            { v: r.weeks ? T(`${r.weeks} 周`, `${r.weeks}w`) : '—' },
+            { v: showBand ? `${b + 1}. ${L === 'zh' ? BAND_L[b][0] : BAND_L[b][1]}` : '' },
+          ] };
+        }),
+      };
+    } else if (style === 'weeks') {
+      /* REQ-018 style A: per-service weeks table + subtotal
+         0917 变更单:导出的生产排期表去掉最左 # 序号列 —— 顺序仍按排期先后,只是不再显示这个系统序号。 */
+      table = {
+        heads: [
+          { v: T('阶段 / 任务', 'Phase / Task'), xw: 34 },
+          { v: T('日期', 'Dates'), w: '26%', xw: 26 },
+          { v: T('时长', 'Duration'), w: '13%', xw: 14 },
+        ],
+        rows: [
+          ...pkg.schedule.flatMap((r, i): XRow[] => {
+            if (r.kind) return [];
+            const d = pd[i];
+            return [{ key: key(r, i), cells: [
+              { v: `${task(r)}${r.freeze ? ' ★' : ''}` },
+              { v: d ? `${fmtDate(d.start)} – ${fmtDate(d.end)}` : '—' },
+              { v: r.weeks ? T(`${r.weeks} 周`, `${r.weeks} week${r.weeks > 1 ? 's' : ''}`) : '—' },
+            ] }];
+          }),
+          /* 去掉 # 列后本表 3 列,小计跨前 2 列 */
+          { key: 'sub', cells: [
+            { v: T('小计 Subtotal', 'Subtotal'), span: 2, st: { align: 'right', bold: true } },
+            { v: T(`${sub} 周`, `${sub} weeks`), st: { bold: true } },
+          ] },
+        ],
+      };
+    } else {
+      /* 0917 变更单:同上,去掉 # 序号列;其余栏位跟导出时勾的排期栏位走 */
+      const stt = (s: string) => ({
+        todo: T('未开始', 'Not started'), wip: T('进行中', 'In progress'),
+        done: T('已完成', 'Done'), block: T('受阻', 'Blocked'),
+      } as Record<string, string>)[s] || '';
+      table = {
+        heads: [
+          { v: T('阶段/任务', 'Phase / Task'), xw: 34 },
+          ...(cols.owner ? [{ v: T('负责', 'Owner'), w: '14%', xw: 16 }] : []),
+          ...(cols.start ? [{ v: T('开始', 'Start'), w: '11%', xw: 14 }] : []),
+          ...(cols.due ? [{ v: T('到期', 'Due'), w: '11%', xw: 14 }] : []),
+          ...(cols.status ? [{ v: T('状态', 'Status'), w: '10%', xw: 14 }] : []),
+        ],
+        rows: pkg.schedule.map((r, i): XRow => {
+          const d = pd[i];
+          return { key: key(r, i), cells: [
+            { v: `${task(r)}${r.freeze ? ' ★' : ''}${r.custom ? ` (${T('自定义', 'custom')})` : ''}` },
+            ...(cols.owner ? [{ v: r.assignee || r.owner || '' }] : []),
+            ...(cols.start ? [{ v: d ? fmtDate(d.start) : '—' }] : []),
+            ...(cols.due ? [{ v: d ? fmtDate(d.end) : '—' }] : []),
+            ...(cols.status ? [{ v: stt(r.status) }] : []),
+          ] };
+        }),
+      };
+    }
+    const scope: XTable | null = pkg.scopeItems && pkg.scopeItems.length > 0 ? {
+      heads: [
+        { v: T('服务项', 'Service item'), w: '34%', xw: 34 },
+        { v: T('数量', 'Detail'), w: '16%', xw: 16 },
+        { v: T('特别说明', 'Special notes'), xw: 30 },
+      ],
+      rows: pkg.scopeItems.map((s, si) => ({ key: String(si), cells: [{ v: s.item || '—' }, { v: s.qty || '—' }, { v: s.note || '—' }] })),
+    } : null;
+    return { heading: `${svcName(pkg)} — ${T('生产排期', 'Production Schedule')}`, color: svcColor(pkg.svc), table, scope };
+  }
+  const scopeTitle = T('服务内容 / 交付清单', 'Service Scope / Deliverables');
+  function SchedBlock({ pkg }: { pkg: ServicePackage }) {
+    const { heading, color, table, scope } = schedTable(pkg);
     return (
       <React.Fragment>
-        <h2 style={{ color: svcColor(pkg.svc) }}>{svcName(pkg)} — {T('生产排期', 'Production Schedule')}</h2>
-        {/* REQ-018 style B: date-based (Scale Model) */}
-        {style === 'dates' ? (
-          <table className="t-fix">
-            <thead>
-              <tr>
-                <th style={{ width: '26%' }}>{T('日期区间 Date Range', 'Date Range')}</th>
-                <th>{T('任务 Task', 'Task')}</th>
-                <th style={{ width: '11%' }}>{T('时长', 'Duration')}</th>
-                <th style={{ width: '17%' }}>{T('阶段', 'Stage')}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {pkg.schedule.map((r, i) => {
-                if (r.kind === 'holiday') return (
-                  <tr key={r.id || i}><td colSpan={4} style={{ textAlign: 'center', color: '#b23a32', fontWeight: 700, background: '#fdecec', letterSpacing: '.06em' }}>{(L === 'zh' ? r.task : r.taskEn || r.task).toUpperCase()}</td></tr>
-                );
-                if (r.kind === 'milestone') return (
-                  <tr key={r.id || i}><td colSpan={4} style={{ color: '#b23a32', fontWeight: 700, background: '#fff5f5' }}>⚑ {L === 'zh' ? r.task : r.taskEn || r.task}{r.s ? ` · ${r.s}` : ''}</td></tr>
-                );
-                const d = pd[i];
-                const b = band(r); const showBand = b !== lastBand; lastBand = b;
-                return (
-                  <tr key={r.id || i}>
-                    <td>{d ? `${fmtDate(d.start)} – ${fmtDate(d.end)}` : '—'}</td>
-                    <td>{(L === 'zh' ? r.task : r.taskEn || r.task)}{r.freeze ? ' ★' : ''}</td>
-                    <td>{r.weeks ? T(`${r.weeks} 周`, `${r.weeks}w`) : '—'}</td>
-                    <td>{showBand ? `${b + 1}. ${L === 'zh' ? BAND_L[b][0] : BAND_L[b][1]}` : ''}</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        ) : style === 'weeks' ? (
-          /* REQ-018 style A: per-service weeks table + subtotal */
-          <table className="t-fix">
-            <thead>
-              <tr>
-                {/* 0917 变更单:导出的生产排期表去掉最左 # 序号列 ——
-                    顺序仍按排期先后,只是不再显示这个系统序号。 */}
-                <th>{T('阶段 / 任务', 'Phase / Task')}</th>
-                <th style={{ width: '26%' }}>{T('日期', 'Dates')}</th>
-                <th style={{ width: '13%' }}>{T('时长', 'Duration')}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {pkg.schedule.map((r, i) => {
-                if (r.kind) return null;
-                const d = pd[i];
-                return (
-                  <tr key={r.id || i}>
-                    <td>{(L === 'zh' ? r.task : r.taskEn || r.task)}{r.freeze ? ' ★' : ''}</td>
-                    <td>{d ? `${fmtDate(d.start)} – ${fmtDate(d.end)}` : '—'}</td>
-                    <td>{r.weeks ? T(`${r.weeks} 周`, `${r.weeks} week${r.weeks > 1 ? 's' : ''}`) : '—'}</td>
-                  </tr>
-                );
-              })}
-              <tr>
-                {/* 去掉 # 列后本表 3 列,小计跨前 2 列 */}
-                <td colSpan={2} style={{ textAlign: 'right', fontWeight: 700 }}>{T('小计 Subtotal', 'Subtotal')}</td>
-                <td style={{ fontWeight: 700 }}>{T(`${sub} 周`, `${sub} weeks`)}</td>
-              </tr>
-            </tbody>
-          </table>
-        ) : (
+        <h2 style={{ color }}>{heading}</h2>
         <table className="t-fix">
-          <thead>
-            <tr>
-              {/* 0917 变更单:同上,去掉 # 序号列 */}
-              <th>{T('阶段/任务', 'Phase / Task')}</th>
-              {cols.owner && <th style={{ width: '14%' }}>{T('负责', 'Owner')}</th>}
-              {cols.start && <th style={{ width: '11%' }}>{T('开始', 'Start')}</th>}
-              {cols.due && <th style={{ width: '11%' }}>{T('到期', 'Due')}</th>}
-              {cols.status && <th style={{ width: '10%' }}>{T('状态', 'Status')}</th>}
-            </tr>
-          </thead>
-          <tbody>
-            {pkg.schedule.map((r, i) => {
-              const d = pd[i];
-              const stt = {
-                todo: T('未开始', 'Not started'), wip: T('进行中', 'In progress'),
-                done: T('已完成', 'Done'), block: T('受阻', 'Blocked'),
-              }[r.status];
-              return (
-                <tr key={r.id || i}>
-                  <td>{(L === 'zh' ? r.task : r.taskEn || r.task)}{r.freeze ? ' ★' : ''}{r.custom ? ` (${T('自定义', 'custom')})` : ''}</td>
-                  {cols.owner && <td>{r.assignee || r.owner}</td>}
-                  {cols.start && <td>{d ? fmtDate(d.start) : '—'}</td>}
-                  {cols.due && <td>{d ? fmtDate(d.end) : '—'}</td>}
-                  {cols.status && <td>{stt}</td>}
-                </tr>
-              );
-            })}
-          </tbody>
+          <thead>{headRow(table.heads)}</thead>
+          <tbody>{table.rows.map((r) => bodyRow(r))}</tbody>
         </table>
-        )}
-        {(pkg.scopeItems && pkg.scopeItems.length > 0) && (
+        {scope && (
           <>
-            <h3 style={{ fontSize: 12.5, margin: '12px 0 6px' }}>{T('服务内容 / 交付清单', 'Service Scope / Deliverables')}</h3>
+            <h3 style={{ fontSize: 12.5, margin: '12px 0 6px' }}>{scopeTitle}</h3>
             <table className="t-fix">
-              <thead>
-                <tr><th style={{ width: '34%' }}>{T('服务项', 'Service item')}</th><th style={{ width: '16%' }}>{T('数量', 'Detail')}</th><th>{T('特别说明', 'Special notes')}</th></tr>
-              </thead>
-              <tbody>
-                {pkg.scopeItems.map((s, si) => (
-                  <tr key={si}><td>{s.item || '—'}</td><td>{s.qty || '—'}</td><td>{s.note || '—'}</td></tr>
-                ))}
-              </tbody>
+              <thead>{headRow(scope.heads)}</thead>
+              <tbody>{scope.rows.map((r) => bodyRow(r))}</tbody>
             </table>
           </>
         )}
@@ -266,14 +281,14 @@ export default function ExportOverlay({ p, onClose, scope = 'all', clScope = 'al
   const selSvcs = [...new Set(selPkgs.map((x) => x.pkg.svc))];
   const selIds = new Set(selPkgs.map((x) => x.pkg.id).filter(Boolean) as string[]);
   const allSvcs = [...new Set(p.packages.map((x) => x.svc))];
-  type ClRow = { key: string; name: string; svcs: string; owner: string; status: string; received: string; date: string; remark: string };
+  type ClRow = { key: string; name: string; svcs: string; owner: string; status: string; pending: boolean; received: string; date: string; remark: string };
   function clRows(): { g: { group: string; groupEn: string }; rows: ClRow[] }[] {
     /* REQ-013: blank items are exported too (kept Pending) unless the user
        unticks 「含空白项」. N/A rows are always dropped. */
     const keepC = (c: ClFields) => c.status !== 'na' && (blanks || !!(c.date || c.remark || c.received) || c.status !== 'pending');
     const name = (it: ChecklistItem) => (L === 'zh' ? it.zh : it.en || it.zh);
     const rowOf = (it: ChecklistItem, c: ClFields, key: string, nm: string, svcs: string): ClRow => ({
-      key, name: nm, svcs, owner: c.owner || '', status: clStat[c.status] || c.status, received: c.received || '', date: c.date || '', remark: c.remark || '',
+      key, name: nm, svcs, owner: c.owner || '', status: clStat[c.status] || c.status, pending: c.status === 'pending', received: c.received || '', date: c.date || '', remark: c.remark || '',
     });
     const one = (it: ChecklistItem): ClRow[] => {
       if (!(it.svcs || allSvcs).some((sv) => selSvcs.includes(sv))) return [];
@@ -303,75 +318,133 @@ export default function ExportOverlay({ p, onClose, scope = 'all', clScope = 'al
     document.title = fileBase;
     return () => { document.title = was; };
   }, [fileBase]);
-  function downloadClCsv() {
-    const q = csvCell;   // 开头是 = + - @ 的不让 Excel 当公式(电话「+65 …」、备注「- …」)
-    const head = [T('分类', 'Section'), T('信息项', 'Item'), T('适用业务', 'Applies to'), T('负责人', 'Owner'), T('状态', 'Status'), T('收到内容', 'Received'), T('收到日期', 'Date received'), T('备注', 'Remark')];
-    const body = clRows().flatMap(({ g, rows }) => rows.map((r) => [L === 'zh' ? g.group : g.groupEn || g.group, r.name, r.svcs, r.owner, r.status, r.received, r.date, r.remark]));
-    const csv = '\ufeff' + [head, ...body].map((r) => r.map(q).join(',')).join('\r\n');
-    const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8;' }));
-    const a = document.createElement('a');
-    a.href = url; a.download = `${fileBase}.csv`;
-    document.body.appendChild(a); a.click(); a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
-  }
-  function ClBlock() {
+  /* 清单这一块的表:栏位跟导出时勾的走(REQ-055 起「负责人」也有开关),
+     clSpan(分组标题合并多宽)就是表头的栏数,自动同步 */
+  function clTable(): { heading: string; color?: string; flat: boolean; heads: XHead[]; tables: XTable[]; empty: boolean } {
     const partial = selSvcs.length < allSvcs.length || selIds.size < p.packages.length;
     const flat = !!p.noCategories; // REQ-014: export follows the chosen mode
-    const showOwner = !flat;
+    const showOwner = cols.clOwner;
     const showSvcs = cols.clSvcs && (allSvcs.length > 1 || p.packages.length > 1);
-    const clSpan = 1 + (showSvcs ? 1 : 0) + (showOwner ? 1 : 0) + (cols.clStatus ? 1 : 0) + (cols.clDate ? 1 : 0) + (cols.clRemark ? 1 : 0);
+    const heads: XHead[] = [
+      { v: T('信息项', 'Item'), xw: 58 },
+      ...(showSvcs ? [{ v: T('适用服务', 'Applies to'), w: '14%', xw: 18 }] : []),
+      ...(showOwner ? [{ v: T('负责人', 'Owner'), w: '12%', xw: 16 }] : []),
+      ...(cols.clStatus ? [{ v: T('状态 / 收到内容', 'Status / Received'), w: '22%', xw: 26 }] : []),
+      ...(cols.clDate ? [{ v: T('收到日期', 'Date received'), w: '12%', xw: 14 }] : []),
+      ...(cols.clRemark ? [{ v: T('备注', 'Remark'), w: '20%', xw: 30 }] : []),
+    ];
+    const row = (r: ClRow): XRow => ({ key: r.key, cells: [
+      { v: r.name },
+      ...(showSvcs ? [{ v: r.svcs }] : []),
+      ...(showOwner ? [{ v: r.owner || '—' }] : []),
+      ...(cols.clStatus ? [{ v: `${r.status}${r.received ? ` — ${r.received}` : ''}`, st: r.pending ? { fill: '#fffbeb' } : undefined }] : []),
+      ...(cols.clDate ? [{ v: r.date || '—' }] : []),
+      ...(cols.clRemark ? [{ v: r.remark || '—', st: { pre: true } }] : []),
+    ] });
     const groups = clRows();
-    const head = (
-      <tr>
-        <th>{T('信息项', 'Item')}</th>
-        {showSvcs && <th style={{ width: '14%' }}>{T('适用服务', 'Applies to')}</th>}
-        {showOwner && <th style={{ width: '12%' }}>{T('负责人', 'Owner')}</th>}
-        {cols.clStatus && <th style={{ width: '22%' }}>{T('状态 / 收到内容', 'Status / Received')}</th>}
-        {cols.clDate && <th style={{ width: '12%' }}>{T('收到日期', 'Date received')}</th>}
-        {cols.clRemark && <th style={{ width: '20%' }}>{T('备注', 'Remark')}</th>}
-      </tr>
-    );
-    const row = (r: ClRow) => (
-      <tr key={r.key} data-testid="ex-cl-row">
-        <td>{r.name}</td>
-        {showSvcs && <td>{r.svcs}</td>}
-        {showOwner && <td>{r.owner || '—'}</td>}
-        {cols.clStatus && (
-          <td style={r.status === clStat.pending ? { background: '#fffbeb' } : undefined}>
-            {r.status}{r.received ? ` — ${r.received}` : ''}
-          </td>
-        )}
-        {cols.clDate && <td>{r.date || '—'}</td>}
-        {cols.clRemark && <td style={{ whiteSpace: 'pre-wrap' }}>{r.remark || '—'}</td>}
-      </tr>
-    );
+    const empty = groups.length === 0 || groups.every((x) => !x.rows.length);
+    const tables: XTable[] = empty ? [] : flat
+      ? [{ heads, rows: groups[0].rows.map(row) }]
+      : groups.map(({ g, rows }) => ({ group: (L === 'zh' ? g.group : g.groupEn || g.group) || '', heads, rows: rows.map(row) }));
+    const heading = `${T('信息清单', 'Information Checklist')}${partial ? ` — ${[...new Set(selPkgs.map(({ pkg }) => (p.packages.filter((x) => x.svc === pkg.svc).length > 1 ? pkgLabel(p, pkg, L) : svcLabel(pkg.svc))))].join(L === 'zh' ? '、' : ', ')}` : ''}`;
+    return { heading, color: selSvcs.length === 1 ? svcColor(selSvcs[0]) : undefined, flat, heads, tables, empty };
+  }
+  const clEmptyTxt = T('暂无信息项。', 'No checklist items.');
+  function ClBlock() {
+    const { heading, color, flat, heads, tables, empty } = clTable();
     return (
       <React.Fragment>
-        <h2 style={{ color: selSvcs.length === 1 ? svcColor(selSvcs[0]) : undefined }}>
-          {T('信息清单', 'Information Checklist')}{partial ? ` — ${[...new Set(selPkgs.map(({ pkg }) => (p.packages.filter((x) => x.svc === pkg.svc).length > 1 ? pkgLabel(p, pkg, L) : svcLabel(pkg.svc))))].join(L === 'zh' ? '、' : ', ')}` : ''}
-        </h2>
-        {groups.length === 0 || groups.every((x) => !x.rows.length) ? (
-          <p style={{ color: '#888', fontSize: 12 }}>{T('暂无信息项。', 'No checklist items.')}</p>
+        <h2 style={{ color }}>{heading}</h2>
+        {empty ? (
+          <p style={{ color: '#888', fontSize: 12 }}>{clEmptyTxt}</p>
         ) : flat ? (
-          <table className="t-fix"><thead>{head}</thead><tbody>{groups[0].rows.map(row)}</tbody></table>
-        ) : groups.map(({ g, rows }, gi) => (
+          <table className="t-fix"><thead>{headRow(heads)}</thead><tbody>{tables[0].rows.map((r) => bodyRow(r, 'ex-cl-row'))}</tbody></table>
+        ) : tables.map((t, gi) => (
           <table key={gi} className="t-fix">
+            {colGroup(heads)}
             <thead>
-              <tr className="grp-h"><td colSpan={clSpan}>{L === 'zh' ? g.group : g.groupEn}</td></tr>
-              {head}
+              <tr className="grp-h"><td colSpan={heads.length}>{t.group}</td></tr>
+              {headRow(heads)}
             </thead>
-            <tbody>{rows.map(row)}</tbody>
+            <tbody>{t.rows.map((r) => bodyRow(r, 'ex-cl-row'))}</tbody>
           </table>
         ))}
       </React.Fragment>
     );
   }
 
+  /* 文档开头那两行(预览的 h1 / 副标题,Excel 每张表的第 1-2 行)和封面 —— 两边共用 */
+  const titleOf = (label: string) => `${projCode(p) ? projCode(p) + ' · ' : ''}${p.name}${label ? ` — ${label}` : ''}`;
+  const stageTxt = L === 'zh' ? STAGES[stageIdx(projStage(p))][1] : STAGES[stageIdx(projStage(p))][2];
+  const subTxt = `${T('客户', 'Client')}: ${p.client || '—'} · ${T('服务', 'Services')}: ${svcNames} · ${T('阶段', 'Stage')}: ${stageTxt}`;
+  const coverMeta: [string, string][][] = [
+    [[T('项目编号', 'Project no.'), projCode(p) || '—'], [T('客户', 'Client'), p.client || '—']],
+    [[T('交付日期', 'Delivery date'), p.delivery ? fmtDate(parseISO(p.delivery)) : '—'], [T('导出日期', 'Exported'), fmtDate(new Date())]],
+    [[T('服务', 'Services'), svcNames], ['PM', (p.owners || []).join(' / ') || '—']],
+  ];
+  /* REQ-018 style A: overall Sum across the exported services */
+  const sumWeeks = round1(selPkgs.reduce((n, x) => n + x.pkg.schedule.filter((r) => !r.kind).reduce((m, r) => m + (Number(r.weeks) || 0), 0), 0));
+  const sumLabel = T('Sum · 合计 Overall duration', 'Sum · Overall duration');
+  const sumVal = T(`${sumWeeks} 周`, `${sumWeeks} weeks`);
+
+  /* REQ-055:Excel 和预览是同一份表。清单固定在第一张、排期第二张(「清单在前 / 排期在前」
+     只管 PDF);只出排期就只有排期一张。封面、公司说明放在第一张上。 */
+  function xlsxBook(): XBook {
+    const coverX: XCover | undefined = cover ? {
+      brand: 'AUDAX', kind: scopeLabel, code: projCode(p) || '', name: p.name, client: p.client || '—', meta: coverMeta,
+    } : undefined;
+    const notesX = notesOn && notes.trim() ? { title: T('公司说明', 'Notes'), text: notes } : undefined;
+    const sheets: XSheet[] = [];
+    if (showCl) {
+      const c = clTable();
+      sheets.push({
+        name: T('清单', 'Checklist'), title: titleOf(T('信息清单', 'Checklist')), sub: subTxt,
+        sections: [{ heading: c.heading, color: c.color, level: 2, tables: c.tables, empty: c.empty ? clEmptyTxt : undefined }],
+      });
+    }
+    if (showSched) {
+      const secs: XSection[] = selPkgs.flatMap(({ pkg }) => {
+        const s = schedTable(pkg);
+        return [
+          { heading: s.heading, color: s.color, level: 2 as const, tables: [s.table] },
+          ...(s.scope ? [{ heading: scopeTitle, level: 3 as const, tables: [s.scope] }] : []),
+        ];
+      });
+      if (schedStyle === 'weeks' && secs.length) secs.push({ tight: true, tables: [{ heads: [], rows: [{ key: 'sum', cells: [
+        { v: sumLabel, span: 2, st: { align: 'right', bold: true, fill: '#f0f2f5' } }, { v: sumVal, st: { bold: true, fill: '#f0f2f5' } },
+      ] }] }] });
+      sheets.push({ name: T('排期', 'Schedule'), title: titleOf(T('生产排期', 'Schedule')), sub: subTxt, sections: secs });
+    }
+    if (sheets[0]) { sheets[0].cover = coverX; sheets[0].notes = notesX; }
+    return { sheets, orient, header: `${projCode(p) ? projCode(p) + ' · ' : ''}${p.name}` };
+  }
+  async function downloadXlsx() {
+    if (xBusy || !selPkgs.length) return;
+    setXBusy(true);
+    try {
+      /* 点了才加载 exceljs(体积不小),不进首屏 */
+      const [mod, { buildXlsx }] = await Promise.all([import('exceljs'), import('@/lib/exportXlsx')]);
+      const m = mod as unknown as { default?: typeof mod };
+      const X = m.default && 'Workbook' in m.default ? m.default : mod;
+      const buf = await buildXlsx(X, xlsxBook());
+      const url = URL.createObjectURL(new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
+      const a = document.createElement('a');
+      a.href = url; a.download = `${fileBase}.xlsx`;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (e) {
+      console.error(e);
+      setToast(T('Excel 生成失败,请再试一次', 'Could not create the Excel file — please try again'));
+    } finally {
+      setXBusy(false);
+    }
+  }
+
   /* REQ-015: assemble blocks per ordering preset */
   const blocks: React.ReactNode[] = [];
   /* REQ-044: 清单项目一张 —— 不再按服务包穿插;「清单在前」放最前,其余放在排期后面 */
   if (order === 'clFirst' && showCl && selPkgs.length) blocks.push(<ClBlock key="cl" />);
-  if (showSched) selPkgs.forEach(({ pkg, pi }) => blocks.push(<SchedBlock key={`s${pi}`} pkg={pkg} pi={pi} />));
+  if (showSched) selPkgs.forEach(({ pkg, pi }) => blocks.push(<SchedBlock key={`s${pi}`} pkg={pkg} />));
   if (order !== 'clFirst' && showCl && selPkgs.length) blocks.push(<ClBlock key="cl" />);
 
   return (
@@ -383,7 +456,10 @@ export default function ExportOverlay({ p, onClose, scope = 'all', clScope = 'al
         <button className="btn-line sm" onClick={() => setOrient(orient === 'portrait' ? 'landscape' : 'portrait')}>
           {orient === 'portrait' ? T('A4 纵向', 'A4 Portrait') : T('A4 横向', 'A4 Landscape')} ⇄
         </button>
-        {showCl && <button className="btn-line sm" onClick={downloadClCsv} disabled={!selPkgs.length} data-testid="ex-cl-csv" title={`${fileBase}.csv`}>{T('清单下载 Excel (CSV)', 'Checklist as Excel (CSV)')}</button>}
+        {/* REQ-055:.xlsx,和预览一样;只出排期时按钮照样在,只出排期那一张 */}
+        <button className="btn-line sm" onClick={downloadXlsx} disabled={!selPkgs.length || xBusy} data-testid="ex-xlsx" title={`${fileBase}.xlsx`}>
+          {xBusy ? T('生成中…', 'Preparing…') : showCl ? T('清单下载 Excel', 'Checklist as Excel') : T('下载 Excel', 'Download Excel')}
+        </button>
         <button className="btn-navy sm" onClick={() => window.print()} title={`${fileBase}.pdf`}>{T('打印 / 另存 PDF', 'Print / Save PDF')}</button>
         <button className="btn-line sm" onClick={onClose}>{T('关闭', 'Close')}</button>
       </div>
@@ -393,14 +469,14 @@ export default function ExportOverlay({ p, onClose, scope = 'all', clScope = 'al
         {/* REQ-021 */}
         <label style={{ display: 'inline-flex', gap: 6, alignItems: 'center', cursor: 'pointer' }}
           title={T('第一页放项目封面(编号 / 名称 / 客户 / 日期)', 'Put a project cover on page 1 (no. / name / client / dates)')}>
-          <input type="checkbox" checked={cover} onChange={(e) => setCover(e.target.checked)} />
+          <input type="checkbox" checked={cover} onChange={(e) => setCover(e.target.checked)} data-testid="ex-cover" />
           {T('封面页', 'Cover page')}
         </label>
         <span className="ex-grp">
           {T('内容', 'Content')}:
-          <label className="ex-col"><input type="radio" name="exsec" checked={sec === 'all'} onChange={() => setSec('all')} /> {T('排期+清单', 'Schedule + Checklist')}</label>
-          <label className="ex-col"><input type="radio" name="exsec" checked={sec === 'schedule'} onChange={() => setSec('schedule')} /> {T('仅排期', 'Schedule only')}</label>
-          <label className="ex-col"><input type="radio" name="exsec" checked={sec === 'checklist'} onChange={() => setSec('checklist')} /> {T('仅清单', 'Checklist only')}</label>
+          <label className="ex-col"><input type="radio" name="exsec" checked={sec === 'all'} onChange={() => setSec('all')} data-testid="ex-sec-all" /> {T('排期+清单', 'Schedule + Checklist')}</label>
+          <label className="ex-col"><input type="radio" name="exsec" checked={sec === 'schedule'} onChange={() => setSec('schedule')} data-testid="ex-sec-schedule" /> {T('仅排期', 'Schedule only')}</label>
+          <label className="ex-col"><input type="radio" name="exsec" checked={sec === 'checklist'} onChange={() => setSec('checklist')} data-testid="ex-sec-checklist" /> {T('仅清单', 'Checklist only')}</label>
         </span>
         {/* REQ-050: 业务选择总是显示;同一业务两份时可以分别勾「LED-1 / LED-2」 */}
         <span className="ex-grp" data-testid="ex-svcs">
@@ -425,7 +501,7 @@ export default function ExportOverlay({ p, onClose, scope = 'all', clScope = 'al
         {multi && showSched && showCl && (
           <span className="ex-grp">
             {T('排列', 'Order')}:
-            <select className="in sm" value={order} onChange={(e) => setOrder(e.target.value as Order)} style={{ width: 'auto', padding: '3px 6px' }}>
+            <select className="in sm" value={order} onChange={(e) => setOrder(e.target.value as Order)} style={{ width: 'auto', padding: '3px 6px' }} data-testid="ex-order">
               {/* REQ-044: 清单是项目一张,不再按服务穿插 —— 只剩谁在前 */}
               <option value="byPkg">{T('排期在前,清单在后', 'Schedules, then checklist')}</option>
               <option value="clFirst">{T('清单在前', 'Checklist first')}</option>
@@ -435,14 +511,14 @@ export default function ExportOverlay({ p, onClose, scope = 'all', clScope = 'al
         {T('栏位', 'Columns')}:
         {showSched && <span className="ex-grp">{T('排期', 'Schedule')} {colToggle('owner', '负责', 'Owner')}{colToggle('start', '开始', 'Start')}{colToggle('due', '到期', 'Due')}{colToggle('status', '状态', 'Status')}</span>}
         {showCl && (
-          <span className="ex-grp">{T('清单', 'Checklist')} {colToggle('clStatus', '状态', 'Status')}{colToggle('clDate', '日期', 'Date')}{colToggle('clRemark', '备注', 'Remark')}{(p.packages.length > 1) && colToggle('clSvcs', '适用服务', 'Applies to')}
+          <span className="ex-grp">{T('清单', 'Checklist')} {colToggle('clOwner', '负责人', 'Owner')}{colToggle('clStatus', '状态', 'Status')}{colToggle('clDate', '日期', 'Date')}{colToggle('clRemark', '备注', 'Remark')}{(p.packages.length > 1) && colToggle('clSvcs', '适用服务', 'Applies to')}
             <label className="ex-col" title={T('未收到的空白项也一并导出(状态 Pending)', 'Export blank items too (kept Pending)')}>
-              <input type="checkbox" checked={blanks} onChange={() => setBlanks(!blanks)} /> {T('含空白项', 'Include blanks')}
+              <input type="checkbox" checked={blanks} onChange={() => setBlanks(!blanks)} data-testid="ex-blanks" /> {T('含空白项', 'Include blanks')}
             </label>
           </span>
         )}
         <span className="ex-grp">
-          <label className="ex-col"><input type="checkbox" checked={notesOn} onChange={() => setNotesOn(!notesOn)} /> {T('公司说明', 'Company notes')}</label>
+          <label className="ex-col"><input type="checkbox" checked={notesOn} onChange={() => setNotesOn(!notesOn)} data-testid="ex-notes" /> {T('公司说明', 'Company notes')}</label>
           {notesOn && <button className="btn-line sm" onClick={() => setNotesEdit(!notesEdit)}>{notesEdit ? T('收起', 'Done') : T('编辑', 'Edit')}</button>}
         </span>
       </div>
@@ -483,28 +559,16 @@ export default function ExportOverlay({ p, onClose, scope = 'all', clScope = 'al
             </div>
             <table className="exc-meta">
               <tbody>
-                <tr>
-                  <th>{T('项目编号', 'Project no.')}</th><td>{projCode(p) || '—'}</td>
-                  <th>{T('客户', 'Client')}</th><td>{p.client || '—'}</td>
-                </tr>
-                <tr>
-                  <th>{T('交付日期', 'Delivery date')}</th><td>{p.delivery ? fmtDate(parseISO(p.delivery)) : '—'}</td>
-                  <th>{T('导出日期', 'Exported')}</th><td>{fmtDate(new Date())}</td>
-                </tr>
-                <tr>
-                  <th>{T('服务', 'Services')}</th><td>{svcNames}</td>
-                  <th>PM</th><td>{(p.owners || []).join(' / ') || '—'}</td>
-                </tr>
+                {coverMeta.map((pairs, i) => (
+                  <tr key={i}>{pairs.map(([k, v]) => <React.Fragment key={k}><th>{k}</th><td>{v}</td></React.Fragment>)}</tr>
+                ))}
               </tbody>
             </table>
           </section>
         )}
 
-        <h1>{projCode(p) ? projCode(p) + ' · ' : ''}{p.name}{scopeLabel ? ` — ${scopeLabel}` : ''}</h1>
-        <div className="exsub">
-          {T('客户', 'Client')}: {p.client || '—'} · {T('服务', 'Services')}: {svcNames} · {T('阶段', 'Stage')}:{' '}
-          {L === 'zh' ? STAGES[stageIdx(projStage(p))][1] : STAGES[stageIdx(projStage(p))][2]}
-        </div>
+        <h1>{titleOf(scopeLabel)}</h1>
+        <div className="exsub">{subTxt}</div>
         {selPkgs.length === 0 ? (
           <p style={{ color: '#888' }}>{T('请至少勾选一个服务。', 'Select at least one service.')}</p>
         ) : blocks}
@@ -513,11 +577,8 @@ export default function ExportOverlay({ p, onClose, scope = 'all', clScope = 'al
           <table className="t-fix" style={{ marginTop: 4 }}>
             <tbody>
               <tr>
-                <td style={{ textAlign: 'right', fontWeight: 700, background: '#f0f2f5' }}>{T('Sum · 合计 Overall duration', 'Sum · Overall duration')}</td>
-                <td style={{ width: '13%', fontWeight: 700, background: '#f0f2f5' }}>
-                  {T(`${round1(selPkgs.reduce((n, x) => n + x.pkg.schedule.filter((r) => !r.kind).reduce((m, r) => m + (Number(r.weeks) || 0), 0), 0))} 周`,
-                     `${round1(selPkgs.reduce((n, x) => n + x.pkg.schedule.filter((r) => !r.kind).reduce((m, r) => m + (Number(r.weeks) || 0), 0), 0))} weeks`)}
-                </td>
+                <td style={{ textAlign: 'right', fontWeight: 700, background: '#f0f2f5' }}>{sumLabel}</td>
+                <td style={{ width: '13%', fontWeight: 700, background: '#f0f2f5' }}>{sumVal}</td>
               </tr>
             </tbody>
           </table>
