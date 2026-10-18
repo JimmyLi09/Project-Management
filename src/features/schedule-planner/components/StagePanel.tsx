@@ -39,6 +39,8 @@ export interface StagePanelProps {
   onEditDuration?: (index: number, units: number) => string | null
   /* REQ-048:每行右侧附加内容(负责人 / 状态) */
   stageExtra?: (stage: StageSchedule) => ReactNode
+  /* REQ-057:只读 —— 不能改名、删除、拖动、加阶段,也没有 Reset / Confirm / 保存;备注只显示 */
+  readOnly?: boolean
 }
 
 export function StagePanel({
@@ -62,7 +64,8 @@ export function StagePanel({
   onMoveStage,
   onEditDate,
   onEditDuration,
-  stageExtra
+  stageExtra,
+  readOnly = false
 }: StagePanelProps) {
   const { lang, t } = useLang()
   const unit = excludeHolidays ? 'workdays' : 'days'
@@ -126,7 +129,8 @@ export function StagePanel({
         <div>
           <h2>{isDone ? 'Schedule complete' : 'Stage Schedule'}</h2>
           <p className="panel-intro">
-            {isDone ? 'All stages are scheduled. Boundaries remain adjustable.' : 'Set dates for each stage in order, from top to bottom.'}
+            {readOnly ? t('只读', 'Read-only')
+              : isDone ? 'All stages are scheduled. Boundaries remain adjustable.' : 'Set dates for each stage in order, from top to bottom.'}
           </p>
         </div>
         <span className={`panel-status ${isDone ? 'panel-status-done' : ''}`}>
@@ -157,8 +161,8 @@ export function StagePanel({
             setGap(null)
           }
         }}
-        onDragOver={handleListDragOver}
-        onDrop={handleListDrop}
+        onDragOver={readOnly ? undefined : handleListDragOver}
+        onDrop={readOnly ? undefined : handleListDrop}
       >
         {schedules.map((stage) => {
           const isActive = activeIndex === stage.index
@@ -216,18 +220,18 @@ export function StagePanel({
                       <h3
                         data-testid={`stage-name-${stage.index}`}
                         onClick={() => {
-                          if (dragFrom === null) {
+                          if (dragFrom === null && !readOnly) {
                             setEditingIndex(stage.index)
                           }
                         }}
                         onKeyDown={(event) => {
-                          if ((event.key === 'Enter' || event.key === ' ') && dragFrom === null) {
+                          if ((event.key === 'Enter' || event.key === ' ') && dragFrom === null && !readOnly) {
                             event.preventDefault()
                             setEditingIndex(stage.index)
                           }
                         }}
-                        tabIndex={0}
-                        title={`${stageName(stage, lang)} — ${t('点击编辑阶段名称', 'click to rename')}`}
+                        tabIndex={readOnly ? undefined : 0}
+                        title={readOnly ? stageName(stage, lang) : `${stageName(stage, lang)} — ${t('点击编辑阶段名称', 'click to rename')}`}
                       >
                         {stageName(stage, lang)}
                       </h3>
@@ -314,8 +318,9 @@ export function StagePanel({
                     <span className={`stage-row-msg stage-row-msg-${rowMsg[stage.index].kind}`} data-testid={`stage-msg-${stage.index}`}>{rowMsg[stage.index].text}</span>
                   )}
                   {!onEditDate && noteInput}
+                  {readOnly && notes?.[stage.id] && <span className="stage-note-text" data-testid={`stage-note-text-${stage.index}`}>{notes[stage.id]}</span>}
                 </div>
-                <div className="stage-side-actions">
+                {!readOnly && <div className="stage-side-actions">
                   <button
                     aria-label={t(`删除阶段 ${stage.index + 1}`, `Delete stage ${stage.index + 1}`)}
                     className="icon-button-small icon-button-small-danger"
@@ -362,7 +367,7 @@ export function StagePanel({
                   >
                     ⋮⋮
                   </span>
-                </div>
+                </div>}
               </li>
             </Fragment>
           )
@@ -378,7 +383,7 @@ export function StagePanel({
           {t('只移动这一个边界', 'Move only this boundary')}
         </label>
       )}
-      <div className="stage-manage-row">
+      {!readOnly && <div className="stage-manage-row">
         <button
           className="button button-secondary button-small"
           data-testid="stage-add"
@@ -400,9 +405,9 @@ export function StagePanel({
         >
           {t('恢复默认阶段', 'Restore default stages')}
         </button>
-      </div>
+      </div>}
 
-      <div className="panel-actions">
+      {!readOnly && <div className="panel-actions">
         <button className="button button-secondary" onClick={onReset} type="button">
           Reset
         </button>
@@ -417,8 +422,8 @@ export function StagePanel({
             {saving ? t('保存中…', 'Saving…') : (saveLabel || t('保存到项目', 'Save to project'))}
           </button>
         )}
-      </div>
-      <p className="panel-footnote">Drag boundary points or use arrow keys to fine-tune.</p>
+      </div>}
+      {!readOnly && <p className="panel-footnote">Drag boundary points or use arrow keys to fine-tune.</p>}
     </aside>
   )
 }

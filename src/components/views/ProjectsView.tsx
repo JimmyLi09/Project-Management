@@ -4,7 +4,7 @@ import React, { useMemo, useState } from 'react';
 import { CONTACT_ROLES as CONTACT_ROLE_DEFS, roleBilingual } from '@/lib/contactRoles';
 import { useStore } from '../store';
 import { fmtDate, isoDate, missingInvoiceRef, parseISO, projectHealth, projPoints, projStage, schedProgress } from '@/lib/project';
-import { canAssign, canCreate, canSeeModule, isScopedRole } from '@/lib/permissions';
+import { canAssign, canCreate, canSeeModule, isArchivedFor, isScopedRole, pmLocked } from '@/lib/permissions';
 import { APPROACH_BADGE, approachProjects, approachTag } from '@/lib/approach';
 import { ApproachTable } from './ApproachList';
 import InvoiceModal, { invoiceTag } from '../InvoiceModal';
@@ -44,7 +44,9 @@ export default function ProjectsView({ search = '' }: { search?: string }) {
   const closedAp = useMemo(() => approachProjects(allProjects, ['lost', 'merged']).sort((a, b) => ((b.approach?.lostAt || b.approach?.mergedAt || 0) - (a.approach?.lostAt || a.approach?.mergedAt || 0))), [allProjects]);
   const showTabs = canSeeModule(me, 'avcost') && !focus;
 
-  const archivedCount = projects.filter((p) => p.archived).length;
+  /* REQ-057:对 PM / Engineer,进了开票 / 收尾的项目也算归档(isArchivedFor);其他角色就是 p.archived */
+  const arch = (p: Project) => isArchivedFor(p, me);
+  const archivedCount = projects.filter(arch).length;
 
   const pms = useMemo(() => {
     const s = new Set<string>();
@@ -71,16 +73,16 @@ export default function ProjectsView({ search = '' }: { search?: string }) {
     return true;
   };
   const list = projects.filter((p) => {
-    if (!mixArchived && !!p.archived !== showArchived) return false; // archived tab is separate
+    if (!mixArchived && arch(p) !== showArchived) return false; // archived tab is separate
     return matches(p);
   });
   /* REQ-054:全局搜索 —— 售前接洽里匹配的也列出来(带「售前」标签) */
   const apHits = needle ? approachProjects(allProjects).filter((p) => (p.name + ' ' + p.client).toLowerCase().includes(needle)) : [];
   /* 搜索时,被「默认不看归档」挡掉的有几个 */
-  const hiddenArch = needle && !mixArchived && !showArchived ? projects.filter((p) => p.archived && matches(p)).length : 0;
+  const hiddenArch = needle && !mixArchived && !showArchived ? projects.filter((p) => arch(p) && matches(p)).length : 0;
   /* REQ-045: 旧「已开票」开关标过、没有 Invoice 号的 —— 交给 PD / BD 补号 */
   const missing = canAssign(me) ? projects.filter(missingInvoiceRef) : [];
-  const archivedInList = list.filter((p) => p.archived).length;
+  const archivedInList = list.filter(arch).length;
   /* 「总积分」那一格点进来,想看的是谁分最多 —— 只有这一种口径自带排序 */
   if (focus && focus.kind === 'points') {
     list.sort((a, b) => projPoints(b, rulesFor(b.created)) - projPoints(a, rulesFor(a.created)));
@@ -135,7 +137,7 @@ export default function ProjectsView({ search = '' }: { search?: string }) {
       {fillFor && <InvoiceModal p={fillFor} onClose={() => setFillFor(null)} />}
       {showTabs && (
         <div style={{ display: 'flex', gap: 8, marginBottom: 16, alignItems: 'center', flexWrap: 'wrap' }} data-testid="proj-tabs">
-          {([['formal', t('正式项目', 'Formal projects'), projects.filter((p) => !p.archived).length], ['approach', t('售前接洽', 'Approach'), openAp.length], ['closed', t('已关闭', 'Closed'), closedAp.length]] as ['formal' | 'approach' | 'closed', string, number][]).map(([k, lb, n]) => (
+          {([['formal', t('正式项目', 'Formal projects'), projects.filter((p) => !arch(p)).length], ['approach', t('售前接洽', 'Approach'), openAp.length], ['closed', t('已关闭', 'Closed'), closedAp.length]] as ['formal' | 'approach' | 'closed', string, number][]).map(([k, lb, n]) => (
             <button key={k} className={`chip ${tab === k ? 'active' : ''}`} onClick={() => setTab(k)} data-testid={`proj-tab-${k}`}>{lb} <span style={{ opacity: 0.65 }}>{n}</span></button>
           ))}
           <span style={{ fontSize: 12, color: 'var(--text2)', marginLeft: 6 }}>{t('售前接洽 = AV 立项询价建的、还没转正式的记录,没有编号', 'Approach = records opened from an AV inquiry, not yet a formal project (no number)')}</span>
@@ -243,7 +245,7 @@ function CompactCard({ p, onOpen }: { p: Project; onOpen: () => void }) {
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8 }}>
         <div style={{ minWidth: 0 }}>
           <Ell style={{ fontSize: 14, fontWeight: 600, color: 'var(--navy900)' }}>
-            {p.archived && <span data-testid="archived-tag" className="badge" style={{ background: 'var(--hover-bg)', color: 'var(--text2)', marginRight: 5 }}>📦 {t('已归档', 'Archived')}</span>}{p.name}
+            <ArchTag p={p} />{p.name}
           </Ell>
           <Ell style={{ fontSize: 11.5, color: 'var(--text2)' }}>{p.client || '—'}</Ell>
           <InvTag p={p} />
@@ -337,7 +339,7 @@ function ProjectList({ list, onOpen }: { list: Project[]; onOpen: (id: string) =
           <div key={p.id} className="row-hover" style={{ display: 'grid', gridTemplateColumns: cols, gap: 12, alignItems: 'center', padding: '13px 16px', borderBottom: '1px solid var(--row-line)', cursor: 'pointer' }} onClick={() => onOpen(p.id)}>
             <div style={{ minWidth: 0 }}>
               <Ell style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--navy900)' }}>
-                {p.archived && <span data-testid="archived-tag" className="badge" style={{ background: 'var(--hover-bg)', color: 'var(--text2)', marginRight: 5 }}>📦 {t('已归档', 'Archived')}</span>}{p.name}
+                <ArchTag p={p} />{p.name}
               </Ell>
               <Ell style={{ fontSize: 11.5, color: 'var(--text2)' }}>{p.client || '—'}</Ell>
               <InvTag p={p} />
@@ -360,9 +362,18 @@ function ProjectList({ list, onOpen }: { list: Project[]; onOpen: (id: string) =
 
 /* REQ-045: 「已开 Invoice · INV-xxxx · 01-Oct」 */
 function InvTag({ p }: { p: Project }) {
-  const { lang } = useLang();
+  const { lang, t } = useLang();
+  const { me } = useStore();
+  /* REQ-057:PM / Engineer 这边「已归档」里没开票的那些 —— 写清楚是 PM 收尾、在等开票 */
+  if (pmLocked(me, p)) return <div data-testid="pmclosed-tag" style={{ fontSize: 11.5, color: 'var(--text2)', marginTop: 2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{t('PM 已收尾 · 等开票', 'Closed by PM · awaiting invoice')}</div>;
   const s = invoiceTag(p, lang);
   return s ? <div data-testid="invoice-tag" title={s} style={{ fontSize: 11.5, color: 'var(--success)', marginTop: 2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{s}</div> : null;
+}
+/* 「已归档」小标签:按这个人看 —— PM / Engineer 这边,进了开票 / 收尾的也算(REQ-057) */
+function ArchTag({ p }: { p: Project }) {
+  const { t } = useLang();
+  const { me } = useStore();
+  return isArchivedFor(p, me) ? <span data-testid="archived-tag" className="badge" style={{ background: 'var(--hover-bg)', color: 'var(--text2)', marginRight: 5 }}>📦 {t('已归档', 'Archived')}</span> : null;
 }
 
 /* deterministic navy-toned cover gradient per project */
@@ -403,7 +414,7 @@ function ProjectCard({ p, onOpen }: { p: Project; onOpen: () => void }) {
       </div>
       <div style={{ padding: 18, display: 'flex', flexDirection: 'column', gap: 13, flex: 1 }}>
         <div>
-          <div style={{ fontSize: 16, fontWeight: 600, color: 'var(--navy900)' }}>{p.archived && <span data-testid="archived-tag" className="badge" style={{ background: 'var(--hover-bg)', color: 'var(--text2)', marginRight: 5 }}>📦 {t('已归档', 'Archived')}</span>}{p.name}</div>
+          <div style={{ fontSize: 16, fontWeight: 600, color: 'var(--navy900)' }}><ArchTag p={p} />{p.name}</div>
           <div style={{ fontSize: 12.5, color: 'var(--text2)', marginTop: 2 }}>{p.client || '—'}</div>
           <InvTag p={p} />
         </div>

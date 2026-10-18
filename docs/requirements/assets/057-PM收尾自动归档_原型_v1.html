@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PM 收尾自动归档 · 原型 v1</title>
+<style>
+:root{--bg:#f5f2ec;--card:#fff;--line:#e6e0d6;--line2:#efebe4;--text:#1f2430;--text2:#6b6558;--navy:#15203a;--green:#2f7a5b;--gbg:#e6f2ec;--amber:#b85c1e;--abg:#fdf1e6;--blue:#2c5aa0;--bbg:#e8eff9;--gray:#8a8478;--grbg:#f1eee8;--red:#b91c1c}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:13px/1.5 -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;display:flex;min-height:100vh}
+aside{width:200px;background:#fff;border-right:1px solid var(--line);padding:14px 10px;flex-shrink:0}
+.logo{font-weight:800;letter-spacing:1px;margin:0 8px 14px;font-size:15px}.logo small{display:block;font-size:10px;color:var(--text2)}
+.nav{padding:8px 10px;border-radius:8px;cursor:pointer;display:flex;align-items:center;gap:8px;margin-bottom:2px}
+.nav:hover{background:#f6f3ee}.nav.on{background:var(--navy);color:#fff;font-weight:600}
+.badge{margin-left:auto;background:var(--navy);color:#fff;border-radius:10px;font-size:11px;padding:0 7px}.nav.on .badge{background:#fff;color:var(--navy)}
+.who{margin-top:20px;font-size:12px;color:var(--text2);padding:0 6px}
+.who select{width:100%;border:1px solid var(--line);border-radius:7px;padding:5px;margin-top:4px;font:inherit}
+main{flex:1;min-width:0}
+header{padding:12px 24px;background:#fff;border-bottom:1px solid var(--line)}
+header h1{margin:0;font-size:18px}.sub{color:var(--text2);font-size:12px}
+.content{padding:16px 24px 60px;max-width:1150px}
+.note{background:#fffaf2;border:1px dashed #d9a57a;border-radius:8px;padding:8px 12px;margin-bottom:12px;color:#7c3a10;font-size:12.5px}
+.card{background:#fff;border:1px solid var(--line);border-radius:12px;margin-bottom:14px}
+.card>.h{display:flex;align-items:center;gap:8px;padding:11px 16px;border-bottom:1px solid var(--line2);flex-wrap:wrap}
+.card>.h h2{margin:0;font-size:15px}.card>.b{padding:12px 16px}
+.spc{flex:1}
+table{width:100%;border-collapse:collapse;font-size:12.5px}
+th{text-align:left;color:var(--text2);font-weight:600;padding:8px 12px;border-bottom:1px solid var(--line);background:#faf8f4}
+td{padding:9px 12px;border-bottom:1px solid var(--line2)}
+tr.dim td{color:#9a958c}
+.tag{display:inline-block;padding:1px 8px;border-radius:10px;font-size:11.5px;font-weight:600;white-space:nowrap}
+.s0{background:var(--grbg);color:var(--gray)}.s1{background:var(--abg);color:var(--amber)}.s2{background:var(--bbg);color:var(--blue)}.s3{background:var(--gbg);color:var(--green)}
+.chips{display:flex;gap:6px}.chip{border:1px solid var(--line);background:#fff;border-radius:16px;padding:4px 12px;cursor:pointer;font-size:12.5px}
+.chip.on{background:var(--navy);color:#fff;border-color:var(--navy);font-weight:600}
+.kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:14px}
+.kpi{background:#fff;border:1px solid var(--line);border-radius:12px;padding:12px 14px}.kpi b{font-size:24px;display:block}
+.steps{display:flex;gap:6px;margin:10px 0}.step{border-radius:16px;padding:4px 12px;font-size:12px;font-weight:600;background:var(--gbg);color:var(--green)}.step.cur{background:var(--navy);color:#fff}
+.banner{background:var(--bbg);border:1px solid #c7d6ee;color:#1e3d6e;border-radius:8px;padding:9px 12px;margin:10px 0;font-size:12.5px}
+.btn{border:1px solid var(--line);background:#fff;padding:5px 12px;border-radius:7px;cursor:pointer;font-size:12.5px}.btn-navy{background:var(--navy);color:#fff;border-color:var(--navy)}
+.btn[disabled]{opacity:.45;cursor:not-allowed}
+.toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:var(--navy);color:#fff;padding:8px 16px;border-radius:8px;opacity:0;transition:.3s;pointer-events:none}.toast.on{opacity:1}
+@media (max-width:900px){aside{display:none}.kpis{grid-template-columns:1fr 1fr}.content{padding:12px}}
+</style>
+</head>
+<body>
+<aside>
+  <div class="logo">AUDAX<small>PROJECT PLATFORM</small></div>
+  <div id="nav"></div>
+  <div class="who">切换角色看效果<select id="role"><option value="pm">JM · Senior PM</option><option value="eng">Dylan · Engineer</option><option value="sales">Candy · Sales</option><option value="fin">Account · Finance</option><option value="pd">总监 PD</option></select></div>
+</aside>
+<main>
+<header><h1>PM 收尾自动归档 · 原型 v1</h1><span class="sub">2026-10-17 · JM 反馈:PM 已收尾的项目,PM 端直接归档、不再显示</span></header>
+<div class="content" id="page"></div>
+</main>
+<div class="toast" id="toast"></div>
+<script>
+const $=s=>document.querySelector(s);
+const toast=m=>{const t=$('#toast');t.textContent=m;t.classList.add('on');clearTimeout(t._t);t._t=setTimeout(()=>t.classList.remove('on'),1800)};
+/* stage: 1 售前 2 交接 3 进行中 4 完成(待 PD 批 / 待 Sales 核对) 5 开票/收尾  inv: 已开 Invoice(REQ-045 正式归档) */
+const P=[
+ {no:'048',nm:'171-50JHS',cl:'The Assembly Place',pm:'JM',st:3,dl:'31-Dec',task:3},
+ {no:'050',nm:'173-Elite Park Avenue',cl:'Noel Property',pm:'JM',st:3,dl:'29-Dec',task:2},
+ {no:'041',nm:'162-Model Frame for P&T',cl:'P&T',pm:'JM',st:5,dl:'30-Oct',task:0,q:'QN26-375'},
+ {no:'017',nm:'087-7 Margate Road',cl:'Margate',pm:'JM',st:4,dl:'15-Oct',task:1,sub:'待 PD 批准完工'},
+ {no:'045',nm:'166-Coca Cola Transformer',cl:'Pacific Refreshments',pm:'JM',st:5,inv:'INV-2026-0912',dl:'—',task:0},
+ {no:'009',nm:'132- River Opus LED',cl:'River Opus',pm:'Kian Lim',st:3,dl:'20-Nov',task:4,eng:'Dylan'},
+ {no:'034',nm:'150-Louis Maxhub',cl:'Louis',pm:'Kian Lim',st:5,dl:'—',task:0,eng:'Dylan'},
+];
+let role='pm', view='list', filt='active', openP=null;
+const STN=['','售前','交接PM','进行中','完成','开票/收尾'];
+const isPMside=()=>role==='pm'||role==='eng';
+const mine=p=>role==='pm'?p.pm==='JM':role==='eng'?p.eng==='Dylan':true;
+/* 新规则:进入「5 开票/收尾」→ 对 PM / Engineer 视为已归档(原因「PM 已收尾」);已开 Invoice → 所有人归档(REQ-045,不变) */
+const archivedFor=p=>!!p.inv||(isPMside()&&p.st===5);
+const reason=p=>p.inv?`已开 Invoice · ${p.inv}`:p.st===5?'PM 已收尾 · 等开票':'';
+function vis(){return P.filter(mine)}
+function nav(){
+  const act=vis().filter(p=>!archivedFor(p));
+  const items=[['ov','总览',act.length],['list','项目',''],['todo','我的待办',act.reduce((a,p)=>a+p.task,0)],['team','团队负载','']];
+  $('#nav').innerHTML=items.map(([k,l,b])=>`<div class="nav ${view===k?'on':''}" onclick="view='${k}';openP=null;render()">${l}${b!==''?`<span class="badge">${b}</span>`:''}</div>`).join('');
+}
+function render(){nav();({ov:renderOv,list:renderList,todo:renderTodo,team:renderTeam})[view]();}
+function noteTop(){
+  return `<div class="note"><b>规则</b>:项目进入「<b>5 开票 / 收尾</b>」(PD 已批准完工、Sales 已核对)→ 对 <b>PM / Engineer</b> 自动视为已归档(原因「PM 已收尾 · 等开票」):不在默认项目列表、总览、我的待办、团队负载里出现;在「已归档」里能看,只读。<br><b>Sales / Finance / PD / BD 不受影响</b>,照常看到,等「已开 Invoice」后再按 REQ-045 正式归档。现在角色:<b>${$('#role').selectedOptions[0].text}</b>(左下角切换)。</div>`;
+}
+function renderList(){
+  if(openP) return renderDetail();
+  const all=vis(), act=all.filter(p=>!archivedFor(p)), arc=all.filter(archivedFor);
+  const rows=filt==='active'?act:arc;
+  $('#page').innerHTML=noteTop()+`<div class="card"><div class="h"><h2>项目</h2><div class="chips"><span class="chip ${filt==='active'?'on':''}" onclick="filt='active';render()">进行中 ${act.length}</span><span class="chip ${filt==='arc'?'on':''}" onclick="filt='arc';render()">已归档 ${arc.length}</span></div><span class="spc"></span><span class="sub">${filt==='active'&&arc.length?`另有 ${arc.length} 个已归档项目`:''}</span></div>
+  <table><tr><th>编号</th><th>项目</th><th>客户</th><th>PM</th><th>阶段</th><th>交付</th><th></th></tr>
+  ${rows.map(p=>`<tr class="${archivedFor(p)?'dim':''}"><td>${p.no}</td><td><b>${p.nm}</b>${archivedFor(p)?`<div style="font-size:11.5px">${reason(p)}</div>`:''}</td><td>${p.cl}</td><td>${p.pm}</td><td><span class="tag ${p.st===5?'s3':p.st===4?'s1':'s2'}">${p.st} ${STN[p.st]}</span>${p.sub?`<div class="sub">${p.sub}</div>`:''}</td><td>${p.dl}</td><td><button class="btn" onclick="openP='${p.no}';render()">打开</button></td></tr>`).join('')||'<tr><td colspan="7" class="sub">没有项目</td></tr>'}</table></div>`;
+}
+function renderDetail(){
+  const p=P.find(x=>x.no===openP), ro=archivedFor(p)&&isPMside();
+  $('#page').innerHTML=noteTop()+`<div class="card"><div class="b"><button class="btn" onclick="openP=null;render()">‹ 返回</button>
+  <h2 style="margin:10px 0 2px">${p.nm} <span class="tag ${p.st===5?'s3':'s2'}">${p.st===5?'已完成':'进行中'}</span></h2><div class="sub">${p.cl} · PM ${p.pm}${p.q?' · 报价号 '+p.q:''}</div>
+  <div class="steps">${[1,2,3,4,5].map(i=>`<span class="step ${i===p.st?'cur':''}">${i} ${STN[i]}</span>`).join('')}</div>
+  ${ro?`<div class="banner">🗄 <b>已归档(PM 已收尾)</b>:这个项目已进入开票 / 收尾,由 Sales / Finance 跟进。你可以查看,但不能修改排期、清单、Job Record。</div>`:''}
+  ${p.st===5&&!isPMside()&&!p.inv?`<div class="banner" style="background:var(--abg);border-color:#f0c9a5;color:#7c3a10">PM 端已自动归档。开票后按 REQ-045 对所有人归档。 <button class="btn btn-navy" ${role==='pm'||role==='eng'?'disabled':''} onclick="P.find(x=>x.no==='${p.no}').inv='INV-2026-1017';toast('已开 Invoice,项目对所有人归档');render()">已开 Invoice</button></div>`:''}
+  <div style="display:flex;gap:8px;margin-top:8px"><button class="btn" ${ro?'disabled':''}>编辑排期</button><button class="btn" ${ro?'disabled':''}>编辑清单</button><button class="btn">导出</button></div></div></div>`;
+}
+function renderOv(){
+  const act=vis().filter(p=>!archivedFor(p));
+  $('#page').innerHTML=noteTop()+`<div class="kpis"><div class="kpi"><span class="sub">进行中项目</span><b>${act.length}</b></div><div class="kpi"><span class="sub">本周到期任务</span><b>${act.reduce((a,p)=>a+p.task,0)}</b></div><div class="kpi"><span class="sub">待开票(收尾)</span><b>${isPMside()?'—':vis().filter(p=>p.st===5&&!p.inv).length}</b><span class="sub">${isPMside()?'PM 端不显示':'Sales / Finance 跟进'}</span></div><div class="kpi"><span class="sub">已归档</span><b>${vis().filter(archivedFor).length}</b></div></div>
+  <div class="card"><div class="h"><h2>进行中</h2></div><div class="b">${act.map(p=>`<div style="padding:6px 0;border-bottom:1px solid var(--line2)"><b>${p.no} · ${p.nm}</b> <span class="tag s2">${p.st} ${STN[p.st]}</span></div>`).join('')}</div></div>`;
+}
+function renderTodo(){
+  const act=vis().filter(p=>!archivedFor(p)&&p.task);
+  $('#page').innerHTML=noteTop()+`<div class="card"><div class="h"><h2>我的待办</h2><span class="sub">已归档(含 PM 已收尾)的项目不出待办</span></div><table><tr><th>项目</th><th>待办数</th></tr>${act.map(p=>`<tr><td>${p.no} · ${p.nm}</td><td>${p.task}</td></tr>`).join('')}</table></div>`;
+}
+function renderTeam(){
+  const by={};P.filter(p=>!(p.inv||p.st===5)).forEach(p=>{by[p.pm]=(by[p.pm]||0)+1});
+  $('#page').innerHTML=noteTop()+`<div class="card"><div class="h"><h2>团队负载</h2><span class="sub">所有角色看到的负载都不算「开票 / 收尾」的项目 —— PM 已经没事做了</span></div><table><tr><th>PM</th><th>手上项目</th></tr>${Object.entries(by).map(([k,v])=>`<tr><td>${k}</td><td>${v}</td></tr>`).join('')}</table></div>
+  <div class="sub">KPI / 积分:PM 已收尾的项目<b>照算</b>(和 REQ-045 开票归档一样,归档不扣分)。</div>`;
+}
+$('#role').onchange=e=>{role=e.target.value;openP=null;filt='active';render()};
+render();
+</script>
+</body>
+</html>

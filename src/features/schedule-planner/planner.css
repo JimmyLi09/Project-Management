@@ -1583,3 +1583,12 @@
 .date-pop-today { box-shadow: inset 0 0 0 1px var(--line-strong); }
 .date-pop-sel, .date-pop-sel:hover { background: var(--ink); color: #fff; }
 .date-pop-foot { margin-top: 6px; color: var(--muted); font-size: 10.5px; }
+
+/* REQ-057:只读时备注只显示文字 */
+.stage-note-text {
+  display: block;
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--muted);
+  white-space: pre-wrap;
+}
