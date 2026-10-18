@@ -179,6 +179,39 @@ textarea.in { width: 100%; min-height: 46px; resize: vertical }
 .ex-doc th, .ex-doc td { border: 1px solid #ccc; padding: 6px 9px; font-size: 12px; text-align: left; vertical-align: top }
 .ex-doc th { background: #f0f2f5 }
 .ex-doc .grp-h { background: #e8edf2; font-weight: 700 }
+/* REQ-056:排期导出 · 月历(一页一个月)/ 甘特(一页整个工期)—— 固定 A4 横向 */
+.ex-doc .exc-month, .ex-doc .exg, .ex-doc .exg-legend { -webkit-print-color-adjust: exact; print-color-adjust: exact }
+.ex-doc .exc-month { margin-bottom: 18px }
+.ex-doc .exc-cont { font-size: 11.5px; color: #777; margin-bottom: 6px }
+.ex-doc .exc-mhead { display: flex; align-items: baseline; gap: 12px; margin: 6px 0 6px }
+.ex-doc .exc-mhead b { font-size: 16px; color: var(--navy900) }
+.ex-doc .exc-mhead span { font-size: 11.5px; color: #666 }
+.ex-doc .exc-grid { border: 1px solid #d9d9d9; border-bottom: none }
+.ex-doc .exc-wd { display: grid; grid-template-columns: repeat(7, 1fr); background: #f3f4f6; font-size: 10.5px; font-weight: 700; color: #555; text-align: center }
+.ex-doc .exc-wd span { padding: 4px 0; border-right: 1px solid #e3e3e3 }
+.ex-doc .exc-wd span.we { background: #eceef2 }
+.ex-doc .exc-week { position: relative; display: grid; grid-template-columns: repeat(7, 1fr); border-bottom: 1px solid #d9d9d9; break-inside: avoid }
+.ex-doc .exc-day { position: relative; border-right: 1px solid #e6e6e6; padding: 3px 5px; font-size: 11px; color: #333; overflow: hidden }
+.ex-doc .exc-day.we { background: #f6f7f9 }
+.ex-doc .exc-day.out { background: #fbfbfb; color: #c3c3c3 }
+.ex-doc .exc-day.hol { background: #fdecec }
+.ex-doc .exc-day .n { font-weight: 600 }
+.ex-doc .exc-day .hn { position: absolute; top: 3px; right: 5px; font-size: 9px; font-weight: 700; color: #b23a32; max-width: 70%; text-align: right; line-height: 1.15 }
+.ex-doc .exc-day .kd { position: absolute; top: 4px; right: 5px; width: 7px; height: 7px; border: 1.6px solid #c62828; border-radius: 50% }
+.ex-doc .exc-day.hol .kd { right: auto; left: 22px }
+.ex-doc .exc-day .endl { position: absolute; top: 16px; left: 5px; font-size: 9px; font-weight: 700; color: #c62828 }
+.ex-doc .exc-bar { position: absolute; height: 13px; line-height: 13px; font-size: 9.5px; color: #333; padding: 0 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; box-sizing: border-box }
+.ex-doc .exc-list { margin-top: 8px; font-size: 11px }
+.ex-doc .exc-list th { text-align: left; background: none; border: none; border-bottom: 1px solid #bbb; padding: 4px 6px; font-size: 11.5px }
+.ex-doc .exc-list td { border: none; border-bottom: 1px solid #eee; padding: 3px 6px; font-size: 11px }
+.ex-doc .exc-list .sw { display: inline-block; width: 10px; height: 10px; margin-right: 6px; vertical-align: -1px; border: 1px solid }
+.ex-doc .exg th, .ex-doc .exg td { padding: 5px 6px; font-size: 11px }
+.ex-doc .exg th.exg-wk { font-size: 10px; text-align: center; padding: 5px 0; white-space: nowrap }
+.ex-doc .exg td.exg-tl { position: relative; padding: 0; height: 26px }
+.ex-doc .exg .exg-bar { position: absolute; top: 7px; height: 12px; border-radius: 2px }
+.ex-doc .exg .exg-line { position: absolute; top: 0; bottom: 0; width: 0; border-left: 2px solid #c62828 }
+.ex-doc .exg-legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 11px; color: #555; margin: 6px 0 14px }
+.ex-doc .exg-legend i { display: inline-block; width: 11px; height: 11px; margin-right: 5px; vertical-align: -1px; border-radius: 2px }
 /* REQ-017: print layout. The old `inset:0` clamped .ex-wrap to one viewport
    so only page 1 printed; height must stay auto for multi-page output. */
 @media print {
@@ -191,6 +224,8 @@ textarea.in { width: 100%; min-height: 46px; resize: vertical }
   .ex-doc tr { break-inside: avoid; page-break-inside: avoid }
   .ex-doc thead { display: table-header-group }
   .ex-doc h2, .ex-doc h3 { break-after: avoid-page; break-inside: avoid }
+  .ex-doc .exc-page { break-before: page }
+  .ex-doc .exc-month, .ex-doc .exg { break-inside: avoid-page }
 }
 
 /* ── stage steps (project lifecycle) ────────────────────── */
