@@ -7,6 +7,7 @@ import {
   schedProgress, staleInfo, todayMid,
 } from '@/lib/project';
 import { teamLoads } from '@/lib/alloc';
+import { isArchivedFor } from '@/lib/permissions';
 import { svcColor, svcName } from '@/lib/templates';
 import { useLang } from '@/lib/i18n';
 import { Avatar, Ell, healthColor, HM, Icon, Pill, ProgressBar } from '../ui';
@@ -21,7 +22,7 @@ export default function OverviewView() {
 
   /* Overview is personalised: PM/member see their own projects; PD/BD/Sales see all (A5) */
   const active = useMemo(
-    () => projects.filter((p) => { if (p.archived || !isMyProject(p, me)) return false; const s = projStage(p); return s !== 'complete' && s !== 'invoice'; }),
+    () => projects.filter((p) => { if (isArchivedFor(p, me) || !isMyProject(p, me)) return false; const s = projStage(p); return s !== 'complete' && s !== 'invoice'; }),
     [projects, me],
   );
   const monthStart = new Date(t0.getFullYear(), t0.getMonth(), 1).getTime();
@@ -90,7 +91,7 @@ export default function OverviewView() {
   const myTasks = useMemo(() => {
     const out: { title: string; titleEn: string; project: string; due: Date | null; over: boolean; status: string }[] = [];
     projects.forEach((p) => {
-      if (p.archived) return;
+      if (isArchivedFor(p, me)) return;   // REQ-057
       const isOwner = (p.owners || []).includes(me.name);
       p.packages.forEach((pk) => {
         const pd = planDates(pk, pkgStart(p, pk));
@@ -111,7 +112,7 @@ export default function OverviewView() {
   const directorItems = useMemo(() => {
     const items: { icon: string; color: string; title: string; detail: string; pid: string }[] = [];
     projects.forEach((p) => {
-      if (p.archived || !isMyProject(p, me)) return;
+      if (isArchivedFor(p, me) || !isMyProject(p, me)) return;
       const u = p.update;
       if (u?.needDirector && u.dStatus === 'pending') {
         items.push({

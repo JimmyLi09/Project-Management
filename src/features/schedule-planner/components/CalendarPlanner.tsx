@@ -162,6 +162,9 @@ export interface CalendarPlannerProps {
   busy?: boolean
   /* REQ-048:每个阶段行右边再挂点东西(接了项目时 = 负责人、状态)。不传就跟以前一样 */
   stageExtra?: (stage: StageSchedule) => ReactNode
+  /* REQ-057:只读 —— 日历上点日期 / 拖分界点、改名、加删阶段、改日期 / 工期 / 备注、存档全都没有,
+     只看。导出照常。不传 = 和以前一样 */
+  readOnly?: boolean
 }
 
 export function CalendarPlanner({
@@ -176,6 +179,7 @@ export function CalendarPlanner({
   saveLabel,
   busy,
   stageExtra,
+  readOnly = false,
 }: CalendarPlannerProps = {}) {
   const { lang, t } = useLang()
   const initialCursorRef = useRef<MonthCursor>(monthFromDate(todayLocalDate()))
@@ -835,14 +839,16 @@ export function CalendarPlanner({
             <div className="calendar-instruction-actions">
               {isPreview && <span className="instruction-preview">PREVIEW</span>}
               {activeBoundaryIndex === null && <span className="adjust-mode-chip" data-testid="adjust-mode">ADJUST MODE</span>}
-              <button
-                aria-expanded={reverseOpen}
-                className="today-button"
-                onClick={handleToggleReversePlan}
-                type="button"
-              >
-                Reverse plan
-              </button>
+              {!readOnly && (
+                <button
+                  aria-expanded={reverseOpen}
+                  className="today-button"
+                  onClick={handleToggleReversePlan}
+                  type="button"
+                >
+                  Reverse plan
+                </button>
+              )}
               <button className="today-button" data-testid="today-button" onClick={handleToday} type="button">
                 Today
               </button>
@@ -850,6 +856,7 @@ export function CalendarPlanner({
                 <input
                   checked={excludeHolidays}
                   data-testid="exclude-holidays-toggle"
+                  disabled={readOnly}
                   onChange={(event) => setExcludeHolidays(event.target.checked)}
                   type="checkbox"
                 />
@@ -857,7 +864,7 @@ export function CalendarPlanner({
               </label>
             </div>
           </div>
-          {reverseOpen && (
+          {reverseOpen && !readOnly && (
             <form className="reverse-plan-form" onSubmit={handleApplyReversePlan}>
               <label className={reversePickTarget === 'start' ? 'reverse-date-active' : undefined}>
                 <span>Project start</span>
@@ -936,11 +943,11 @@ export function CalendarPlanner({
                       dragDate: drag?.draftDate ?? null,
                       previewStageIndex,
                       stageCount,
-                      onClick: handleDateClick,
-                      onHover: handleHover,
+                      onClick: readOnly ? () => {} : handleDateClick,
+                      onHover: readOnly ? () => {} : handleHover,
                       onLeave: () => setHoverDate(null),
-                      onBoundaryKeyDown: handleBoundaryKeyDown,
-                      onBoundaryPointerDown: handleBoundaryPointerDown
+                      onBoundaryKeyDown: readOnly ? () => {} : handleBoundaryKeyDown,
+                      onBoundaryPointerDown: readOnly ? () => {} : handleBoundaryPointerDown
                     }))}
                   </Fragment>
                 )
@@ -970,12 +977,13 @@ export function CalendarPlanner({
             onRenameStage={handleRenameStage}
             onReset={handleReset}
             onRestoreStages={handleRestoreStages}
-            onEditDate={handleEditDate}
-            onEditDuration={onSave ? handleEditDuration : undefined}
+            onEditDate={readOnly ? undefined : handleEditDate}
+            onEditDuration={onSave && !readOnly ? handleEditDuration : undefined}
             stageExtra={stageExtra}
             notes={notes}
-            onNoteChange={onSave ? (stageId, note) => setNotes((cur) => ({ ...cur, [stageId]: note })) : undefined}
-            onSave={onSave ? async () => {
+            onNoteChange={onSave && !readOnly ? (stageId, note) => setNotes((cur) => ({ ...cur, [stageId]: note })) : undefined}
+            readOnly={readOnly}
+            onSave={onSave && !readOnly ? async () => {
               setSaving(true)
               try { await onSave({ stages, boundaries, notes, excludeHolidays }) } finally { setSaving(false) }
             } : undefined}
@@ -983,7 +991,7 @@ export function CalendarPlanner({
             saving={saving || busy}
             schedules={schedules}
           />
-          <ArchivePanel
+          {!readOnly && <ArchivePanel
             archives={archives}
             canSave={boundaries.length > 0}
             draftName={archiveName}
@@ -991,7 +999,7 @@ export function CalendarPlanner({
             onDraftNameChange={setArchiveName}
             onLoad={handleLoadArchive}
             onSave={handleSaveArchive}
-          />
+          />}
           <ExportPanel
             meta={exportMeta}
             onExportPdf={handleExportPdf}

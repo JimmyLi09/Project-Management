@@ -3,7 +3,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useStore, useWho } from '../store';
 import { useLang } from '@/lib/i18n';
-import { canEditIn, canRowEdit } from '@/lib/permissions';
+import { canEditIn, canRowEdit, pmLocked } from '@/lib/permissions';
 import { isLegacyFlow } from '@/lib/legacyStages';
 import { pkgSuffix, projCode } from '@/lib/project';
 import { svcName } from '@/lib/templates';
@@ -254,6 +254,8 @@ export default function CalendarScheduleTab({ p, pkgIdx }: { p: Project; pkgIdx:
             });
           }}
           onSave={ed ? save : undefined}
+          /* REQ-057:PM / Engineer 在开票 / 收尾阶段只读;其他只读角色维持原样(能在日历上试排、不能保存) */
+          readOnly={pmLocked(me, p)}
           saveLabel={t('保存到项目', 'Save to project')}
           busy={busy}
           stageExtra={stageExtra}

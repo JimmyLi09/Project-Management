@@ -4,7 +4,8 @@
 
 import type { Identity } from '@/lib/permissions';
 import {
-  canAssign, canCommercial, canDecide, canEdit, canEditFinance, canEditModule, canRowEdit, isFull, canDelete , canMeta, canMarkInvoice } from '@/lib/permissions';
+  canAssign, canCommercial, canDecide, canEdit, canEditFinance, canEditModule, canRowEdit, isFull, canDelete , canMeta, canMarkInvoice, pmLocked } from '@/lib/permissions';
+import { PM_CLOSED_MSG } from '@/lib/closeout';
 import { ACTION_MODULE, PERM_MODULES, type PermModule } from '@/lib/permTable';
 import { buildPackage, deriveStatuses, fitWindow, newId, parseISO, isoDate, totalDays } from '@/lib/project';
 import { getBuiltinTemplate, SVC, type Template } from '@/lib/templates';
@@ -285,6 +286,9 @@ export function applyAction(u: Identity, p: Project, a: ProjectAction, ctx: Acti
   /* REQ-054:已关闭的售前记录(未成交 / 已并入)只读;开着的售前记录不能指派 PM、走交接 / 完工 / 开票 / 收款 —— 先转为正式项目 */
   if (isClosedApproach(p)) throw new ValidationError(APPROACH_CLOSED_MSG);
   if (isApproach(p) && APPROACH_BLOCKED.has(a.type)) throw new ValidationError(APPROACH_BLOCK_MSG);
+  /* REQ-057:进了「开票 / 收尾」,PM / Engineer 这边只读(下面各动作的 canEdit / canRowEdit 也会拦,
+     这里先拦一道,给一句说得清楚的话)。Sales / Finance / PD / BD 照常。 */
+  if (pmLocked(u, p)) throw new PermissionError(PM_CLOSED_MSG);
   switch (a.type) {
     case 'toggleDone': {
       const { pk, r } = getRow(p, a.pkg, a.idx);

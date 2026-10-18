@@ -11,7 +11,7 @@ import { rulePoints, ruleFor } from '@/lib/points';
 import {
   canAssign, canCommercial, canCreate, canDecide, canDelete, canEdit, canEditFinance, isFull,
   canSeeWorkflow, canSeeWorkflowTimeline, canSeeHandoverBlock, canSeeCompletionBlock,
-  canSeeVerifyBlock, canSeeFinanceBlock, isPM, canMeta, canMarkInvoice, canEditIn, canSeeModule,
+  canSeeVerifyBlock, canSeeFinanceBlock, isPM, canMeta, canMarkInvoice, canEditIn, canSeeModule, isArchivedFor, pmLocked,
 } from '@/lib/permissions';
 import { DIFF, STAGES, stageIdx, svcColor, svcName } from '@/lib/templates';
 import { contactRoleTerm, diffTerm, fieldGroupTerm } from '@/lib/terms';
@@ -72,6 +72,16 @@ export default function ProjectDetail() {
     <>
       {/* REQ-054:售前记录 —— 未编号 / 已并入 / 未成交,和「转为正式项目」 */}
       <ApproachBanner p={p} />
+      {/* REQ-057:PM / Engineer 打开进了开票 / 收尾的项目 —— 说清楚为什么只读、谁在跟进 */}
+      {pmLocked(me, p) && (
+        <div className="panel" data-testid="pmclosed-banner" style={{ padding: '10px 16px', marginBottom: 14, display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', background: '#F6F7F9', borderColor: '#D8DCE2' }}>
+          <span className="badge" style={{ background: '#eef1f4', color: '#51606f' }}>📦 {t('已归档(PM 已收尾)', 'Archived (closed by PM)')}</span>
+          <span style={{ fontSize: 12.5, color: 'var(--text2)', flex: 1, minWidth: 260 }}>
+            {t('这个项目已进入开票 / 收尾,由 Sales / Finance 跟进。你可以查看,但不能修改排期、清单、Job Record。',
+               'This project is in invoicing / close-out and is followed up by Sales / Finance. You can view it, but the schedule, checklist and Job Record can no longer be edited.')}
+          </span>
+        </div>
+      )}
       {/* header card */}
       <div className="panel" style={{ padding: '22px 24px 0', marginBottom: 20 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 16, flexWrap: 'wrap', paddingBottom: 18 }}>
@@ -113,7 +123,7 @@ export default function ProjectDetail() {
                 </h1>
               )}
               <Pill m={HM[h]} />
-              {p.archived && <span className="badge" style={{ background: '#eef1f4', color: '#51606f' }}>📦 {t('已归档', 'Archived')}</span>}
+              {isArchivedFor(p, me) && <span className="badge" style={{ background: '#eef1f4', color: '#51606f' }}>📦 {t('已归档', 'Archived')}</span>}
             </div>
             <div style={{ fontSize: 13.5, color: 'var(--text2)', marginTop: 4, display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
               {/* REQ-039: 客户名以前建完项目就改不了了(Job Record 那张只读表却在
@@ -300,7 +310,7 @@ export default function ProjectDetail() {
           不需要为此把整套售后流程重新摆到他面前。 */}
       {!isApproach(p) && <HandoverInbox p={p} />}
 
-      {!ed && (
+      {!ed && !pmLocked(me, p) && (
         <div className="panel" style={{ padding: '11px 18px', marginBottom: 20, fontSize: 12.5, color: 'var(--text2)', display: 'flex', gap: 8, alignItems: 'center' }}>
           <Icon name="lock" size={14} />
           {me.role === 'sales'

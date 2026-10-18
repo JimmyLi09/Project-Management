@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { appendAudit, getEffectiveTemplate, getProject, getUserTemplate, saveProjectCAS } from '@/server/db';
 import { tplNamesFrom } from '@/lib/checklistScope';
 import { currentUser } from '@/server/session';
-import { canEdit, canEditModule, canSeeProject, identityOf } from '@/lib/permissions';
+import { canEdit, canEditModule, canSeeProject, identityOf, pmLocked } from '@/lib/permissions';
+import { PM_CLOSED_MSG } from '@/lib/closeout';
 import { redactProject } from '@/lib/permRedact';
 import {
   applyChecklist, applySchedule, extractChecklist, extractSchedule, matchPackage, statFragment,
@@ -27,6 +28,7 @@ export async function POST(req: NextRequest, { params }: Params) {
   const { id } = await params;
   const p = getProject(id);
   if (!p) return NextResponse.json({ error: '项目不存在' }, { status: 404 });
+  if (pmLocked(identityOf(user), p)) return NextResponse.json({ error: PM_CLOSED_MSG }, { status: 403 });   // REQ-057
   if (!canEdit(identityOf(user), p)) return NextResponse.json({ error: '无编辑权限' }, { status: 403 });
 
   const body = (await req.json().catch(() => null)) as {

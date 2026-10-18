@@ -12,7 +12,8 @@
    看全部,PM 与 Engineer 只看自己的。 */
 
 import { NextResponse } from 'next/server';
-import { canEditModule, canSeeModule, canSeeProject, identityOf } from '@/lib/permissions';
+import { canEditModule, canSeeModule, canSeeProject, identityOf, pmLocked } from '@/lib/permissions';
+import { PM_CLOSED_MSG } from '@/lib/closeout';
 import type { Project, User } from '@/lib/types';
 import { APPROACH_CLOSED_MSG, isClosedApproach } from '@/lib/approach';
 
@@ -26,6 +27,8 @@ export function denyUnlessVisible(user: User, project: Project | null | undefine
   if (!canSeeProject(identityOf(user), project)) return NextResponse.json({ error: AV_DENY }, { status: 403 });
   /* REQ-054:已关闭的售前记录(未成交 / 已并入)只读 —— 写接口传 write = true */
   if (write && isClosedApproach(project)) return NextResponse.json({ error: APPROACH_CLOSED_MSG }, { status: 400 });
+  /* REQ-057:进了开票 / 收尾,PM / Engineer 在 AV 这边也只读 */
+  if (write && pmLocked(identityOf(user), project)) return NextResponse.json({ error: PM_CLOSED_MSG }, { status: 403 });
   return null;
 }
 

@@ -5,7 +5,7 @@ import type { User } from '@/lib/types';
 import type { PermTable } from '@/lib/permTable';
 import { StoreProvider, useStore, type View } from './store';
 import { allOverdue, awaitingPayment, fmtDate, isMyProject, pendingWorkflowAction } from '@/lib/project';
-import { canCreate, canSeeModule, canViewPrices, isFull } from '@/lib/permissions';
+import { canCreate, canSeeModule, canViewPrices, isFull, isArchivedFor } from '@/lib/permissions';
 import type { PermModule } from '@/lib/permTable';
 import { myTasks } from '@/lib/myTasks';
 import { roleTerm } from '@/lib/terms';
@@ -104,7 +104,7 @@ function Shell() {
   /* force a password change when the account is flagged (first login / after reset) */
   const [mustChange, setMustChange] = useState(!!user.mustChangePassword);
   /* bell shows only the current person's overdue items (A5 scoping) */
-  const overdue = useMemo(() => (canSeeModule(me, 'schedule') ? allOverdue(projects.filter((p) => !p.archived && isMyProject(p, me))) : []), [projects, me]);
+  const overdue = useMemo(() => (canSeeModule(me, 'schedule') ? allOverdue(projects.filter((p) => !isArchivedFor(p, me) && isMyProject(p, me))) : []), [projects, me]);
 
   useEffect(() => {
     if (!notifOpen) return;

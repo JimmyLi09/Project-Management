@@ -9,6 +9,7 @@ import type { Project, Role, ScheduleRow, User } from './types';
 import { ROLE_TERMS } from './terms';
 import { permAllows, type PermModule } from './permTable';
 import { isApproach, isClosedApproach } from './approach';
+import { pmClosed } from './closeout';
 
 /* ===== REQ-051:按角色的权限表 =====
    下面每个函数 = 权限表这一格放行(模块级:不可见 / 只读 / 可编辑)且原有业务规则放行。
@@ -32,6 +33,7 @@ export const isFull = (u: Identity) => u.role === 'director' || u.role === 'bd';
    —— 「每个项目单独一个 engineer」,他就是这个项目的人,不是路过帮忙勾一行的。
    老项目没有 engineer 字段,这一条对它们恒为假,行为一个字没变。 */
 export const canEdit = (u: Identity, p: Project) => !isClosedApproach(p) &&   // REQ-054:已关闭的售前记录只读
+  !pmLocked(u, p) &&                                                              // REQ-057:进了开票 / 收尾,PM / Engineer 只读
   (isFull(u) || (p.owners || []).includes(u.name) || (p.perm || []).includes(u.name) || p.engineer === u.name);
 
 export const canCommercial = (u: Identity, _p?: Project) => isFull(u) || u.role === 'sales';
@@ -47,6 +49,15 @@ export const canCommercial = (u: Identity, _p?: Project) => isFull(u) || u.role 
    一行任务点名指派给我」—— 没被指派为项目工程师、只是来帮一行忙的人,也得
    看得见那个项目,否则他连自己的待办都点不开。 */
 export const isScopedRole = (u: Identity) => u.role === 'pm' || u.role === 'member';
+
+/* ===== REQ-057:进了「5 开票 / 收尾」,PM / Engineer 这边就算归档了 =====
+   PM 已经没事做,项目却一直挂在他的列表、待办、提醒里,要等 Sales / Finance 开完票
+   (REQ-045 才正式归档)。所以对 PM / Engineer(和 REQ-043 收窄可见范围的是同两个
+   角色)来说,进了这个阶段就视同归档、只读;Sales / Finance / PD / BD / Viewer 不变。
+   每次算、不存库,也就不用迁移。KPI / 积分 / 时效统计不用它,照 p.archived 算 —— PM
+   收尾的项目正是要算分的。 */
+export const pmLocked = (u: Identity, p: Project) => isScopedRole(u) && pmClosed(p);
+export const isArchivedFor = (p: Project, u: Identity) => !!p.archived || pmLocked(u, p);
 
 export const isOnProject = (u: Identity, p: Project) =>
   (p.owners || []).includes(u.name)
@@ -81,7 +92,8 @@ export const canStageTo = (u: Identity, p: Project, s: string) =>
 export const canMeta = (u: Identity, p: Project) => !isClosedApproach(p) && (canEdit(u, p) || canCommercial(u, p)) && canEditModule(u, 'projects');
 
 export const canRowEdit = (u: Identity, p: Project, row?: ScheduleRow) =>
-  canEditModule(u, 'schedule') && (canEdit(u, p) || (u.role === 'member' && !!row && row.assignee === u.name));
+  canEditModule(u, 'schedule') && !pmLocked(u, p)   // REQ-057:Engineer 改自己负责的那一行也一样拦
+  && (canEdit(u, p) || (u.role === 'member' && !!row && row.assignee === u.name));
 
 export const canDecide = (u: Identity) => isFull(u);
 
