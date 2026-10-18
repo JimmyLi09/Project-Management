@@ -1592,3 +1592,40 @@
   color: var(--muted);
   white-space: pre-wrap;
 }
+
+/* REQ-056:阶段卡片默认收起 —— 编号 + 名称 + 日期,右边「编辑」;展开后才有日期框 / 备注 / 工期 / 负责人 / 状态 */
+.stage-expand-row {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  margin: 2px 0 6px;
+}
+.stage-edit-button {
+  border: 1px solid var(--line, #d9dde3);
+  border-radius: 6px;
+  background: #fff;
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 3px 9px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.stage-edit-button:hover { background: #eef1f5; }
+/* 卡片里阶段名完整显示(换行),不再截成省略号 */
+.stage-row .stage-row-name h3 {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.stage-row-open .stage-row-main {
+  background: #faf9f6;
+  border: 1px solid #ece8e0;
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+.stage-card-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
+.stage-card-actions .stage-delete-button { color: var(--accent-deep, #b42318); }

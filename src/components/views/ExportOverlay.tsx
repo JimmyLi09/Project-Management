@@ -9,6 +9,10 @@ import { STAGES, stageIdx, SVC, svcColor } from '@/lib/templates';
 import type { ChecklistItem, Project, ServicePackage } from '@/lib/types';
 import { cellLabel, pkgLabel, type ClFields } from '@/lib/clCells';
 import type { XBook, XCover, XHead, XRow, XSection, XSheet, XStyle, XTable } from '@/lib/exportXlsx';
+import {
+  dayMon, edgeOf, ganttLine, ganttPos, ganttWeeks, GANTT_STATUS, holidayOf, inMonth, keyDates, monthTitle, monthWeeks, monthsOf,
+  spanLabel, spanOf, stagesInMonth, toneOf, weekSegments, ymd, type ExpStage,
+} from '@/lib/schedExport';
 
 /* REQ-016: built-in fallback when no global note has been saved yet.
    0917 收尾:导出是发给客户的,一份文件不该中英各来一段 —— 拆成两份,
@@ -40,6 +44,8 @@ function resolveNotes(zhRaw: string | null, enRaw: string | null): { zh: string;
 type Cols = { owner: boolean; start: boolean; due: boolean; status: boolean; clOwner: boolean; clStatus: boolean; clDate: boolean; clRemark: boolean; clSvcs: boolean };
 export type ExportScope = 'all' | 'schedule' | 'checklist';
 type Order = 'byPkg' | 'schedFirst' | 'clFirst';
+/* REQ-018 的三种表格样式 + REQ-056 的月历 / 甘特(只用于预览和 PDF) */
+type SchedLayout = 'classic' | 'weeks' | 'dates' | 'calendar' | 'gantt';
 
 /* ===== REQ-015 / REQ-017: flexible, print-solid export =====
    - content multi-select: services + (schedule / checklist / both)
@@ -58,7 +64,11 @@ export default function ExportOverlay({ p, onClose, scope = 'all', clScope = 'al
   const [order, setOrder] = useState<Order>('byPkg');
   const [orient, setOrient] = useState<'portrait' | 'landscape'>('portrait');
   /* REQ-048:排期页不再选「样式」,导出时在这里选(默认沿用项目上次用的那种) */
-  const [schedStyle, setSchedStyle] = useState<'classic' | 'weeks' | 'dates'>(p.schedStyle || 'classic');
+  const [schedStyle, setSchedStyle] = useState<SchedLayout>(p.schedStyle || 'classic');
+  /* REQ-056:月历的三个显示开关,默认都勾 */
+  const [calHol, setCalHol] = useState(true);
+  const [calKey, setCalKey] = useState(true);
+  const [calList, setCalList] = useState(true);
   const [pkgSel, setPkgSel] = useState<boolean[]>(() => p.packages.map((pk) => clScope === 'all' || pk.svc === clScope));
   const [blanks, setBlanks] = useState(true); // REQ-013: include blank (Pending) items — default on
   /* REQ-021 封面页。0917 变更单:「Checklist 导出第一页空白太多」——
@@ -101,6 +111,10 @@ export default function ExportOverlay({ p, onClose, scope = 'all', clScope = 'al
   const notes = L === 'zh' ? notesZh : notesEn;
   const setNotes = L === 'zh' ? setNotesZh : setNotesEn;
   const showSched = sec !== 'checklist';
+  /* REQ-056:月历 / 甘特固定 A4 横向;Excel 里的排期照旧是表格(阶段表) */
+  const fixedLand = showSched && (schedStyle === 'calendar' || schedStyle === 'gantt');
+  const effOrient = fixedLand ? 'landscape' : orient;
+  const tableStyle: 'classic' | 'weeks' | 'dates' = schedStyle === 'calendar' || schedStyle === 'gantt' ? 'classic' : schedStyle;
   const showCl = sec !== 'schedule';
   const scopeLabel = sec === 'schedule' ? T('生产排期', 'Schedule') : sec === 'checklist' ? T('信息清单', 'Checklist') : '';
   const svcNames = p.services.map((k) => (SVC[k] ? (L === 'zh' ? SVC[k].label : SVC[k].en) : k)).join(', ');
@@ -119,7 +133,7 @@ export default function ExportOverlay({ p, onClose, scope = 'all', clScope = 'al
   const headerTxt = `${projCode(p) ? projCode(p) + ' · ' : ''}${p.name}`.replace(/"/g, '\\"');
   const pageCss = `
 @page {
-  size: A4 ${orient};
+  size: A4 ${effOrient};
   margin: 16mm 12mm 18mm;
   @top-left { content: "${headerTxt}"; font-size: 9px; color: #999; }
   @bottom-left { content: "Audax Visuals"; font-size: 9px; color: #999; }
@@ -149,7 +163,7 @@ export default function ExportOverlay({ p, onClose, scope = 'all', clScope = 'al
   /* ── unified schedule block (per package) — follows the project's REQ-018 template ── */
   function schedTable(pkg: ServicePackage): { heading: string; color: string; table: XTable; scope: XTable | null } {
     const pd = planDates(pkg, pkgStart(p, pkg));
-    const style = schedStyle;
+    const style = tableStyle;   // REQ-056:月历 / 甘特只用于预览和 PDF,Excel 里排期仍是表格(阶段表)
     const sub = round1(pkg.schedule.filter((r) => !r.kind).reduce((n, r) => n + (Number(r.weeks) || 0), 0));
     const band = (r: { phase: string; task: string; taskEn: string }) => {
       const s = `${r.phase} ${r.task} ${r.taskEn}`.toLowerCase();
@@ -269,6 +283,145 @@ export default function ExportOverlay({ p, onClose, scope = 'all', clScope = 'al
     );
   }
 
+  /* ===== REQ-056:月历 / 甘特(只用于预览和 PDF;固定 A4 横向) =====
+     阶段 = 排期里不是假日 / 节点的那些行,日期和其他样式一样来自 planDates(pkg.schedule + 日历边界) */
+  const STT: Record<string, string> = { todo: T('未开始', 'Not started'), wip: T('进行中', 'In progress'), done: T('已完成', 'Done'), block: T('受阻', 'Blocked') };
+  function stagesOf(pkg: ServicePackage): ExpStage[] {
+    const pd = planDates(pkg, pkgStart(p, pkg));
+    let n = 0;
+    return pkg.schedule.flatMap((r, i) => (r.kind ? [] : [{
+      no: ++n, name: L === 'zh' ? r.task : r.taskEn || r.task, star: !!r.freeze,
+      start: pd[i] ? ymd(pd[i]!.start) : null, end: pd[i] ? ymd(pd[i]!.end) : null, status: r.status,
+    }]));
+  }
+  const nn = (n: number) => String(n).padStart(2, '0');
+  const WD = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'];
+  const WD_ZH = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
+  function CalendarBlock({ pkg, first }: { pkg: ServicePackage; first: boolean }) {
+    const stages = stagesOf(pkg);
+    const sp = spanOf(stages);
+    const key = keyDates(stages);
+    const heading = <h2 style={{ color: svcColor(pkg.svc) }}>{svcName(pkg)} — {T('生产排期', 'Production Schedule')}</h2>;
+    if (!sp) return <>{heading}<p style={{ color: '#888', fontSize: 12 }}>{T('这一项业务的排期还没有日期。', 'This service has no scheduled dates yet.')}</p></>;
+    const finalTxt = `Final: ${spanLabel(sp.start, sp.end)} · ${T(`${sp.weeks} 周`, `${sp.weeks} weeks`)}`;
+    const months = monthsOf(stages);
+    const undated = stages.filter((x) => !x.start || !x.end);
+    return (
+      <React.Fragment>
+        {months.map(({ year, month }, mi) => {
+          const weeks = monthWeeks(year, month);
+          const inMo = (d: string) => inMonth(d as never, year, month);
+          /* 没有日期的阶段不画色条,放在最后一页的列表里,日期写「—」 */
+          const list = [...stagesInMonth(stages, year, month), ...(mi === months.length - 1 ? undated : [])].sort((a, b) => a.no - b.no);
+          return (
+            <section key={`${year}-${month}`} className={`exc-month${mi > 0 || !first ? ' exc-page' : ''}`} data-testid="ex-cal-month">
+              {(mi > 0 || !first) && <div className="exc-cont">{titleOf(T('生产排期', 'Schedule'))}{T('(续)', ' (cont.)')}</div>}
+              {mi === 0 && heading}
+              <div className="exc-mhead"><b data-testid="ex-cal-title">{monthTitle(year, month, L === 'zh')}</b><span>{finalTxt}</span></div>
+              <div className="exc-grid">
+                <div className="exc-wd">{(L === 'zh' ? WD_ZH : WD).map((w, i) => <span key={w} className={i > 4 ? 'we' : ''}>{w}</span>)}</div>
+                {weeks.map((week) => {
+                  const clip = week.filter(inMo);
+                  const segs = clip.length ? weekSegments(week, stages, [clip[0], clip[clip.length - 1]]) : [];
+                  const lanes = segs.reduce((n, x) => Math.max(n, x.lane + 1), 0);
+                  return (
+                    <div key={week[0]} className="exc-week" style={{ height: 52 + Math.max(0, lanes - 1) * 15 }}>
+                      {week.map((d, ci) => {
+                        const out = !inMo(d);
+                        const hol = !out && calHol ? holidayOf(d) : null;
+                        const isEnd = !out && calKey && key.end === d;
+                        const isKey = !out && calKey && (key.starts.has(d) || isEnd);
+                        return (
+                          <div key={d} className={`exc-day${ci > 4 ? ' we' : ''}${out ? ' out' : ''}${hol ? ' hol' : ''}`} data-date={d}>
+                            <span className="n">{Number(d.slice(8))}</span>
+                            {hol && <span className="hn" data-testid="ex-cal-holiday">{hol}</span>}
+                            {isKey && <i className="kd" data-testid="ex-cal-key" />}
+                            {isEnd && <span className="endl" data-testid="ex-cal-end">END · Delivery</span>}
+                          </div>
+                        );
+                      })}
+                      {segs.map((g) => (
+                        <div key={`${g.stage.no}-${g.from}`} className="exc-bar" data-testid="ex-cal-bar" data-stage={g.stage.no}
+                          style={{ left: `${(g.from / 7) * 100}%`, width: `${((g.to - g.from + 1) / 7) * 100}%`, top: 30 + g.lane * 15,
+                            background: toneOf(g.stage.no), borderLeft: g.isStart ? `3px solid ${edgeOf(g.stage.no)}` : undefined }}>
+                          {nn(g.stage.no)} · {g.stage.name}
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })}
+              </div>
+              {calList && list.length > 0 && (
+                <table className="exc-list" data-testid="ex-cal-list">
+                  <thead><tr><th colSpan={3}>{T('本月阶段', 'Stages this month')}</th></tr></thead>
+                  <tbody>
+                    {list.map((x) => (
+                      <tr key={x.no}>
+                        <td style={{ width: '55%' }}><i className="sw" style={{ background: toneOf(x.no), borderColor: edgeOf(x.no) }} />{nn(x.no)} · {x.name}{x.star ? ' ★' : ''}</td>
+                        <td>{x.start && x.end ? `${fmtDate(parseISO(x.start))} → ${fmtDate(parseISO(x.end))}` : '—'}</td>
+                        <td style={{ width: '14%' }}>{STT[x.status] || ''}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </section>
+          );
+        })}
+      </React.Fragment>
+    );
+  }
+  function GanttBlock({ pkg }: { pkg: ServicePackage }) {
+    const stages = stagesOf(pkg);
+    const sp = spanOf(stages);
+    const heading = <h2 style={{ color: svcColor(pkg.svc) }}>{svcName(pkg)} — {T('生产排期', 'Production Schedule')}</h2>;
+    if (!sp) return <>{heading}<p style={{ color: '#888', fontSize: 12 }}>{T('这一项业务的排期还没有日期。', 'This service has no scheduled dates yet.')}</p></>;
+    const weeks = ganttWeeks(stages);
+    const d0 = weeks[0], n = weeks.length;
+    const grid = { backgroundImage: 'linear-gradient(to right, transparent calc(100% - 1px), #e3e3e3 calc(100% - 1px))', backgroundSize: `${100 / n}% 100%` };
+    const used = [...new Set(stages.map((x) => x.status))];
+    return (
+      <React.Fragment>
+        {heading}
+        <table className="t-fix exg" data-testid="ex-gantt">
+          <colgroup><col style={{ width: '27%' }} /><col style={{ width: '11%' }} />{weeks.map((w) => <col key={w} />)}</colgroup>
+          <thead>
+            <tr>
+              <th>{T('阶段 / 任务', 'Phase / Task')}</th>
+              <th style={{ textAlign: 'center' }}>{T('日期', 'Dates')}</th>
+              {weeks.map((w) => <th key={w} className="exg-wk" data-testid="ex-gantt-week">{dayMon(w)}</th>)}
+            </tr>
+          </thead>
+          <tbody>
+            {stages.map((x) => {
+              const pos = x.start && x.end ? ganttPos(d0, n, x.start, x.end) : null;
+              return (
+                <tr key={x.no} data-testid="ex-gantt-row">
+                  <td>{nn(x.no)} · {x.name}{x.star ? ' ★' : ''}</td>
+                  <td style={{ textAlign: 'center', fontSize: 11 }}>{x.start && x.end ? `${dayMon(x.start)} – ${dayMon(x.end)}` : '—'}</td>
+                  <td colSpan={n} className="exg-tl" style={grid}>
+                    {pos && <i className="exg-bar" data-testid="ex-gantt-bar" data-status={x.status} style={{ left: `${pos.left}%`, width: `${pos.width}%`, background: GANTT_STATUS[x.status] || GANTT_STATUS.todo }} />}
+                  </td>
+                </tr>
+              );
+            })}
+            <tr className="exg-del">
+              <td style={{ color: '#b23a32', fontWeight: 700 }}>{T('交付 Delivery', 'Delivery')}</td>
+              <td style={{ textAlign: 'center', fontSize: 11, color: '#b23a32' }}>{dayMon(sp.end)}</td>
+              <td colSpan={n} className="exg-tl" style={grid}><i className="exg-line" data-testid="ex-gantt-delivery" style={{ left: `${ganttLine(d0, n, sp.end)}%` }} /></td>
+            </tr>
+          </tbody>
+        </table>
+        <div className="exg-legend">
+          {(['wip', 'todo', 'done', 'block'] as const).filter((k) => k !== 'block' || used.includes('block')).map((k) => (
+            <span key={k}><i style={{ background: GANTT_STATUS[k] }} />{STT[k]}</span>
+          ))}
+          <span>· {T('每格一周,周一开始', 'one column per week, starting Monday')}</span>
+        </div>
+      </React.Fragment>
+    );
+  }
+
   /* ── unified checklist block — REQ-019 template columns ──
      REQ-044: 清单是项目一张,导出也是一张:勾了哪些服务就出适用这些服务的项
      (共用项只出一次),多一列「适用服务」。
@@ -377,8 +530,9 @@ export default function ExportOverlay({ p, onClose, scope = 'all', clScope = 'al
   const titleOf = (label: string) => `${projCode(p) ? projCode(p) + ' · ' : ''}${p.name}${label ? ` — ${label}` : ''}`;
   const stageTxt = L === 'zh' ? STAGES[stageIdx(projStage(p))][1] : STAGES[stageIdx(projStage(p))][2];
   const subTxt = `${T('客户', 'Client')}: ${p.client || '—'} · ${T('服务', 'Services')}: ${svcNames} · ${T('阶段', 'Stage')}: ${stageTxt}`;
+  /* REQ-056:封面信息表去掉「项目编号」那一格 —— 客户占整行,其余两两一对。标题里的编号照旧 */
   const coverMeta: [string, string][][] = [
-    [[T('项目编号', 'Project no.'), projCode(p) || '—'], [T('客户', 'Client'), p.client || '—']],
+    [[T('客户', 'Client'), p.client || '—']],
     [[T('交付日期', 'Delivery date'), p.delivery ? fmtDate(parseISO(p.delivery)) : '—'], [T('导出日期', 'Exported'), fmtDate(new Date())]],
     [[T('服务', 'Services'), svcNames], ['PM', (p.owners || []).join(' / ') || '—']],
   ];
@@ -410,7 +564,7 @@ export default function ExportOverlay({ p, onClose, scope = 'all', clScope = 'al
           ...(s.scope ? [{ heading: scopeTitle, level: 3 as const, tables: [s.scope] }] : []),
         ];
       });
-      if (schedStyle === 'weeks' && secs.length) secs.push({ tight: true, tables: [{ heads: [], rows: [{ key: 'sum', cells: [
+      if (tableStyle === 'weeks' && secs.length) secs.push({ tight: true, tables: [{ heads: [], rows: [{ key: 'sum', cells: [
         { v: sumLabel, span: 2, st: { align: 'right', bold: true, fill: '#f0f2f5' } }, { v: sumVal, st: { bold: true, fill: '#f0f2f5' } },
       ] }] }] });
       sheets.push({ name: T('排期', 'Schedule'), title: titleOf(T('生产排期', 'Schedule')), sub: subTxt, sections: secs });
@@ -444,7 +598,10 @@ export default function ExportOverlay({ p, onClose, scope = 'all', clScope = 'al
   const blocks: React.ReactNode[] = [];
   /* REQ-044: 清单项目一张 —— 不再按服务包穿插;「清单在前」放最前,其余放在排期后面 */
   if (order === 'clFirst' && showCl && selPkgs.length) blocks.push(<ClBlock key="cl" />);
-  if (showSched) selPkgs.forEach(({ pkg, pi }) => blocks.push(<SchedBlock key={`s${pi}`} pkg={pkg} />));
+  if (showSched) selPkgs.forEach(({ pkg, pi }, k) => blocks.push(
+    schedStyle === 'calendar' ? <CalendarBlock key={`s${pi}`} pkg={pkg} first={k === 0 && !(order === 'clFirst' && showCl)} />
+      : schedStyle === 'gantt' ? <GanttBlock key={`s${pi}`} pkg={pkg} />
+      : <SchedBlock key={`s${pi}`} pkg={pkg} />));
   if (order !== 'clFirst' && showCl && selPkgs.length) blocks.push(<ClBlock key="cl" />);
 
   return (
@@ -453,13 +610,16 @@ export default function ExportOverlay({ p, onClose, scope = 'all', clScope = 'al
       <div className="ex-actions">
         <button className="btn-line sm" style={L === 'en' ? { borderColor: 'var(--navy900)' } : undefined} onClick={() => setLang('en')}>English</button>
         <button className="btn-line sm" style={L === 'zh' ? { borderColor: 'var(--navy900)' } : undefined} onClick={() => setLang('zh')}>中文</button>
-        <button className="btn-line sm" onClick={() => setOrient(orient === 'portrait' ? 'landscape' : 'portrait')}>
-          {orient === 'portrait' ? T('A4 纵向', 'A4 Portrait') : T('A4 横向', 'A4 Landscape')} ⇄
+        {/* REQ-056:月历 / 甘特固定 A4 横向,这时方向按钮置灰 */}
+        <button className="btn-line sm" onClick={() => setOrient(orient === 'portrait' ? 'landscape' : 'portrait')} disabled={fixedLand} data-testid="ex-orient"
+          title={fixedLand ? T('月历 / 甘特固定 A4 横向', 'Calendar / Gantt are always A4 landscape') : undefined}>
+          {effOrient === 'portrait' ? T('A4 纵向', 'A4 Portrait') : T('A4 横向', 'A4 Landscape')} ⇄
         </button>
         {/* REQ-055:.xlsx,和预览一样;只出排期时按钮照样在,只出排期那一张 */}
         <button className="btn-line sm" onClick={downloadXlsx} disabled={!selPkgs.length || xBusy} data-testid="ex-xlsx" title={`${fileBase}.xlsx`}>
           {xBusy ? T('生成中…', 'Preparing…') : showCl ? T('清单下载 Excel', 'Checklist as Excel') : T('下载 Excel', 'Download Excel')}
         </button>
+        {fixedLand && <span style={{ fontSize: 11.5, color: 'var(--text2)', alignSelf: 'center' }} data-testid="ex-xlsx-hint">{T('Excel 中排期为表格', 'Excel shows the schedule as a table')}</span>}
         <button className="btn-navy sm" onClick={() => window.print()} title={`${fileBase}.pdf`}>{T('打印 / 另存 PDF', 'Print / Save PDF')}</button>
         <button className="btn-line sm" onClick={onClose}>{T('关闭', 'Close')}</button>
       </div>
@@ -491,11 +651,21 @@ export default function ExportOverlay({ p, onClose, scope = 'all', clScope = 'al
         {showSched && (
           <span className="ex-grp">
             {T('排期样式', 'Schedule layout')}:
-            <select className="in sm" value={schedStyle} onChange={(e) => setSchedStyle(e.target.value as 'classic' | 'weeks' | 'dates')} style={{ width: 'auto', padding: '3px 6px' }} data-testid="export-sched-style">
+            <select className="in sm" value={schedStyle} onChange={(e) => setSchedStyle(e.target.value as SchedLayout)} style={{ width: 'auto', padding: '3px 6px' }} data-testid="export-sched-style">
               <option value="classic">{T('阶段表', 'Stage table')}</option>
               <option value="weeks">{T('按服务分组(周)', 'By service (weeks)')}</option>
               <option value="dates">{T('按日期(Scale Model)', 'By date (Scale Model)')}</option>
+              <option value="calendar">{T('月历', 'Calendar')}</option>
+              <option value="gantt">{T('甘特', 'Gantt')}</option>
             </select>
+          </span>
+        )}
+        {showSched && schedStyle === 'calendar' && (
+          <span className="ex-grp" data-testid="ex-cal-toggles">
+            {T('显示', 'Show')}:
+            <label className="ex-col"><input type="checkbox" checked={calHol} onChange={() => setCalHol(!calHol)} data-testid="ex-cal-show-hol" /> {T('节假日', 'Holidays')}</label>
+            <label className="ex-col"><input type="checkbox" checked={calKey} onChange={() => setCalKey(!calKey)} data-testid="ex-cal-show-key" /> {T('关键日期点', 'Key dates')}</label>
+            <label className="ex-col"><input type="checkbox" checked={calList} onChange={() => setCalList(!calList)} data-testid="ex-cal-show-list" /> {T('本页阶段列表', 'Stages this month')}</label>
           </span>
         )}
         {multi && showSched && showCl && (
@@ -558,9 +728,10 @@ export default function ExportOverlay({ p, onClose, scope = 'all', clScope = 'al
               <div className="exc-client">{p.client || '—'}</div>
             </div>
             <table className="exc-meta">
+              <colgroup><col style={{ width: '16%' }} /><col style={{ width: '34%' }} /><col style={{ width: '16%' }} /><col style={{ width: '34%' }} /></colgroup>
               <tbody>
                 {coverMeta.map((pairs, i) => (
-                  <tr key={i}>{pairs.map(([k, v]) => <React.Fragment key={k}><th>{k}</th><td>{v}</td></React.Fragment>)}</tr>
+                  <tr key={i}>{pairs.map(([k, v]) => <React.Fragment key={k}><th>{k}</th><td colSpan={pairs.length === 1 ? 3 : undefined}>{v}</td></React.Fragment>)}</tr>
                 ))}
               </tbody>
             </table>

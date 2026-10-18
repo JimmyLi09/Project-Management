@@ -1,0 +1,218 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>排期导出与编辑 · 原型 v1</title>
+<style>
+:root{--bg:#f5f2ec;--card:#fff;--line:#e6e0d6;--line2:#efebe4;--text:#1f2430;--text2:#6b6558;--navy:#15203a;--green:#2f7a5b;--amber:#b85c1e;--abg:#fdf1e6;--red:#c0392b;--rbg:#fdecea;--gray:#8a8478}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:13px/1.5 -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
+header{padding:12px 24px;background:#fff;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+header h1{margin:0;font-size:18px}.sub{color:var(--text2);font-size:12px}
+.content{padding:16px 24px 60px;max-width:1300px;margin:0 auto}
+.tabs{display:flex;gap:20px;border-bottom:1px solid var(--line);margin-bottom:14px}
+.tabs>span{padding:7px 2px;color:var(--text2);cursor:pointer}.tabs>span.on{color:var(--navy);border-bottom:2px solid var(--navy);font-weight:700}
+.note{background:#fffaf2;border:1px dashed #d9a57a;border-radius:8px;padding:8px 12px;margin-bottom:12px;color:#7c3a10;font-size:12.5px}
+.btn{border:1px solid var(--line);background:#fff;padding:5px 12px;border-radius:7px;cursor:pointer;font-size:12.5px}
+.btn:hover{background:#f6f3ee}.btn-navy{background:var(--navy);color:#fff;border-color:var(--navy)}
+.btn-sm{padding:3px 9px;font-size:12px}
+.new{background:#fff3e8;color:#c2410c;border-radius:4px;font-size:10.5px;padding:0 5px;font-weight:700;margin-left:3px}
+/* export bar */
+.bar{background:#fff;border:1px solid var(--line);border-radius:10px;padding:8px 12px;display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center;margin-bottom:12px;font-size:12.5px}
+.grp{display:inline-flex;gap:8px;align-items:center;background:#faf8f4;border-radius:6px;padding:3px 8px}
+.grp label{display:inline-flex;gap:4px;align-items:center;cursor:pointer}
+.grp.hl{outline:2px solid #f0b37e;background:#fff7ef}
+.sp{flex:1}
+/* paper */
+.paper{background:#fff;border:1px solid var(--line);box-shadow:0 2px 10px rgba(0,0,0,.05);margin:0 auto 18px;padding:28px 34px}
+.paper.port{max-width:860px}.paper.land{max-width:1200px}
+.pg-h{font-size:24px;font-weight:700;margin:0}
+.pg-sub{color:var(--text2);margin:2px 0 0}
+table{border-collapse:collapse;width:100%}
+.kv td{border:1px solid #ddd;padding:7px 10px;font-size:12.5px}
+.kv td.k{background:#f6f6f6;font-weight:700;width:16%}
+.st{width:100%;font-size:12.5px}
+.st th{background:#f6f6f6;text-align:left;padding:7px 10px;border:1px solid #ddd}
+.st td{padding:7px 10px;border:1px solid #ddd}
+h2.sec{font-size:19px;margin:22px 0 2px}
+h3.svc{color:#3F7A4E;font-size:14px;margin:16px 0 6px;padding-bottom:6px;border-bottom:2px solid var(--navy)}
+.pnote{border:1px solid #ddd;border-left:3px solid #b9770e;padding:9px 12px;font-size:12px;color:#555;margin-top:18px}
+.foot{color:#aaa;font-size:11px;margin-top:10px}
+/* month calendar */
+.mcal{table-layout:fixed}
+.mcal th{font-size:11px;color:var(--text2);font-weight:600;padding:5px;border:1px solid #e5e5e5;background:#fafafa}
+.mcal th.we{background:#f1f4f8}
+.mcal td{border:1px solid #e5e5e5;vertical-align:top;height:86px;padding:0;position:relative}
+.mcal td.we{background:#f7f9fc}.mcal td.out{background:#fcfcfc;color:#ccc}.mcal td.hol{background:#fdf1f1}
+.dn{font-size:12px;padding:3px 6px;display:flex;justify-content:space-between}
+.dn .hn{color:#c0392b;font-size:9.5px;font-weight:600}
+.bar1{position:absolute;left:0;right:0;height:18px;font-size:10px;line-height:18px;padding:0 5px;white-space:nowrap;overflow:hidden;color:#1f2430}
+.dot{position:absolute;right:6px;top:5px;width:8px;height:8px;border-radius:50%;border:2px solid #c0392b}
+.legend{margin-top:10px;font-size:12px}
+.legend td{padding:4px 8px;border-bottom:1px solid #eee}
+.sw{display:inline-block;width:12px;height:12px;border-radius:3px;vertical-align:-2px;margin-right:6px}
+/* gantt */
+.gt{table-layout:fixed;font-size:11.5px}
+.gt th,.gt td{border:1px solid #e5e5e5;padding:0;height:30px}
+.gt th{background:#fafafa;font-weight:600;color:var(--text2);font-size:10.5px;text-align:center}
+.gt td.nm{padding:4px 8px;font-size:12px;width:30%}
+.gt td.c{position:relative}
+.gb{position:absolute;top:7px;height:16px;border-radius:3px}
+.gm{position:absolute;top:0;bottom:0;width:2px;background:#c0392b}
+/* editor */
+.ed{display:grid;grid-template-columns:1fr 420px;gap:16px}
+.panel{background:#fff;border:1px solid var(--line);border-radius:12px;padding:18px 20px}
+.cardx{border-bottom:1px solid var(--line2);padding:10px 0;display:grid;grid-template-columns:30px 1fr auto;gap:8px;align-items:start}
+.num{width:26px;height:26px;border-radius:50%;border:1px solid var(--line);font-size:10.5px;display:flex;align-items:center;justify-content:center;color:var(--text2);margin-top:2px}
+.nm2{font-weight:700;font-size:13px}
+.dt{color:var(--text2);font-size:12px}
+.edit{background:#fbfaf7;border:1px solid var(--line2);border-radius:8px;padding:10px;margin-top:8px;display:grid;gap:8px}
+.edit input,.edit select{font:inherit;border:1px solid var(--line);border-radius:6px;padding:4px 7px;background:#fff}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.handle{color:#bbb;cursor:grab;user-select:none}
+.toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:var(--navy);color:#fff;padding:8px 16px;border-radius:8px;opacity:0;transition:.3s;pointer-events:none}
+.toast.on{opacity:1}
+@media (max-width:900px){.ed{grid-template-columns:1fr}.content{padding:12px}.paper{padding:16px}}
+</style>
+</head>
+<body>
+<header>
+  <h1>排期导出与编辑 · 原型 v1</h1>
+  <span class="sub">2026-10-17 · JM 1017 反馈:① 封面去掉 Project no.,导出可选「月历 / 甘特」② 排期右侧卡片默认收起,点「编辑」或新加时才展开</span>
+</header>
+<div class="content">
+  <div class="tabs"><span data-t="exp" class="on">① 导出预览</span><span data-t="ed">② 排期编辑 · 右侧卡片</span></div>
+  <div id="page"></div>
+</div>
+<div class="toast" id="toast"></div>
+<script>
+const $=s=>document.querySelector(s);
+const toast=m=>{const t=$('#toast');t.textContent=m;t.classList.add('on');clearTimeout(t._t);t._t=setTimeout(()=>t.classList.remove('on'),1800)};
+const D=(y,m,d)=>new Date(y,m-1,d);
+const MON=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+const fmt=d=>`${String(d.getDate()).padStart(2,'0')}-${MON[d.getMonth()]}-${d.getFullYear()}`;
+const fmt2=d=>`${MON[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()}`;
+const same=(a,b)=>a.getFullYear()===b.getFullYear()&&a.getMonth()===b.getMonth()&&a.getDate()===b.getDate();
+const addD=(d,n)=>{const x=new Date(d);x.setDate(x.getDate()+n);return x};
+const COLORS=['#ece6f5','#f8e8d8','#dde7f3','#e3f0e6','#f6e3e3','#e7e3d8'];
+const HOL=[[D(2026,12,25),'Christmas Day'],[D(2027,1,1),"New Year's Day"]];
+let S=[
+ {t:'Receive and review all the information',f:1,s:D(2026,10,14),e:D(2026,10,20),st:'In progress',o:'',n:''},
+ {t:'Confirm the materials for sample and mock up before start',f:1,s:D(2026,10,21),e:D(2026,11,4),st:'Not started',o:'',n:''},
+ {t:'Start to build the structure and send out progress photos',f:1,s:D(2026,11,5),e:D(2026,11,24),st:'Not started',o:'',n:''},
+ {t:'Building facade fabricate and landscape plants',s:D(2026,11,25),e:D(2026,12,8),st:'Not started',o:'',n:''},
+ {t:'Final checking for complete model in photo and videos',s:D(2026,12,9),e:D(2026,12,21),st:'Not started',o:'',n:''},
+ {t:'Delivery and installation the model onsite',s:D(2026,12,22),e:D(2026,12,29),st:'Not started',o:'',n:''},
+];
+let tab='exp', fmtSel='table', content='sched', orient='land', cover=true;
+
+/* ---------------- 导出预览 ---------------- */
+function renderExp(){
+  const land=fmtSel!=='table'?true:orient==='land';
+  let h=`<div class="note">① 封面信息表去掉「Project no.」那一格,其余不变(标题「050 · …」照旧)。② 内容选到排期时,多一个「排期格式」:<b>表格</b>(和现在一样)/ <b>月历</b>(一页一个月)/ <b>甘特</b>(一页看完整个工期)。月历和甘特自动用 A4 横向。</div>
+  <div class="bar">
+    <label class="grp"><input type="checkbox" ${cover?'checked':''} onchange="cover=this.checked;render()"> Cover page</label>
+    <span class="grp">Content: ${[['both','Schedule + Checklist'],['sched','Schedule only'],['cl','Checklist only']].map(([k,l])=>`<label><input type="radio" name="ct" ${content===k?'checked':''} onchange="content='${k}';render()"> ${l}</label>`).join('')}</span>
+    ${content!=='cl'?`<span class="grp hl">Schedule format <span class="new">新</span>: ${[['table','Table 表格'],['month','Calendar 月历'],['gantt','Gantt 甘特']].map(([k,l])=>`<label><input type="radio" name="sf" ${fmtSel===k?'checked':''} onchange="fmtSel='${k}';render()"> ${l}</label>`).join('')}</span>`:''}
+    <span class="grp">Services: <label><input type="checkbox" checked> Scale Model</label></span>
+    ${fmtSel==='table'?`<span class="grp">Columns: Schedule <label><input type="checkbox" checked> Owner</label><label><input type="checkbox" checked> Start</label><label><input type="checkbox" checked> Due</label><label><input type="checkbox" checked> Status</label></span>`:`<span class="grp">显示: <label><input type="checkbox" checked> 节假日</label><label><input type="checkbox" checked> 关键日期点</label><label><input type="checkbox" checked> 本页阶段列表</label></span>`}
+    <span class="sp"></span>
+    <button class="btn" ${fmtSel!=='table'?'disabled title="月历 / 甘特固定 A4 横向"':''} onclick="orient=orient==='land'?'port':'land';render()">A4 ${land?'Landscape':'Portrait'} ⇄</button>
+    <button class="btn btn-navy" onclick="toast('浏览器打印 / 另存 PDF')">Print / Save PDF</button>
+  </div>`;
+  const cls='paper '+(land?'land':'port');
+  if(cover) h+=`<div class="${cls}">${coverHtml()}</div>`;
+  if(content==='cl'){h+=`<div class="${cls}"><p class="sub">(清单部分不变,略)</p></div>`;$('#page').innerHTML=h;return}
+  if(fmtSel==='table') h+=`<div class="${cls}">${headHtml()}${tableHtml()}<div class="pnote">Note: incomplete information may affect the delivery schedule; repeated revisions after confirmation may incur additional charges.</div><div class="foot">Audax Visuals · Exported 17-Oct-2026</div></div>`;
+  else if(fmtSel==='month') monthsOf().forEach((m,i)=>h+=`<div class="${cls}">${i===0?headHtml():`<div class="sub">050 · 173-Elite Park Avenue — Schedule(续)</div>`}${monthHtml(m.y,m.m)}${i===monthsOf().length-1?'<div class="pnote">Note: incomplete information may affect the delivery schedule; repeated revisions after confirmation may incur additional charges.</div>':''}<div class="foot">Audax Visuals · Exported 17-Oct-2026 · Page ${i+1+(cover?1:0)}</div></div>`);
+  else h+=`<div class="${cls}">${headHtml()}${ganttHtml()}<div class="pnote">Note: incomplete information may affect the delivery schedule; repeated revisions after confirmation may incur additional charges.</div><div class="foot">Audax Visuals · Exported 17-Oct-2026</div></div>`;
+  if(content==='both') h+=`<div class="${cls}"><p class="sub">(之后接清单,不变,略)</p></div>`;
+  $('#page').innerHTML=h;
+}
+function coverHtml(){
+  return `<h1 class="pg-h" style="font-size:28px">173-Elite Park Avenue</h1><p class="pg-sub">Noel Property Development Pte Ltd</p><div style="height:90px"></div>
+  <table class="kv">
+   <tr><td class="k">Client</td><td colspan="3">Noel Property Development Pte Ltd</td></tr>
+   <tr><td class="k">Delivery date</td><td>29-Dec-2026</td><td class="k">Exported</td><td>17-Oct-2026</td></tr>
+   <tr><td class="k">Services</td><td>Scale Model</td><td class="k">PM</td><td>JM</td></tr>
+  </table>
+  <p class="sub" style="margin-top:8px;color:#c2410c">↑ 原来左上的「Project no. | 050」一格去掉;客户改为整行,其余两两一行。</p>`;
+}
+function headHtml(){return `<h2 class="sec">050 · 173-Elite Park Avenue — Schedule</h2><div class="sub">Client: Noel Property Development Pte Ltd · Services: Scale Model · Stage: In progress</div><h3 class="svc">Scale Model — Production Schedule</h3>`}
+function tableHtml(){
+  return `<table class="st"><tr><th>Phase / Task</th><th style="width:12%">Start</th><th style="width:12%">Due</th><th style="width:11%">Status</th></tr>${S.map(r=>`<tr><td>${r.t}${r.f?' ★':''}</td><td>${fmt(r.s)}</td><td>${fmt(r.e)}</td><td>${r.st}</td></tr>`).join('')}</table>`;
+}
+function monthsOf(){const a=[];let d=D(S[0].s.getFullYear(),S[0].s.getMonth()+1,1);const end=S[S.length-1].e;while(d<=end){a.push({y:d.getFullYear(),m:d.getMonth()});d=D(d.getFullYear(),d.getMonth()+2,1)}return a}
+function stageOn(d){return S.findIndex(r=>d>=r.s&&d<=r.e)}
+function monthHtml(y,m){
+  const first=new Date(y,m,1), off=(first.getDay()+6)%7, start=addD(first,-off);
+  const last=new Date(y,m+1,0); const weeks=Math.ceil((off+last.getDate())/7);
+  let h=`<div style="display:flex;align-items:baseline;gap:10px;margin:6px 0 6px"><b style="font-size:18px">${['January','February','March','April','May','June','July','August','September','October','November','December'][m]} ${y}</b><span class="sub">Final: Oct 14 → Dec 29, 2026 · 11 weeks</span></div>
+  <table class="mcal"><tr>${['MON','TUE','WED','THU','FRI','SAT','SUN'].map((w,i)=>`<th class="${i>4?'we':''}">${w}</th>`).join('')}</tr>`;
+  for(let w=0;w<weeks;w++){
+    h+='<tr>';
+    for(let i=0;i<7;i++){
+      const d=addD(start,w*7+i), out=d.getMonth()!==m, hol=HOL.find(x=>same(x[0],d)), si=stageOn(d);
+      const isB=S.some(r=>same(r.s,d))||same(d,S[S.length-1].e);
+      let bar='';
+      if(si>=0&&!out){const r=S[si];const startSeg=same(d,r.s)||i===0||d.getDate()===1;
+        bar=`<div class="bar1" style="top:52px;background:${COLORS[si%6]};${same(d,r.s)?'border-left:3px solid #8a8478;':''}">${startSeg?`0${si+1} · ${r.t}`:''}</div>`}
+      h+=`<td class="${i>4?'we ':''}${out?'out ':''}${hol&&!out?'hol':''}"><div class="dn"><span>${d.getDate()}</span>${hol&&!out?`<span class="hn">${hol[1]}</span>`:''}</div>${isB&&!out?'<span class="dot" title="关键日期"></span>':''}${same(d,S[S.length-1].e)&&!out?'<div style="position:absolute;top:22px;left:6px;color:#c0392b;font-size:10px;font-weight:700">END · Delivery</div>':''}${bar}</td>`;
+    }
+    h+='</tr>';
+  }
+  h+='</table>';
+  const inM=S.map((r,i)=>({r,i})).filter(({r})=>r.e>=new Date(y,m,1)&&r.s<=new Date(y,m+1,0));
+  h+=`<table class="legend"><tr><td colspan="4" style="font-weight:700;border-bottom:1px solid #ccc">本月阶段 Stages this month</td></tr>${inM.map(({r,i})=>`<tr><td><span class="sw" style="background:${COLORS[i%6]}"></span>0${i+1} · ${r.t}${r.f?' ★':''}</td><td>${fmt(r.s)} → ${fmt(r.e)}</td><td>${r.st}</td></tr>`).join('')}</table>`;
+  return h;
+}
+function ganttHtml(){
+  const w0=addD(S[0].s,-((S[0].s.getDay()+6)%7)); const end=S[S.length-1].e;
+  const wk=[];for(let d=new Date(w0);d<=end;d=addD(d,7))wk.push(new Date(d));
+  const span=wk.length*7;
+  let h=`<table class="gt"><tr><th style="width:30%;text-align:left;padding-left:8px">Phase / Task</th><th style="width:10%">Dates</th><th colspan="${wk.length}" style="padding:0"><div style="display:flex">${wk.map(d=>`<div style="flex:1;border-left:1px solid #e5e5e5;padding:3px 0">${d.getDate()} ${MON[d.getMonth()]}</div>`).join('')}</div></th></tr>`;
+  S.forEach((r,i)=>{
+    const l=(r.s-w0)/864e5/span*100, w=((r.e-r.s)/864e5+1)/span*100;
+    h+=`<tr><td class="nm">0${i+1} · ${r.t}${r.f?' ★':''}</td><td style="font-size:10.5px;text-align:center">${r.s.getDate()} ${MON[r.s.getMonth()]} – ${r.e.getDate()} ${MON[r.e.getMonth()]}</td><td class="c" colspan="${wk.length}"><div style="position:absolute;inset:0;display:flex">${wk.map(()=>'<div style="flex:1;border-left:1px solid #f0f0f0"></div>').join('')}</div><div class="gb" style="left:${l}%;width:${w}%;background:${r.st==='In progress'?'#2f7a5b':'#9fb3c8'}"></div></td></tr>`;
+  });
+  const dl=((end-w0)/864e5+1)/span*100;
+  h+=`<tr><td class="nm" style="color:#c0392b;font-weight:700">Delivery 交付</td><td style="font-size:10.5px;text-align:center;color:#c0392b">29 Dec</td><td class="c" colspan="${wk.length}"><div class="gm" style="left:${dl}%"></div></td></tr></table>
+  <div class="sub" style="margin-top:6px"><span class="sw" style="background:#2f7a5b"></span>进行中 <span class="sw" style="background:#9fb3c8;margin-left:10px"></span>未开始 <span class="sw" style="background:#8a8478;margin-left:10px"></span>已完成 · 每格一周,周一开始</div>`;
+  return h;
+}
+
+/* ---------------- 排期编辑 · 右侧卡片 ---------------- */
+let opened=new Set();
+const OWN=['未指派','JM','Eric','Skye','Kian Lim'], ST=['未开始','进行中','已完成','受阻'], STE={'Not started':'未开始','In progress':'进行中'};
+function renderEd(){
+  let h=`<div class="note">② 右侧每个阶段<b>默认只显示名称 + 日期</b>;备注、工期、负责人、状态收进「编辑」。点「编辑」展开,改完点「收起」;<b>新加的阶段直接展开</b>。左边日历不变。</div>
+  <div class="ed"><div class="panel" style="color:var(--text2);display:flex;align-items:center;justify-content:center;min-height:300px">(左侧日历不变,略)</div>
+  <div class="panel"><div class="row"><b style="font-size:20px">Schedule complete</b><span class="sp"></span><span style="font-size:11px;letter-spacing:1px;color:var(--green);font-weight:700">DONE</span></div>
+  <div class="sub" style="margin-bottom:10px">All stages are scheduled. Boundaries remain adjustable.</div>
+  <div style="background:#eef3ef;padding:10px 14px;border-left:3px solid var(--green);margin-bottom:6px"><div style="font-size:10.5px;letter-spacing:1px;color:var(--green)">FINAL RESULT</div><b>Oct 14, 2026 → Dec 29, 2026</b><div class="sub">共 77 天 · 11w</div></div>
+  <div class="row" style="justify-content:flex-end;margin:6px 0"><button class="btn btn-sm" onclick="S.forEach((_,i)=>opened.add(i));render()">全部展开</button><button class="btn btn-sm" onclick="opened.clear();render()">全部收起</button></div>`;
+  S.forEach((r,i)=>{
+    const o=opened.has(i), days=Math.round((r.e-r.s)/864e5)+1;
+    h+=`<div class="cardx"><div class="num">0${i+1}</div><div><div class="nm2">${r.t}</div><div class="dt">${fmt2(r.s)} → ${fmt2(r.e)}</div>
+    ${o?`<div class="edit">
+      <div class="row"><input type="date" value="${iso(r.s)}" onchange="S[${i}].s=new Date(this.value+'T00:00')"> → <input type="date" value="${iso(r.e)}" onchange="S[${i}].e=new Date(this.value+'T00:00')"></div>
+      <input placeholder="备注(如:客户出差,顺延一周)" value="${r.n}" oninput="S[${i}].n=this.value">
+      <div class="row">工期 <input type="number" value="${days}" style="width:70px"> 天</div>
+      <div class="row">负责人 <select onchange="S[${i}].o=this.value">${OWN.map(x=>`<option ${x===(r.o||'未指派')?'selected':''}>${x}</option>`).join('')}</select> 状态 <select>${ST.map(x=>`<option ${x===(STE[r.st]||r.st)?'selected':''}>${x}</option>`).join('')}</select></div>
+      <div class="row"><button class="btn btn-sm btn-navy" onclick="opened.delete(${i});render();toast('已保存')">收起</button><button class="btn btn-sm" style="color:var(--red)" onclick="S.splice(${i},1);opened.clear();render()">删除阶段</button></div>
+    </div>`:''}</div>
+    <div class="row" style="gap:4px">${o?'':`<button class="btn btn-sm" onclick="opened.add(${i});render()">编辑</button>`}<span class="handle" title="拖动排序">⠿</span></div></div>`;
+  });
+  h+=`<div style="margin-top:10px"><button class="btn" onclick="addStage()">＋ 添加阶段</button></div></div></div>`;
+  $('#page').innerHTML=h;
+}
+const iso=d=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+function addStage(){const l=S[S.length-1];S.push({t:'New stage 新阶段',s:addD(l.e,1),e:addD(l.e,7),st:'Not started',o:'',n:''});opened.add(S.length-1);render();toast('新阶段已加,直接展开编辑')}
+
+function render(){document.querySelectorAll('.tabs>span').forEach(s=>s.classList.toggle('on',s.dataset.t===tab));tab==='exp'?renderExp():renderEd()}
+document.querySelectorAll('.tabs>span').forEach(s=>s.onclick=()=>{tab=s.dataset.t;render()});
+render();
+</script>
+</body>
+</html>

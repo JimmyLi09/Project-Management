@@ -1,4 +1,4 @@
-import { Fragment, useState, type ReactNode } from 'react'
+import { Fragment, useEffect, useRef, useState, type ReactNode } from 'react'
 
 import { formatDisplayDate } from '../domain/calendar'
 import { calculateDuration, durationExact, formatDuration, nonWorkingReason } from '../domain/duration'
@@ -85,6 +85,19 @@ export function StagePanel({
   const canAdd = schedules.length < MAX_STAGES
   const canRemove = schedules.length > MIN_STAGES
   const [editingIndex, setEditingIndex] = useState<number | null>(null)
+  /* REQ-056:卡片默认收起,只显示编号 + 名称 + 日期;点「编辑」展开。可以同时开好几张。
+     只是界面状态,不存库 —— 刷新后全部收起。新加的那一张(列表多了一行、多出来的是没见过的阶段)直接展开。 */
+  const [open, setOpen] = useState<Set<string>>(() => new Set())
+  const seen = useRef<Set<string> | null>(null)
+  const ids = schedules.map((x) => x.id).join('|')
+  useEffect(() => {
+    const now = schedules.map((x) => x.id)
+    if (seen.current === null) { seen.current = new Set(now); return }
+    const fresh = now.filter((id) => !seen.current!.has(id))
+    if (fresh.length === 1 && now.length === seen.current.size + 1) setOpen((cur) => new Set(cur).add(fresh[0]))
+    seen.current = new Set(now)
+  }, [ids]) // eslint-disable-line react-hooks/exhaustive-deps
+  const toggle = (id: string) => setOpen((cur) => { const n = new Set(cur); if (n.has(id)) n.delete(id); else n.add(id); return n })
   const [dragFrom, setDragFrom] = useState<number | null>(null)
   // gap = 插入线位置：0 = 第一行之前，n = 最后一行之后
   const [gap, setGap] = useState<number | null>(null)
@@ -153,6 +166,10 @@ export function StagePanel({
         </div>
       )}
 
+      <div className="stage-expand-row">
+        <button className="link-button" data-testid="stage-expand-all" onClick={() => setOpen(new Set(schedules.map((x) => x.id)))} type="button">{t('全部展开', 'Expand all')}</button>
+        <button className="link-button" data-testid="stage-collapse-all" onClick={() => setOpen(new Set())} type="button">{t('全部收起', 'Collapse all')}</button>
+      </div>
       <ol
         className="stage-list"
         data-testid="stage-list"
@@ -170,6 +187,7 @@ export function StagePanel({
           const isComplete = Boolean(stage.start && stage.end) && !isPreviewStage
           const isEditing = editingIndex === stage.index
           const isDragging = dragFrom === stage.index
+          const isOpen = open.has(stage.id)
           /* REQ-040: 每阶段备注 —— 跟排期一起存回项目。只有接了后端(传了 onNoteChange)才出现 */
           const noteInput = onNoteChange ? (
             <input
@@ -189,8 +207,9 @@ export function StagePanel({
                 <li className="insert-line" data-testid="insert-line" aria-hidden="true" />
               )}
               <li
-                className={`stage-row stage-row-${stage.tone} ${isActive ? 'stage-row-active' : ''} ${isComplete ? 'stage-row-complete' : ''} ${isDragging ? 'stage-row-dragging' : ''}`}
+                className={`stage-row stage-row-${stage.tone} ${isActive ? 'stage-row-active' : ''} ${isComplete ? 'stage-row-complete' : ''} ${isDragging ? 'stage-row-dragging' : ''} ${isOpen ? 'stage-row-open' : 'stage-row-closed'}`}
                 data-testid={`stage-row-${stage.index}`}
+                data-open={String(isOpen)}
                 data-active={String(isActive)}
                 data-complete={String(isComplete)}
                 data-drop-index={stage.index}
@@ -220,6 +239,11 @@ export function StagePanel({
                       <h3
                         data-testid={`stage-name-${stage.index}`}
                         onClick={() => {
+                          if (dragFrom === null && !readOnly && isOpen) {
+                            setEditingIndex(stage.index)
+                          }
+                        }}
+                        onDoubleClick={() => {
                           if (dragFrom === null && !readOnly) {
                             setEditingIndex(stage.index)
                           }
@@ -231,20 +255,20 @@ export function StagePanel({
                           }
                         }}
                         tabIndex={readOnly ? undefined : 0}
-                        title={readOnly ? stageName(stage, lang) : `${stageName(stage, lang)} — ${t('点击编辑阶段名称', 'click to rename')}`}
+                        title={readOnly ? stageName(stage, lang) : `${stageName(stage, lang)} — ${t('双击改名', 'double-click to rename')}`}
                       >
                         {stageName(stage, lang)}
                       </h3>
                     )}
                     {isActive && <span className="stage-current-label">CURRENT</span>}
-                    {stage.duration !== null && (
+                    {isOpen && stage.duration !== null && (
                       <strong className="stage-duration" data-testid={`stage-duration-${stage.index}`} title={durationExact(stage.duration, unit, lang)}>
                         {formatDuration(stage.duration, unit)}
                       </strong>
                     )}
                   </div>
                   {/* REQ-046:第 2 行 = 开始 → 结束两个日期框(点开小日历,也可直接输入)+ 备注 */}
-                  {onEditDate ? (
+                  {onEditDate && isOpen ? (
                     <div className="stage-row-edit">
                       <DateField
                         excludeHolidays={excludeHolidays}
@@ -278,7 +302,7 @@ export function StagePanel({
                     </div>
                   )}
                   {/* REQ-048:工期可以直接改,改了后面的阶段自动顺延;和默认不一样就标「已改 · 默认 2w」 */}
-                  {onEditDuration && (() => {
+                  {onEditDuration && isOpen && (() => {
                     const def = typeof stage.weeks === 'number' ? Math.max(1, Math.round(stage.weeks * (excludeHolidays ? 5 : 7))) : null
                     const changed = def !== null && stage.duration !== null && stage.duration !== def
                     const wk = typeof stage.weeks === 'number' ? `${Number.isInteger(stage.weeks) ? stage.weeks : stage.weeks.toFixed(1)}w` : ''
@@ -310,34 +334,47 @@ export function StagePanel({
                       </div>
                     )
                   })()}
-                  {stageExtra && <div className="stage-row-extra">{stageExtra(stage)}</div>}
-                  {stage.index === 0 && noStart && onEditDate && (
+                  {isOpen && stageExtra && <div className="stage-row-extra">{stageExtra(stage)}</div>}
+                  {isOpen && stage.index === 0 && noStart && onEditDate && (
                     <span className="stage-need-hint" data-testid="stage-need-start">{t('选开始日期（在这里选，或在左边日历点一天）', 'Pick a start date (here, or click a day on the calendar)')}</span>
                   )}
                   {rowMsg[stage.index] && (
                     <span className={`stage-row-msg stage-row-msg-${rowMsg[stage.index].kind}`} data-testid={`stage-msg-${stage.index}`}>{rowMsg[stage.index].text}</span>
                   )}
-                  {!onEditDate && noteInput}
-                  {readOnly && notes?.[stage.id] && <span className="stage-note-text" data-testid={`stage-note-text-${stage.index}`}>{notes[stage.id]}</span>}
+                  {isOpen && !onEditDate && noteInput}
+                  {isOpen && readOnly && notes?.[stage.id] && <span className="stage-note-text" data-testid={`stage-note-text-${stage.index}`}>{notes[stage.id]}</span>}
+                  {/* REQ-056:展开后底部「收起」「删除阶段」 */}
+                  {isOpen && (
+                    <div className="stage-card-actions">
+                      <button className="button button-primary button-small" data-testid={`stage-collapse-${stage.index}`} onClick={() => toggle(stage.id)} type="button">{t('收起', 'Collapse')}</button>
+                      {!readOnly && (
+                        <button
+                          aria-label={t(`删除阶段 ${stage.index + 1}`, `Delete stage ${stage.index + 1}`)}
+                          className="button button-secondary button-small stage-delete-button"
+                          data-testid={`stage-delete-${stage.index}`}
+                          disabled={!canRemove}
+                          onClick={() => {
+                            if (editingIndex === stage.index) {
+                              setEditingIndex(null)
+                            }
+                            onRemoveStage(stage.index)
+                          }}
+                          title={canRemove ? t(`删除阶段 ${stage.index + 1}`, `Delete stage ${stage.index + 1}`) : t('至少保留一个阶段', 'Keep at least one stage')}
+                          type="button"
+                        >
+                          {t('删除阶段', 'Delete stage')}
+                        </button>
+                      )}
+                    </div>
+                  )}
                 </div>
-                {!readOnly && <div className="stage-side-actions">
-                  <button
-                    aria-label={t(`删除阶段 ${stage.index + 1}`, `Delete stage ${stage.index + 1}`)}
-                    className="icon-button-small icon-button-small-danger"
-                    data-testid={`stage-delete-${stage.index}`}
-                    disabled={!canRemove}
-                    onClick={() => {
-                      if (editingIndex === stage.index) {
-                        setEditingIndex(null)
-                      }
-                      onRemoveStage(stage.index)
-                    }}
-                    title={canRemove ? t(`删除阶段 ${stage.index + 1}`, `Delete stage ${stage.index + 1}`) : t('至少保留一个阶段', 'Keep at least one stage')}
-                    type="button"
-                  >
-                    ×
-                  </button>
-                  <span
+                <div className="stage-side-actions">
+                  {!isOpen && (
+                    <button className="stage-edit-button" data-testid={`stage-edit-${stage.index}`} onClick={() => toggle(stage.id)} type="button">
+                      {readOnly ? t('详情', 'Details') : t('编辑', 'Edit')}
+                    </button>
+                  )}
+                  {!readOnly && <span
                     aria-label={t(`拖动排序阶段 ${stage.index + 1}，也可用上下方向键移动`, `Reorder stage ${stage.index + 1} — drag, or use the arrow keys`)}
                     className="drag-handle"
                     data-testid={`stage-drag-${stage.index}`}
@@ -366,8 +403,8 @@ export function StagePanel({
                     title={t('拖动调整顺序', 'Drag to reorder')}
                   >
                     ⋮⋮
-                  </span>
-                </div>}
+                  </span>}
+                </div>
               </li>
             </Fragment>
           )
