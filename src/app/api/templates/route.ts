@@ -35,7 +35,8 @@ function validTemplate(t: unknown): t is Template {
   if (!Array.isArray(tt.schedule) || !Array.isArray(tt.checklist)) return false;
   /* REQ-041: 9 位是老格式,11 位多带 typicalEn / gateEn */
   if (!tt.schedule.every((r) => Array.isArray(r) && (r.length === 9 || r.length === 11))) return false;
-  if (!tt.checklist.every((g) => Array.isArray(g) && g.length === 4 && Array.isArray(g[3]))) return false;
+  /* REQ-058:分组可选第五位 key(字符串) */
+  if (!tt.checklist.every((g) => Array.isArray(g) && (g.length === 4 || (g.length === 5 && typeof g[4] === 'string')) && Array.isArray(g[3]))) return false;
   return true;
 }
 

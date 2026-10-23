@@ -18,9 +18,13 @@
 
 import type { ChecklistGroup, ChecklistItem, ChecklistStatus, ReceiptRecord } from './types';
 
+/* 去掉空格、标点、符号,统一全半角和大小写 */
+export const normName = (s: string | undefined | null): string =>
+  String(s || '').normalize('NFKC').toLowerCase().replace(/[\s\p{P}\p{S}]+/gu, '');
+
 /* 默认「同义项」:模板里名字不同、说的是同一份资料的。PD / BD 可以在模板管理里改
    (存进数据库后以那份为准)。宁少勿多 —— 合错了比没合上更难发现。 */
-export const DEFAULT_SYNONYMS: string[][] = [
+const BASE_SYNONYMS: string[][] = [
   ['最终 CAD + 3D 模型', '最终 CAD + SKP + 平面/立面/屋顶', '确认 3D 模型 & CAD'],
   ['场地竖向(详细标高)', '场地竖向'],
   ['彩色总平 标注设施名', '彩色总平(可最后)'],
@@ -33,6 +37,28 @@ export const DEFAULT_SYNONYMS: string[][] = [
   ['材料表(饰面/铺贴方向)', '材料表(饰面/颜色/纹理/铺贴)'],
   ['地址 + 联系人', '项目地址 + 开发商/Main Con 联系人'],
 ];
+/* REQ-058:效果图 / 动画统一清单的新名字并进原来的同义组(原来的名字留着 —— 已有项目、覆盖过的模板还在用),
+   再加三组新的。宁少勿多:不确定的不合。 */
+export const SYNONYMS_058: string[][] = [
+  ['最终 CAD + 3D 模型', '最终 CAD + 3D 模型(至少 WP 审批版)'],
+  ['场地竖向(详细标高)', '场地竖向(详细标高图)'],
+  ['景观材料(色/尺寸/排布)+ 参考', '景观铺地材质 + 参考'],
+  ['景观平面(材料/种植/家具)', '景观平面图', '景观图 + 详图'],
+  ['户外家具/健身/儿童设施 + 参考', '室外家具 / 健身 / 儿童设施布置 + 参考', '家具与设备'],
+  ['截止日', '最终截止日'],
+];
+/* 把几组同义项并进一份清单:和已有某组有同一个名字(规范化后)就并进那一组,否则另起一组。返回新的一份,不改原来的 */
+export function addSynonyms(base: string[][], adds: string[][]): string[][] {
+  const out = base.map((g) => [...g]);
+  for (const add of adds) {
+    const keys = new Set(add.map(normName));
+    const hit = out.find((g) => g.some((n) => keys.has(normName(n))));
+    if (hit) { for (const n of add) if (!hit.some((x) => normName(x) === normName(n))) hit.push(n); }
+    else out.push([...add]);
+  }
+  return out;
+}
+export const DEFAULT_SYNONYMS: string[][] = addSynonyms(BASE_SYNONYMS, SYNONYMS_058);
 
 /* 当前生效的同义项:服务端启动时从数据库读一次(PD / BD 改了再设),没有就是默认那份。
    放在模块里是为了让 newProject / 加服务包这些纯函数不用一层层传参数。 */
@@ -48,9 +74,6 @@ export function cleanSynonyms(list: unknown): string[][] {
     .filter((g) => g.length >= 2);
 }
 
-/* 去掉空格、标点、符号,统一全半角和大小写 */
-export const normName = (s: string | undefined | null): string =>
-  String(s || '').normalize('NFKC').toLowerCase().replace(/[\s\p{P}\p{S}]+/gu, '');
 
 /* 同义项索引:规范化后的名字 → 组号 */
 export function synonymIndex(synonyms: string[][]): Map<string, number> {
@@ -67,8 +90,10 @@ export function itemKeys(it: { zh?: string; en?: string }, syn: Map<string, numb
   if (en) { out.push('en:' + en); if (syn.has(en)) out.push('syn:' + syn.get(en)); }
   return out;
 }
-export const groupKeys = (g: { group?: string; groupEn?: string }): string[] =>
-  [normName(g.group) && 'zh:' + normName(g.group), normName(g.groupEn) && 'en:' + normName(g.groupEn)].filter(Boolean) as string[];
+/* 分组的身份:REQ-058 有稳定的 key 时先按 key(arch / land / int / brief),再按中文 / 英文名 —— 以后改名不影响合并;
+   老模板(覆盖过的)、老项目没有 key,照旧按名字 */
+export const groupKeys = (g: { group?: string; groupEn?: string; key?: string }): string[] =>
+  [g.key && 'key:' + g.key, normName(g.group) && 'zh:' + normName(g.group), normName(g.groupEn) && 'en:' + normName(g.groupEn)].filter(Boolean) as string[];
 
 /* 已确认 > 已收到 > 需修订 > 退回 > 待处理。需修订 / 退回说明东西来过但不能用,
    比「没来」靠后、比「已收到」靠前不合适 —— 两个服务里有一个已经收到能用的,就按已收到算 */
@@ -184,7 +209,7 @@ export function mergeChecklists(pkgs: LegacyPackage[], opts: { synonyms?: string
     (pk.checklist || []).forEach((g) => {
       let tg = groupKeys(g).map((k) => gIndex.get(k)).find(Boolean);
       if (!tg) {
-        tg = { group: g.group, groupEn: g.groupEn, color: g.color, items: [] };
+        tg = { group: g.group, groupEn: g.groupEn, color: g.color, ...(g.key ? { key: g.key } : {}), items: [] };
         groups.push(tg);
       }
       groupKeys(g).forEach((k) => { if (!gIndex.has(k)) gIndex.set(k, tg!); });

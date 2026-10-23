@@ -8,6 +8,7 @@ import { useLang } from '@/lib/i18n';
 import { STAGES, stageIdx, SVC, svcColor } from '@/lib/templates';
 import type { ChecklistItem, Project, ServicePackage } from '@/lib/types';
 import { cellLabel, pkgLabel, type ClFields } from '@/lib/clCells';
+import { clGroupHidden } from '@/lib/interior';
 import type { XBook, XCover, XHead, XRow, XSection, XSheet, XStyle, XTable } from '@/lib/exportXlsx';
 import {
   dayMon, edgeOf, ganttLine, ganttPos, ganttWeeks, GANTT_STATUS, holidayOf, inMonth, keyDates, monthTitle, monthWeeks, monthsOf,
@@ -154,11 +155,14 @@ export default function ExportOverlay({ p, onClose, scope = 'all', clScope = 'al
   const colGroup = (heads: XHead[]) => (
     <colgroup>{heads.map((h, i) => <col key={i} style={h.w ? { width: h.w } : undefined} />)}</colgroup>
   );
-  const bodyRow = (row: XRow, testid?: string) => (
-    <tr key={row.key} data-testid={testid}>
-      {row.cells.map((c, i) => <td key={i} colSpan={c.span} style={cssOf(c.st)}>{c.v}</td>)}
-    </tr>
-  );
+  const bodyRow = (row: XRow, testid?: string) => (row.sec
+    /* REQ-058:组内小标题行 */
+    ? <tr key={row.key} className="ex-sec" data-testid="ex-cl-sec"><td colSpan={row.cells[0]?.span}>{row.cells[0]?.v}</td></tr>
+    : (
+      <tr key={row.key} data-testid={testid}>
+        {row.cells.map((c, i) => <td key={i} colSpan={c.span} style={cssOf(c.st)}>{c.v}{c.sub && <div className="ex-sub">{c.sub}</div>}</td>)}
+      </tr>
+    ));
 
   /* ── unified schedule block (per package) — follows the project's REQ-018 template ── */
   function schedTable(pkg: ServicePackage): { heading: string; color: string; table: XTable; scope: XTable | null } {
@@ -434,14 +438,18 @@ export default function ExportOverlay({ p, onClose, scope = 'all', clScope = 'al
   const selSvcs = [...new Set(selPkgs.map((x) => x.pkg.svc))];
   const selIds = new Set(selPkgs.map((x) => x.pkg.id).filter(Boolean) as string[]);
   const allSvcs = [...new Set(p.packages.map((x) => x.svc))];
-  type ClRow = { key: string; name: string; svcs: string; owner: string; status: string; pending: boolean; received: string; date: string; remark: string };
+  type ClRow = { key: string; name: string; svcs: string; owner: string; status: string; pending: boolean; received: string; date: string; remark: string; sub: string; sec: string };
   function clRows(): { g: { group: string; groupEn: string }; rows: ClRow[] }[] {
     /* REQ-013: blank items are exported too (kept Pending) unless the user
        unticks 「含空白项」. N/A rows are always dropped. */
     const keepC = (c: ClFields) => c.status !== 'na' && (blanks || !!(c.date || c.remark || c.received) || c.status !== 'pending');
     const name = (it: ChecklistItem) => (L === 'zh' ? it.zh : it.en || it.zh);
+    /* REQ-058:分项、组内小标题按导出语言取(英文没写用中文) */
+    const subOf = (it: ChecklistItem) => (L === 'zh' ? it.sub : it.subEn || it.sub) || '';
+    const secOf = (it: ChecklistItem) => (L === 'zh' ? it.sec : it.secEn || it.sec) || '';
     const rowOf = (it: ChecklistItem, c: ClFields, key: string, nm: string, svcs: string): ClRow => ({
       key, name: nm, svcs, owner: c.owner || '', status: clStat[c.status] || c.status, pending: c.status === 'pending', received: c.received || '', date: c.date || '', remark: c.remark || '',
+      sub: subOf(it), sec: secOf(it),
     });
     const one = (it: ChecklistItem): ClRow[] => {
       if (!(it.svcs || allSvcs).some((sv) => selSvcs.includes(sv))) return [];
@@ -458,7 +466,8 @@ export default function ExportOverlay({ p, onClose, scope = 'all', clScope = 'al
         .filter(([, c]) => keepC(c))
         .map(([k, c]) => rowOf(it, c, `${it.id}:${k}`, `${name(it)} · ${cellLabel(p, k, L)}`, it.mode === 'sep' ? svcLabel(k) : cellLabel(p, k, L)));
     };
-    const cl = p.checklist || [];
+    /* REQ-058:不包含室内部分时,「室内资料」那一组不导出 */
+    const cl = (p.checklist || []).filter((g) => !clGroupHidden(p, g));
     return p.noCategories
       ? [{ g: { group: '', groupEn: '' }, rows: cl.flatMap((g) => g.items).flatMap(one) }]
       : cl.map((g) => ({ g, rows: g.items.flatMap(one) })).filter((x) => x.rows.length);
@@ -487,7 +496,7 @@ export default function ExportOverlay({ p, onClose, scope = 'all', clScope = 'al
       ...(cols.clRemark ? [{ v: T('备注', 'Remark'), w: '20%', xw: 30 }] : []),
     ];
     const row = (r: ClRow): XRow => ({ key: r.key, cells: [
-      { v: r.name },
+      { v: r.name, ...(r.sub ? { sub: r.sub } : {}) },
       ...(showSvcs ? [{ v: r.svcs }] : []),
       ...(showOwner ? [{ v: r.owner || '—' }] : []),
       ...(cols.clStatus ? [{ v: `${r.status}${r.received ? ` — ${r.received}` : ''}`, st: r.pending ? { fill: '#fffbeb' } : undefined }] : []),
@@ -496,9 +505,14 @@ export default function ExportOverlay({ p, onClose, scope = 'all', clScope = 'al
     ] });
     const groups = clRows();
     const empty = groups.length === 0 || groups.every((x) => !x.rows.length);
+    /* REQ-058:组内小标题 —— 和上一行不同时先出一行(只有一格,横跨整行) */
+    const withSec = (rows: ClRow[]): XRow[] => rows.flatMap((r, i) => [
+      ...(r.sec && r.sec !== (rows[i - 1]?.sec || '') ? [{ key: `sec:${r.key}`, sec: true, cells: [{ v: r.sec, span: heads.length }] }] : []),
+      row(r),
+    ]);
     const tables: XTable[] = empty ? [] : flat
-      ? [{ heads, rows: groups[0].rows.map(row) }]
-      : groups.map(({ g, rows }) => ({ group: (L === 'zh' ? g.group : g.groupEn || g.group) || '', heads, rows: rows.map(row) }));
+      ? [{ heads, rows: withSec(groups[0].rows) }]
+      : groups.map(({ g, rows }) => ({ group: (L === 'zh' ? g.group : g.groupEn || g.group) || '', heads, rows: withSec(rows) }));
     const heading = `${T('信息清单', 'Information Checklist')}${partial ? ` — ${[...new Set(selPkgs.map(({ pkg }) => (p.packages.filter((x) => x.svc === pkg.svc).length > 1 ? pkgLabel(p, pkg, L) : svcLabel(pkg.svc))))].join(L === 'zh' ? '、' : ', ')}` : ''}`;
     return { heading, color: selSvcs.length === 1 ? svcColor(selSvcs[0]) : undefined, flat, heads, tables, empty };
   }

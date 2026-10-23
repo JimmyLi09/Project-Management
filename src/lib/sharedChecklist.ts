@@ -8,6 +8,7 @@ import type { ChecklistGroup, ChecklistItem, Project, RemovedClItem } from './ty
 import { getSynonyms, groupKeys, itemKeys, synonymIndex } from './checklistMerge';
 import { newId, parseISO } from './project';
 import { unitsOf } from './clCells';
+import { clGroupHidden } from './interior';
 
 export const ALL = 'all';
 /* 'all' 或某个服务 key(cgi / scale / led …) */
@@ -42,9 +43,10 @@ export function findClItem(p: { checklist?: ChecklistGroup[] }, id: string) {
 
 /* 顶部三张卡 + 进度。N/A 不计;逾期 = 待处理且过了日期(和原来一样)。
    REQ-050: 按格算 —— 同步项 1 格;单独填的项和规格项按业务数 / 份数,单个业务标签下只算它的格 */
-export function clStats(p: { checklist?: ChecklistGroup[]; packages: Project['packages'] }, scope: ClScope = ALL, today?: Date) {
+export function clStats(p: { checklist?: ChecklistGroup[]; packages: Project['packages']; services?: string[]; includeInterior?: boolean }, scope: ClScope = ALL, today?: Date) {
   let done = 0, total = 0, pending = 0, overdue = 0;
-  clGroups(p).forEach((g) => g.items.forEach((it) => unitsOf(p, it, scope).forEach(({ c }) => {
+  /* REQ-058:不包含室内部分时,「室内资料」那一组不计 */
+  clGroups(p).filter((g) => !clGroupHidden(p, g)).forEach((g) => g.items.forEach((it) => unitsOf(p, it, scope).forEach(({ c }) => {
     if (c.status === 'na') return;
     total++;
     if (c.status === 'confirmed') done++;
@@ -60,13 +62,13 @@ export function clStats(p: { checklist?: ChecklistGroup[]; packages: Project['pa
 const blankItem = (zh: string, en: string, svcs: string[]): ChecklistItem =>
   ({ id: newId(), zh, en, status: 'pending', date: '', remark: '', owner: '', shots: [], receipts: [], svcs });
 
-/* 找 / 建分组(按名字认,中文或英文相同就是同一组) */
-function groupFor(p: Project, g: { group: string; groupEn: string; color: string }): ChecklistGroup {
+/* 找 / 建分组(按名字认,中文或英文相同就是同一组;REQ-058 有 key 的先按 key) */
+function groupFor(p: Project, g: { group: string; groupEn: string; color: string; key?: string }): ChecklistGroup {
   if (!p.checklist) p.checklist = [];
   const keys = groupKeys(g);
   const hit = keys.length ? p.checklist.find((x) => groupKeys(x).some((k) => keys.includes(k))) : undefined;
   if (hit) return hit;
-  const ng: ChecklistGroup = { group: g.group || '特殊需求', groupEn: g.groupEn || 'Custom', color: g.color || '#607080', items: [] };
+  const ng: ChecklistGroup = { group: g.group || '特殊需求', groupEn: g.groupEn || 'Custom', color: g.color || '#607080', ...(g.key ? { key: g.key } : {}), items: [] };
   p.checklist.push(ng);
   return ng;
 }
@@ -105,6 +107,7 @@ function newFrom(src: ChecklistItem, svcs: string[], withContent?: boolean): Che
   if (!withContent) {
     const it = blankItem(src.zh, src.en, svcs);
     if (src.scope === 'inst' || src.scope === 'proj') it.scope = src.scope;   // REQ-050:模板上 PD 设的范围跟着走
+    for (const k of ['sub', 'subEn', 'sec', 'secEn'] as const) if (src[k]) it[k] = src[k];   // REQ-058:分项 / 组内小标题
     return it;
   }
   return {
@@ -121,7 +124,7 @@ export function moveToRemoved(p: Project, gi: number, ii: number, by: string, re
   if (!g || !it) return null;
   g.items.splice(ii, 1);
   if (!p.checklistRemoved) p.checklistRemoved = [];
-  p.checklistRemoved.unshift({ item: it, group: g.group, groupEn: g.groupEn, color: g.color, at: Date.now(), by, reason });
+  p.checklistRemoved.unshift({ item: it, group: g.group, groupEn: g.groupEn, color: g.color, ...(g.key ? { groupKey: g.key } : {}), at: Date.now(), by, reason });
   return it;
 }
 
@@ -156,7 +159,7 @@ export function restoreRemoved(p: Project, removedIdx: number, scope: ClScope): 
   const have = projectSvcs(p);
   let svcs = (r.item.svcs || []).filter((s) => have.includes(s));
   if (!svcs.length) svcs = scope === ALL ? have : [scope];
-  const g = groupFor(p, r);
+  const g = groupFor(p, { group: r.group, groupEn: r.groupEn, color: r.color, key: r.groupKey });
   g.items.push({ ...r.item, svcs });
   p.checklistRemoved!.splice(removedIdx, 1);
   return r.item;

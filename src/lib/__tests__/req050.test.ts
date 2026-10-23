@@ -222,7 +222,8 @@ test('REQ-050 验收:171-50JHS「景观平面」切成单独填 → 三格各自
   assert.ok(it.history!.some((h) => h.k === 'mode.sync' && h.data?.remark === '沙盘只要主干树位置'), '沙盘那份在修改记录里');
   assert.ok(it.history!.some((h) => h.k === 'mode.sync' && h.cell === '动画'));
   assert.ok(p.log!.some((l) => (l as { k?: string }).k === 'cl.modeSync'));
-  assert.throws(() => act(p, { type: 'setClMode', item: find(p, '立面材料分区').id, mode: 'sep' }), /只适用于一个业务/);
+  /* REQ-058 起效果图的项都和动画共用 —— 只属于一个业务的拿沙盘的「门窗表」 */
+  assert.throws(() => act(p, { type: 'setClMode', item: find(p, '门窗表').id, mode: 'sep' }), /只适用于一个业务/);
 });
 const unitsStatus = (p: Project, id: string, scope: string) => {
   const it = items(p).find((x) => x.id === id)!;

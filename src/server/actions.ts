@@ -56,6 +56,7 @@ export type ProjectAction =
   | { type: 'removeReceipt'; item: string; id: string; cell?: string }
   /* REQ-050: 同步(几个业务共用一份)/ 单独填(每个业务一格);改回同步时 from = 以哪一格为准 */
   | { type: 'setClMode'; item: string; mode: 'sync' | 'sep'; from?: string }
+  | { type: 'setIncludeInterior'; value: boolean }   // REQ-058:包含室内部分(PM / PD / BD)
   | { type: 'renameGroup'; gi: number; name: string; nameEn?: string }
   | { type: 'renameProject'; name: string }
   | { type: 'setQuotationNo'; value: string }
@@ -624,6 +625,15 @@ export function applyAction(u: Identity, p: Project, a: ProjectAction, ctx: Acti
       catch (e) { throw new ValidationError(e instanceof Error ? e.message : '切换失败'); }
       it.updatedAt = Date.now();
       logIt(p, u.name, a.mode === 'sep' ? 'cl.modeSep' : 'cl.modeSync', { item: it.zh, svc: a.mode === 'sync' && a.from ? svcsText([a.from]) : svcsText(it.svcs || []) });
+      break;
+    }
+    case 'setIncludeInterior': {
+      /* REQ-058:清单页的「包含室内部分」开关。关掉只是不显示 / 不计数 / 不导出,状态和收料记录都留着 */
+      if (!canEdit(u, p) || !(isFull(u) || u.role === 'pm')) throw new PermissionError('仅 PM / PD / BD 可以打开或关掉室内部分 / Only PM / PD / BD can turn the interior part on or off');
+      const v = !!a.value;
+      if (!!p.includeInterior === v) break;
+      if (v) p.includeInterior = true; else delete p.includeInterior;
+      logIt(p, u.name, v ? 'cl.interiorOn' : 'cl.interiorOff', {});
       break;
     }
     case 'restoreClItem': {

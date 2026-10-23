@@ -36,6 +36,7 @@ export async function POST(req: NextRequest) {
     services: services.length ? services : ['others'],
     owners: Array.isArray(body.owners) ? body.owners.map(String).filter(Boolean) : [],
     engineer: String(body.engineer || '').slice(0, 120),   // REQ-043
+    includeInterior: body.includeInterior === true,   // REQ-058
 
     difficulty: String(body.difficulty || 'medium'),
     start: String(body.start || ''),

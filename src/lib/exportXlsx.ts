@@ -14,8 +14,9 @@ type ExcelJSMod = typeof ExcelJSNS;
 
 /* 预览和 Excel 共用的一格:预览按它出 <td> 的样式,Excel 按它出字体 / 底色 / 对齐 */
 export type XStyle = { align?: 'left' | 'center' | 'right'; bold?: boolean; color?: string; fill?: string; spacing?: boolean; pre?: boolean };
-export type XCell = { v: string; span?: number; st?: XStyle };
-export type XRow = { key: string; cells: XCell[] };
+/* REQ-058:sub = 项名下面一行小号灰字(清单的 a / b 分项);sec = 组内小标题行(只有一格,横跨整行) */
+export type XCell = { v: string; span?: number; st?: XStyle; sub?: string };
+export type XRow = { key: string; cells: XCell[]; sec?: boolean };
 /* w:预览里 <th> 的宽度(百分比);xw:Excel 的列宽 */
 export type XHead = { v: string; w?: string; xw: number };
 /* group:有就先出一行合并的分组标题(清单的分类) */
@@ -175,13 +176,25 @@ function drawSheet(wb: ExcelJSNS.Workbook, sh: XSheet, book: XBook) {
         });
       }
       for (const row of t.rows) {
+        /* REQ-058:组内小标题 —— 一行合并,浅底、灰色粗体 */
+        if (row.sec) {
+          line(row.cells[0]?.v || '', { font: { size: 9.5, bold: true, color: { argb: 'FF6B6558' } }, fill: '#FBFAF7', border: BOX, alignment: { vertical: 'middle', wrapText: true } });
+          continue;
+        }
         r += 1;
         let col = 1;
         row.cells.forEach((c, i) => {
           const last = i === row.cells.length - 1;
           const span = last ? Math.max(1, N - col + 1) : (c.span || 1);
           const st = c.st || {};
-          put(r, col, c.v, {
+          /* REQ-058:有分项就在同一格里换行,小号灰字 */
+          const val: string | ExcelJSNS.CellRichTextValue = c.sub
+            ? { richText: [
+                { text: c.v, font: { name: FONT, size: 10, bold: st.bold || undefined, color: st.color ? { argb: argb(st.color) } : undefined } },
+                { text: '\n' + c.sub, font: { name: FONT, size: 8.5, color: { argb: 'FF888888' } } },
+              ] }
+            : c.v;
+          put(r, col, val, {
             font: { bold: st.bold || undefined, color: st.color ? { argb: argb(st.color) } : undefined },
             fill: st.fill, border: BOX,
             alignment: { vertical: 'top', wrapText: true, horizontal: st.align },

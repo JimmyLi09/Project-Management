@@ -163,6 +163,11 @@ export interface ChecklistItem {
   mode?: 'sync' | 'sep';
   cells?: Record<string, ClCell>;
   history?: ClHistory[];
+  /* REQ-058:来自模板 —— sub 是项名下面的灰色分项(a / b),sec 是组内小标题(如「单元 · 建筑方提供」)。只是显示用 */
+  sub?: string;
+  subEn?: string;
+  sec?: string;
+  secEn?: string;
 }
 
 /* REQ-050: 一格的内容(和信息项本身同一套字段) */
@@ -193,6 +198,7 @@ export interface RemovedClItem {
   group: string;
   groupEn: string;
   color: string;
+  groupKey?: string;   // REQ-058:分组的 key,恢复时先按它找组
   at: number;
   by: string;
   reason: string;   // 'svc:<svc>' 删了服务包 · 'item' 删了这一项 · 'group' 删了分类 · 'reset' 套用模板 / 恢复默认
@@ -235,6 +241,9 @@ export interface ChecklistGroup {
   groupEn: string;
   color: string;
   items: ChecklistItem[];
+  /* REQ-058:稳定的分组 key(arch 建筑资料 / land 景观资料 / int 室内资料 / brief 销售 · 需求)。
+     合并时先按 key、再按名字;老项目、老模板没有这一位,照旧按名字 */
+  key?: string;
 }
 
 /* REQ-049: Job Record 的一行(4 栏,和 Sales 报价表一致)。存在项目上,svc = 属于哪种业务('' = 没对上业务) */
@@ -410,6 +419,9 @@ export interface Project {
      每项的 svcs 说明哪些服务需要它,服务标签只是筛选。 */
   checklist?: ChecklistGroup[];
   noCategories?: boolean;                       // 无固定分类(项目级开关)
+  /* REQ-058:包含室内部分 —— 不包含时「室内资料」(key = int)这一组照样存着,但不显示、不计数、不导出。
+     3D VR/720、单元模型自动包含(见 interiorOn)。老项目没有 int 组,这一位不起作用 */
+  includeInterior?: boolean;
   checklistLegacy?: { svc: string; label?: string; checklist?: ChecklistGroup[]; noCategories?: boolean }[];   // 迁移前各服务包的清单原样
   /* REQ-050: 合并「(#2)」重复项之前的清单原样(回退用),和迁移记录 */
   checklistLegacy050?: ChecklistGroup[];

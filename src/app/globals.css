@@ -179,6 +179,9 @@ textarea.in { width: 100%; min-height: 46px; resize: vertical }
 .ex-doc th, .ex-doc td { border: 1px solid #ccc; padding: 6px 9px; font-size: 12px; text-align: left; vertical-align: top }
 .ex-doc th { background: #f0f2f5 }
 .ex-doc .grp-h { background: #e8edf2; font-weight: 700 }
+/* REQ-058:清单分项(项名下面的小号灰字)和组内小标题 */
+.ex-doc .ex-sub { font-size: 10.5px; color: #888; margin-top: 2px; white-space: pre-wrap }
+.ex-doc tr.ex-sec td { background: #fbfaf7; color: #6b6558; font-weight: 700; font-size: 11px; padding-top: 5px; padding-bottom: 5px }
 /* REQ-056:排期导出 · 月历(一页一个月)/ 甘特(一页整个工期)—— 固定 A4 横向 */
 .ex-doc .exc-month, .ex-doc .exg, .ex-doc .exg-legend { -webkit-print-color-adjust: exact; print-color-adjust: exact }
 .ex-doc .exc-month { margin-bottom: 18px }
