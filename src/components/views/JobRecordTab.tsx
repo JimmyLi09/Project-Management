@@ -2,7 +2,8 @@
 
 import React, { useMemo, useState } from 'react';
 import { useStore, useWho } from '../store';
-import { canAdmin, canDelete, canEditIn } from '@/lib/permissions';
+import { canAdmin, canEditIn } from '@/lib/permissions';
+import { canRemovePkg } from '@/lib/pkgRemove';
 import { SVC, svcName, svcColor } from '@/lib/templates';
 import { fmtDate, parseISO, pkgSuffix } from '@/lib/project';
 import { useLang } from '@/lib/i18n';
@@ -23,7 +24,7 @@ import { fieldGroupTerm } from '@/lib/terms';
 /* ===== REQ-049 · Job Record = 一张 4 栏表 / REQ-053 · 硬件回到登记表 =====
    软件业务(效果图、动画、沙盘、无人机…):4 栏表 Service Item / Detail / Quantity / Special Notes,和 Sales 报价表一致,
    按业务分组(同类两份显示「LED × 2」),每组「＋ 加一行」,每个业务至少保留 1 行;可以从 Excel 粘贴。
-   硬件业务(LED、投影、TV、MAXHUB、灯箱、AV、弱电、光伏、3D VR/720,以登记表管理里的分类为准):
+   硬件业务(LED、投影、TV、MAXHUB、灯箱、AV、弱电、光伏,以登记表管理里的分类为准;REQ-059 起 3D VR/720 是软件):
    每份服务包一张登记表卡(LED ① / LED ②),字段直接改、公式自动算;下面可选加几行 4 栏「额外项目」。
    页面顺序:上面软件,下面硬件;项目只有一类就只显示那一块。 */
 export default function JobRecordTab({ p }: { p: Project }) {
@@ -331,6 +332,8 @@ function HwCard({ p, pk, pkgIdx, canEd }: { p: Project; pk: ServicePackage; pkgI
         ) : (
           <span className="badge" style={{ background: 'var(--hover-bg)', color: sm[3] }}><span className="bdot" style={{ background: sm[3] }} />{lang === 'zh' ? sm[1] : sm[2]}</span>
         )}
+        {/* REQ-059:资料卡右上角「✕ 删除业务」(REQ-053 改成登记表卡时漏了,补回来) */}
+        <RemovePkgButton p={p} pkgIdx={pkgIdx} card />
       </div>
 
       {fieldEdit && <FieldEditor svc={pk.svc} builtin={base.fields} current={fields} onClose={() => setFieldEdit(false)} />}
@@ -508,28 +511,52 @@ function PasteModal({ p, onClose }: { p: Project; onClose: () => void }) {
   );
 }
 
+/* REQ-059:删业务的确认框多说一句 —— AV 数据按「项目 + 业务线」存,删业务不删它 */
+const AV_KEEP_ZH = 'AV 方案 / 成本里这条业务线的数据不删,重新加回这个业务就会回来。';
+const AV_KEEP_EN = 'AV design / cost data for this line is kept — add the service back and it comes back.';
+
+/* ---------- REQ-059:删除一份业务的按钮(业务条上的 ×、资料卡右上角的「✕ 删除业务」共用) ----------
+   谁能删由 canRemovePkg 定(和后端同一个判断):看不到就不出;不能删就置灰,悬停说为什么。 */
+function RemovePkgButton({ p, pkgIdx, card }: { p: Project; pkgIdx: number; card?: boolean }) {
+  const { dispatch, me } = useStore();
+  const { lang, t } = useLang();
+  const rm = canRemovePkg(me, p, pkgIdx);
+  if (!rm.show) return null;
+  const testid = card ? `job-card-del-${pkgIdx}` : `job-pkg-del-${pkgIdx}`;
+  if (!rm.ok) {
+    return (
+      <span title={rm.why} style={card ? undefined : { marginLeft: 4 }}>
+        {card
+          ? <button className="btn-line sm" disabled aria-disabled="true" aria-label={rm.why} data-testid={testid}>✕ {t('删除业务', 'Remove')}</button>
+          : <button disabled aria-disabled="true" aria-label={rm.why} style={{ color: 'var(--text3, #b8b2a7)', fontWeight: 700, cursor: 'not-allowed' }} data-testid={testid}>×</button>}
+      </span>
+    );
+  }
+  async function remove() {
+    const pk = p.packages[pkgIdx];
+    const name = svcName(pk.svc, lang) + (pkgSuffix(p, pkgIdx) ? ' ' + pkgSuffix(p, pkgIdx) : '');
+    const sched = pk.schedule.length;
+    /* REQ-044: 信息清单是项目共用的 —— 删业务只去掉这个服务的标签;只属于它的项移到「已移除的项」(可恢复) */
+    const sameLeft = p.packages.some((x, j) => j !== pkgIdx && x.svc === pk.svc);
+    const own = sameLeft ? 0 : (p.checklist || []).reduce((n, g) => n + g.items.filter((it) => (it.svcs || []).length === 1 && it.svcs![0] === pk.svc).length, 0);
+    if (!confirm(t(
+      `删除业务「${name}」?\n它的 ${sched} 个排期阶段${card ? '和这张资料卡' : ''}会一起删掉,不能撤销。\n信息清单里只属于它的 ${own} 项移到「已移除的项」(可恢复),共用的项保留。\nJob Record 里这项业务的 4 栏行 / 额外项目留着(同类还有别的份就归到那一份,否则标「项目里已没有这项业务」),需要的话自己删。\n${AV_KEEP_ZH}`,
+      `Remove "${name}"? Its ${sched} schedule phases${card ? ' and this record card' : ''} go with it. This cannot be undone.\nIts ${own} checklist-only items move to “Removed” (restorable); shared items stay.\nIts Job Record rows stay (marked "service no longer in the project") — delete them yourself if needed.\n${AV_KEEP_EN}`))) return;
+    await dispatch(p.id, { type: 'removeServicePackage', pkg: pkgIdx });
+  }
+  return card
+    ? <button className="btn-line sm danger" title={t('删除这份业务', 'Remove this service')} onClick={remove} data-testid={testid}>✕ {t('删除业务', 'Remove')}</button>
+    : <button title={t('删除这份业务', 'Remove this service')} style={{ marginLeft: 4, color: 'var(--danger)', fontWeight: 700 }} onClick={remove} data-testid={testid}>×</button>;
+}
+
 /* ---------- 这个项目的业务:加 / 删(制作过程中范围变了) ---------- */
 function ServicesBar({ p, canEd }: { p: Project; canEd: boolean }) {
-  const { dispatch, me } = useStore();
+  const { dispatch } = useStore();
   const { lang, t } = useLang();
   const [svc, setSvc] = useState('');
   const [label, setLabel] = useState('');
   const [busy, setBusy] = useState(false);
   const countOf = (k: string) => p.packages.filter((x) => x.svc === k).length;
-  const delOk = canDelete(me) && p.packages.length > 1;
-
-  async function removePkg(i: number) {
-    const pk = p.packages[i];
-    const name = svcName(pk.svc, lang) + (pkgSuffix(p, i) ? ' ' + pkgSuffix(p, i) : '');
-    const sched = pk.schedule.length;
-    const sameLeft = p.packages.some((x, j) => j !== i && x.svc === pk.svc);
-    const own = sameLeft ? 0 : (p.checklist || []).reduce((n, g) => n + g.items.filter((it) => (it.svcs || []).length === 1 && it.svcs![0] === pk.svc).length, 0);
-    if (!confirm(t(
-      `删除业务「${name}」?\n它的 ${sched} 个排期阶段会一起删掉,不能撤销。\n信息清单里只属于它的 ${own} 项移到「已移除的项」(可恢复),共用的项保留。\nJob Record 里这项业务的 4 栏行 / 额外项目留着(同类还有别的份就归到那一份,否则标「项目里已没有这项业务」),需要的话自己删。`,
-      `Remove "${name}"? Its ${sched} schedule phases go with it. This cannot be undone.\nIts ${own} checklist-only items move to “Removed” (restorable); shared items stay.\nIts Job Record rows stay (marked "service no longer in the project") — delete them yourself if needed.`))) return;
-    await dispatch(p.id, { type: 'removeServicePackage', pkg: i });
-  }
-
   return (
     <div className="panel" style={{ padding: '12px 16px', borderStyle: 'dashed' }} data-testid="job-services">
       <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap', alignItems: 'center' }}>
@@ -538,7 +565,7 @@ function ServicesBar({ p, canEd }: { p: Project; canEd: boolean }) {
           <span key={i} className="badge" style={{ background: 'var(--hover-bg)', color: 'var(--text2)' }}>
             <span className="bdot" style={{ background: svcColor(pk.svc) }} />
             {svcName(pk.svc, lang)}{pkgSuffix(p, i) ? ' ' + pkgSuffix(p, i) : ''}
-            {delOk && <button title={t('删除这份业务', 'Remove this service')} style={{ marginLeft: 4, color: 'var(--danger)', fontWeight: 700 }} onClick={() => removePkg(i)} data-testid={`job-pkg-del-${i}`}>×</button>}
+            <RemovePkgButton p={p} pkgIdx={i} />
           </span>
         ))}
       </div>
@@ -649,23 +676,8 @@ function RecordCard({ p, pk, pkgIdx, def: baseDef, canEd, register, legacy }: {
             {fieldEdit ? t('完成', 'Done') : t('增减字段', 'Edit fields')}
           </button>
         )}
-        {/* REQ-026: 删除这一份业务。整包连排期/信息清单/资料一起没,
-            所以只给 Sales / PD / BD,并且说清楚删的是什么。 */}
-        {canDelete(me) && !editing && !legacy && p.packages.length > 1 && (
-          <button className="btn-line sm danger" title={t('删除这份业务', 'Remove this service')}
-            onClick={async () => {
-              const name = svcName(pk.svc, lang) + (pkgSuffix(p, pkgIdx) ? ' ' + pkgSuffix(p, pkgIdx) : '');
-              const sched = pk.schedule.length;
-              /* REQ-044: 信息清单是项目共用的 —— 删业务只去掉这个服务的标签;只属于它的项
-                 移到「已移除的项」(可恢复),和别的服务共用的项留着 */
-              const sameLeft = p.packages.some((x, i) => i !== pkgIdx && x.svc === pk.svc);
-              const own = sameLeft ? 0 : (p.checklist || []).reduce((n, g) => n + g.items.filter((it) => (it.svcs || []).length === 1 && it.svcs![0] === pk.svc).length, 0);
-              if (!confirm(t(
-                `删除业务「${name}」?\n它的 ${sched} 个排期阶段和这张资料卡会一起删掉,不能撤销。\n信息清单里只属于它的 ${own} 项移到「已移除的项」(可恢复),共用的项保留。`,
-                `Remove "${name}"? Its ${sched} schedule phases and this record card go with it. This cannot be undone.\nIts ${own} checklist-only items move to “Removed” (restorable); shared items stay.`))) return;
-              await dispatch(p.id, { type: 'removeServicePackage', pkg: pkgIdx });
-            }}>✕ {t('删除业务', 'Remove')}</button>
-        )}
+        {/* REQ-026: 删除这一份业务。REQ-059:谁能删由 canRemovePkg 定(和后端同一个判断) */}
+        {!editing && !legacy && <RemovePkgButton p={p} pkgIdx={pkgIdx} card />}
       </div>
 
       {fieldEdit && !editing && <FieldEditor svc={baseDef.svc} builtin={baseDef.fields} current={def.fields} onClose={() => setFieldEdit(false)} />}

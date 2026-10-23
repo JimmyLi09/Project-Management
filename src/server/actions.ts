@@ -3,8 +3,9 @@
    checked here against the authenticated user (never trusted from client). */
 
 import type { Identity } from '@/lib/permissions';
+import { canRemovePkg, PKG_LAST_MSG, PKG_STARTED_MSG } from '@/lib/pkgRemove';
 import {
-  canAssign, canCommercial, canDecide, canEdit, canEditFinance, canEditModule, canRowEdit, isFull, canDelete , canMeta, canMarkInvoice, pmLocked } from '@/lib/permissions';
+  canAssign, canCommercial, canDecide, canEdit, canEditFinance, canEditModule, canRowEdit, isFull, canMeta, canMarkInvoice, pmLocked } from '@/lib/permissions';
 import { PM_CLOSED_MSG } from '@/lib/closeout';
 import { ACTION_MODULE, PERM_MODULES, type PermModule } from '@/lib/permTable';
 import { buildPackage, deriveStatuses, fitWindow, newId, parseISO, isoDate, totalDays } from '@/lib/project';
@@ -943,10 +944,16 @@ export function applyAction(u: Identity, p: Project, a: ProjectAction, ctx: Acti
       if (inv.invoiceStatus === 'issued') throw new ValidationError('这个项目已开 Invoice');
       const ref = String(a.invoiceRef || '').trim().slice(0, 60);
       const day = String(a.issuedDate || '').trim();
-      if (!ref) throw new ValidationError('请填写 Invoice 号');
-      if (!validDay(day)) throw new ValidationError('请填写开票日期');
       const due = String(a.dueDate || '').trim();
-      if (due && !validDay(due)) throw new ValidationError('到期日格式不对');
+      /* REQ-059:校验不过时把收到的原值写进服务器日志,以后再有人说「填了日期还报错」可以直接查 */
+      const bad = (msg: string) => {
+        console.warn(`[REQ-059] 开 Invoice 被拒(${p.id} · ${u.name}):${msg} · 收到 issuedDate=${JSON.stringify(a.issuedDate)} dueDate=${JSON.stringify(a.dueDate)} invoiceRef=${JSON.stringify(a.invoiceRef)}`);
+        return new ValidationError(msg);
+      };
+      if (!ref) throw bad('请填写 Invoice 号 / Please enter the invoice number');
+      if (!validDay(day)) throw bad('请填写有效的开票日期(YYYY-MM-DD)/ Please enter a valid invoice date');
+      if (due && !validDay(due)) throw bad('到期日格式不对(YYYY-MM-DD)/ The due date is not a valid date');
+      if (due && due < day) throw bad('到期日不能早于开票日期 / The due date cannot be before the invoice date');
       inv.invoiceRef = ref;
       inv.issuedDate = day;
       if (due) inv.dueDate = due;
@@ -1388,10 +1395,13 @@ export function applyAction(u: Identity, p: Project, a: ProjectAction, ctx: Acti
       break;
     }
     case 'removeServicePackage': {
-      if (!canDelete(u)) throw new PermissionError('仅 Sales / PD / BD 可删除业务');
       const pk = p.packages[a.pkg];
       if (!pk) throw new ValidationError('无效的服务包');
-      if (p.packages.length <= 1) throw new ValidationError('至少要保留一份业务');
+      /* REQ-059:和前端同一个判断 —— Sales / PD / BD 照旧;项目 PM 只能删还没开工的业务 */
+      const rm = canRemovePkg(u, p, a.pkg);
+      if (!rm.show) throw new PermissionError('仅 Sales / PD / BD 或项目 PM 可删除业务 / Only Sales / PD / BD or the project PM can remove a service');
+      if (rm.last) throw new ValidationError(PKG_LAST_MSG);
+      if (!rm.ok) throw new PermissionError(rm.why || PKG_STARTED_MSG);
       const inst = instOf(p, a.pkg);
       const labels = labelsBeforeDrop(p, pk);   // REQ-050:删了之后就算不出「LED-2」了
       p.packages.splice(a.pkg, 1);
