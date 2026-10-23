@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getUserByLogin, verifyPassword } from '@/server/db';
-import { setSessionCookie } from '@/server/session';
+import { getDb, getUserByLogin, verifyPassword } from '@/server/db';
+import { clientInfo, setSessionCookie } from '@/server/session';
+import { startSession } from '@/server/usageStore';
 
 /* Public link: slow down password guessing. After 5 wrong passwords for one
    account from one address, that pair waits 15 minutes. Kept in memory — a
@@ -38,7 +39,11 @@ export async function POST(req: NextRequest) {
   if ((user as { disabled?: number | boolean }).disabled) {
     return NextResponse.json({ error: '账号已停用,请联系管理员' }, { status: 403 });
   }
-  await setSessionCookie(user.id);
+  /* REQ-060:记一条登录(登录时间、设备、IP),cookie 带上这一段的 sid */
+  const { ua } = await clientInfo();
+  let sid: string | undefined;
+  try { sid = startSession(getDb(), { userId: user.id, ua, ip, now }); } catch (e) { console.warn('[REQ-060] 登录记录没写上:', e); }
+  await setSessionCookie(user.id, sid);
   return NextResponse.json({
     user: {
       id: user.id, username: user.username, name: user.name, role: user.role,

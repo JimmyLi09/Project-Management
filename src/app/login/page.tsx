@@ -92,6 +92,10 @@ export default function LoginPage() {
           {t('初始账号:pd / bd / sales(密码 audax123)。登录 PD 后在「用户管理」为团队创建账号。',
             'Default accounts: pd / bd / sales (password audax123). Sign in as pd to create team accounts under Users.')}
         </div>
+        {/* REQ-060:告知 */}
+        <div className="login-hint" data-testid="login-usage-notice" style={{ marginTop: 6, fontSize: 11 }}>
+          {t('为统计使用情况,平台会记录登录时间与使用时长。', 'Login times and usage time are recorded for usage statistics.')}
+        </div>
       </form>
     </div>
   );

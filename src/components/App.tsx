@@ -11,6 +11,7 @@ import { myTasks } from '@/lib/myTasks';
 import { roleTerm } from '@/lib/terms';
 import { useLang } from '@/lib/i18n';
 import { Avatar, AvatarSrcProvider, Ell, Icon } from './ui';
+import { MyUsageModal, useHeartbeat } from './views/UsageView';
 import OverviewView from './views/OverviewView';
 import ProjectsView, { NewProjectModal } from './views/ProjectsView';
 import TeamView from './views/TeamView';
@@ -101,6 +102,8 @@ function Shell() {
   const [notifOpen, setNotifOpen] = useState(false);
   const [search, setSearch] = useState('');
   const [showPw, setShowPw] = useState(false);
+  const [showUsage, setShowUsage] = useState(false);   // REQ-060 我的使用记录
+  useHeartbeat();   // REQ-060:在前台、5 分钟内有操作才每分钟报一次
   /* force a password change when the account is flagged (first login / after reset) */
   const [mustChange, setMustChange] = useState(!!user.mustChangePassword);
   /* bell shows only the current person's overdue items (A5 scoping) */
@@ -245,6 +248,9 @@ function Shell() {
             <div className="nm">{user.name}</div>
             <div className="rl">{user.position || roleTerm(user.role, lang)}</div>
           </div>
+          <button title={t('我的使用记录', 'My usage')} onClick={() => setShowUsage(true)} style={{ color: 'var(--text2)', display: 'flex' }} data-testid="my-usage-btn">
+            <Icon name="clock" size={15} />
+          </button>
           <button title={t('修改密码', 'Change password')} onClick={() => setShowPw(true)} style={{ color: 'var(--text2)', display: 'flex' }}>
             <Icon name="lock" size={15} />
           </button>
@@ -396,6 +402,7 @@ function Shell() {
       </main>
 
       {showNew && <NewProjectModal onClose={() => setShowNew(false)} />}
+      {showUsage && <MyUsageModal onClose={() => setShowUsage(false)} />}
       {(showPw || mustChange) && (
         <ChangePasswordModal
           forced={mustChange}
