@@ -1,0 +1,194 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>1022 反馈 · 原型 v2</title>
+<style>
+:root{--bg:#f5f2ec;--line:#e6e0d6;--line2:#efebe4;--text:#1f2430;--text2:#6b6558;--navy:#15203a;--green:#2f7a5b;--gbg:#e6f2ec;--amber:#b85c1e;--abg:#fdf1e6;--red:#b91c1c;--rbg:#fde4e4;--blue:#2c5aa0;--bbg:#e8eff9}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:13px/1.55 -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
+header{padding:12px 24px;background:#fff;border-bottom:1px solid var(--line)}header h1{margin:0;font-size:18px}.sub{color:var(--text2);font-size:12px}
+.content{padding:16px 24px 60px;max-width:1240px;margin:0 auto}
+.tabs{display:flex;gap:20px;border-bottom:1px solid var(--line);margin-bottom:14px;flex-wrap:wrap}
+.tabs>span{padding:7px 2px;color:var(--text2);cursor:pointer}.tabs>span.on{color:var(--navy);border-bottom:2px solid var(--navy);font-weight:700}
+.note{background:#fffaf2;border:1px dashed #d9a57a;border-radius:8px;padding:8px 12px;margin-bottom:12px;color:#7c3a10;font-size:12.5px}
+.card{background:#fff;border:1px solid var(--line);border-radius:12px;margin-bottom:14px;overflow:hidden}
+.card>.h{display:flex;align-items:center;gap:8px;padding:10px 16px;border-bottom:1px solid var(--line2)}.card>.h h2{margin:0;font-size:14.5px}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.grp{display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid var(--line2)}
+.grp.bad{background:var(--rbg);text-decoration:line-through;color:#a05050}
+.dot{width:10px;height:10px;border-radius:3px;display:inline-block}
+.cnt{background:#f1eee8;border-radius:10px;padding:0 8px;font-size:11.5px}
+.en{color:var(--text2);font-size:12px}
+table{width:100%;border-collapse:collapse;font-size:12.5px}
+th{text-align:left;color:var(--text2);font-weight:600;padding:8px 10px;border-bottom:1px solid var(--line);background:#faf8f4;font-size:11.5px}
+td{padding:8px 10px;border-bottom:1px solid var(--line2);vertical-align:top}
+tr.gh td{background:#f1eee8;font-weight:700}
+tr.sh td{background:#faf8f4;color:var(--text2);font-size:11.5px;font-weight:600;padding:5px 10px}
+.num{color:var(--text2);width:34px}
+.zh{color:var(--text2);font-size:12px}
+.subp{color:var(--text2);font-size:12px;margin-top:2px}
+.tag{display:inline-block;padding:0 7px;border-radius:9px;font-size:11px;font-weight:600;margin:1px 2px 1px 0;white-space:nowrap}
+.t-cgi{background:#e3f0ef;color:#2C7A7B}.t-ani{background:#ece6f5;color:#6B4E9E}.t-oth{background:#eceeee;color:#555}.t-scale{background:#e3f0e6;color:#3F7A4E}.t-vr{background:#f2e6f7;color:#8E44AD}
+.from{font-size:11.5px;color:var(--amber)}
+.new{background:#fff3e8;color:#c2410c;border-radius:4px;font-size:10.5px;padding:0 5px;font-weight:700}
+.arrow{font-size:22px;color:var(--text2);text-align:center;padding-top:60px}
+@media (max-width:900px){.two{grid-template-columns:1fr}.content{padding:12px}}
+</style>
+</head>
+<body>
+<header><h1>Progress comments 1022 · 原型 v2</h1><span class="sub">v2:③ 室内项移到「室内资料」(可选);新增 ⑥ 登录与使用时间(PD / BD)。其他 JM 已确认</span></header>
+<div class="content">
+<div class="tabs"><span data-t="inv">① 开票日期</span><span data-t="role">② 发展商</span><span data-t="a" class="on">③ 清单去重 · 前后对比</span><span data-t="b">③ 统一清单(27 项)</span><span data-t="c">③ 其他业务分组</span><span data-t="vr">④ 3D VR/720</span><span data-t="del">⑤ 删除业务</span><span data-t="usage">⑥ 登录与使用 <span class="new">新</span></span></div>
+<div id="page"></div>
+</div>
+<script>
+const $=s=>document.querySelector(s);
+const G={arch:['建筑资料','From Architect','#D98A2B'],land:['景观资料','From Landscape','#3F7A4E'],id:['室内资料 · 可选','From Interior (optional)','#6B4E9E'],brief:['销售 / 需求','From Sales / Brief','#2C6E8F']};
+/* 统一清单:效果图和动画用同一份(svcs: cgi + ani)。sub = UTB 那样的分项;from = 原来动画 / 其他业务里被合并掉的项 */
+const L=[
+ ['arch',1,'Site plan / Google map (surrounding buildings)','总平 / Google 地图(周边建筑)','',''],
+ ['arch',2,'Final CAD + 3D model (min. WP approval)','最终 CAD + 3D 模型(至少 WP 审批版)','','动画「确认 3D 模型 & CAD」'],
+ ['arch',3,'Façade colour demarcation + colour code + reference','立面分色 + 色号 + 参考','a. Glass colour  b. Window frame colour · 玻璃 / 窗框颜色','动画「建筑材料 + 色号」'],
+ ['arch',4,'Building lighting info + reference','建筑灯光信息 + 参考','',''],
+ ['arch',5,'Key plan with unit numbers','Key plan 标注单元号','',''],
+ ['arch',6,'Clubhouse & gym interior material + furniture','会所 / 健身房室内材料 + 家具','',''],
+ ['land',7,'Landscape plan','景观平面图','Material / planting / furniture · 材料 / 种植 / 家具','动画「景观图 + 详图」(平面部分)'],
+ ['land',8,'Planting layout + reference','种植布局 + 参考','a. Shrubs reference images  b. Trees reference images · 灌木 / 乔木参考',''],
+ ['land',9,'Hardscape material plan + reference','景观铺地材质 + 参考','Material, colour, sizes & arrangement · 材质 / 颜色 / 尺寸 / 排布','动画「景观材料」'],
+ ['land',10,'Lighting layout + fittings + reference','灯光布局 + 灯具 + 参考','',''],
+ ['land',11,'Outdoor furniture & equipment layout + reference','室外家具 / 健身 / 儿童设施布置 + 参考','','动画「家具与设备」'],
+ ['land',12,'Site levelling (detailed level plan)','场地竖向(详细标高图)','',''],
+ ['land',13,'Detail drawings','详图','Pool / pavilion / feature areas · 泳池 / 凉亭 / 景观区','动画「景观图 + 详图」(详图部分)'],
+ ['land',14,'Colour site plan with facility names','彩色总平(标注设施名)','',''],
+ ['id','单元 · 建筑方提供 Unit · from Architect'],
+ ['id',15,'Selected unit floor plan + 3D model','选定单元平面 + 3D 模型','','原「建筑方 · 室内/单元」'],
+ ['id',16,'Carpentry elevations','木作立面','','原「建筑方 · 室内/单元」'],
+ ['id',17,'Floor & wall tile layout + reference','地墙砖排布 + 参考','','原「建筑方 · 室内/单元」'],
+ ['id',18,'Reflected ceiling plan with levels','天花平面含标高','AC / vents · 空调 / 风口','原「建筑方 · 室内/单元」'],
+ ['id',19,'Sanitary & plumbing schedule','洁具 / 给排水配置表','','原「建筑方 · 室内/单元」'],
+ ['id',20,'Electrical points elevation + reference','电位 / 开关立面 + 参考','','原「建筑方 · 室内/单元」'],
+ ['id',21,'Wardrobe & kitchen details','衣柜 / 厨房详图','','动画「衣柜/厨房/卫浴详图」的一半'],
+ ['id',22,'Master & all bathroom details','主卫及全部卫浴详图','','动画「衣柜/厨房/卫浴详图」的另一半'],
+ ['id',23,'Unit material + reference','单元材料 + 参考','','原「建筑方 · 室内/单元」'],
+ ['id','设计 · ID 方提供 Design · from ID'],
+ ['id',24,'Design concept / proposal','设计概念 / 方案提报','',''],
+ ['id',25,'Unit layout + furniture design + soft-furnishing reference','单元布局 + 家具设计 + 软装参考','','动画「单元平面 + 设计布局」「家具设计」'],
+ ['brief',26,'Number of views (exterior / interior) / animation length','确认视角数量(外观 / 室内)/ 动画时长','','动画「确认视角数量」'],
+ ['brief',27,'Final deadline','最终截止日','','动画「最终截止日」;「其他」业务的「截止日」也并到这里'],
+ ['brief',28,'Requirements / spec · Assets / reference','需求 / 规格 · 素材 / 参考','只在项目里有「其他」业务时出现','「其他」业务的「需求信息」组'],
+];
+const BEFORE=[['建筑方 · 外观','From Architect (Exterior)','#D98A2B',5,'效果图'],['景观方 · 外观','From Landscape (Exterior)','#3F7A4E',8,'效果图'],['建筑方 · 室内/单元','From Architect (Interior/Unit)','#B26A2E',9,'效果图',1],['ID 方 · 室内','From ID (Interior)','#6B4E9E',2,'效果图'],['建筑方','From Architect','#D98A2B',2,'动画',1],['景观方','From Landscape','#3F7A4E',2,'动画',1],['ID 方','From ID Designer','#6B4E9E',2,'动画',1],['销售/需求','From Sales / Brief','#2C6E8F',2,'动画'],['需求信息','Required Info','#2C6E8F',3,'其他',1]];
+function tabA(){
+  const after=Object.entries(G).map(([k,g])=>[g[0],g[1],g[2],L.filter(r=>r[0]===k&&typeof r[1]==='number').length]);
+  return `<div class="note">现在一个「效果图 + 动画 + 其他」的项目有 <b>9 组</b>(你截图里那个)。合并后只剩 <b>4 组</b>:建筑资料、景观资料、室内资料、销售 / 需求。同一份资料只出现一次,用业务标签标出谁要用。<b>只改模板</b>,新建的项目才这样;已有项目不动。</div>
+  <div class="two"><div class="card"><div class="h"><h2>现在(9 组)</h2></div>${BEFORE.map(b=>`<div class="grp ${b[5]?'bad':''}"><span class="dot" style="background:${b[2]}"></span><b>${b[0]}</b><span class="en">${b[1]}</span><span class="cnt">${b[3]}</span><span style="margin-left:auto" class="sub">来自${b[4]}</span></div>`).join('')}</div>
+  <div class="card"><div class="h"><h2>合并后(4 组)</h2><span class="new">新</span></div>${after.map(a=>`<div class="grp"><span class="dot" style="background:${a[2]}"></span><b>${a[0]}</b><span class="en">${a[1]}</span><span class="cnt">${a[3]}</span><span style="margin-left:auto">${a[0]==='销售 / 需求'?'<span class="tag t-cgi">效果图</span><span class="tag t-ani">动画</span><span class="tag t-oth">其他</span>':'<span class="tag t-cgi">效果图</span><span class="tag t-ani">动画</span>'}</span></div>`).join('')}
+  <div class="b" style="padding:10px 16px" ><div class="sub">· 建筑资料只留外观(6 项);<b>单元 / 室内的 9 项移到「室内资料」</b>。<br>· <b>室内资料是可选的</b>:新建项目时勾「包含室内部分」才出现(默认不勾);之后在清单里也能打开 / 关掉。3D VR/720、单元模型项目自动包含。<br>· 动画不再有自己的一套,和效果图用同一份清单(27 项,见 ②)。<br>· 「需求信息」(其他业务)并入「销售 / 需求」,截止日只留一条。</div></div></div></div>`;
+}
+function tabB(){
+  let h=`<div class="note">按 UTB checklist 的写法:<b>连续编号</b>、<b>英文 + 中文</b>、需要时加 a / b 分项。<b>效果图和动画共用这一份</b>(每项都同时适用两个业务,REQ-050 的「同步 / 单独填」照旧可用)。右栏是原来被合并掉的项,方便你核对没漏。<br><b>v2(JM 1022)</b>:原来「建筑资料 · 室内/单元」的 9 项移到「室内资料」(可选组,勾了「包含室内部分」才出现)。</div><div class="card"><table><tr><th class="num">#</th><th>信息项 Description</th><th style="width:150px">适用业务</th><th style="width:250px">合并了原来的</th></tr>`;
+  let cur='';
+  L.forEach(r=>{
+    if(r[0]!==cur){cur=r[0];const g=G[cur];h+=`<tr class="gh"><td colspan="4"><span class="dot" style="background:${g[2]}"></span> ${g[0]} <span class="en" style="font-weight:400">${g[1]}</span>${cur==='id'?' <span class="new">新建项目勾「包含室内部分」才有</span>':''}</td></tr>`}
+    if(typeof r[1]!=='number'){h+=`<tr class="sh"><td></td><td colspan="3">${r[1]}</td></tr>`;return}
+    h+=`<tr><td class="num">${r[1]}</td><td><b>${r[2]}</b><div class="zh">${r[3]}</div>${r[4]?`<div class="subp">${r[4]}</div>`:''}</td><td>${r[1]===28?'<span class="tag t-oth">其他</span>':'<span class="tag t-cgi">效果图</span><span class="tag t-ani">动画</span>'}</td><td class="from">${r[5]||''}</td></tr>`;
+  });
+  return h+`</table></div>`;
+}
+function tabC(){
+  const R=[['沙盘模型','建筑方 From Architect','建筑资料 From Architect','项不变;和效果图同名 / 同义的项照 REQ-044 合成一条(如「最终 CAD + SKP」≈「最终 CAD + 3D 模型」)'],
+   ['沙盘模型','景观方 From Landscape (consultant)','景观资料 From Landscape','项不变;「种植布局」「景观材料」「灯光布局」「场地竖向」「彩色总平」和效果图合成一条'],
+   ['沙盘模型','场地/市场/需求 Site / Marketing / Requirements','不变','都是模型专用的(比例、模型台、标题牌…),不和别的业务重复'],
+   ['3D VR/720','建筑 / ID From Architect / ID','拆成 建筑资料 + 室内资料','立面信息、立面图 → 建筑资料;单元平面、天花反射图、非 ID 木作、材料表、ID 处理 / FF&E → 室内资料(VR 项目自动包含室内资料)'],
+   ['3D VR/720','需求 / 市场 Requirements','销售 / 需求 From Sales / Brief','项不变'],
+   ['单元模型','建筑 / ID From Architect / ID','拆成 建筑资料 + 室内资料','同上规则'],
+   ['其他(通用模板)','需求信息 Required Info','销售 / 需求 From Sales / Brief','「截止日」和动画的「最终截止日」合成一条'],
+   ['LED / 投影 等硬件','客户 / Main Con、现场 / 电工、业务','不变','硬件资料和制作类不重复,不动']];
+  return `<div class="note">只有分组名统一了,不同业务放在一个项目里时才会并成一栏(系统是按分组名合并的)。下面是其他业务模板的分组怎么对应。<b>只改分组名 / 归组,项目本身的内容不删</b>。</div><div class="card"><table><tr><th>业务</th><th>原来的分组</th><th>改成</th><th>说明</th></tr>${R.map(r=>`<tr><td><b>${r[0]}</b></td><td>${r[1]}</td><td><b>${r[2]}</b></td><td class="sub">${r[3]}</td></tr>`).join('')}</table></div>`;
+}
+
+/* ---------- ① 开票日期 ---------- */
+function tabInv(){
+  return `<div class="note"><b>第 1 条:填了开票日期还提示「请填写开票日期」。</b>查了代码:这个是 <b>10/10 已修好的旧 bug</b>(提交 3c0c6df「UTC+8 日期差一天」)—— 以前服务器把日期按 UTC 换算,新加坡时间会变成前一天,校验对不上就报这句。现在服务器上的版本已经包含这个修复。</div>
+  <div class="two"><div class="card"><div class="h"><h2>请你在现在的版本上重试一次</h2></div><div style="padding:12px 16px;line-height:1.9">1. 用 Sales / Finance / PD 登录,打开 161-Dedao MAXHUB Donlge<br>2. 阶段 5「已开 Invoice」→ 填 Invoice 号 + 开票日期 2026/09/30 → 确认并归档<br>3. <b>能归档</b> = 已好;<b>还报错</b> = 截图给我,我让 Claude Code 带日志查(需求里已写好兜底)</div></div>
+  <div class="card"><div class="h"><h2>需求里的兜底(仍复现才做)</h2></div><div style="padding:12px 16px;line-height:1.9" class="sub">· 弹窗里先在前端校验日期,错了直接在框下面提示,不再弹浏览器 alert<br>· 服务端报错时把收到的原始值写进日志,方便定位<br>· 加一条自动测试:服务器时区 UTC+8,开票日期 2026-09-30 能通过</div></div></div>`;
+}
+/* ---------- ② 发展商 ---------- */
+let roleOpen=true;
+function tabRole(){
+  const R=['Developer / 发展商','Main contractor / 总包','Architect / 建筑师','Landscape / 景观','Interior / 室内','Creative / 创意'];
+  return `<div class="note"><b>第 2 条:新建项目 →「相关公司」的角色下拉里没有「发展商」。</b>原因:当时觉得上面「① 客户信息」就是发展商,所以下拉里特意去掉了。改成<b>下拉里加回「Developer / 发展商」,放第一位</b>(客户不一定是发展商,比如客户是 Main con 或 ID 公司时,发展商要另外填)。</div>
+  <div class="card" style="max-width:560px"><div class="h"><h2>② 相关公司(按需添加)</h2></div><div style="padding:12px 16px">
+  <div class="sub">角色</div><div style="border:1px solid var(--navy);border-radius:7px;padding:6px 10px;margin:4px 0;cursor:pointer" onclick="roleOpen=!roleOpen;render()">如 发展商 / 总包 / 建筑师… ▾</div>
+  ${roleOpen?`<div style="border:1px solid var(--line);border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,.08);width:260px">${R.map((r,i)=>`<div style="padding:7px 12px;${i===0?'background:#fff3e8;font-weight:700':''}">${r}${i===0?' <span class="new">新</span>':''}</div>`).join('')}</div>`:''}
+  <div class="sub" style="margin-top:10px">选了存成键 developer,通讯录里显示「发展商」(和 REQ-052 一致)。项目详情里「添加联系人」的下拉本来就有发展商,不变。</div></div></div>`;
+}
+/* ---------- ④ 3D VR/720 ---------- */
+function tabVr(){
+  return `<div class="note"><b>第 4 条:3D VR/720 不是硬件,Job Record 里只要一个基础栏(4 栏)。</b>把 3D VR/720 的<b>默认分类改成「软件 · 4 栏」</b>(代码默认值,不用再到登记表管理里手动改)。原来登记表里的字段(客户联系人、交付日…)<b>不删</b>,放到下面「旧字段(只读)」里。</div>
+  <div class="card"><div class="h"><h2>项目详情 · Job Record(例:065-11A Carmen Street VR)</h2></div>
+  <table><tr><th style="width:24%">SERVICE ITEM</th><th>DETAIL</th><th style="width:10%">QUANTITY</th><th style="width:22%">SPECIAL NOTES</th></tr>
+  <tr class="gh"><td colspan="4"><span class="dot" style="background:#8E44AD"></span> 3D VR/720 · 1 行</td></tr>
+  <tr><td><b>Virtual tour of Semi-D house for 2 units</b></td><td style="white-space:pre-line">* estimated 25-35 viewing points for each unit
+* basic ID design to be provided by client
+* Excluding the ID Design (the mood concept provided by client)
+* Including the exterior part in pool and entrance area
+* Architect will provide the architecture model in SKP</td><td>2</td><td>Complimentary hosting for 1 year</td></tr></table>
+  <div style="padding:8px 16px" class="sub">▸ 旧字段(只读)· 1 份业务 —— Client Contact: Derek Low · Handover Date: 2026-10-15</div></div>
+  <div class="sub">· 和你附的报价单一样:Detail 可以多行,从 Excel 复制 4 栏直接粘贴。<br>· 已经在登记表管理里手动改成「软件」的,不受影响。<br>· 注意:VR 的「有效期」到期提醒(项目档案里)随之停用;hosting 到期可以先写在 Special Notes。</div>`;
+}
+/* ---------- ⑤ 删除业务 ---------- */
+let delRole='pm', delAsk=null;
+function tabDel(){
+  const can=delRole!=='eng';
+  const cards=[['AV','#6C3483','待签收','无进度'],['LED','#C0392B','待签收','无进度']];
+  return `<div class="note"><b>第 5 条:增加的业务要能删。</b>功能其实已有(「删除业务」),但<b>只给 Sales / PD / BD</b>,PM 登录看不到按钮 —— 你截图里就是这种情况。改成:<b>项目的 PM 也能删</b>;按钮放在每张资料卡右上角和 Job Record 顶部的业务条上,两处都有。</div>
+  <div style="display:flex;gap:8px;align-items:center;margin-bottom:10px"><span class="sub">切换角色:</span>${[['pm','项目 PM'],['sales','Sales / PD / BD'],['eng','Engineer']].map(([k,l])=>`<span class="tag ${delRole===k?'t-ani':'t-oth'}" style="cursor:pointer;padding:3px 10px" onclick="delRole='${k}';delAsk=null;render()">${l}</span>`).join('')}</div>
+  <div class="card"><div style="padding:10px 16px;display:flex;gap:8px;align-items:center;flex-wrap:wrap"><span class="sub">业务:</span>${['3D VR/720','AV','LED'].map(n=>`<span style="border:1px solid var(--line);border-radius:14px;padding:3px 10px">${n}${can?` <span style="color:var(--red);cursor:pointer" onclick="delAsk='${n}';render()">×</span>`:''}</span>`).join('')}<span style="border:1px dashed var(--line);border-radius:14px;padding:3px 10px">＋ 添加业务</span></div></div>
+  ${cards.map(c=>`<div class="card"><div class="h"><span class="dot" style="background:${c[1]};border-radius:50%"></span><h2>${c[0]} <span class="sub">· 资料</span></h2><span style="margin-left:auto"></span><span style="border:1px solid var(--line);border-radius:7px;padding:3px 10px">增减字段</span><span style="border:1px solid var(--line);border-radius:14px;padding:3px 10px;color:var(--amber)">● ${c[2]}</span>${can?`<span style="border:1px solid #f0b4b4;color:var(--red);border-radius:7px;padding:3px 10px;cursor:pointer" onclick="delAsk='${c[0]}';render()">✕ 删除业务</span>`:''}</div><div style="padding:12px 16px" class="sub">(登记表字段,略)</div></div>`).join('')}
+  ${delAsk?`<div class="card" style="border-color:var(--red);max-width:620px"><div class="h"><h2>删除业务「${delAsk}」?</h2></div><div style="padding:12px 16px;line-height:1.9">· 它的排期阶段和这张资料卡一起删掉<br>· 信息清单里只属于它的项移到「已移除的项」(可恢复),共用的项保留<br>· AV 方案 / 成本里这条业务线的数据<b>不删</b>,只是不再显示(重新加回这个业务就回来)<br>${delRole==='pm'?'<span style="color:var(--amber)">· PM 删除时:这个业务已经开工(排期有进行中 / 已完成)或已收到资料时,不能删,请找 Sales / PD 处理</span><br>':''}<div style="margin-top:8px;display:flex;gap:8px"><span style="background:var(--red);color:#fff;border-radius:7px;padding:5px 12px;cursor:pointer" onclick="delAsk=null;render()">确认删除</span><span style="border:1px solid var(--line);border-radius:7px;padding:5px 12px;cursor:pointer" onclick="delAsk=null;render()">取消</span></div></div></div>`:''}
+  <div class="sub">· 项目只剩一个业务时不能删(至少保留一个),按钮置灰并提示。<br>· 每次删除写日志:谁、何时、删了哪个业务。<br>· Engineer 看不到删除按钮。</div>`;
+}
+
+/* ---------- ⑥ 登录与使用时间 ---------- */
+const U=[
+ ['JM','Senior PM','on','2 分钟前','22-Oct 08:52',[3.2,14.6,52.1],[2.1,3.4,2.8,3.9,3.6,0,0,2.9,3.2,4.1,3.0,3.6,0,0]],
+ ['Skye','Senior PM','on','刚刚','22-Oct 09:15',[2.4,11.2,47.5],[2.6,2.2,3.1,2.4,2.9,0,0,2.2,2.5,2.0,2.1,2.4,0,0]],
+ ['Kian Lim','Senior PM','idle','18 分钟前','22-Oct 09:40',[0.9,7.8,31.0],[1.5,1.9,1.2,1.8,1.6,0,0,1.4,1.7,1.9,1.9,0.9,0,0]],
+ ['Candy','Sales','off','昨天 17:42','21-Oct 10:05',[0,4.3,18.6],[0.8,1.1,0.9,1.2,0.7,0,0,1.0,1.3,0.9,1.1,0,0,0]],
+ ['Dylan','Engineer','off','3 天前','19-Oct 14:20',[0,0.6,6.2],[0.5,0,0.7,0.4,0,0,0,0.6,0,0,0,0,0,0]],
+ ['Account','Finance','off','10-Oct 11:02','10-Oct 10:48',[0,0,1.1],[0,0,0,0,0,0,0,0,0,0,0,0,0,0]],
+ ['Xue Min','Senior PM','off','从未登录','—',[0,0,0],[0,0,0,0,0,0,0,0,0,0,0,0,0,0]],
+];
+let uSel=null,uPeriod=1;
+function tabUsage(){
+  const st={on:['● 在线','#2f7a5b'],idle:['● 空闲','#b85c1e'],off:['○ 离线','#8a8478']};
+  const per=['今天','本周','本月'];
+  let h=`<div class="note"><b>新功能:每个人登录与否 + 使用平台的时间。</b>放在「用户与权限」里新增标签「<b>登录与使用</b>」,<b>只有 PD / BD 能看</b>;每个人可以在右下角头像菜单里看「我的使用记录」(只看自己)。<br>使用时长<b>只算真正在用的时间</b>:页面在前台、5 分钟内有点击 / 输入 / 滚动才算;挂着不动不算。</div>
+  <div class="card"><div class="h"><h2>登录与使用</h2><span class="sub">· 3 人在线</span><span style="margin-left:auto;display:flex;gap:6px">${per.map((p,i)=>`<span class="tag ${uPeriod===i?'t-ani':'t-oth'}" style="cursor:pointer;padding:3px 10px" onclick="uPeriod=${i};render()">${p}</span>`).join('')}<span class="tag t-oth" style="padding:3px 10px">导出 Excel</span></span></div>
+  <table><tr><th>用户</th><th>职位</th><th>状态</th><th>最后活动</th><th>最近登录</th><th>使用时长(${per[uPeriod]})</th><th style="width:200px">近 14 天</th><th></th></tr>
+  ${U.map((u,i)=>{const mx=5;return `<tr><td><b>${u[0]}</b></td><td>${u[1]}</td><td style="color:${st[u[2]][1]};font-weight:600">${st[u[2]][0]}</td><td>${u[3]}</td><td>${u[4]}</td><td><b>${u[5][uPeriod]?u[5][uPeriod].toFixed(1)+' 小时':'—'}</b></td>
+   <td><div style="display:flex;gap:2px;align-items:flex-end;height:26px">${u[6].map(v=>`<span title="${v} 小时" style="width:11px;height:${Math.max(2,v/mx*26)}px;background:${v?'#6B4E9E':'#e6e0d6'};border-radius:2px"></span>`).join('')}</div></td>
+   <td><span class="tag t-oth" style="cursor:pointer;padding:3px 10px" onclick="uSel=${i};render()">明细</span></td></tr>`}).join('')}</table></div>`;
+  if(uSel!==null){const u=U[uSel];
+    h+=`<div class="card" style="border-color:var(--navy)"><div class="h"><h2>${u[0]} · 登录明细(近 7 天)</h2><span style="margin-left:auto;cursor:pointer" onclick="uSel=null;render()">✕</span></div>
+    <table><tr><th>日期</th><th>登录</th><th>登出 / 最后活动</th><th>使用时长</th><th>设备</th></tr>
+    ${u[0]==='Xue Min'?'<tr><td colspan="5" class="sub">还没有登录过</td></tr>':`
+    <tr><td>22-Oct(三)</td><td>08:52</td><td>仍在线</td><td>3.2 小时</td><td>Chrome · Windows</td></tr>
+    <tr><td>21-Oct(二)</td><td>09:05 · 14:10</td><td>12:31 · 18:22(超时自动登出)</td><td>3.6 小时</td><td>Chrome · Windows</td></tr>
+    <tr><td>20-Oct(一)</td><td>09:12</td><td>18:05</td><td>3.0 小时</td><td>Chrome · Windows / Safari · iPhone</td></tr>
+    <tr><td>19-Oct(日)</td><td>—</td><td>—</td><td>—</td><td></td></tr>`}</table>
+    <div class="sub" style="padding:8px 16px">一天里登录多次就按段列出;「超时自动登出」= 会话过期。只记登录 / 登出 / 活跃时长和设备,<b>不记看了哪些页面</b>。</div></div>`;}
+  h+=`<div class="sub">· 状态:在线 = 2 分钟内有活动;空闲 = 已登录但 5 分钟以上没操作;离线 = 已登出或关掉页面。<br>· 记录保留 12 个月。<br>· 登录页底部加一行说明:「为统计使用情况,平台会记录登录时间与使用时长」。<br>· 停用 / 已删除的账号仍保留历史记录,列表里默认不显示,可勾「含已停用」查看。</div>`;
+  return h;
+}
+
+let tab='a';
+function render(){document.querySelectorAll('.tabs>span').forEach(s=>s.classList.toggle('on',s.dataset.t===tab));$('#page').innerHTML=({a:tabA,b:tabB,c:tabC,inv:tabInv,role:tabRole,vr:tabVr,del:tabDel,usage:tabUsage})[tab]()}
+document.querySelectorAll('.tabs>span').forEach(s=>s.onclick=()=>{tab=s.dataset.t;render()});
+render();
+</script>
+</body>
+</html>
