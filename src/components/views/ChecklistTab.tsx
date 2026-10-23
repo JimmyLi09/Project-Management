@@ -411,7 +411,7 @@ export default function ChecklistTab({ p, scope, onScope, onExport }: {
           const gpct = applicable.length ? Math.round((conf / applicable.length) * 100) : 0;
           const isCol = !!collapsed[gi];
           return (
-            <div key={gi}>
+            <div key={gi} data-testid="cl-group" data-key={g.key || ''}>
               {/* collapsible bold section header — hidden in flat mode (REQ-014) */}
               {!flat && (
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '16px 24px', borderBottom: '1px solid var(--row-line)' }}>
