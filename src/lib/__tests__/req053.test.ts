@@ -3,9 +3,9 @@ import assert from 'node:assert/strict';
 import { newProject } from '../project.ts';
 import { cleanJobFormats, formatOf, isHw, setServerJobFormatSource, DEFAULT_HW_SVCS } from '../jobFormat.ts';
 import { baseDefOf, computeFormula, fieldsOf, ledSizeIssues, registerDef, type FieldDef } from '../records.ts';
-import { extraRowsOf, jobGroups, jobRowPkg } from '../jobRecord.ts';
+import { ensureJobRows, extraRowsOf, jobGroups, jobRowPkg } from '../jobRecord.ts';
 import { migrateProject049 } from '../mig049.ts';
-import { migrateProject053, report053 } from '../mig053.ts';
+import { hw053, migrateProject053, report053 } from '../mig053.ts';
 import { applyAction } from '../../server/actions.ts';
 import { SVC } from '../templates.ts';
 import type { Project } from '../types.ts';
@@ -151,13 +151,17 @@ test('REQ-053 迁移:143 —— 拆分行和空行删掉,改过 / 新加的留�
   assert.match(md, /自检:全部通过/);
 });
 
-test('REQ-053 迁移:只有软件业务的项目(171-50JHS)不动;140 软硬混合只动硬件(REQ-059:3D VR/720 是软件,它的行留着)', () => {
+test('REQ-053 迁移:只有软件业务的项目(171-50JHS)不动;140 软硬混合只动硬件(REQ-059 后 3D VR/720 是软件,但它 049 拆出来的行照旧清理)', () => {
   const p = proj(['cgi', 'ani', 'scale']);
   assert.equal(migrateProject053(p, { defsFor: defs, isHw: (s) => isHw(s), at: 1 }), null);
   const q = proj(['cgi', 'ani', 'vrar', 'drone', 'lightbox']);
   q.jobRecord!.push({ id: 'b1', svc: 'vrar', item: '3D VR / 720', detail: '', qty: '', note: '' }, { id: 'b2', svc: 'lightbox', item: 'Lightbox', detail: '', qty: '', note: '' });
-  const sw = JSON.stringify(q.jobRecord!.filter((r) => !isHw(r.svc)));
-  const m = migrateProject053(q, { defsFor: defs, isHw: (s) => isHw(s), at: 1 })!;
-  assert.equal(m.blank.length, 1, '只有灯箱那一行;3D VR / 720 那行留在 4 栏表里');
+  const hw = hw053((s) => isHw(s));
+  const sw = JSON.stringify(q.jobRecord!.filter((r) => !hw(r.svc)));
+  const m = migrateProject053(q, { defsFor: defs, isHw: hw, at: 1 })!;
+  assert.equal(m.blank.length, 3, '只预填了业务名的空行:3D VR / 720 两行(新建时自动带的一行 + 049 那行)、灯箱一行');
+  assert.equal(isHw('vrar'), false, '3D VR/720 现在是软件');
   assert.equal(JSON.stringify(q.jobRecord), sw, '剩下的就是 CGI / 动画 / 无人机的 4 栏行');
+  assert.equal(ensureJobRows(q), 1, '读项目时给 3D VR/720 补回一行基础栏');
+  assert.deepEqual(q.jobRecord!.filter((r) => r.svc === 'vrar').map((r) => r.item), ['3D VR / 720']);
 });

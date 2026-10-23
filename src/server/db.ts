@@ -15,7 +15,7 @@ import { handOverWork, renameInProject } from '@/lib/peopleRefs';
 import { migrateProject048, type Mig048Entry } from '@/lib/mig048';
 import { migrateProject049, type Mig049Entry } from '@/lib/mig049';
 import { migrateProject050, report050, type Mig050Entry } from '@/lib/mig050';
-import { migrateProject053, report053, type Mig053Entry } from '@/lib/mig053';
+import { hw053, migrateProject053, report053, type Mig053Entry } from '@/lib/mig053';
 import { isApproach } from '@/lib/approach';
 import { applyMig054, approachFails, MIG054_DEFAULT_IDS, planMig054, report054 } from '@/lib/mig054';
 import { tplNamesFrom } from '@/lib/checklistScope';
@@ -491,7 +491,7 @@ function migrateJobRecord053(d: Database.Database) {
   let fm: JobFormatMap = {};
   const fr = d.prepare('SELECT value FROM meta WHERE key = ?').get('job.formats') as { value: string } | undefined;
   if (fr) { try { fm = cleanJobFormats(JSON.parse(fr.value), (k) => !!SVC[k]); } catch { /* 当默认 */ } }
-  const opts = (at: number) => ({ defsFor: (svc: string) => fieldsOf(baseDefOf(svc), ov), isHw: (svc: string) => formatOf(svc, fm) === 'hw', at });
+  const opts = (at: number) => ({ defsFor: (svc: string) => fieldsOf(baseDefOf(svc), ov), isHw: hw053((svc: string) => formatOf(svc, fm) === 'hw'), at });
   /* 先在副本上数一遍:要删几行 */
   let toRemove = 0;
   for (const r of rows) {

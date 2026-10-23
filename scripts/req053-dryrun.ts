@@ -4,7 +4,7 @@
      1. 用 SQLite 的在线备份把 data\audax.db 复制一份到 data\migrations\053-dryrun-<时间>.db
         (网站开着也能复制,正式库一个字节都不改);
      2. 在这份副本上按上线时的规则处理每个项目的 Job Record:只看硬件业务(LED、投影、TV、MAXHUB、灯箱、AV、
-        弱电、光伏,以登记表管理里的分类为准;REQ-059 起 3D VR/720 是软件)——
+        弱电、光伏,以登记表管理里的分类为准;3D VR/720 在 REQ-059 改成了软件,但它 049 拆出来的行照旧清理)——
         删掉 049 拆出来、之后没人改过的 4 栏行和只预填了业务名的空行;改过 / 新加的留下当那一份的「额外项目」;
      3. 自检:软件业务的行、登记表字段 pk.record 一个都没动;
      4. 报告写到 data\migrations\053-jobrecord-dryrun-<时间>.md。
@@ -22,7 +22,7 @@ import { createRequire } from 'node:module';
 import { baseDefOf, fieldsOf, type FieldDef, type FieldOverrides } from '../src/lib/records';
 import { cleanJobFormats, formatOf, type JobFormatMap } from '../src/lib/jobFormat';
 import { SVC } from '../src/lib/templates';
-import { migrateProject053, report053, type Mig053Entry } from '../src/lib/mig053';
+import { hw053, migrateProject053, report053, type Mig053Entry } from '../src/lib/mig053';
 
 const require = createRequire(import.meta.url);
 const Database = require('better-sqlite3');
@@ -64,7 +64,8 @@ async function main() {
     const row = d.prepare("SELECT value FROM meta WHERE key = 'job.formats'").get() as { value: string } | undefined;
     if (row) fm = cleanJobFormats(JSON.parse(row.value), (k) => !!SVC[k]);
   } catch { /* 当默认 */ }
-  const hwList = Object.keys(SVC).filter((k) => formatOf(k, fm) === 'hw');
+  const isHw053 = hw053((k) => formatOf(k, fm) === 'hw');
+  const hwList = Object.keys(SVC).filter(isHw053);
 
   const rows = d.prepare('SELECT id, data FROM projects ORDER BY created_at ASC').all() as { id: string; data: string }[];
   const upd = d.prepare('UPDATE projects SET data = ? WHERE id = ?');
@@ -76,7 +77,7 @@ async function main() {
       try { o = JSON.parse(r.data); } catch { continue; }
       if (!Array.isArray(o.packages)) continue;
       if (!Array.isArray(o.jobRecord)) { noJob++; continue; }
-      const m = migrateProject053(o, { defsFor: (svc) => fieldsOf(baseDefOf(svc), ov), isHw: (svc) => formatOf(svc, fm) === 'hw', at: now.getTime() });
+      const m = migrateProject053(o, { defsFor: (svc) => fieldsOf(baseDefOf(svc), ov), isHw: isHw053, at: now.getTime() });
       if (!m) continue;
       list.push(m);
       const { updatedAt: _u, version: _v, ...data } = o;
