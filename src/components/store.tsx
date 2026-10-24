@@ -118,7 +118,8 @@ interface Store {
   openProject: (pid: string) => void;
   /* 0922 变更单:下钻到按某个口径过滤的项目列表 */
   drillTo: (focus: Focus) => void;
-  dispatch: (pid: string, action: ProjectAction) => Promise<boolean>;
+  /* REQ-059:传了 onError 时出错不弹 alert,把服务端那句话交给调用方(弹窗里显示在输入框下面) */
+  dispatch: (pid: string, action: ProjectAction, opts?: { onError?: (msg: string) => void }) => Promise<boolean>;
   createProject: (input: Record<string, unknown>) => Promise<Project | null>;
   removeProject: (pid: string) => Promise<boolean>;
   refresh: () => Promise<void>;
@@ -311,7 +312,7 @@ export function StoreProvider({ user, permTable: initialPerm, children }: { user
     return () => clearInterval(t);
   }, [refresh, refreshUsers, refreshRecordFields, refreshJobFormats, refreshAvDerived, refreshPointRules, refreshKpiRules, refreshPerms]);
 
-  const dispatch = useCallback((pid: string, action: ProjectAction) => {
+  const dispatch = useCallback((pid: string, action: ProjectAction, opts?: { onError?: (msg: string) => void }) => {
     /* v2.2 [P0-3] strict optimistic lock. Serialize per project so a user's own
        fast successive edits don't race their own version; cross-user conflicts
        still reject (409 stale) → re-read + prompt to reconfirm. */
@@ -340,7 +341,8 @@ export function StoreProvider({ user, permTable: initialPerm, children }: { user
         setToast('⚠ 此项目刚被他人修改,已为你刷新,请核对后重新操作。');
         return false;
       }
-      alert(body.error || '操作失败');
+      if (opts?.onError) opts.onError(body.error || '操作失败');
+      else alert(body.error || '操作失败');
       return false;
     };
     const prev = chainRef.current[pid] || Promise.resolve(true);

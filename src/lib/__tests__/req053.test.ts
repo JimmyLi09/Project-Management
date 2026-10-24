@@ -3,9 +3,9 @@ import assert from 'node:assert/strict';
 import { newProject } from '../project.ts';
 import { cleanJobFormats, formatOf, isHw, setServerJobFormatSource, DEFAULT_HW_SVCS } from '../jobFormat.ts';
 import { baseDefOf, computeFormula, fieldsOf, ledSizeIssues, registerDef, type FieldDef } from '../records.ts';
-import { extraRowsOf, jobGroups, jobRowPkg } from '../jobRecord.ts';
+import { ensureJobRows, extraRowsOf, jobGroups, jobRowPkg } from '../jobRecord.ts';
 import { migrateProject049 } from '../mig049.ts';
-import { migrateProject053, report053 } from '../mig053.ts';
+import { hw053, migrateProject053, report053 } from '../mig053.ts';
 import { applyAction } from '../../server/actions.ts';
 import { SVC } from '../templates.ts';
 import type { Project } from '../types.ts';
@@ -17,14 +17,15 @@ const proj = (services: string[]) => newProject({ name: 'T', client: 'C', servic
 const defs = (svc: string) => fieldsOf(baseDefOf(svc), {});
 setServerJobFormatSource(() => ({}));
 
-test('REQ-053 业务分类:默认 9 种硬件,其余软件;覆盖值只存和默认不一样的', () => {
-  assert.deepEqual(DEFAULT_HW_SVCS, ['led', 'projector', 'tv', 'maxhub', 'lightbox', 'av', 'elv', 'pv', 'vrar']);
-  for (const k of ['cgi', 'ani', 'scale', 'drone', 'website', 'matterport', 'saleskit', 'unitmodel', 'brochure', 'video', 'interior', 'renovation', 'others']) {
+test('REQ-053 业务分类:默认 8 种硬件,其余软件(REQ-059:3D VR/720 改为软件);覆盖值只存和默认不一样的', () => {
+  assert.deepEqual(DEFAULT_HW_SVCS, ['led', 'projector', 'tv', 'maxhub', 'lightbox', 'av', 'elv', 'pv']);
+  for (const k of ['cgi', 'ani', 'scale', 'drone', 'website', 'matterport', 'saleskit', 'unitmodel', 'brochure', 'video', 'interior', 'renovation', 'others', 'vrar']) {
     assert.equal(formatOf(k), 'sw', k);
   }
   assert.equal(isHw('led'), true);
   assert.equal(isHw('drone', { drone: 'hw' }), true);
   assert.deepEqual(cleanJobFormats({ drone: 'hw', led: 'hw', cgi: 'x', nope: 'hw' }, (k) => !!SVC[k]), { drone: 'hw' }, '和默认一样的、坏值、不存在的业务都不存');
+  assert.deepEqual(cleanJobFormats({ vrar: 'sw' }, (k) => !!SVC[k]), {}, 'REQ-059:以前手动改成软件的 3D VR/720,现在和默认一样,不用再存');
 });
 
 test('REQ-053 登记表:TV 用 MAXHUB 的字段,灯箱新建,弱电 / 光伏用 AV 的;都是安装类;LED「Height 高 (mm)」', () => {
@@ -150,13 +151,17 @@ test('REQ-053 迁移:143 —— 拆分行和空行删掉,改过 / 新加的留�
   assert.match(md, /自检:全部通过/);
 });
 
-test('REQ-053 迁移:只有软件业务的项目(171-50JHS)不动;140 软硬混合只动硬件', () => {
+test('REQ-053 迁移:只有软件业务的项目(171-50JHS)不动;140 软硬混合只动硬件(REQ-059 后 3D VR/720 是软件,但它 049 拆出来的行照旧清理)', () => {
   const p = proj(['cgi', 'ani', 'scale']);
   assert.equal(migrateProject053(p, { defsFor: defs, isHw: (s) => isHw(s), at: 1 }), null);
   const q = proj(['cgi', 'ani', 'vrar', 'drone', 'lightbox']);
   q.jobRecord!.push({ id: 'b1', svc: 'vrar', item: '3D VR / 720', detail: '', qty: '', note: '' }, { id: 'b2', svc: 'lightbox', item: 'Lightbox', detail: '', qty: '', note: '' });
-  const sw = JSON.stringify(q.jobRecord!.filter((r) => !isHw(r.svc)));
-  const m = migrateProject053(q, { defsFor: defs, isHw: (s) => isHw(s), at: 1 })!;
-  assert.equal(m.blank.length, 2);
+  const hw = hw053((s) => isHw(s));
+  const sw = JSON.stringify(q.jobRecord!.filter((r) => !hw(r.svc)));
+  const m = migrateProject053(q, { defsFor: defs, isHw: hw, at: 1 })!;
+  assert.equal(m.blank.length, 3, '只预填了业务名的空行:3D VR / 720 两行(新建时自动带的一行 + 049 那行)、灯箱一行');
+  assert.equal(isHw('vrar'), false, '3D VR/720 现在是软件');
   assert.equal(JSON.stringify(q.jobRecord), sw, '剩下的就是 CGI / 动画 / 无人机的 4 栏行');
+  assert.equal(ensureJobRows(q), 1, '读项目时给 3D VR/720 补回一行基础栏');
+  assert.deepEqual(q.jobRecord!.filter((r) => r.svc === 'vrar').map((r) => r.item), ['3D VR / 720']);
 });

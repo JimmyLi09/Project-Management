@@ -13,6 +13,12 @@ import { CIRCLED_NO, fieldRowName, fieldRowValue } from './mig049';
 import { projSourceOf, type FieldDef } from './records';
 import type { JobRow, Project, ServicePackage } from './types';
 
+/* 053 要清理拆分行的业务 = 现在的硬件,再加上 3D VR/720。
+   REQ-059 把 3D VR/720 改成了软件(Job Record 里只是一行基础栏),但 049 已经把它登记表的每个字段拆成了一行。
+   053 照 10/12 JM 看过的预演规则把这些没人改过的拆分行 / 空行删掉;改过 / 新加的留下,成了 4 栏表里的行;
+   之后读项目时自动补一行基础栏(ensureJobRows)。登记表字段 pk.record 不动,在「旧字段(只读)」里能看到。 */
+export const hw053 = (isHw: (svc: string) => boolean) => (svc: string) => isHw(svc) || svc === 'vrar';
+
 export interface Mig053Kept { pkg: string; item: string; detail: string; qty: string; note: string }
 export interface Mig053Entry {
   id: string; project: string; serial?: number;

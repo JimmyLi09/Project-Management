@@ -11,7 +11,9 @@
 export type JobFormat = 'hw' | 'sw';
 export type JobFormatMap = Record<string, JobFormat>;
 
-export const DEFAULT_HW_SVCS = ['led', 'projector', 'tv', 'maxhub', 'lightbox', 'av', 'elv', 'pv', 'vrar'];
+/* REQ-059:3D VR/720 不是硬件(Job Record 里只是一行基础栏)—— 默认改为软件 · 4 栏。不迁移数据:
+   原来登记表里的字段在「旧字段(只读)」里照样看得到,原来的「额外项目」行直接成了 4 栏表里的行 */
+export const DEFAULT_HW_SVCS = ['led', 'projector', 'tv', 'maxhub', 'lightbox', 'av', 'elv', 'pv'];
 
 const G = globalThis as { __audaxJobFmtServer?: () => JobFormatMap; __audaxJobFmtClient?: () => JobFormatMap };
 const current = (): JobFormatMap =>

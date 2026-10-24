@@ -442,8 +442,9 @@ function ProjectCard({ p, onOpen }: { p: Project; onOpen: () => void }) {
    dynamic add/remove company blocks, each carrying person/phone/email. */
 interface CompanyDraft { role: string; company: string; person: string; phone: string; email: string }
 /* REQ-052:这里只是输入提示,填进去的名字在建项目时换成键(roleKeyOf) */
-/* 1010 确认:角色名双语显示(「Main contractor / 总包」);选了存成键,手填的原样 */
-const COMPANY_ROLES: string[] = CONTACT_ROLE_DEFS.filter((r) => r.key !== 'developer').map(roleBilingual);
+/* 1010 确认:角色名双语显示(「Main contractor / 总包」);选了存成键,手填的原样
+   REQ-059:客户不一定是发展商(可能是总包 / ID 公司),所以「Developer / 发展商」也放进来,排第一 */
+const COMPANY_ROLES: string[] = CONTACT_ROLE_DEFS.map(roleBilingual);
 
 export function NewProjectModal({ onClose }: { onClose: () => void }) {
   const { me, users, createProject, openProject } = useStore();
@@ -534,7 +535,7 @@ export function NewProjectModal({ onClose }: { onClose: () => void }) {
             <div className="two" style={{ marginBottom: 4 }}>
               <div className="field">
                 <label>{t('角色', 'Role')}</label>
-                <input list="company-roles" value={c.role} onChange={(e) => setComp(i, 'role', e.target.value)} placeholder={t('如 总包 / 建筑师…', 'e.g. Main Con / Architect…')} />
+                <input list="company-roles" value={c.role} onChange={(e) => setComp(i, 'role', e.target.value)} placeholder={t('如 发展商 / 总包 / 建筑师…', 'e.g. Developer / Main Con / Architect…')} />
               </div>
               <div className="field"><label>{t('公司名', 'Company')}</label><input value={c.company} onChange={(e) => setComp(i, 'company', e.target.value)} /></div>
             </div>
