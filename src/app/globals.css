@@ -392,3 +392,8 @@ textarea.in { width: 100%; min-height: 46px; resize: vertical }
   .av-row { grid-template-columns: 1.6fr 1.4fr 1.6fr 1fr; }
   .av-row > :nth-child(2), .av-row > :nth-child(5) { display: none }
 }
+
+/* REQ-060 登录与使用 */
+.usage-tbl { width: 100%; border-collapse: collapse; font-size: 13px; }
+.usage-tbl th { padding: 10px 14px; font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--text2); background: var(--hover-bg); text-align: left; white-space: nowrap; }
+.usage-tbl td { padding: 10px 14px; border-top: 1px solid var(--row-line); vertical-align: middle; }

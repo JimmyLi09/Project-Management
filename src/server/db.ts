@@ -16,6 +16,7 @@ import { migrateProject048, type Mig048Entry } from '@/lib/mig048';
 import { migrateProject049, type Mig049Entry } from '@/lib/mig049';
 import { migrateProject050, report050, type Mig050Entry } from '@/lib/mig050';
 import { hw053, migrateProject053, report053, type Mig053Entry } from '@/lib/mig053';
+import { closeUserSessions, ensureUsageTables, pruneUsage } from './usageStore';
 import { APPROVE_058, apply058, LEGACY_058, MIG_058, plan058, report058, SYN_KEY as SYN_KEY_058 } from '@/lib/mig058';
 import { isApproach } from '@/lib/approach';
 import { applyMig054, approachFails, MIG054_DEFAULT_IDS, planMig054, report054 } from '@/lib/mig054';
@@ -125,7 +126,24 @@ function setupDb(db: Database.Database): Database.Database {
   migrateInvoiceArchive(db);
   migrateContactRoles(db);
   scheduleBackups(db);
+  scheduleUsagePrune(db);
   return db;
+}
+
+/* REQ-060: 登录与使用记录只留 12 个月 —— 启动时清一次,之后每天一次 */
+let usagePruneScheduled = false;
+function scheduleUsagePrune(d: Database.Database) {
+  if (usagePruneScheduled) return;
+  usagePruneScheduled = true;
+  const run = () => {
+    try {
+      const r = pruneUsage(d, Date.now());
+      if (r.sessions || r.days) console.log(`[REQ-060] 清理 12 个月以前的登录记录 ${r.sessions} 段、使用时长 ${r.days} 天`);
+    } catch (e) { console.warn('[REQ-060] 清理登录记录失败:', e); }
+  };
+  run();
+  const timer = setInterval(run, 24 * 60 * 60 * 1000);
+  (timer as unknown as { unref?: () => void }).unref?.();
 }
 
 /* One-time pass so migrate()'s freshly-assigned item/row ids get persisted;
@@ -837,6 +855,8 @@ function migrateSchema(d: Database.Database) {
   /* REQ-051: 删除用户 = 先转交工作,再打上删除时间。行不删 —— 历史记录里的名字还要认得出是谁,
      显示「(已删除)」。0 = 没删 */
   if (!cols.includes('deleted_at')) d.exec('ALTER TABLE users ADD COLUMN deleted_at INTEGER NOT NULL DEFAULT 0');
+  /* REQ-060: 登录记录(user_sessions)和每人每天使用分钟数(user_activity_daily) —— 新表,不动旧表 */
+  ensureUsageTables(d);
   /* REQ-051: 不属于某个项目的管理操作(改权限表、删除用户)记在这里;项目里的照旧进 audit_log */
   d.exec(`CREATE TABLE IF NOT EXISTS admin_log (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1228,6 +1248,8 @@ export function resetPassword(id: number, newPw: string) {
 }
 export function setUserDisabled(id: number, disabled: boolean) {
   getDb().prepare('UPDATE users SET disabled = ? WHERE id = ?').run(disabled ? 1 : 0, id);
+  /* REQ-060: 停用时他还开着的段在最后一次活动那里结束,标「已停用」 */
+  if (disabled) closeUserSessions(getDb(), id, 'disabled', Date.now());
 }
 
 /* ---- projects (stored as JSON documents; all mutations happen server-side) ----
@@ -1627,6 +1649,7 @@ export function deleteUserWithHandover(id: number, to: { projects: string; tasks
       total.projects += c.projects; total.tasks += c.tasks; total.checklist += c.checklist; total.touched++;
     }
     d.prepare('UPDATE users SET deleted_at = ?, disabled = 1 WHERE id = ?').run(now, id);
+    closeUserSessions(d, id, 'disabled', now);   // REQ-060
     appendAdminLog(by, 'user.delete', { name: u.name, toP: to.projects, toT: to.tasks, toC: to.checklist, n: total.touched });
   })();
   return total;

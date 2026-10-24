@@ -13,6 +13,7 @@ import {
   type PermLevel, type PermModule, type PermRole, type PermTable,
 } from '@/lib/permTable';
 import { Avatar } from '../ui';
+import { UsageTab } from './UsageView';
 import type { Role, User } from '@/lib/types';
 
 const ROLE_DESC: Record<Role, [string, string]> = {
@@ -25,20 +26,22 @@ const ROLE_DESC: Record<Role, [string, string]> = {
   finance: ['开票/收款状态跟踪(不改生产)', 'Invoice/payment status tracking (no production edits)'],
 };
 
-/* REQ-051: 「用户与权限」两个标签 —— 账号 / 权限设置 */
+/* REQ-051: 「用户与权限」标签 —— 账号 / 权限设置;REQ-060 加「登录与使用」(这一页本来就只有 PD / BD 进得来) */
+type UsersTab = 'accounts' | 'perm' | 'usage';
 export default function UsersView() {
   const { t } = useLang();
-  const [tab, setTab] = useState<'accounts' | 'perm'>(() => {
-    try { return (localStorage.getItem('audax.usersTab') as 'accounts' | 'perm') || 'accounts'; } catch { return 'accounts'; }
+  const [tab, setTab] = useState<UsersTab>(() => {
+    try { const v = localStorage.getItem('audax.usersTab'); return v === 'perm' || v === 'usage' ? v : 'accounts'; } catch { return 'accounts'; }
   });
-  const pick = (k: 'accounts' | 'perm') => { setTab(k); try { localStorage.setItem('audax.usersTab', k); } catch { /* ignore */ } };
+  const pick = (k: UsersTab) => { setTab(k); try { localStorage.setItem('audax.usersTab', k); } catch { /* ignore */ } };
   return (
     <>
       <div className="detail-tabs" style={{ marginBottom: 16, borderTop: 'none', borderBottom: '1px solid var(--border)' }}>
         <button className={`detail-tab ${tab === 'accounts' ? 'active' : ''}`} onClick={() => pick('accounts')} data-testid="users-tab-accounts">{t('账号', 'Accounts')}</button>
         <button className={`detail-tab ${tab === 'perm' ? 'active' : ''}`} onClick={() => pick('perm')} data-testid="users-tab-perm">{t('权限设置', 'Permissions')}</button>
+        <button className={`detail-tab ${tab === 'usage' ? 'active' : ''}`} onClick={() => pick('usage')} data-testid="users-tab-usage">{t('登录与使用', 'Login & usage')}</button>
       </div>
-      {tab === 'accounts' ? <AccountsTab /> : <PermTab />}
+      {tab === 'accounts' ? <AccountsTab /> : tab === 'perm' ? <PermTab /> : <UsageTab />}
     </>
   );
 }
