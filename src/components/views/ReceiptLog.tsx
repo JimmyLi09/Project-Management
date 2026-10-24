@@ -7,6 +7,7 @@ import { fmtDate, parseISO } from '@/lib/project';
 import { CM } from '../ui';
 import { RECEIVE_VIA, viaName } from '@/lib/receipts';
 import { inScope } from '@/lib/sharedChecklist';
+import { visibleGroups } from '@/lib/interior';
 import { cellLabel, unitsOf } from '@/lib/clCells';
 import type { ChecklistStatus, Project, ReceiptRecord } from '@/lib/types';
 import { localDay } from '@/lib/localDate';
@@ -182,7 +183,8 @@ export function ReceivingLog({ p, scope, canEd, onOpenItem }: {
      所以按时间倒序排,而不是按清单顺序。 */
   const rows = useMemo(() => {
     const out: { id: string; cell?: string; cellName?: string; item: string; group: string; r: ReceiptRecord; isLatest: boolean }[] = [];
-    (p.checklist || []).forEach((g) => g.items.forEach((it) => {
+    /* REQ-058:没勾「包含室内部分」时室内资料那组不显示,记录也先不列(数据都在,打开开关就回来) */
+    visibleGroups(p).forEach((g) => g.items.forEach((it) => {
       if (!inScope(it, scope)) return;
       /* REQ-050: 分格的项每格各有记录,标明是哪个业务 / 哪一份 */
       unitsOf(p, it, scope).forEach(({ key, c }) => (c.receipts || []).forEach((r, k) => {
@@ -190,7 +192,7 @@ export function ReceivingLog({ p, scope, canEd, onOpenItem }: {
       }));
     }));
     return out.sort((a, b) => (b.r.date || '').localeCompare(a.r.date || '') || (b.r.at || 0) - (a.r.at || 0));
-  }, [p.checklist, scope, lang]);
+  }, [p.checklist, p.includeInterior, p.services, p.packages, scope, lang]);
 
   const shown = rows.filter((x) => {
     if (st && x.r.status !== st) return false;

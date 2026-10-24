@@ -6,7 +6,19 @@
 
 import React, { useEffect, useState } from 'react';
 import { useLang } from '@/lib/i18n';
-import type { Template, TplChecklistGroup, TplScheduleRow } from '@/lib/templates';
+import { tplItemExtra, type Template, type TplChecklistGroup, type TplChecklistItem, type TplItemExtra, type TplScheduleRow } from '@/lib/templates';
+
+/* REQ-058:模板项 [中文, English, 范围?, { 分项 / 小标题 }?] —— 改范围或分项时别把另一位丢了 */
+function withScope(it: TplChecklistItem, scope: 'proj' | 'inst'): TplChecklistItem {
+  const ex = tplItemExtra(it);
+  return Object.keys(ex).length ? [it[0], it[1], scope, ex] : [it[0], it[1], scope];
+}
+function withExtra(it: TplChecklistItem, patch: TplItemExtra): TplChecklistItem {
+  const ex: TplItemExtra = { ...tplItemExtra(it), ...patch };
+  for (const k of Object.keys(ex) as (keyof TplItemExtra)[]) if (!ex[k]) delete ex[k];
+  const scope = (it[2] === 'proj' || it[2] === 'inst') ? it[2] : '';
+  return Object.keys(ex).length ? [it[0], it[1], scope, ex] : scope ? [it[0], it[1], scope] : [it[0], it[1]];
+}
 import { tplItemScope } from '@/lib/checklistScope';
 
 interface SvcRow { key: string; label: string; en: string; color: string; customized: boolean }
@@ -236,10 +248,15 @@ function TemplateEditor({ svc, onBack }: { svc: string; onBack: () => void }) {
                 {/* REQ-050: 这一项的范围 —— 规格项在同一业务加第二份时每份一格,项目级整个项目一条 */}
                 <select className="in sm" style={{ width: 'auto' }} value={tplItemScope(svc, it)} data-testid={`tpl-scope-${gi}-${ii}`}
                   title={t('规格项:同一业务有两份(两块 LED)时每份一格;项目级:整个项目只有一条', 'Spec: one cell per instance when the service has two or more; Project-level: one row for the whole project')}
-                  onChange={(e) => { const gs = structuredClone(tpl.checklist); gs[gi][3][ii] = [gs[gi][3][ii][0], gs[gi][3][ii][1], e.target.value as 'proj' | 'inst']; setCheck(gs); }}>
+                  onChange={(e) => { const gs = structuredClone(tpl.checklist); gs[gi][3][ii] = withScope(gs[gi][3][ii], e.target.value as 'proj' | 'inst'); setCheck(gs); }}>
                   <option value="proj">{t('项目级', 'Project-level')}</option>
                   <option value="inst">{t('规格项 · 每份一格', 'Spec · per instance')}</option>
                 </select>
+                {/* REQ-058:分项(项名下面的灰色小字,如「a. 玻璃颜色 b. 窗框颜色」) */}
+                <input className="in sm" style={{ width: 150 }} value={tplItemExtra(it).sub || ''} placeholder={t('分项(可空)', 'Sub ZH (optional)')} data-testid={`tpl-sub-${gi}-${ii}`}
+                  onChange={(e) => { const gs = structuredClone(tpl.checklist); gs[gi][3][ii] = withExtra(gs[gi][3][ii], { sub: e.target.value }); setCheck(gs); }} />
+                <input className="in sm" style={{ width: 150 }} value={tplItemExtra(it).subEn || ''} placeholder="Sub EN"
+                  onChange={(e) => { const gs = structuredClone(tpl.checklist); gs[gi][3][ii] = withExtra(gs[gi][3][ii], { subEn: e.target.value }); setCheck(gs); }} />
                 <button style={{ color: 'var(--danger)', fontWeight: 700 }} onClick={() => { const gs = structuredClone(tpl.checklist); gs[gi][3] = gs[gi][3].filter((_, k) => k !== ii); setCheck(gs); }}>✕</button>
               </div>
             ))}

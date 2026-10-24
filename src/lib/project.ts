@@ -1,6 +1,6 @@
 /* ===== Isomorphic domain logic (used by both server and client) ===== */
 
-import { GENERIC, TPL, diffPoints, STAGES, stageIdx, svcName, type Template } from './templates';
+import { GENERIC, TPL, diffPoints, STAGES, stageIdx, svcName, tplGroupKey, tplItemExtra, type Template } from './templates';
 import { localDay } from './localDate';
 import { rulePoints, type PointRules } from './points';
 import { seedReceipt } from './receipts';
@@ -9,6 +9,7 @@ import { canSeeProject } from './permissions';
 import { roleKeyOf } from './contactRoles';
 import { calendarFromRows, seedCalendar } from './scheduleSync';
 import { blankRow, ensureJobRows } from './jobRecord';
+import { visibleGroups } from './interior';
 import { isHw } from './jobFormat';
 import { approachTag, isApproach } from './approach';
 import { workflowStage } from './closeout';
@@ -57,6 +58,7 @@ export interface NewProjectInput {
   services: string[];
   owners?: string[];
   engineer?: string;   // REQ-043: 项目级的工程师指派,一个项目一个人
+  includeInterior?: boolean;   // REQ-058:新建时勾「包含室内部分」
   difficulty?: string;
   points?: number | null;
   start: string;
@@ -95,7 +97,15 @@ export function buildPackage(svc: string, start: string, tpl?: Template): Servic
     })),
     checklist: t.checklist.map((g) => ({
       group: g[0], groupEn: g[1], color: g[2],
-      items: g[3].map((i) => ({ id: newId(), zh: i[0], en: i[1], status: 'pending' as const, date: '', remark: '', owner: '', shots: [] as string[], scope: tplItemScope(svc, i) })),
+      /* REQ-058:分组 key、分项(sub)、组内小标题(sec)从模板带过来;没有的不写这几位 */
+      ...(tplGroupKey(g) ? { key: tplGroupKey(g) } : {}),
+      items: g[3].map((i) => {
+        const x = tplItemExtra(i);
+        return {
+          id: newId(), zh: i[0], en: i[1], status: 'pending' as const, date: '', remark: '', owner: '', shots: [] as string[], scope: tplItemScope(svc, i),
+          ...(x.sub ? { sub: x.sub } : {}), ...(x.subEn ? { subEn: x.subEn } : {}), ...(x.sec ? { sec: x.sec } : {}), ...(x.secEn ? { secEn: x.secEn } : {}),
+        };
+      }),
     })),
   };
   /* REQ-048:排期只在日历上排 —— 新建业务就带一份日历(阶段 = 上面这些行,id 相同);
@@ -136,6 +146,7 @@ export function newProject(o: NewProjectInput, tplLookup?: (svc: string) => Temp
     points: o.points != null ? o.points : diffPoints(difficulty) * services.length,
     owners: o.owners || [],
     engineer: (o.engineer || '').trim() || undefined,
+    ...(o.includeInterior ? { includeInterior: true } : {}),
     perm: [],
     start: o.start,
     delivery: o.delivery || '',
@@ -472,7 +483,8 @@ export function schedProgress(p: Project) {
 export function infoProgress(p: Project) {
   let c = 0, t = 0;
   /* REQ-050: 按格算 —— 同步项 1 格,规格项 / 单独填按份数 / 业务数 */
-  (p.checklist || []).forEach((g) => g.items.forEach((it) => unitsOf(p, it, 'all').forEach(({ c: i }) => { if (i.status === 'na') return; t++; if (i.status === 'confirmed') c++; })));
+  /* REQ-058:不包含室内部分时,「室内资料」那一组不计 */
+  visibleGroups(p).forEach((g) => g.items.forEach((it) => unitsOf(p, it, 'all').forEach(({ c: i }) => { if (i.status === 'na') return; t++; if (i.status === 'confirmed') c++; })));
   return { done: c, total: t, pct: t ? Math.round((c / t) * 100) : 0 };
 }
 

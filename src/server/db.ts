@@ -5,7 +5,7 @@ import path from 'path';
 import crypto from 'crypto';
 import type { Project, Role, User } from '@/lib/types';
 import { migrate } from '@/lib/project';
-import { getBuiltinTemplate, SVC, type Template } from '@/lib/templates';
+import { getBuiltinTemplate, SVC, svcName, type Template } from '@/lib/templates';
 import { applyProjField, projSourceOf } from '@/lib/records';
 import { logZh, type LogParams } from '@/lib/logmsg';
 import { cleanSynonyms, DEFAULT_SYNONYMS, getSynonyms, migrationReport, setSynonyms, type ProjectMigration } from '@/lib/checklistMerge';
@@ -16,6 +16,7 @@ import { migrateProject048, type Mig048Entry } from '@/lib/mig048';
 import { migrateProject049, type Mig049Entry } from '@/lib/mig049';
 import { migrateProject050, report050, type Mig050Entry } from '@/lib/mig050';
 import { hw053, migrateProject053, report053, type Mig053Entry } from '@/lib/mig053';
+import { APPROVE_058, apply058, LEGACY_058, MIG_058, plan058, report058, SYN_KEY as SYN_KEY_058 } from '@/lib/mig058';
 import { isApproach } from '@/lib/approach';
 import { applyMig054, approachFails, MIG054_DEFAULT_IDS, planMig054, report054 } from '@/lib/mig054';
 import { tplNamesFrom } from '@/lib/checklistScope';
@@ -107,6 +108,7 @@ function setupDb(db: Database.Database): Database.Database {
   migrateSchema(db);
   seedIfEmpty(db);
   maybeSeedDemo(db);
+  migrateTemplates058(db);      // REQ-058:模板覆盖换清单 / 同义项补新的 —— 有要改的,等 scripts\req058-dryrun 预演确认过才跑
   loadSynonyms(db);
   /* 顺序有讲究:migrate() 读项目时会兜底补日历(048)、补 Job Record 默认行(049)、合并清单(044)。
      谁先把兜底结果存进库,后面的一次性迁移就以为「已经有了」而跳过(没备份、没报告、旧字段也没转成行)。
@@ -623,6 +625,62 @@ function migrateApproach054(d: Database.Database) {
     fs.writeFileSync(file, md + '\n回退:先 pm2 stop audax,再跑 scripts\\req054-rollback.bat(不带参数只报告;--apply 才写库,会先备份)。\n', 'utf8');
     console.log(`[REQ-054] 售前接洽:${changed.length} 个项目去掉编号(${changed.map((c) => String(c.serial).padStart(3, '0')).join('、') || '无'}),报告 ${file}`);
   } catch (e) { console.warn('[REQ-054] 迁移报告写不出来:', e); }
+}
+
+/* ===== REQ-058 模板覆盖:只把清单部分换成新的(排期保留),PD 存过的同义项补上新的 =====
+   没有要改的(新装的库、没人覆盖过):直接记标记。有要改的:要先跑 scripts\req058-dryrun.bat、JM 看过报告后 --approve,
+   这里才真改 —— 先整库备份,原覆盖值和原同义项存进 meta templatesLegacy058,出报告。已有项目的清单一个字都不动。 */
+function migrateTemplates058(d: Database.Database) {
+  if (d.prepare('SELECT 1 FROM meta WHERE key = ?').get(MIG_058)) return;
+  const overrides: { svc: string; data: Template }[] = [];
+  for (const r of d.prepare('SELECT svc, data FROM templates').all() as { svc: string; data: string }[]) {
+    try { overrides.push({ svc: r.svc, data: JSON.parse(r.data) as Template }); } catch { /* 坏行不动 */ }
+  }
+  const synRow = d.prepare('SELECT value FROM meta WHERE key = ?').get(SYN_KEY_058) as { value: string } | undefined;
+  let saved: string[][] | null = null;
+  if (synRow) { try { saved = JSON.parse(synRow.value); } catch { saved = null; } }
+  const plan = plan058(overrides, saved);
+  const now = Date.now();
+  const setMeta = d.prepare('INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value');
+  if (!plan.templates.length && !plan.synonyms) {
+    setMeta.run(MIG_058, JSON.stringify({ at: now, none: true }));
+    return;
+  }
+  const approved = d.prepare('SELECT value FROM meta WHERE key = ?').get(APPROVE_058) as { value: string } | undefined;
+  if (!approved) {
+    console.log(`[REQ-058] 有 ${plan.templates.length} 个业务模板要换清单${plan.synonyms ? '、同义项要补新的' : ''} —— 等预演确认:先跑 scripts\\req058-dryrun.bat,JM 看过报告后 scripts\\req058-dryrun.bat --approve,再 pm2 restart audax。在那之前这几个业务新建项目时还是旧清单。`);
+    return;
+  }
+  const t = new Date(now), pad = (n: number) => String(n).padStart(2, '0');
+  const stamp = `${t.getFullYear()}${pad(t.getMonth() + 1)}${pad(t.getDate())}-${pad(t.getHours())}${pad(t.getMinutes())}${pad(t.getSeconds())}`;
+  let backup = '';
+  try {
+    const dir = path.join(DATA_DIR, 'backups');
+    fs.mkdirSync(dir, { recursive: true });
+    backup = path.join(dir, `pre-req058-${stamp}.db`);
+    d.exec(`VACUUM INTO '${backup.replace(/'/g, "''")}'`);
+  } catch (e) {
+    throw new Error(`[REQ-058] 迁移前备份失败,这次不迁移:${e instanceof Error ? e.message : String(e)}`);
+  }
+  const byId = new Map(overrides.map((o) => [o.svc, o.data]));
+  d.transaction(() => {
+    setMeta.run(LEGACY_058, JSON.stringify({
+      at: now, backup,
+      templates: Object.fromEntries(plan.templates.map((e) => [e.svc, byId.get(e.svc)])),
+      synonyms: plan.synonyms ? saved : undefined,
+    }));
+    const upd = d.prepare('UPDATE templates SET data = ?, updated_at = ?, updated_by = ? WHERE svc = ?');
+    for (const e of plan.templates) upd.run(JSON.stringify(apply058(byId.get(e.svc)!, e)), now, 'REQ-058', e.svc);
+    if (plan.synonyms) setMeta.run(SYN_KEY_058, JSON.stringify(plan.synonyms.after));
+    setMeta.run(MIG_058, JSON.stringify({ at: now, backup, templates: plan.templates.map((e) => e.svc), synonyms: !!plan.synonyms, approved: JSON.parse(approved.value) }));
+  })();
+  try {
+    const dir = path.join(DATA_DIR, 'migrations');
+    fs.mkdirSync(dir, { recursive: true });
+    const md = report058(plan, { title: 'REQ-058 信息清单模板 · 上线迁移报告', when: t.toLocaleString('zh-CN'), db: `迁移前备份:${backup}`, names: (k) => svcName(k, 'zh') });
+    fs.writeFileSync(path.join(dir, `058-templates-${stamp}.md`), md + '\n回退:先 pm2 stop audax,再跑 scripts\\req058-rollback.bat(不带参数只报告;--apply 才写库,会先备份)。\n', 'utf8');
+  } catch (e) { console.warn('[REQ-058] 迁移报告写不出来:', e); }
+  console.log(`[REQ-058] 模板覆盖已换清单:${plan.templates.map((e) => e.svc).join(', ') || '无'}${plan.synonyms ? ';同义项已补新的' : ''}`);
 }
 
 /* ===== REQ-044 一个项目一张信息清单 =====

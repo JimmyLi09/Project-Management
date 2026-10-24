@@ -13,6 +13,7 @@ import {
   canSeeWorkflow, canSeeWorkflowTimeline, canSeeHandoverBlock, canSeeCompletionBlock,
   canSeeVerifyBlock, canSeeFinanceBlock, isPM, canMeta, canMarkInvoice, canEditIn, canSeeModule, isArchivedFor, pmLocked,
 } from '@/lib/permissions';
+import { hasInteriorGroup, interiorAuto, interiorOn } from '@/lib/interior';
 import { DIFF, STAGES, stageIdx, svcColor, svcName } from '@/lib/templates';
 import { contactRoleTerm, diffTerm, fieldGroupTerm } from '@/lib/terms';
 import { CONTACT_ROLES as ROLE_DEFS, roleKeyOf } from '@/lib/contactRoles';
@@ -697,6 +698,12 @@ function OverviewTab({ p, onSchedule }: { p: Project; onSchedule: (pkg: number) 
         <div className="panel clip">
           <div className="panel-head" style={{ padding: '16px 22px' }}>
             <span className="panel-title" style={{ fontSize: 15 }}>{t('服务包', 'Service Packages')}</span>
+            {/* REQ-058:信息清单含不含室内部分(项目里有室内资料组才显示) */}
+            {hasInteriorGroup(p) && (
+              <span className="badge" data-testid="ov-interior" style={{ background: interiorOn(p) ? '#efe9f8' : 'var(--hover-bg)', color: interiorOn(p) ? '#6B4E9E' : 'var(--text2)', fontSize: 11 }}>
+                {interiorOn(p) ? (interiorAuto(p) && !p.includeInterior ? t('含室内(自动)', 'Interior included (auto)') : t('含室内', 'Interior included')) : t('不含室内', 'No interior')}
+              </span>
+            )}
             <span className="tnum" style={{ fontSize: 12.5, color: 'var(--text2)' }}>{sp.done}/{sp.total} · {sp.pct}%</span>
           </div>
           {p.packages.map((pk, pi) => {

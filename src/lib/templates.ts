@@ -60,14 +60,77 @@ export type TplScheduleRow =
 /* Template checklist group: [group, groupEn, color, items[[zh,en]]]
    REQ-050: 每项可选第三位「范围」—— 'inst' 规格项(同一业务多份时每份一格)/ 'proj' 项目级。
    没写的按出厂规格项表(checklistScope.ts)定。 */
-export type TplChecklistItem = [string, string] | [string, string, 'proj' | 'inst'];
-export type TplChecklistGroup = [string, string, string, TplChecklistItem[]];
+/* REQ-058:每项还可以带第四位 { sub, subEn, sec, secEn }:
+   sub = 项名下面的灰色分项(如「a. 玻璃颜色 b. 窗框颜色」);sec = 组内小标题(如室内资料里「单元 · 建筑方提供」)。
+   第三位已经是「范围」,所以分项放在第四位;范围没写就留空字符串。 */
+export interface TplItemExtra { sub?: string; subEn?: string; sec?: string; secEn?: string }
+export type TplChecklistItem =
+  | [string, string]
+  | [string, string, 'proj' | 'inst' | '']
+  | [string, string, 'proj' | 'inst' | '', TplItemExtra];
+/* 分组:[中文, English, 颜色, 项] —— REQ-058 可选第五位稳定的 key(arch / land / int / brief),合并时先按 key 再按名字 */
+export type TplChecklistGroup =
+  | [string, string, string, TplChecklistItem[]]
+  | [string, string, string, TplChecklistItem[], string];
+export const tplItemExtra = (it: TplChecklistItem): TplItemExtra =>
+  (it.length > 3 && it[3] && typeof it[3] === 'object' ? (it[3] as TplItemExtra) : {});
+export const tplGroupKey = (g: TplChecklistGroup): string | undefined => (typeof g[4] === 'string' && g[4] ? g[4] : undefined);
 export interface Template {
   schedule: TplScheduleRow[];
   checklist: TplChecklistGroup[];
 }
 
 export const getBuiltinTemplate = (svc: string): Template => TPL[svc] || GENERIC;
+
+/* ===== REQ-058:信息清单按「谁提供」统一分组(所有制作类业务共用这几个名字和 key) ===== */
+const ARCH = ['建筑资料', 'From Architect', '#D98A2B'] as const;
+const LAND = ['景观资料', 'From Landscape', '#3F7A4E'] as const;
+const INT = ['室内资料', 'From Interior', '#6B4E9E'] as const;
+const BRIEF = ['销售 / 需求', 'From Sales / Brief', '#2C6E8F'] as const;
+/* 室内资料是可选组(新建项目勾「包含室内部分」才显示);3D VR/720、单元模型本来就是做室内,自动包含 */
+export const INTERIOR_KEY = 'int';
+export const INTERIOR_AUTO_SVCS = ['vrar', 'unitmodel'];
+const S_UNIT = { sec: '单元 · 建筑方提供', secEn: 'Unit · from Architect' };
+const S_DESIGN = { sec: '设计 · ID 方提供', secEn: 'Design · from ID' };
+/* 效果图 = 动画:同一份清单(UTB 写法:连续编号、中英两套、需要时一行灰色分项)。
+   和原来的对应关系见 docs/requirements/058 §2.2;原来的名字留在同义项里(已有项目、覆盖过的模板还在用) */
+export const CGI_ANI_CHECKLIST: TplChecklistGroup[] = [
+  [...ARCH, [
+    ['总平 / Google 地图(周边建筑)', 'Site plan / Google map (surrounding buildings)'],
+    ['最终 CAD + 3D 模型(至少 WP 审批版)', 'Final CAD + 3D model (min. WP approval)'],
+    ['立面分色 + 色号 + 参考', 'Façade colour demarcation + colour code + reference', '', { sub: 'a. 玻璃颜色 b. 窗框颜色', subEn: 'a. Glass colour b. Window frame colour' }],
+    ['建筑灯光信息 + 参考', 'Building lighting info + reference'],
+    ['Key plan 标注单元号', 'Key plan with unit numbers'],
+    ['会所 / 健身房室内材料 + 家具', 'Clubhouse & gym interior material + furniture'],
+  ], 'arch'],
+  [...LAND, [
+    ['景观平面图', 'Landscape plan', '', { sub: '材料 / 种植 / 家具', subEn: 'Material / planting / furniture' }],
+    ['种植布局 + 参考', 'Planting layout + reference', '', { sub: 'a. 灌木参考图 b. 乔木参考图', subEn: 'a. Shrubs reference images b. Trees reference images' }],
+    ['景观铺地材质 + 参考', 'Hardscape material plan + reference', '', { sub: '材质 / 颜色 / 尺寸 / 排布', subEn: 'Material, colour, sizes & arrangement' }],
+    ['灯光布局 + 灯具 + 参考', 'Lighting layout + fittings + reference'],
+    ['室外家具 / 健身 / 儿童设施布置 + 参考', 'Outdoor furniture & equipment layout + reference'],
+    ['场地竖向(详细标高图)', 'Site levelling (detailed level plan)'],
+    ['详图', 'Detail drawings', '', { sub: '泳池 / 凉亭 / 景观区', subEn: 'Pool / pavilion / feature areas' }],
+    ['彩色总平(标注设施名)', 'Colour site plan with facility names'],
+  ], 'land'],
+  [...INT, [
+    ['选定单元平面 + 3D 模型', 'Selected unit floor plan + 3D model', '', S_UNIT],
+    ['木作立面', 'Carpentry elevations', '', S_UNIT],
+    ['地墙砖排布 + 参考', 'Floor & wall tile layout + reference', '', S_UNIT],
+    ['天花平面含标高', 'Reflected ceiling plan with levels', '', { ...S_UNIT, sub: '空调 / 风口', subEn: 'AC / vents' }],
+    ['洁具 / 给排水配置表', 'Sanitary & plumbing schedule', '', S_UNIT],
+    ['电位 / 开关立面 + 参考', 'Electrical points elevation + reference', '', S_UNIT],
+    ['衣柜 / 厨房详图', 'Wardrobe & kitchen details', '', S_UNIT],
+    ['主卫及全部卫浴详图', 'Master & all bathroom details', '', S_UNIT],
+    ['单元材料 + 参考', 'Unit material + reference', '', S_UNIT],
+    ['设计概念 / 方案提报', 'Design concept / proposal', '', S_DESIGN],
+    ['单元布局 + 家具设计 + 软装参考', 'Unit layout + furniture design + soft-furnishing reference', '', S_DESIGN],
+  ], INTERIOR_KEY],
+  [...BRIEF, [
+    ['确认视角数量(外观 / 室内)/ 动画时长', 'Number of views (exterior / interior) / animation length'],
+    ['最终截止日', 'Final deadline'],
+  ], 'brief'],
+];
 
 export const GENERIC: Template = {
   schedule: [
@@ -77,7 +140,8 @@ export const GENERIC: Template = {
     ['4', '交付', '交付 / 签收', 'Delivery & sign-off', 'PM', 1, '—', '★ 交付前核对需求', true],
   ],
   checklist: [
-    ['需求信息', 'Required Info', '#2C6E8F', [['需求 / 规格', 'Requirements / spec'], ['素材 / 参考', 'Assets / reference'], ['截止日', 'Deadline']]],
+    /* REQ-058:「需求信息」并进统一的「销售 / 需求」;「截止日」和效果图 / 动画的「最终截止日」是同义项 */
+    [...BRIEF, [['需求 / 规格', 'Requirements / spec'], ['素材 / 参考', 'Assets / reference'], ['截止日', 'Deadline']], 'brief'],
   ],
 };
 
@@ -91,41 +155,7 @@ export const TPL: Record<string, Template> = {
       ['B', 'Mood & angle', 'Mood & angle stage：每个角度出氛围图，确认角度与氛围', 'Mood & angle stage: a mood render for each angle; confirm angles and mood', 'Audax / Client', 2, '2 周', ' ', false, '2 weeks', ' '],
       ['C', 'Material & model', 'Material & model stage：微调模型与材质，最终确认', 'Material & model stage: fine-tune the model and materials; final confirmation', 'Audax / Client', 2, '2 周', ' ', false, '2 weeks', ' '],
     ],
-    checklist: [
-      ['建筑方 · 外观', 'From Architect (Exterior)', '#D98A2B', [
-        ['Siteplan / google map', '建周边建筑'],
-        ['最终 CAD + 3D 模型', 'Final CAD + 3D model (min. WP approval)'],
-        ['立面材料分区 + 色号 + 参考', 'Façade demarcation + colour code'],
-        ['建筑灯光信息 + 参考', 'Building lighting info + ref'],
-        ['Key plan 标注单元号', 'unit number labels'],
-        ['会所/健身房室内材料 + 家具', 'Clubhouse & gym indoor material'],
-      ]],
-      ['景观方 · 外观', 'From Landscape (Exterior)', '#3F7A4E', [
-        ['景观平面(材料/种植/家具)', 'Landscape plan'],
-        ['种植布局(灌木/乔木)+ 参考', 'Planting layout + ref'],
-        ['景观材料(色/尺寸/排布)+ 参考', 'Landscape material + ref'],
-        ['灯光布局 + 灯具 + 参考', 'Lighting layout + ref'],
-        ['户外家具/健身/儿童设施 + 参考', 'Outdoor furniture + ref'],
-        ['场地竖向(详细标高)', 'Site levelling'],
-        ['详图(泳池/凉亭/景观区)', 'Details drawing'],
-        ['彩色总平 标注设施名', 'Colour site plan'],
-      ]],
-      ['建筑方 · 室内/单元', 'From Architect (Interior/Unit)', '#B26A2E', [
-        ['选定单元平面 + 3D 模型', 'Unit floor plan & 3d model'],
-        ['木作立面', 'Elevation for carpentry'],
-        ['地墙砖排布 + 参考', 'Tiles arrangement + ref'],
-        ['天花平面含标高(空调/风口)', 'Ceiling plans (AC & vent)'],
-        ['洁具/给排水配置表', 'Sanitary & plumbing schedule'],
-        ['电位/开关立面 + 参考', 'Electrical points + ref'],
-        ['衣柜详图(厨房/卧室)', 'Wardrobe detail'],
-        ['主卫及全部卫浴详图', 'Bathroom details'],
-        ['单元材料 + 参考', 'Unit material + ref'],
-      ]],
-      ['ID 方 · 室内', 'From ID (Interior)', '#6B4E9E', [
-        ['设计概念/方案提报', 'Design concept / proposal'],
-        ['家具布局 + 软装参考', 'Furniture layout + images'],
-      ]],
-    ],
+    checklist: CGI_ANI_CHECKLIST,   // REQ-058:效果图和动画共用一份
   },
   ani: {
     /* REQ-048(1009 第 3 条):动画 5 个阶段,1 / 2 / 1 / 2 / 1 周 —— 只是默认值。英文阶段名用 JM 原文。 */
@@ -136,26 +166,7 @@ export const TPL: Record<string, Template> = {
       ['D', 'Still frame 2', 'Still frame stage 2：确认所有模型与材质细节', 'Still frame stage 2: confirm all model and material details', 'Audax / SZ / Client', 2, '2 周', ' ', false, '2 weeks', ' '],
       ['E', 'Post', 'Post production', 'Post production', 'Audax / SZ', 1, '1 周', ' ', false, '1 week', ' '],
     ],
-    checklist: [
-      ['建筑方', 'From Architect', '#D98A2B', [
-        ['确认 3D 模型 & CAD', 'Confirmed 3d model & cad'],
-        ['建筑材料 + 色号', 'Material + colour code'],
-        ['衣柜/厨房/卫浴详图', 'Wardrobe, kitchen & bathroom'],
-      ]],
-      ['景观方', 'From Landscape', '#3F7A4E', [
-        ['景观图 + 详图', 'Landscape drawing & detail'],
-        ['景观材料', 'Material of landscape'],
-        ['家具与设备', 'Furniture & equipment'],
-      ]],
-      ['ID 方', 'From ID Designer', '#6B4E9E', [
-        ['单元平面 + 设计布局', 'Unit plan & layout'],
-        ['家具设计', 'Furniture design'],
-      ]],
-      ['销售/需求', 'From Sales / Brief', '#2C6E8F', [
-        ['确认视角数量(外观/室内)', 'Number of views'],
-        ['最终截止日', 'Final deadline'],
-      ]],
-    ],
+    checklist: CGI_ANI_CHECKLIST,   // REQ-058:动画始终跟效果图的资料统一
   },
   scale: {
     schedule: [
@@ -183,7 +194,8 @@ export const TPL: Record<string, Template> = {
         ['单元命名/灯光逻辑/UI配色', 'Unit naming / lighting logic / UI colours (if app)'],
         ['Mock-up 部位决定', 'Mock-up area decision (inform the client first)'],
       ]],
-      ['建筑方', 'From Architect', '#D98A2B', [
+      /* REQ-058:「建筑方」「景观方」改成统一的「建筑资料」「景观资料」(项不变),和效果图同名 / 同义的合成一条 */
+      [...ARCH, [
         ['CAD vs SKP 以哪个为准', 'CAD or SKP as the master (info accuracy)'],
         ['最终 CAD + SKP + 平面/立面/屋顶', 'Final CAD + SKP + plans / elevations / roof'],
         ['立面:色号/玻璃/门窗框/分区', 'Façade full spec'],
@@ -193,8 +205,8 @@ export const TPL: Record<string, Template> = {
         ['内墙结构 / 颜色', 'Internal wall'],
         ['玻璃样板色', 'Glass sample colour'],
         ['售楼处门尺寸', 'Sales gallery door size'],
-      ]],
-      ['景观方', 'From Landscape (consultant)', '#3F7A4E', [
+      ], 'arch'],
+      [...LAND, [
         ['种植布局 + 参考', 'Planting layout + ref'],
         ['景观材料(全规格)', 'Landscape material spec'],
         ['灯光布局 + 参考', 'Lighting plan + ref'],
@@ -202,7 +214,7 @@ export const TPL: Record<string, Template> = {
         ['泳池/水景细节', 'Pool & water feature'],
         ['场地竖向', 'Site levelling'],
         ['彩色总平(可最后)', 'Colour site plan'],
-      ]],
+      ], 'land'],
     ],
   },
   led: {
@@ -277,21 +289,24 @@ export const TPL: Record<string, Template> = {
       ['6', '交付', '部署/交付,客户签收', 'Deploy / delivery + sign-off', 'Audax / PM', 0.5, '—', '★ 对照信息清单 QC', true],
     ],
     checklist: [
-      ['建筑 / ID', 'From Architect / ID', '#D98A2B', [
+      /* REQ-058:「建筑 / ID」拆开 —— 立面两项进建筑资料,其余进室内资料(3D VR/720 自动包含室内);「需求 / 市场」→ 销售 / 需求 */
+      [...ARCH, [
+        ['立面信息 Façade', 'Façade information'],
+        ['立面图 Elevations', 'Elevational drawings'],
+      ], 'arch'],
+      [...INT, [
         ['单元户型平面图', 'Unit type floor plan'],
         ['天花反射图(墙高/假天花)', 'Reflected ceiling plan'],
         ['非ID木作与固定件', 'Non-ID carpentry & fixtures'],
         ['材料表(饰面/铺贴方向)', 'Material schedule'],
-        ['立面信息 Façade', 'Façade information'],
         ['ID处理 / FF&E 表', 'ID treatment / FF&E'],
-        ['立面图 Elevations', 'Elevational drawings'],
-      ]],
-      ['需求 / 市场', 'Requirements', '#2C6E8F', [
+      ], INTERIOR_KEY],
+      [...BRIEF, [
         ['是否跟 showflat 风格', 'Follow showflat styling'],
         ['风格由 ID 或我方提案', 'Styling proposer'],
         ['日间 / 夜间设定', 'Day / night setting'],
         ['是否航拍(我方拍需申请license)', 'Drone footage (license if we shoot)'],
-      ]],
+      ], 'brief'],
     ],
   },
   saleskit: {
@@ -341,22 +356,25 @@ export const TPL: Record<string, Template> = {
       ['7', '安装移交', '现场安装(易损件/插座)+移交', 'Onsite install + handover', 'Audax', 1, '1-2 周', '注意各国插座', false],
     ],
     checklist: [
-      ['建筑 / ID', 'From Architect / ID', '#D98A2B', [
+      /* REQ-058:「建筑 / ID」拆开 —— 立面图、玻璃色 / 墙色进建筑资料,其余进室内资料(单元模型自动包含室内);「需求」→ 销售 / 需求 */
+      [...ARCH, [
+        ['立面图', 'Elevational drawings'],
+        ['玻璃色 / 墙色', 'Glass / wall colour'],
+      ], 'arch'],
+      [...INT, [
         ['单元户型平面', 'Unit type floor plan'],
         ['天花反射图(墙高/假天花)', 'Reflected ceiling plan'],
         ['非ID木作与固定件(衣柜/台盆/洁具)', 'Non-ID carpentry & fixtures'],
         ['材料表(饰面/颜色/纹理/铺贴)', 'Material schedule'],
         ['ID处理 / FF&E 表', 'ID treatment / FF&E'],
-        ['立面图', 'Elevational drawings'],
-        ['玻璃色 / 墙色', 'Glass / wall colour'],
         ['室内材料分区', 'Interior material demarcation'],
-      ]],
-      ['需求', 'Requirements', '#2C6E8F', [
+      ], INTERIOR_KEY],
+      [...BRIEF, [
         ['比例 Scale(1:25/1:150等)', 'Scale'],
         ['灯光色调', 'Lighting tone'],
         ['仅FFE 或 FFE+ID处理', 'FFE only or FFE+ID'],
         ['模型台 Model stand table', 'Model stand table'],
-      ]],
+      ], 'brief'],
     ],
   },
 };

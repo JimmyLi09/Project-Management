@@ -3,7 +3,8 @@
 import React, { useState } from 'react';
 import { ItemReceipts, ReceivingLog } from './ReceiptLog';
 import { useStore, useWho } from '../store';
-import { canEdit, canEditIn } from '@/lib/permissions';
+import { canEdit, canEditIn, isFull } from '@/lib/permissions';
+import { clGroupHidden, hasInteriorGroup, interiorAuto, isInteriorGroup } from '@/lib/interior';
 import { getBuiltinTemplate, svcColor, svcName } from '@/lib/templates';
 import { parseISO, todayMid } from '@/lib/project';
 import { ALL, clGroups, clStats, inScope, projectSvcs, type ClScope } from '@/lib/sharedChecklist';
@@ -68,6 +69,13 @@ export default function ChecklistTab({ p, scope, onScope, onExport }: {
      都不算逾期(资料已到位或已在处理),避免把「已收到」误报成逾期。
      REQ-044: 按当前标签算 */
   const st = clStats(p, scope, today);
+  /* REQ-058:分项 / 组内小标题按界面语言取(英文没写就用中文) */
+  const subOf = (it: ChecklistItem) => (lang === 'zh' ? it.sub : it.subEn || it.sub) || '';
+  const secOf = (it: ChecklistItem) => (lang === 'zh' ? it.sec : it.secEn || it.sec) || '';
+  /* REQ-058:「包含室内部分」开关 —— 项目里有室内资料组、又不是 3D VR/720 / 单元模型(自动包含)时才出;PM / PD / BD 能改 */
+  const intShow = hasInteriorGroup(p) && !interiorAuto(p);
+  const intEd = ed && (isFull(me) || me.role === 'pm');
+  const intN = (p.checklist || []).filter(isInteriorGroup).reduce((n, g) => n + g.items.length, 0);
   const doneN = st.done, totalN = st.total, pendingN = st.pending, overdueN = st.overdue, pct = st.pct;
 
   /* 「添加信息项」的常用默认项:当前标签对应服务的模板;「全部」下是所有服务的 */
@@ -314,6 +322,15 @@ export default function ChecklistTab({ p, scope, onScope, onExport }: {
             : t('点状态徽章向前推进(右键选择指定状态)', 'Click a status badge to advance it (right-click to pick)')}
         </div>
         <div style={{ flex: 1 }} />
+        {intShow && (
+          <label className="btn-line sm" data-testid="cl-interior" title={t('不包含时「室内资料」这一组不显示、不计数、不导出;已填的状态和收料记录都留着', 'When off, the “From Interior” group is hidden, not counted and not exported; its statuses and receipts are kept')}
+            style={{ cursor: intEd ? 'pointer' : 'default', display: 'inline-flex', gap: 6, alignItems: 'center', ...(p.includeInterior ? { borderColor: 'var(--navy700)', color: 'var(--navy900)', fontWeight: 600 } : {}) }}>
+            <input type="checkbox" checked={!!p.includeInterior} disabled={!intEd} data-testid="cl-interior-box"
+              onChange={(e) => dispatch(p.id, { type: 'setIncludeInterior', value: e.target.checked })} />
+            {t('包含室内部分', 'Include interior')}
+            {!p.includeInterior && <span style={{ fontWeight: 400, color: 'var(--text2)' }}>{t(`(已隐藏 ${intN} 项)`, `(${intN} hidden)`)}</span>}
+          </label>
+        )}
         {ed && editMode && (
           <button className="btn-line sm" style={{ color: 'var(--danger)' }}
             title={scope === ALL
@@ -383,6 +400,8 @@ export default function ChecklistTab({ p, scope, onScope, onExport }: {
         </div>
 
         {clGroups(p).map((g, gi) => {
+          /* REQ-058:不包含室内部分时,「室内资料」那一组不显示(还存着,打开开关就回来) */
+          if (clGroupHidden(p, g)) return null;
           /* REQ-044: 只显示当前标签的项;一项都不剩的分组不显示 */
           const vis = g.items.filter((it) => inScope(it, scope));
           if (!vis.length) return null;
@@ -392,7 +411,7 @@ export default function ChecklistTab({ p, scope, onScope, onExport }: {
           const gpct = applicable.length ? Math.round((conf / applicable.length) * 100) : 0;
           const isCol = !!collapsed[gi];
           return (
-            <div key={gi}>
+            <div key={gi} data-testid="cl-group" data-key={g.key || ''}>
               {/* collapsible bold section header — hidden in flat mode (REQ-014) */}
               {!flat && (
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '16px 24px', borderBottom: '1px solid var(--row-line)' }}>
@@ -480,6 +499,8 @@ export default function ChecklistTab({ p, scope, onScope, onExport }: {
                         <span className="badge" data-testid="cl-only" style={{ marginLeft: 7, background: 'var(--hover-bg)', color: 'var(--text2)' }}>{t('只此业务', 'This service only')} · {short((it.svcs || [])[0] || '')}</span>
                       )}
                     </div>
+                    {/* REQ-058:分项(a / b)—— 项名下面一行小号灰字 */}
+                    {subOf(it) && <div data-testid="cl-sub" style={{ fontSize: 11.5, color: 'var(--text2)', marginTop: 2 }}>{subOf(it)}</div>}
                     {dual && <div style={{ fontSize: 11.5, color: 'var(--text2)' }}>{lang === 'zh' ? it.en : it.zh}</div>}
                     {/* REQ-050: 同步的共用项 —— 在任一标签下改,别的业务同时更新 */}
                     {shared && !sep && (
@@ -541,8 +562,13 @@ export default function ChecklistTab({ p, scope, onScope, onExport }: {
                   borderLeft: `3px solid ${over ? 'var(--navy700)' : 'transparent'}`,
                   opacity: drag && drag.id === it.id ? 0.45 : 1,
                 });
+                /* REQ-058:组内小标题(如室内资料的「单元 · 建筑方提供」),和上一项不同时出一行 */
+                const sec = secOf(it), prevSec = ii > 0 ? secOf(vis[ii - 1]) : '';
                 return (
                   <React.Fragment key={it.id || ii}>
+                  {sec && sec !== prevSec && (
+                    <div className="cl-sec" data-testid="cl-sec" style={{ padding: '8px 24px 6px', fontSize: 12, fontWeight: 700, color: 'var(--text2)', background: 'var(--hover-bg)', borderBottom: '1px solid var(--row-line)' }}>{sec}</div>
+                  )}
                   {!cellKeys ? (
                     <div data-testid={`cl-row-${it.id}`} {...dragProps} style={rowStyle(it.status === 'pending')}>
                       {/* ── Item: name, thumbnails, remark ── */}

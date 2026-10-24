@@ -2,6 +2,7 @@
 
 import React, { useMemo, useState } from 'react';
 import { CONTACT_ROLES as CONTACT_ROLE_DEFS, roleBilingual } from '@/lib/contactRoles';
+import { INTERIOR_OPT_SVCS, interiorAuto } from '@/lib/interior';
 import { useStore } from '../store';
 import { fmtDate, isoDate, missingInvoiceRef, parseISO, projectHealth, projPoints, projStage, schedProgress } from '@/lib/project';
 import { canAssign, canCreate, canSeeModule, isArchivedFor, isScopedRole, pmLocked } from '@/lib/permissions';
@@ -463,7 +464,11 @@ export function NewProjectModal({ onClose }: { onClose: () => void }) {
   const [clientPhone, setClientPhone] = useState('');
   const [clientEmail, setClientEmail] = useState('');
   const [companies, setCompanies] = useState<CompanyDraft[]>([]);
+  const [includeInterior, setIncludeInterior] = useState(false);   // REQ-058
   const [busy, setBusy] = useState(false);
+  /* REQ-058:选了带室内资料的业务(效果图 / 动画)才问;3D VR/720、单元模型本来就是做室内,自动包含 */
+  const interiorAutoSel = interiorAuto({ services });
+  const interiorAsk = !interiorAutoSel && services.some((k) => INTERIOR_OPT_SVCS.includes(k));
 
   function toggleSvc(k: string) {
     setServices((s) => {
@@ -481,6 +486,7 @@ export function NewProjectModal({ onClose }: { onClose: () => void }) {
       name: name.trim(), client, quotationNo: quotationNo.trim(), services,
       owners: owners.split(',').map((s) => s.trim()).filter(Boolean),
       engineer: engineer.trim(),
+      includeInterior: interiorAsk && includeInterior,
       difficulty, start, delivery, buffer,
       clientPerson, clientPhone, clientEmail,
       companies: companies.filter((c) => c.company || c.person || c.phone || c.email),
@@ -563,6 +569,16 @@ export function NewProjectModal({ onClose }: { onClose: () => void }) {
             ))}
           </div>
           <div className="msub" style={{ marginTop: 4 }}>{t('点选添加/移除;含模板的服务会自动生成排期与信息清单。', 'Click to add/remove; templated services auto-generate a schedule & checklist.')}</div>
+          {interiorAsk && (
+            <label className="np-interior" data-testid="np-interior" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, marginTop: 8, fontSize: 13, cursor: 'pointer' }}>
+              <input type="checkbox" checked={includeInterior} onChange={(e) => setIncludeInterior(e.target.checked)} data-testid="np-interior-box" />
+              {t('包含室内部分', 'Include interior')}
+              <span style={{ fontSize: 11.5, color: 'var(--text2)' }}>{t('(勾上才有「室内资料」那一组;建好后也可以在信息清单里打开)', '(adds the “From Interior” group; can also be turned on later in the checklist)')}</span>
+            </label>
+          )}
+          {interiorAutoSel && (
+            <div className="msub" style={{ marginTop: 6 }} data-testid="np-interior-auto">{t('3D VR/720、单元模型本来就是做室内,自动包含室内资料。', '3D VR / 720 and unit models are interior work — interior items are included automatically.')}</div>
+          )}
         </div>
 
         <Section zh="④ 项目属性" en="④ Project attributes" />
