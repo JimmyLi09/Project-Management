@@ -13,6 +13,7 @@ import { focusLabel, focusWantsArchived, matchFocus } from '@/lib/focus';
 import { DIFF, SVC, stageIdx, svcColor, svcName } from '@/lib/templates';
 import { diffTerm } from '@/lib/terms';
 import { useLang } from '@/lib/i18n';
+import { GateNote, useAssignCheck } from '../AssignHint';
 import { Avatar, AvatarStack, Ell, HM, Icon, Pill, ProgressBar } from '../ui';
 import type { Project } from '@/lib/types';
 
@@ -496,6 +497,10 @@ export function NewProjectModal({ onClose }: { onClose: () => void }) {
   }
 
   const pmNames = users.filter((u) => u.role === 'pm' || u.role === 'director' || u.role === 'bd').map((u) => u.name);
+  /* REQ-062:选的负责 PM 要在项目的业务上到「可协助」(派项目限制;开关关着只提醒) */
+  const ownerList = owners.split(',').map((x) => x.trim()).filter(Boolean);
+  const chk = useAssignCheck({ svcs: services }, ownerList);
+  const ownerBlocked = ownerList.some((n) => chk.results[n]?.blocked);
   /* REQ-043: 工程师是项目级指派,一个项目一个人。候选名单取 member(平台里
      「工程师 / 团队成员」就是这个角色),PM 也允许 —— 小项目常常 PM 自己兼。 */
   const engNames = users.filter((u) => u.role === 'member' || u.role === 'pm').map((u) => u.name);
@@ -587,6 +592,7 @@ export function NewProjectModal({ onClose }: { onClose: () => void }) {
             <label>{t('负责 PM(逗号分隔多人)', 'PM (comma-separated)')}</label>
             <input value={owners} onChange={(e) => setOwners(e.target.value)} placeholder={pmNames.slice(0, 2).join(', ') || '张三, 李四'} list="pm-names" />
             <datalist id="pm-names">{pmNames.map((n) => <option key={n} value={n} />)}</datalist>
+            {ownerList.map((n) => <GateNote key={n} name={n} r={chk.results[n]} gate={chk.gate} testid="np-gate" />)}
           </div>
           {/* REQ-043: 指派谁,谁才看得见这个项目 —— 建项目时就填,省得工程师
               上来发现列表是空的。留空也行,之后在项目里补。 */}
@@ -607,7 +613,7 @@ export function NewProjectModal({ onClose }: { onClose: () => void }) {
         </div>
         <div className="modal-actions">
           <button className="btn-line" onClick={onClose}>{t('取消', 'Cancel')}</button>
-          <button className="btn-navy" onClick={submit} disabled={busy}>{busy ? t('创建中…', 'Creating…') : t('创建', 'Create')}</button>
+          <button className="btn-navy" onClick={submit} disabled={busy || ownerBlocked} data-testid="np-create">{busy ? t('创建中…', 'Creating…') : t('创建', 'Create')}</button>
         </div>
       </div>
     </div>

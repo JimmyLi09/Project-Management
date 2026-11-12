@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { checkOwner } from '@/server/assignGate';
 import { deleteUserWithHandover, getUserById, listProjects, listUsers } from '@/server/db';
 import { currentUser } from '@/server/session';
 import { canAdmin, identityOf } from '@/lib/permissions';
@@ -51,7 +52,14 @@ export async function DELETE(req: NextRequest, { params }: Params) {
   const toC = pick(body.toChecklist, work.checklist > 0, '信息清单', 'checklist items');
   if (toC instanceof NextResponse) return toC;
 
+  /* REQ-062:接手负责 PM 的人在哪些项目的业务上还没到「可协助」—— 删除用户时只提醒、不拦(JM 1112 确认) */
+  const warns: string[] = [];
+  if (toP) for (const p of listProjects()) {
+    if (!(p.owners || []).includes(target.name) || (p.owners || []).includes(toP)) continue;
+    const r = checkOwner(p, toP, false);
+    if (r.warns.length) warns.push(`${p.name}:${r.warns[0]}`);
+  }
   const done = deleteUserWithHandover(id, { projects: toP, tasks: toT, checklist: toC }, user.name);
   if (!done) return NextResponse.json({ error: '用户不存在' }, { status: 404 });
-  return NextResponse.json({ ok: true, ...done });
+  return NextResponse.json({ ok: true, ...done, warns });
 }

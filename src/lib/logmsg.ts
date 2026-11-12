@@ -159,6 +159,9 @@ export const LOG_MSG: Record<string, [string, string]> = {
 
   /* 人员 */
   'owner.add': ['指派 PM:{name}', 'PM assigned: {name}'],
+  'trainee.shadow': ['加为「跟项目」成员:{name}', 'Added {name} as a shadow member'],
+  'trainee.assist': ['加为「协助」成员:{name}', 'Added {name} as an assisting member'],
+  'trainee.remove': ['移除跟项目 / 协助成员:{name}', 'Removed shadow / assist member {name}'],
   'eng.set': ['指派工程师:{name}', 'Engineer assigned: {name}'],
   'eng.replace': ['指派工程师:{name}(原 {was})', 'Engineer assigned: {name} (was {was})'],
   'eng.clear': ['撤下工程师:{was}', 'Engineer unassigned: {was}'],

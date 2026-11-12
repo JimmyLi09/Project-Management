@@ -7,7 +7,8 @@ import {
   schedProgress, staleInfo, todayMid,
 } from '@/lib/project';
 import { teamLoads } from '@/lib/alloc';
-import { isArchivedFor } from '@/lib/permissions';
+import { isArchivedFor, isFull } from '@/lib/permissions';
+import { bizLabel } from '@/lib/train';
 import { svcColor, svcName } from '@/lib/templates';
 import { useLang } from '@/lib/i18n';
 import { Avatar, Ell, healthColor, HM, Icon, Pill, ProgressBar } from '../ui';
@@ -25,6 +26,7 @@ export default function OverviewView() {
     () => projects.filter((p) => { if (isArchivedFor(p, me) || !isMyProject(p, me)) return false; const s = projStage(p); return s !== 'complete' && s !== 'invoice'; }),
     [projects, me],
   );
+  const capGapProjects = useMemo(() => projects.filter((p) => !isArchivedFor(p, me) && (p.capGaps || []).length > 0), [projects, me]);
   const monthStart = new Date(t0.getFullYear(), t0.getMonth(), 1).getTime();
   const newThisMonth = projects.filter((p) => p.created >= monthStart).length;
 
@@ -176,6 +178,23 @@ export default function OverviewView() {
             </div>
           ))}
           {workflowTodos.length > 8 && <div style={{ padding: '10px 22px', fontSize: 12, color: 'var(--text2)', borderTop: '1px solid var(--row-line)' }}>{t(`还有 ${workflowTodos.length - 8} 项…`, `+${workflowTodos.length - 8} more…`)}</div>}
+        </div>
+      )}
+
+      {/* REQ-062:上线后新指派过负责 PM、但某个业务还没有到「可协助」的负责 PM 的项目(只 PD / BD 看,提醒不拦) */}
+      {isFull(me) && capGapProjects.length > 0 && (
+        <div className="panel clip" style={{ marginBottom: 20, borderColor: '#f0d9a8' }} data-testid="cap-gap-list">
+          <div className="panel-head" style={{ background: '#fbf3e6' }}>
+            <span className="panel-title">⚠ {t('业务还没有到「可协助」的负责 PM', 'Services without a lead PM at “Can assist”')} <span className="badge" style={{ background: '#a8690b', color: '#fff', marginLeft: 6 }}>{capGapProjects.length}</span></span>
+          </div>
+          {capGapProjects.slice(0, 8).map((p) => (
+            <div key={p.id} className="row-hover" style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 22px', borderTop: '1px solid var(--row-line)', cursor: 'pointer' }} onClick={() => openProject(p.id)}>
+              <Ell style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--navy900)', minWidth: 0 }}>{p.name}</Ell>
+              <div style={{ flex: 1 }} />
+              <span style={{ fontSize: 12, color: '#8a5a08' }}>{(p.capGaps || []).map((b) => bizLabel(b, lang)).join(lang === 'zh' ? '、' : ', ')}</span>
+            </div>
+          ))}
+          {capGapProjects.length > 8 && <div style={{ padding: '10px 22px', fontSize: 12, color: 'var(--text2)', borderTop: '1px solid var(--row-line)' }}>{t(`还有 ${capGapProjects.length - 8} 个…`, `+${capGapProjects.length - 8} more…`)}</div>}
         </div>
       )}
 

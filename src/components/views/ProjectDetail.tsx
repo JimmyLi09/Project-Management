@@ -25,6 +25,8 @@ import ChecklistTab from './ChecklistTab';
 import JobRecordTab from './JobRecordTab';
 import ExportOverlay from './ExportOverlay';
 import TransferModal from '../TransferModal';
+import { GateNote, gateText, useAssignCheck } from '../AssignHint';
+import { bizLabel } from '@/lib/train';
 import InvoiceModal from '../InvoiceModal';
 import { ApproachBanner } from './ApproachList';
 import { isApproach } from '@/lib/approach';
@@ -245,6 +247,15 @@ export default function ProjectDetail() {
         ))}
       </div>
 
+      {/* REQ-062:上线后新指派过负责 PM 的项目 —— 哪个业务还没有到「可协助」的负责 PM(提醒,不拦) */}
+      {(p.capGaps || []).length > 0 && (
+        <div className="panel" data-testid="cap-gap" style={{ padding: '10px 16px', marginBottom: 14, background: '#fbf0dc', borderColor: '#f0d9a8', color: '#8a5a08', fontSize: 13 }}>
+          ⚠ {lang === 'zh'
+            ? `${(p.capGaps || []).map((b) => bizLabel(b, 'zh')).join('、')} 还没有到「可协助」的负责 PM。`
+            : `No lead PM has reached “Can assist” in ${(p.capGaps || []).map((b) => bizLabel(b, 'en')).join(', ')} yet.`}
+        </div>
+      )}
+
       {/* PD/BD management bar */}
       {canAssign(me, p) && (
         <div className="panel" style={{ padding: '14px 20px', marginBottom: 20, display: 'flex', gap: 20, flexWrap: 'wrap', alignItems: 'center' }}>
@@ -354,7 +365,7 @@ export default function ProjectDetail() {
           onError={(m) => setToast(m)} />
       )}
       {assignOpen && (
-        <AssignModal
+        <AssignModal pid={p.id}
           candidates={users.filter((u) => u.role !== 'viewer' && !(p.owners || []).includes(u.name)).map((u) => u.name)}
           onClose={() => setAssignOpen(false)}
           onAssign={(name) => { dispatch(p.id, { type: 'addOwner', name }); setAssignOpen(false); }}
@@ -364,11 +375,58 @@ export default function ProjectDetail() {
   );
 }
 
+/* ===== REQ-062:跟项目 / 协助成员 =====
+   新人实战用:跟项目 = 只读;协助 = 和编辑授权一样能改。不算负责 PM,不计 KPI、积分。
+   PD / BD,或这个人的带教人(要能编辑这个项目)可以加、可以移除 —— 后端同样判。 */
+function Trainees({ p }: { p: Project }) {
+  const { me, users, dispatch } = useStore();
+  const { t } = useLang();
+  const who = useWho();
+  const [name, setName] = useState('');
+  const [mode, setMode] = useState<'shadow' | 'assist'>('shadow');
+  const list = p.trainees || [];
+  const canManage = isFull(me) || canEdit(me, p);
+  if (!list.length && !canManage) return null;
+  const cands = users.filter((u) => u.role === 'pm' && !(p.owners || []).includes(u.name) && !list.some((x) => x.name === u.name)).map((u) => u.name);
+  return (
+    <div data-testid="trainees" style={{ marginTop: 6 }}>
+      {list.map((x) => (
+        <div key={x.name} data-testid="trainee-row" data-name={x.name} style={{ display: 'flex', alignItems: 'center', gap: 11, padding: '9px 0', borderTop: '1px solid var(--row-line2)' }}>
+          <Avatar name={x.name} size={30} />
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 13, fontWeight: 600 }}>{who(x.name)}</div>
+            <div style={{ fontSize: 11.5, color: 'var(--text2)' }}>{x.mode === 'assist' ? t('协助 · 新人实战(能编辑,不计 KPI / 积分)', 'Assisting · trainee (can edit, no KPI / points)') : t('跟项目 · 新人实战(只读,不计 KPI / 积分)', 'Shadowing · trainee (read-only, no KPI / points)')}</div>
+          </div>
+          {canManage && <button className="btn-line sm" data-testid="trainee-remove" onClick={() => dispatch(p.id, { type: 'removeTrainee', name: x.name })}>✕</button>}
+        </div>
+      ))}
+      {canManage && cands.length > 0 && (
+        <div style={{ display: 'flex', gap: 6, alignItems: 'center', paddingTop: 10, borderTop: '1px solid var(--row-line2)', flexWrap: 'wrap' }}>
+          <span style={{ fontSize: 12, color: 'var(--text2)' }}>{t('新人实战', 'Trainee')}</span>
+          <select className="in sm" value={name} onChange={(e) => setName(e.target.value)} data-testid="trainee-name" style={{ minWidth: 120 }}>
+            <option value="">{t('— 选人 —', '— pick —')}</option>
+            {cands.map((n) => <option key={n} value={n}>{n}</option>)}
+          </select>
+          <select className="in sm" value={mode} onChange={(e) => setMode(e.target.value as 'shadow' | 'assist')} data-testid="trainee-mode">
+            <option value="shadow">{t('跟项目(只读)', 'Shadow (read-only)')}</option>
+            <option value="assist">{t('协助(能编辑)', 'Assist (can edit)')}</option>
+          </select>
+          <button className="btn-line sm" disabled={!name} data-testid="trainee-add"
+            onClick={async () => { if (await dispatch(p.id, { type: 'addTrainee', name, mode })) setName(''); }}>＋ {t('加入', 'Add')}</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* D15: assign PM via an account dropdown (same shape as the transfer modal),
    instead of a raw prompt() that made you type the name. */
-function AssignModal({ candidates, onClose, onAssign }: { candidates: string[]; onClose: () => void; onAssign: (name: string) => void }) {
-  const { t } = useLang();
+function AssignModal({ pid, candidates, onClose, onAssign }: { pid: string; candidates: string[]; onClose: () => void; onAssign: (name: string) => void }) {
+  const { t, lang } = useLang();
   const [name, setName] = useState('');
+  /* REQ-062:没到「可协助」的人,派项目限制打开时选不了(标 ✗),关着只提醒(标 ⚠) */
+  const chk = useAssignCheck({ pid }, candidates);
+  const blocked = !!name && !!chk.results[name]?.blocked;
   return (
     <div className="overlay" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <div className="modal" style={{ maxWidth: 420 }}>
@@ -376,15 +434,19 @@ function AssignModal({ candidates, onClose, onAssign }: { candidates: string[]; 
         <div className="msub">{t('从账号中选择负责人加入本项目。', 'Pick an account to add as a PM on this project.')}</div>
         <div className="field">
           <label>{t('选择账号', 'Choose account')}</label>
-          <select className="in" value={name} onChange={(e) => setName(e.target.value)} autoFocus>
+          <select className="in" value={name} onChange={(e) => setName(e.target.value)} autoFocus data-testid="assign-select">
             <option value="">{t('— 请选择 —', '— select —')}</option>
-            {candidates.map((n) => <option key={n} value={n}>{n}</option>)}
+            {candidates.map((n) => {
+              const g = gateText(n, chk.results[n], chk.gate, lang);
+              return <option key={n} value={n}>{g ? `${g.tone === 'block' ? '✗' : '⚠'} ` : ''}{n}</option>;
+            })}
           </select>
+          {name && <GateNote name={name} r={chk.results[name]} gate={chk.gate} testid="assign-gate" />}
         </div>
         {candidates.length === 0 && <div style={{ fontSize: 12.5, color: 'var(--text2)' }}>{t('没有可指派的账号(都已在项目中)。', 'No accounts left to assign (all already on the project).')}</div>}
         <div className="modal-actions">
           <button className="btn-line" onClick={onClose}>{t('取消', 'Cancel')}</button>
-          <button className="btn-navy" disabled={!name} onClick={() => onAssign(name)}>{t('确认指派', 'Assign')}</button>
+          <button className="btn-navy" disabled={!name || blocked} onClick={() => onAssign(name)} data-testid="assign-ok">{t('确认指派', 'Assign')}</button>
         </div>
       </div>
     </div>
@@ -821,7 +883,8 @@ function OverviewTab({ p, onSchedule }: { p: Project; onSchedule: (pkg: number) 
               </span>
             </div>
           ))}
-          {(p.owners || []).length === 0 && team.length === 0 && <div style={{ fontSize: 12.5, color: 'var(--text2)', padding: '8px 0' }}>{t('尚未指派人员', 'No one assigned yet')}</div>}
+          {(p.owners || []).length === 0 && team.length === 0 && !(p.trainees || []).length && <div style={{ fontSize: 12.5, color: 'var(--text2)', padding: '8px 0' }}>{t('尚未指派人员', 'No one assigned yet')}</div>}
+          <Trainees p={p} />
         </div>
 
         {/* R5-2 联系人 · REQ-030: 默认只读展示,点「编辑」才进编辑态 */}
@@ -888,6 +951,10 @@ function WorkflowPanel({ p, users, me, dispatch }: {
   const [brief, setBrief] = useState('');
   const [pm, setPm] = useState('');
   const [busy, setBusy] = useState(false);
+  /* REQ-062:接单 PM 会成为负责 PM —— 同样看派项目限制 */
+  const chk = useAssignCheck({ pid: p.id }, canSubmit ? pmNames : []);
+  const pmBlocked = !!pm && !!chk.results[pm]?.blocked && !(p.owners || []).includes(pm);
+  const pmOpt = (n: string) => { const g = (p.owners || []).includes(n) ? null : gateText(n, chk.results[n], chk.gate, lang); return <option key={n} value={n}>{g ? `${g.tone === 'block' ? '✗' : '⚠'} ` : ''}{n}</option>; };
   const cr = p.completionReview;
   const sv = p.salesVerification;
   const inv = p.invoiceClose;
@@ -1004,12 +1071,13 @@ function WorkflowPanel({ p, users, me, dispatch }: {
               <textarea className="in" placeholder={t('交接简报:范围 / 商务要点 / 客户注意事项…', 'Handover brief: scope / commercials / client notes…')}
                 value={brief} onChange={(e) => setBrief(e.target.value)} style={{ minHeight: 64 }} />
               <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-                <select className="in sm" value={pm} onChange={(e) => setPm(e.target.value)} style={{ minWidth: 180 }}>
+                <select className="in sm" value={pm} onChange={(e) => setPm(e.target.value)} style={{ minWidth: 180 }} data-testid="handover-pm">
                   <option value="">{t('— 指派接单 PM —', '— assign PM —')}</option>
-                  {pmNames.map((n) => <option key={n} value={n}>{n}</option>)}
+                  {pmNames.map(pmOpt)}
                 </select>
-                <button className="btn-navy sm" disabled={busy || !pm} onClick={submit}>{t('提交交接', 'Submit handover')}</button>
+                <button className="btn-navy sm" disabled={busy || !pm || pmBlocked} onClick={submit} data-testid="handover-submit">{t('提交交接', 'Submit handover')}</button>
               </div>
+              {pm && !(p.owners || []).includes(pm) && <GateNote name={pm} r={chk.results[pm]} gate={chk.gate} testid="handover-gate" />}
             </div>
           ) : (
             <div style={{ fontSize: 12.5, color: 'var(--text2)' }}>{t('等待 Sales 发起交接。', 'Waiting for Sales to start the handover.')}</div>
@@ -1036,9 +1104,9 @@ function WorkflowPanel({ p, users, me, dispatch }: {
                 <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
                   <select className="in sm" value={pm} onChange={(e) => setPm(e.target.value)} style={{ minWidth: 180 }}>
                     <option value="">{t('— 指派接单 PM —', '— assign PM —')}</option>
-                    {pmNames.map((n) => <option key={n} value={n}>{n}</option>)}
+                    {pmNames.map(pmOpt)}
                   </select>
-                  <button className="btn-navy sm" disabled={busy || !pm}
+                  <button className="btn-navy sm" disabled={busy || !pm || pmBlocked}
                     onClick={async () => {
                       setBusy(true);
                       /* 走 editHandover 而不是 submitHandover —— 后者一个工作流版本
@@ -1049,6 +1117,7 @@ function WorkflowPanel({ p, users, me, dispatch }: {
                     }}>{t('保存修改', 'Save changes')}</button>
                   <button className="btn-line sm" onClick={() => setEditHandover(false)}>{t('取消', 'Cancel')}</button>
                 </div>
+                {pm && !(p.owners || []).includes(pm) && <GateNote name={pm} r={chk.results[pm]} gate={chk.gate} />}
               </div>
             ) : (
               <button className="btn-line sm" style={{ alignSelf: 'flex-start' }}

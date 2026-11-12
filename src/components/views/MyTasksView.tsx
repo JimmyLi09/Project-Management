@@ -85,6 +85,7 @@ export default function MyTasksView() {
 
   return (
     <>
+      <TrainingReminder />
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2,minmax(0,220px)) 1fr', gap: 20, marginBottom: 20, alignItems: 'center' }}>
         <div className="kpi" style={{ padding: '18px 20px' }} data-testid="tasks-overdue-n">
           <div className="kpi-label">{t('已逾期', 'Overdue')}</div>
@@ -294,6 +295,33 @@ function ProjectInfoPanel({ p, onOpen }: { p: Project | null; onOpen: (id: strin
       <button className="btn-navy sm" style={{ width: '100%', justifyContent: 'center', marginTop: 12 }} onClick={() => onOpen(p.id)}>
         {t('打开项目详情', 'Open project')} →
       </button>
+    </div>
+  );
+}
+
+/* REQ-062:培训的提醒(只在平台内)—— 学员:自己超过建议时间的关;带教人 / PD / BD:待我评估几项。点了去「新人培训」 */
+function TrainingReminder() {
+  const { go } = useStore();
+  const { lang, t } = useLang();
+  const [r, setR] = React.useState<{ late: { zh: string; en: string; days: number }[]; queue: number } | null>(null);
+  React.useEffect(() => {
+    let alive = true;
+    fetch('/api/train').then((x) => (x.ok ? x.json() : null)).then((b) => {
+      if (!alive || !b) return;
+      const late = (b.mine?.stages || []).filter((s: { overdueDays: number }) => s.overdueDays > 0)
+        .map((s: { def: { zh: string; en: string }; sid: string; overdueDays: number }) => ({ zh: `关 ${s.sid.slice(1)} ${s.def.zh}`, en: `Stage ${s.sid.slice(1)} ${s.def.en || s.def.zh}`, days: s.overdueDays }));
+      setR({ late, queue: (b.queue || []).length });
+    }).catch(() => {});
+    return () => { alive = false; };
+  }, []);
+  if (!r || (!r.late.length && !r.queue)) return null;
+  return (
+    <div className="panel" data-testid="training-reminder" style={{ padding: '10px 18px', marginBottom: 16, display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap', background: '#fbf3e6', borderColor: '#f0d9a8' }}>
+      <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--navy900)' }}>🎓 {t('新人培训', 'Training')}</span>
+      {r.late.length > 0 && <span style={{ fontSize: 12.5, color: '#98342b' }}>{t('超过建议时间:', 'Past the suggested date: ')}{r.late.map((x) => `${lang === 'zh' ? x.zh : x.en}(${t(`${x.days} 天`, `${x.days}d`)})`).join(' · ')}</span>}
+      {r.queue > 0 && <span style={{ fontSize: 12.5, color: '#8a5a08' }}>{t(`待我评估 ${r.queue} 项`, `${r.queue} waiting for your assessment`)}</span>}
+      <div style={{ flex: 1 }} />
+      <button className="btn-line sm" onClick={() => go('training')}>{t('去看看', 'Open')} →</button>
     </div>
   );
 }
