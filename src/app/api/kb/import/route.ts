@@ -24,6 +24,9 @@ export async function POST(req: NextRequest) {
 
   const mode = String(form.get('mode') || 'parse');       // parse | attach
   const category = String(form.get('category') || 'other');
+  /* REQ-061:导入时可以直接归进业务 × 板块(不选就是未归类) */
+  const biz = String(form.get('biz') || '') || null;
+  const sec = String(form.get('sec') || '') || null;
   const title = String(form.get('title') || file.name.replace(/\.[^.]+$/, '')).slice(0, 200);
   const buf = Buffer.from(await file.arrayBuffer());
 
@@ -53,7 +56,12 @@ export async function POST(req: NextRequest) {
     body = lines.slice(hi + 1).join('\n').replace(/^\n+/, '');
   }
 
-  const doc = createDoc({ title: useTitle, category, body, summary: `导入自 ${file.name}` }, user.name);
+  let doc;
+  try {
+    doc = createDoc({ title: useTitle, category, body, summary: `导入自 ${file.name}`, biz, sec }, user.name);
+  } catch (e) {
+    return NextResponse.json({ error: (e as Error).message }, { status: 400 });
+  }
   /* 解析不出正文、或用户就选了「作为附件」—— 原件一律留一份,不丢东西 */
   const withFile = (!body || mode === 'attach')
     ? attachFile(doc.id, file.name, file.type || 'application/octet-stream', buf, user.name)

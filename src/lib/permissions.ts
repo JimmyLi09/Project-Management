@@ -206,13 +206,26 @@ export const ROLE_LABEL: Record<Role, string> = {
    需求默认口径:总监 / PM 可编辑,其余角色只读 + 可导出。
    BD 与总监同权(平台里两者一直是一档),删除文档收得更紧一些 ——
    知识库是公司资产,误删一篇 SOP 比误改一篇代价大。 */
+/* REQ-061 收紧:PM 能新建文档、导入、给任何文档加附件,但只能改自己建的文档、删自己上传的附件;
+   删文档、更新首页地图、恢复旧版本只有 PD / BD。看、预览、下载、看版本历史人人都能。
+   canEditKb 现在的意思是「能往知识库里加东西」(新建 / 导入 / 加附件)。 */
 export const canEditKb = (u: Identity) => isFull(u) || u.role === 'pm';
 export const canDeleteKb = (u: Identity) => isFull(u);
+/* 改这一篇(正文、标题、标签、归类):PD / BD 任何一篇,PM 只能是自己建的 */
+export const canEditKbDoc = (u: Identity, d: { createdBy?: string }) =>
+  isFull(u) || (u.role === 'pm' && !!d.createdBy && d.createdBy === u.name);
+/* 删这个附件:PD / BD 任何一个,PM 只能是自己上传的(老附件没有上传人 = 只有 PD / BD) */
+export const canDeleteKbFile = (u: Identity, f: { uploadedBy?: string | null }) =>
+  isFull(u) || (u.role === 'pm' && !!f.uploadedBy && f.uploadedBy === u.name);
+export const canRevertKb = (u: Identity) => isFull(u);
+export const canUpdateKbMap = (u: Identity) => isFull(u);
+export const canManageKbPreviews = (u: Identity) => isFull(u);   // 「生成全部预览」、失败重试
 
-/* REQ-036: 新人培训 —— 路径与题库由 总监 / BD / PM 维护(和知识库同一档);
-   学员进度所有人都能看自己的,管理视图另判。 */
-export const canEditTraining = (u: Identity) => canEditKb(u);
-export const canSeeAllTraining = (u: Identity) => canEditKb(u);
+/* REQ-036: 新人培训 —— 路径与题库由 总监 / BD / PM 维护;
+   学员进度所有人都能看自己的,管理视图另判。
+   REQ-061 起和知识库的编辑权限拆开(以前直接等于 canEditKb),口径不变,REQ-062 再定。 */
+export const canEditTraining = (u: Identity) => isFull(u) || u.role === 'pm';
+export const canSeeAllTraining = (u: Identity) => isFull(u) || u.role === 'pm';
 /* 具体到某一条路径:勾了「仅总监维护」的,PM 就碰不了了。
    题库和学员在同一批人里(全体 PM)的时候,这是唯一能真正把答案挡住的办法。 */
 export const canEditPath = (u: Identity, adminOnly: boolean) =>
