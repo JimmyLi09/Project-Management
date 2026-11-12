@@ -29,6 +29,8 @@ export interface KbAttachment {
   name: string;
   mime: string;
   size: number;
+  uploadedBy?: string;   // REQ-061:上传人(老附件没有 —— 只有 PD / BD 能删)
+  isMap?: boolean;       // REQ-061:首页流程地图当前这一版的 HTML
 }
 
 export interface KbDoc {
@@ -42,6 +44,12 @@ export interface KbDoc {
      在 Job Record、售后工作流那些地方就地列出来。 */
   anchors: { svc: string[]; stage: string[] };
   attachments: KbAttachment[];
+  /* REQ-061:业务 × 板块(bizMap.ts)。都空 = 未归类(升级前的老文档) */
+  biz: string | null;
+  sec: string | null;
+  isMap?: boolean;      // 首页流程地图那一篇
+  /* REQ-061:附件的预览状态(只在读单篇时带) */
+  previews?: Record<string, { status: string; pages: number | null; error: string }>;
   version: number;
   updatedAt: number;
   updatedBy: string;

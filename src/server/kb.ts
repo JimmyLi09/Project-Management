@@ -1,12 +1,16 @@
 /* ===== REQ-035: 知识库的服务端读写 =====
    API 路由只管鉴权与 HTTP,清洗和落库的规矩都在这里,四个路由共用一份。 */
 import {
-  deleteKbFile, getKbDoc, insertKbDoc, insertKbFile, insertKbVersion,
+  deleteKbFile, getDb, getKbDoc, insertKbDoc, insertKbFile, insertKbVersion,
   listKbDocs, listKbVersions, updateKbDoc, type KbRow,
 } from './db';
 import { KB_CATEGORIES, type KbAttachment, type KbCategory, type KbDoc, type KbVersion } from '@/lib/kb';
 import { SVC } from '@/lib/templates';
 import { STAGES } from '@/lib/templates';
+import { bizSecError } from '@/lib/bizMap';
+import { previewKind } from '@/lib/kbPreview';
+import { mapDocId, previewsOfDoc } from './kbStore';
+import { queuePreview } from './kbPreview';
 
 export const MAX_BODY = 400_000;          // 一篇文档正文上限(约 20 万汉字)
 export const MAX_FILE = 8 * 1024 * 1024;  // 单个上传文件 8MB
@@ -14,9 +18,11 @@ const CATS = new Set(KB_CATEGORIES.map((c) => c[0]));
 
 const jparse = <T,>(s: string, d: T): T => { try { return JSON.parse(s) as T; } catch { return d; } };
 
-export function rowToDoc(r: KbRow): KbDoc {
+export function rowToDoc(r: KbRow, mapId: string | null = mapDocId(getDb())): KbDoc {
   const a = jparse<{ svc?: string[]; stage?: string[] }>(r.anchors, {});
   return {
+    biz: r.biz || null, sec: r.sec || null,
+    ...(mapId && r.id === mapId ? { isMap: true } : {}),
     id: r.id, title: r.title, titleEn: r.title_en,
     category: (CATS.has(r.category as KbCategory) ? r.category : 'other') as KbCategory,
     tags: jparse<string[]>(r.tags, []),
@@ -29,14 +35,20 @@ export function rowToDoc(r: KbRow): KbDoc {
   };
 }
 
-export const allDocs = (): KbDoc[] => listKbDocs().map(rowToDoc);
+export const allDocs = (): KbDoc[] => { const m = mapDocId(getDb()); return listKbDocs().map((r) => rowToDoc(r, m)); };
 export const oneDoc = (id: string): KbDoc | undefined => { const r = getKbDoc(id); return r ? rowToDoc(r) : undefined; };
+/* 读单篇时顺带附件的预览状态(REQ-061) */
+export const oneDocWithPreviews = (id: string): KbDoc | undefined => {
+  const d = oneDoc(id);
+  return d ? { ...d, previews: previewsOfDoc(getDb(), id) } : undefined;
+};
 export const versionsOf = (id: string): KbVersion[] =>
   listKbVersions(id).map((v) => ({ version: v.version, title: v.title, body: v.body, summary: v.summary, at: v.at, by: v.by }));
 
 export interface DocInput {
   title?: unknown; titleEn?: unknown; category?: unknown; tags?: unknown;
   body?: unknown; anchors?: unknown; summary?: unknown;
+  biz?: unknown; sec?: unknown;   // REQ-061:没带就不改(老的调用方)
 }
 
 /* 清洗一份来自浏览器的输入。锚点按已知的服务类型 / 阶段过一遍,
@@ -47,7 +59,14 @@ export function clean(inp: DocInput) {
   if (body.length > MAX_BODY) throw new Error('正文过长(上限 40 万字符)');
   const a = (inp.anchors || {}) as { svc?: unknown; stage?: unknown };
   const stageKeys = new Set<string>(STAGES.map((s) => s[0] as string));
+  /* REQ-061:业务 × 板块。非「总览」只能 B / C / D,不合法就拒(前端也选不到) */
+  const hasBiz = 'biz' in inp || 'sec' in inp;
+  const biz = inp.biz == null || inp.biz === '' ? null : String(inp.biz);
+  const sec = inp.sec == null || inp.sec === '' ? null : String(inp.sec);
+  const bsErr = hasBiz ? bizSecError(biz, sec) : null;
+  if (bsErr) throw new Error(bsErr);
   return {
+    hasBiz, biz, sec,
     title,
     titleEn: String(inp.titleEn ?? '').trim().slice(0, 200),
     category: (CATS.has(String(inp.category) as KbCategory) ? String(inp.category) : 'other') as KbCategory,
@@ -71,6 +90,7 @@ export function createDoc(inp: DocInput, by: string): KbDoc {
     tags: JSON.stringify(c.tags), body: c.body,
     anchors: JSON.stringify(c.anchors), attachments: '[]',
     version: 1, updated_at: now, updated_by: by, created_at: now, created_by: by,
+    biz: c.biz, sec: c.sec,
   };
   insertKbDoc(row);
   /* 第 1 版也进历史 —— 否则回退时看不到最初长什么样 */
@@ -93,6 +113,7 @@ export function saveDoc(id: string, inp: DocInput, by: string): KbDoc {
     title: c.title, title_en: c.titleEn, category: c.category,
     tags: JSON.stringify(c.tags), body: c.body, anchors: JSON.stringify(c.anchors),
     version, updated_at: now, updated_by: by,
+    ...(c.hasBiz ? { biz: c.biz, sec: c.sec } : {}),
   };
   updateKbDoc(row);
   if (changed) insertKbVersion({ doc_id: id, version, title: c.title, body: c.body, summary: c.summary, at: now, by });
@@ -121,10 +142,12 @@ export function attachFile(docId: string, name: string, mime: string, buf: Buffe
   const list = jparse<KbAttachment[]>(cur.attachments, []);
   if (list.length >= 30) throw new Error('一篇文档最多 30 个附件');
   const id = 'kf' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
-  insertKbFile(docId, id, name, mime, buf.toString('base64'));
-  list.push({ id, name, mime, size: buf.length });
+  insertKbFile(docId, id, name, mime, buf.toString('base64'), by);   // REQ-061:记上传人
+  list.push({ id, name, mime, size: buf.length, uploadedBy: by });
   const row: KbRow = { ...cur, attachments: JSON.stringify(list), updated_at: Date.now(), updated_by: by };
   updateKbDoc(row);
+  /* REQ-061:Word / Excel / PPT 上传后排队转 PDF(一次只转一个);服务器没装 LibreOffice 就不排 */
+  if (previewKind(name) === 'office') queuePreview(id);
   return rowToDoc(row);
 }
 

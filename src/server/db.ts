@@ -17,6 +17,7 @@ import { migrateProject049, type Mig049Entry } from '@/lib/mig049';
 import { migrateProject050, report050, type Mig050Entry } from '@/lib/mig050';
 import { hw053, migrateProject053, report053, type Mig053Entry } from '@/lib/mig053';
 import { closeUserSessions, ensureUsageTables, pruneUsage } from './usageStore';
+import { ensureKb061, importMapIfMissing } from './kbStore';
 import { APPROVE_058, apply058, LEGACY_058, MIG_058, plan058, report058, SYN_KEY as SYN_KEY_058 } from '@/lib/mig058';
 import { isApproach } from '@/lib/approach';
 import { applyMig054, approachFails, MIG054_DEFAULT_IDS, planMig054, report054 } from '@/lib/mig054';
@@ -107,6 +108,8 @@ function setupDb(db: Database.Database): Database.Database {
     );
   `);
   migrateSchema(db);
+  /* REQ-061:库里还没有首页流程地图时,把仓库里的 SOP Map v5 导入成第一版(找不到文件就跳过,首页提示 PD / BD 上传) */
+  try { importMapIfMissing(db, process.cwd(), Date.now()); } catch (e) { console.warn('[REQ-061] 导入流程地图失败:', e); }
   seedIfEmpty(db);
   maybeSeedDemo(db);
   migrateTemplates058(db);      // REQ-058:模板覆盖换清单 / 同义项补新的 —— 有要改的,等 scripts\req058-dryrun 预演确认过才跑
@@ -928,6 +931,8 @@ function migrateSchema(d: Database.Database) {
     mime TEXT NOT NULL DEFAULT '',
     data TEXT NOT NULL
   )`);
+  /* REQ-061: 业务 × 板块两列、附件上传人、Office 预览表、流程地图版本表 —— 只加列加表,老数据不动 */
+  ensureKb061(d);
   /* REQ-036: 新人培训。路径定义一张表,每人每路径的进度一张表,
      每次考核的成绩单独留痕(需求要「记录成绩与尝试次数」)。 */
   d.exec(`CREATE TABLE IF NOT EXISTS training_paths (
@@ -990,6 +995,7 @@ export interface KbRow {
   id: string; title: string; title_en: string; category: string; tags: string; body: string;
   anchors: string; attachments: string; version: number;
   updated_at: number; updated_by: string; created_at: number; created_by: string;
+  biz?: string | null; sec?: string | null;   // REQ-061:业务 × 板块,老文档为空(未归类)
 }
 export interface KbVersionRow { doc_id: string; version: number; title: string; body: string; summary: string; at: number; by: string }
 
@@ -1001,17 +1007,20 @@ export function getKbDoc(id: string): KbRow | undefined {
 }
 export function insertKbDoc(r: KbRow) {
   getDb().prepare(`INSERT INTO kb_docs
-      (id, title, title_en, category, tags, body, anchors, attachments, version, updated_at, updated_by, created_at, created_by)
-      VALUES (@id, @title, @title_en, @category, @tags, @body, @anchors, @attachments, @version, @updated_at, @updated_by, @created_at, @created_by)`).run(r);
+      (id, title, title_en, category, tags, body, anchors, attachments, version, updated_at, updated_by, created_at, created_by, biz, sec)
+      VALUES (@id, @title, @title_en, @category, @tags, @body, @anchors, @attachments, @version, @updated_at, @updated_by, @created_at, @created_by, @biz, @sec)`)
+    .run({ ...r, biz: r.biz ?? null, sec: r.sec ?? null });
 }
 export function updateKbDoc(r: KbRow) {
   getDb().prepare(`UPDATE kb_docs SET title=@title, title_en=@title_en, category=@category, tags=@tags,
       body=@body, anchors=@anchors, attachments=@attachments, version=@version,
-      updated_at=@updated_at, updated_by=@updated_by WHERE id=@id`).run(r);
+      updated_at=@updated_at, updated_by=@updated_by, biz=@biz, sec=@sec WHERE id=@id`)
+    .run({ ...r, biz: r.biz ?? null, sec: r.sec ?? null });
 }
 export function deleteKbDoc(id: string) {
   const d = getDb();
   d.prepare('DELETE FROM kb_versions WHERE doc_id = ?').run(id);
+  d.prepare('DELETE FROM kb_previews WHERE file_id IN (SELECT id FROM kb_files WHERE doc_id = ?)').run(id);   // REQ-061
   d.prepare('DELETE FROM kb_files WHERE doc_id = ?').run(id);
   d.prepare('DELETE FROM kb_docs WHERE id = ?').run(id);
 }
@@ -1023,14 +1032,16 @@ export function insertKbVersion(v: KbVersionRow) {
   getDb().prepare('INSERT INTO kb_versions (doc_id, version, title, body, summary, at, by) VALUES (@doc_id, @version, @title, @body, @summary, @at, @by)').run(v);
 }
 /* 附件另存一张表:文档行本身要频繁读列表,别让 base64 把它撑大 */
-export function insertKbFile(docId: string, id: string, name: string, mime: string, data: string) {
-  getDb().prepare('INSERT OR REPLACE INTO kb_files (id, doc_id, name, mime, data) VALUES (?, ?, ?, ?, ?)')
-    .run(id, docId, name, mime, data);
+export function insertKbFile(docId: string, id: string, name: string, mime: string, data: string, uploadedBy?: string) {
+  getDb().prepare('INSERT OR REPLACE INTO kb_files (id, doc_id, name, mime, data, uploaded_by) VALUES (?, ?, ?, ?, ?, ?)')
+    .run(id, docId, name, mime, data, uploadedBy ?? null);
 }
-export function getKbFile(id: string): { id: string; doc_id: string; name: string; mime: string; data: string } | undefined {
+/* uploaded_by:REQ-061 起记上传人;老附件为空(只有 PD / BD 能删) */
+export function getKbFile(id: string): { id: string; doc_id: string; name: string; mime: string; data: string; uploaded_by: string | null } | undefined {
   return getDb().prepare('SELECT * FROM kb_files WHERE id = ?').get(id) as never;
 }
 export function deleteKbFile(id: string) {
+  getDb().prepare('DELETE FROM kb_previews WHERE file_id = ?').run(id);   // REQ-061:转好的预览跟着删
   getDb().prepare('DELETE FROM kb_files WHERE id = ?').run(id);
 }
 
