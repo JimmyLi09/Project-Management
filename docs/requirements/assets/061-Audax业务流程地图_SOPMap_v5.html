@@ -1,0 +1,776 @@
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
+<title>Audax 业务流程地图</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700&family=Space+Grotesk:wght@500;700&family=JetBrains+Mono:wght@500&display=swap">
+<style>
+/* Layout: blueprint-style workbench — sticky business tabs, each business = gantt + flow + checklist + watch-outs, all vector */
+:root{
+  --bg:#EEF2F5; --surface:#FFFFFF; --sunk:#E3E9EE; --ink:#15202B; --muted:#5A6876; --line:#CBD4DC; --grid:#DCE3E9;
+  --warn:#B4531A; --ok:#2E7D4F;
+  --f-zh:"Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;
+  --f-head:"Space Grotesk","Noto Sans SC",sans-serif;
+  --f-mono:"JetBrains Mono",ui-monospace,Consolas,monospace;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#0E141A; --surface:#161F27; --sunk:#1C2731; --ink:#E4EBF1; --muted:#93A2B0; --line:#2B3946; --grid:#22303B;
+  --warn:#E08A4F; --ok:#5DBB86; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#0E141A; --surface:#161F27; --sunk:#1C2731; --ink:#E4EBF1; --muted:#93A2B0; --line:#2B3946; --grid:#22303B;
+  --warn:#E08A4F; --ok:#5DBB86; color-scheme:dark}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font-family:var(--f-zh);font-size:14px;line-height:1.5}
+body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset-top,0px);z-index:10;background:var(--surface)}
+.wrap{max-width:1180px;margin:0 auto;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+header.top{background:var(--surface);border-bottom:1px solid var(--line);position:sticky;top:env(safe-area-inset-top,0px);z-index:5}
+.toprow{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding-block:12px 8px}
+.brand{font-family:var(--f-head);font-weight:700;font-size:18px;letter-spacing:.01em}
+.brand small{display:block;font-family:var(--f-zh);font-weight:400;font-size:12px;color:var(--muted)}
+.spacer{flex:1}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}
+.seg button{border:0;background:transparent;color:var(--muted);font:500 12px var(--f-zh);padding:6px 10px;cursor:pointer}
+.seg button[aria-pressed="true"]{background:var(--ink);color:var(--surface)}
+nav.tabs{display:flex;gap:6px;overflow-x:auto;padding-block:4px 10px;scrollbar-width:thin}
+nav.tabs a{flex:0 0 auto;text-decoration:none;color:var(--muted);border:1px solid var(--line);border-radius:999px;padding:5px 12px;font-size:13px;display:flex;align-items:center;gap:6px;white-space:nowrap}
+nav.tabs a .dot{width:8px;height:8px;border-radius:50%}
+nav.tabs a[aria-current="page"]{color:var(--ink);border-color:var(--ink);background:var(--sunk);font-weight:500}
+main{padding-block:20px 60px;display:grid;gap:18px}
+h1{font-family:var(--f-head);font-size:24px;margin:0;text-wrap:balance;display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+h1 .en{font-size:15px;color:var(--muted);font-weight:500}
+.tag{font:500 11px var(--f-mono);letter-spacing:.04em;padding:2px 7px;border-radius:4px;border:1px solid currentColor}
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:16px;min-width:0}
+.ph{display:flex;align-items:baseline;gap:8px;margin:0 0 10px;font-family:var(--f-head);font-size:15px;font-weight:700}
+.ph .en{font-size:12px;color:var(--muted);font-weight:500;text-transform:uppercase;letter-spacing:.06em}
+.scroll{overflow-x:auto}
+.controls{display:flex;flex-wrap:wrap;gap:10px 18px;align-items:center;margin-bottom:10px;font-size:13px}
+.controls label{color:var(--muted)}
+input[type=date]{font:13px var(--f-mono);padding:4px 6px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--ink)}
+.total{font-family:var(--f-mono);font-size:13px;padding:4px 10px;border-radius:6px;background:var(--sunk)}
+.steppers{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:8px;margin-top:10px}
+.stp{display:flex;align-items:center;gap:8px;border:1px solid var(--line);border-radius:8px;padding:6px 8px;font-size:12px;min-width:0}
+.stp .nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.stp button{width:24px;height:24px;border-radius:6px;border:1px solid var(--line);background:var(--bg);color:var(--ink);cursor:pointer;font:600 14px var(--f-mono)}
+.stp .v{font-family:var(--f-mono);min-width:34px;text-align:center}
+.btn{border:1px solid var(--line);background:var(--bg);color:var(--ink);border-radius:6px;padding:5px 10px;font:12px var(--f-zh);cursor:pointer}
+button:focus-visible,a:focus-visible,input:focus-visible,summary:focus-visible{outline:2px solid var(--ink);outline-offset:2px}
+.legend{display:flex;flex-wrap:wrap;gap:14px;font-size:12px;color:var(--muted);margin-top:8px}
+.legend span{display:inline-flex;align-items:center;gap:5px}
+.two{display:grid;grid-template-columns:1.6fr 1fr;gap:18px}
+@media (max-width:860px){.two{grid-template-columns:1fr}}
+.cl{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:12px}
+.grp{border:1px solid var(--line);border-radius:8px;padding:10px;min-width:0}
+.grp h4{margin:0 0 6px;font-size:13px;display:flex;justify-content:space-between;gap:8px}
+.grp h4 .cnt{font:500 11px var(--f-mono);color:var(--muted)}
+.bar{height:3px;background:var(--sunk);border-radius:2px;margin-bottom:8px;overflow:hidden}
+.bar i{display:block;height:100%}
+.it{display:flex;gap:8px;align-items:flex-start;padding:4px 0;font-size:12.5px;cursor:pointer;line-height:1.35}
+.it input{margin-top:2px;accent-color:var(--ink)}
+.it .en,.watch .en,.mail .en{display:block;color:var(--muted);font-size:11.5px}
+.watch{display:grid;gap:8px}
+.w{display:flex;gap:10px;align-items:flex-start;padding:8px 10px;border-radius:8px;background:var(--sunk);font-size:13px}
+.w svg{flex:0 0 18px;margin-top:2px}
+.mails{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:10px}
+details.mail{border:1px solid var(--line);border-radius:8px;padding:8px 10px;background:var(--surface)}
+details.mail summary{cursor:pointer;display:flex;gap:8px;align-items:center;list-style:none}
+details.mail summary::-webkit-details-marker{display:none}
+.code{font:600 11px var(--f-mono);padding:2px 6px;border-radius:4px;background:var(--ink);color:var(--surface)}
+.trig{font-size:11.5px;color:var(--muted);margin-left:auto;text-align:right}
+pre.tpl{white-space:pre-wrap;font:12px/1.5 var(--f-mono);background:var(--sunk);padding:8px;border-radius:6px;margin:8px 0 6px}
+table.mx{border-collapse:collapse;font-size:12.5px;min-width:620px;width:100%}
+table.mx th,table.mx td{border-bottom:1px solid var(--line);padding:7px 8px;text-align:center}
+table.mx th:first-child,table.mx td:first-child{text-align:left}
+table.mx thead th{font-weight:500;color:var(--muted);font-size:11.5px}
+.mxd{display:inline-block;width:12px;height:12px;border-radius:50%}
+.note{font-size:12px;color:var(--muted)}
+.subchips{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+.subchips span{font-size:12px;border:1px dashed var(--line);border-radius:6px;padding:3px 8px}
+.sk{font:700 12px var(--f-mono);background:var(--ink);color:var(--surface);border-radius:5px;padding:2px 7px;align-self:center}
+.ph{scroll-margin-top:120px}
+.sub{display:flex;align-items:baseline;gap:8px;margin:14px 0 8px;font-weight:700;font-size:13px}
+.sub .en{font-size:11px;color:var(--muted);font-weight:500}
+.secnav{display:flex;flex-wrap:wrap;gap:6px}
+.secnav .btn b{font-family:var(--f-mono);margin-right:4px}
+.bizlinks{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:8px}
+.bizlinks a{display:flex;flex-direction:column;gap:2px;text-decoration:none;color:var(--ink);border:1px solid var(--line);border-left-width:4px;border-radius:8px;padding:8px 10px;font-size:13px}
+.bizlinks a .dot{display:none}.bizlinks small{color:var(--muted);font:11px var(--f-mono)}
+.docs{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}.docs span{font:11px var(--f-mono);border:1px solid var(--line);border-radius:6px;padding:3px 8px;display:inline-flex;gap:6px;align-items:center}.docs i{width:8px;height:8px;border-radius:2px;display:inline-block}
+.sumgrid,.tpl4,.radar{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:8px}
+.sum{display:flex;flex-direction:column;gap:4px;border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-size:13px}.sum .code{align-self:flex-start}
+.tpl4>div,.radar>div{border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-size:13px;display:flex;gap:8px;align-items:flex-start}
+.stds{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:8px}
+.stds>div{display:flex;gap:8px;align-items:flex-start;font-size:12.5px;background:var(--sunk);border-radius:8px;padding:8px 10px}
+.stds .n{font:600 11px var(--f-mono);color:var(--muted)}
+.stds .en,.tpl4 .en,.radar .en,.sum .en{display:block;color:var(--muted);font-size:11px}
+.st{font:600 10px var(--f-mono);border-radius:4px;padding:2px 6px;color:#fff}
+.st-adopted{background:var(--ok)}.st-pilot{background:#2F6FB0}.st-evaluate{background:var(--warn)}
+.mtg{display:grid;grid-template-columns:70px repeat(5,minmax(132px,1fr));gap:6px;min-width:760px}
+.mh{font-weight:700;font-size:12px;text-align:center;padding:2px 0}
+.ml{font-size:12px;align-self:center}.ml .en{display:block;color:var(--muted);font-size:10.5px}
+.mc{background:var(--sunk);border-radius:6px;min-height:46px;padding:4px;display:flex;flex-direction:column;gap:4px}
+.mi{text-align:left;border:1px solid var(--line);border-left:4px solid var(--ink);background:var(--surface);color:var(--ink);border-radius:5px;padding:4px 8px;font:12px var(--f-zh);cursor:pointer}
+.mi .en{display:block;color:var(--muted);font-size:10.5px}
+.madd{align-self:flex-end;margin-top:auto;border:0;background:transparent;color:var(--muted);font:600 14px var(--f-mono);cursor:pointer;line-height:1;padding:2px 6px;border-radius:4px}
+.madd:hover,.mi:hover{background:var(--bg)}
+.mform{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:10px;padding:10px;border:1px solid var(--ink);border-radius:8px;font-size:12px}
+.mform label{color:var(--muted)}
+.mform input,.mform select{font:13px var(--f-zh);padding:5px 8px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--ink);min-width:0}
+.mform input{flex:1 1 150px}
+.btn.pri{background:var(--ink);color:var(--surface);border-color:var(--ink)}
+/* svg */
+.t{fill:var(--ink)} .tm{fill:var(--muted)} .tw{fill:#fff}
+.gl{stroke:var(--grid)} .ln{stroke:var(--line)} .ink{stroke:var(--ink)}
+.box{fill:var(--surface);stroke:var(--line)} .sunk{fill:var(--sunk)} .surf{fill:var(--surface)}
+.mailchip{fill:var(--ink)} .mailtxt{fill:var(--surface)}
+.f-m{font-family:var(--f-mono)} .f-h{font-family:var(--f-head)}
+@media (prefers-reduced-motion:no-preference){.panel{animation:rise .35s ease both}@keyframes rise{from{transform:translateY(4px)}to{transform:none}}}
+</style>
+
+<header class="top">
+  <div class="wrap">
+    <div class="toprow">
+      <div class="brand">Audax Visuals · SOP Map<small>A 架构 · B 流程 · C 清单排期 · D 节点 · E 会议 · F 规范 · G 培训 · H 新技术 · I 改进（v5 · 2026-11）</small></div>
+      <div class="spacer"></div>
+      <div class="seg" role="group" aria-label="Language">
+        <button id="lg-bi" data-lang="bi">中 / EN</button><button id="lg-zh" data-lang="zh">中文</button><button id="lg-en" data-lang="en">EN</button>
+      </div>
+    </div>
+    <nav class="tabs" id="tabs" aria-label="Business"></nav>
+  </div>
+</header>
+<div class="wrap"><main id="main"></main></div>
+
+<script>
+/* ============ DATA ============ */
+const MAIL={
+ E1:{zh:"启动邮件",en:"Kick-off",tz:"收到 Job Order 当天",te:"Day of job order",
+  gist:"自我介绍 · 确认资料为最终版 · 流程 · 时间表 · 资料延误=顺延",
+  tpl:"Dear __,\nI am __, the project manager for __.\nMay I confirm that all information received is the final copy? If not, please specify the areas that may change.\nOur workflow: (1) 3D model & angle drafts (2) material & lighting drafts (3) full rendering (4) post-production.\nProposed schedule: __.\nPlease note that late or changed information may shift the final delivery date."},
+ U:{zh:"Summary & update",en:"Summary & update",tz:"AI / 调材质灯光前",te:"Before AI / M&L",
+  gist:"汇总已确认角度 · 材质/景观/家私资料 · 效果与像素要求 · 待补资料",
+  tpl:"Dear __,\nBefore we proceed to the mood & material drafts, please find the summary of confirmed items:\n- Shortlisted angles: __\n- Façade materials / colour codes: __\n- Planting, outdoor furniture, hardscape: __\n- Mood per angle & pixel requirement: __\nOutstanding information (owner / date): __.\nKindly confirm or advise any update by __."},
+ E2:{zh:"会议纪要",en:"Meeting minutes",tz:"每次会议后当天",te:"Same day after every meeting",
+  gist:"意见汇总 · 下一次小样时间 · 资料负责人+日期",
+  tpl:"Thank you for meeting us today. Summary of comments:\n1. __\n2. __\nNext draft: __ (date).\nInformation still required (owner / date): __."},
+ E3:{zh:"小样确认",en:"Draft for review",tz:"每次发小样",te:"Each draft sent",
+  gist:"附小像素图 · 请各方汇总意见 · 角度确认后不再改",
+  tpl:"Please find attached the __ drafts (low resolution) for your confirmation.\nKindly consolidate comments from all parties before sending to us.\nPlease note that no angle changes are allowed after angle confirmation."},
+ E4:{zh:"大图前提醒",en:"Pre-final notice",tz:"渲大图 / 高清 / 渲成品之前",te:"Before full rendering",
+  gist:"确认角度·模型·材质·灯光 · 之后改要收费 · 分辨率 A0 / 4×A0",
+  tpl:"Kindly confirm the angles, model, materials and lights before we proceed to full rendering.\nAs per company policy, after full rendering any angle changes or major changes to the model design which require remodelling and re-rendering will incur a revision fee.\nBased on the contract, the resolution allows a maximum print size of A0 (developer projects: up to 4 A0 printouts / 2 m). Should you require a higher resolution, please inform us in advance as additional fees and rendering time apply."},
+ E5:{zh:"第 3 轮提醒",en:"3rd-round notice",tz:"第 3 轮修改时",te:"At 3rd revision round",
+  gist:"已改 3 轮 · 请一次性汇总意见 · 之后收费",
+  tpl:"Please kindly note that this is the third round of revision. In order to complete this job efficiently, we appreciate if you can consolidate all comments so we can check through at once. We may request a revision fee after this round. Thank you for your kind understanding."},
+ E6:{zh:"催资料 / 进度",en:"Info chase",tz:"资料逾期 1 天",te:"Info 1 day overdue",
+  gist:"缺什么 · 最晚何时要 · 否则影响交付",
+  tpl:"Kindly note we have not received __ yet. To keep the delivery date of __, we will need it by __. Please update us on the current status so we can schedule our next actions."},
+ E7:{zh:"交付 / 反馈",en:"Delivery & feedback",tz:"交付当天",te:"Delivery day",
+  gist:"确认收到 · 征求反馈 · 归档 Final",
+  tpl:"Please find attached / linked the final __.\nHope everything is in good order. Please do not hesitate to contact us should you require any assistance. We welcome your feedback."},
+ E8:{zh:"请假交接",en:"Leave cover",tz:"请假前 1 天",te:"1 day before leave",
+  gist:"代理同事 · 抄送 project@",
+  tpl:"Kindly note that I will be on leave from __ to __. Should you require any assistance, please contact my colleague __, and keep project@audax.com.sg in the loop."},
+ W:{zh:"每周进度照",en:"Weekly progress",tz:"生产期每周",te:"Weekly during production",
+  gist:"进度 % · 照片 · 请在照片/CAD 截图上标注",
+  tpl:"Please find this week's progress photos (__% completion).\nKindly mark up any issues directly on the photos or on a CAD screenshot by __ so the factory can amend accordingly."},
+ D:{zh:"图纸签字",en:"Drawing sign-off",tz:"下单 / 开料前",te:"Before order / cutting",
+  gist:"线路图 / 铁架图 / 底盘图 签字后才下单",
+  tpl:"Please find attached the __ drawing (rev __) for your sign-off.\nKindly confirm by __ so we can release production. Any change after sign-off may affect cost and schedule."},
+ S:{zh:"现场就绪确认",en:"Site readiness",tz:"安装前 1 周",te:"1 week before install",
+  gist:"电源 · 网线/音响线 · 墙面 · 进场通道 · 现场照片",
+  tpl:"May we confirm site readiness for installation on __:\n- Power at isolator / sub DB\n- LAN / audio cabling\n- Wall finish and access route\nKindly send us current site photos."}
+};
+
+const TEAM=[
+ {zh:"模型",en:"Modelling",c:"#1F6391",lead:["赵平","赵公子"],m:[["海啸","开心·好"],["祖宝","梦心语"],["段学明","咯咯哒"],["黄发明",""],["胡果","*guo"]]},
+ {zh:"渲染 / 后期",en:"Render / Post",c:"#2E8B57",lead:["包姐","包子"],m:[["吴启明","1"],["倪川","The Only"],["蒋一帆","小帆"],["梁广祥","LGX"],["杨磊","您"],["李旭","endeavor"]]},
+ {zh:"动画",en:"Animation",c:"#C27A00",lead:["黄明","M."],m:[["向进","小九"],["郑兴龙","Zxinglong"],["冯斌超","Steve"]]},
+ {zh:"室内（待定）",en:"Interior (TBC)",c:"#B5441E",lead:["小赵","…"],m:[["谭靖","靖"],["小陆","我干嘛"],["小胡","珊瑚"],["周哥","周振朝"]]},
+ {zh:"中控 / 硬件",en:"Control / Hardware",c:"#4E6A85",lead:["CZT",""],m:[["CC",""]]}
+];
+
+const SIZE_LABEL=[["小","S"],["中","M"],["大","L"]];
+
+const B=[
+{id:"persp",zh:"效果图",en:"Perspectives",c:"#2F6FB0",teams:[0,1,3],
+ phases:[
+  {zh:"建模 · 白模角度",en:"Model · White-model angles",w:[2,2,2.5],ms:["E1"],me:["E3"],
+   steps:[["收资料 CAD/SKP/Revit/Rhino/MAX + 周边","Files + context","—"],["按 CAD 建模：建筑→地形→周边→配楼","Model per CAD","3–7d"],["白模小样 → 客户 shortlist 角度","White drafts → shortlist","—"],["整理 / 塌陷场景 → 交 AI","Clean scene → AI","2–5d"]],
+   gate:["角度 shortlist 确认","Angles shortlisted"]},
+  {zh:"AI 角度效果小样",en:"AI mood drafts",w:[2,2.5,2.5],ms:["U"],me:["E4"],
+   steps:[["准备：建筑材质 · 景观植物 · 园林家私 · 景观材质","Material · planting · furniture","—"],["确认效果要求 + 开发商像素要求","Mood + pixel spec","—"],["AI 生成效果小样（3 张 / 7 张）","AI drafts (3 / 7 imgs)","2d / 3–5d"],["各方过程意见汇总","Consolidate all comments","—"]],
+   gate:["角度 + 氛围确认","Angles & mood locked"]},
+  {zh:"后期成图 · 交付",en:"Post · Deliver",w:[2,2.5,3],me:["E7"],
+   steps:[["后期成图（3 张 / 7 张）","Post (3 / 7 imgs)","3d / 5–7d"],["彩平（需户型平面）","Colour plans (unit plans)","—"],["Wenbing 内审","Internal QC","—"],["交图 · 归档 Final","Deliver · archive","—"]],
+   gate:["交付签收","Sign-off"]}],
+ checklist:[
+  {zh:"建模资料",en:"Model info",items:[["CAD / SKP / Revit / Rhino / MAX","Model files"],["周边资料 / 总图 / Google map","Context / site plan"],["最终图纸（≥WP 批准）","Final dwg (≥WP)"],["单位号键图","Key plan (unit no.)"]]},
+  {zh:"AI 前准备资料",en:"Before AI drafts",items:[["建筑材质 + 色号","Façade materials + codes"],["景观植物（种植平面）","Planting plan"],["园林家私","Outdoor furniture"],["景观材质（铺装样板）","Hardscape samples"],["每个角度效果要求","Mood per angle"],["开发商像素要求","Pixel spec"]]},
+  {zh:"后期 / 交付",en:"Post / Delivery",items:[["户型平面（彩平必需）","Unit plans (colour plan)"],["设施命名彩平","Facility labels"],["交图时间（精确到钟点）","Deadline (exact hour)"],["图量 + 日/黄昏/夜景","Qty + day/dusk/night"]]}],
+ watch:[["白模先让客户 shortlist 角度，再进 AI","Shortlist angles before AI"],["AI 小样阶段锁定角度 + 氛围，之后改=收费","Lock angles & mood at AI stage"],["开始 AI 前发 Summary & update 邮件（U）","Send U before AI drafts"],["各方意见（开发商/建筑/室内/景观/市场/广告）一次汇总","One consolidated comment set"],["彩平必须有户型平面","Colour plan needs unit plans"],["设计院投标项目时间另排，一般更短","Tender jobs: shorter, plan separately"]]},
+
+{id:"anim",zh:"动画",en:"Animation",c:"#C27A12",teams:[0,2,1],
+ phases:[
+  {zh:"脚本（PM）+ 模型（深圳）",en:"Script (PM) + Model (SZ)",w:[1.5,2,2],ms:["E1"],me:["E3"],
+   steps:[["预演脚本：总时长（跟业务定）","Script: total length","3–5d"],["客户要求 · 重点表现区域","Client asks · key areas","—"],["前期多媒体要求","Multimedia intro","—"],["深圳建模（按 CAD）","SZ modelling","3–5d / 7–10d"]],
+   gate:["脚本 + 模型确认","Script & model OK"]},
+  {zh:"预演 · AI with mood",en:"Preview · AI with mood",w:[1.5,1.5,2],me:["E3"],
+   steps:[["镜头路径预演","Camera path preview","3d"],["AI 氛围叠加","AI mood pass","—"],["新客户当面看","Show new client in person","—"],["核对时长 vs 合同","Length vs contract","—"]],
+   gate:["预演锁定","Preview locked"]},
+  {zh:"渲染单帧",en:"Still frames",w:[2,2,2.5],me:["E4"],
+   steps:[["景观树种 / 配景","Planting & entourage","—"],["每镜头单帧确认","Stills per shot","5–7d / 7–10d"],["定渲染像素 720/1080/4K/8K","Fix render res","—"]],
+   gate:["单帧确认","Stills confirmed"]},
+  {zh:"网络渲染 · 后期合成",en:"Render · Post",w:[1,1.5,1.5],me:["E7"],
+   steps:[["网络渲染","Render farm","2–3d"],["后期合成：音乐 · 文字描述","Post: music · captions","2–3d"],["拼写 + logo 检查","Spelling & logo QC","—"],["交付 MP4","Deliver MP4","—"]],
+   gate:["交付签收","Sign-off"]}],
+ checklist:[
+  {zh:"脚本（PM）",en:"Script (PM)",items:[["总时长（跟业务确认）","Total length"],["客户要求","Client requirements"],["重点表现区域","Key areas"],["前期多媒体要求","Multimedia intro"],["音乐 / 文字描述","Music / captions"],["logo 工作文件","Logo files"]]},
+  {zh:"建模（深圳）",en:"Model (SZ)",items:[["最终 CAD + 3D","Final CAD + 3D"],["周边 / 地形","Context / terrain"],["立面材质 + 灯光参考","Façade & lighting refs"],["户型 / 柜体 / 天花（室内段）","Interior details"]]},
+  {zh:"景观",en:"Landscape",items:[["种植平面 + 树种","Planting + species"],["铺装材质","Hardscape"],["灯光布置","Lighting layout"],["家私 / 设备","Furniture & equipment"]]},
+  {zh:"交付规格",en:"Delivery spec",items:[["分辨率 1280×720 / 1920×1080 / 4K / 8K","Resolution"],["格式 MP4","Format"],["字幕语言","Subtitle language"]]}],
+ watch:[["脚本 PM 负责，模型深圳同步开工","PM scripts, SZ models in parallel"],["预演以往最耗时：控制在 3 天 + 意见轮","Preview overruns — cap it"],["预演锁定后不改镜头路径","No camera change after lock"],["渲染像素先定，4K/8K 另计时间与费用","Res drives time & cost"],["成品注意音乐与文字描述","Check music & captions"]]},
+
+{id:"model",zh:"实体模型",en:"Scale & Unit Model",c:"#2E8B57",teams:[0],factory:true,
+ phases:[
+  {zh:"需求 · 资料 · 底盘",en:"Brief · Info · Base",w:[1.5,1.5,2],ms:["E1"],me:["D"],
+   steps:[["比例 · 类型 · 灯光","Scale · type · lighting"],["罩子 / 展台 / 人物","Cover · stand · figures"],["最终 BP 图纸","Final BP drawings"],["底盘尺寸图","Base drawing"]],
+   gate:["底盘确认","Base confirmed"]},
+  {zh:"Mock-up · 色板",en:"Mock-up · Board",w:[1.5,1.5,2],me:["E3"],
+   steps:[["指定或自选局部","Mock-up portion"],["材料色板","Material board"],["玻璃 / 门窗框色","Glass & frame colour"]],
+   gate:["材质书面确认","Written material OK"]},
+  {zh:"正式生产",en:"Production",w:[2,2.5,2.5],weekly:"W",
+   steps:[["开料前告知图纸版本","Confirm drawing rev"],["骨架 → 立面 → 底盘照片","Structure → façade → base"],["50% · 70% · 80% 节点","50 · 70 · 80 % checks"],["改图浪费拍照报业务","Wastage → sales"]],
+   gate:["80% 审核","80% review"]},
+  {zh:"修整 · 运输 · 安装",en:"Touch-up · Ship · Install",w:[1,1.5,1.5],ms:["S"],me:["E7"],
+   steps:[["打包拍照 / 视频","Packing photos / video"],["备件 + 送货文件","Spares + shipping docs"],["现场安装 · 验收","Install · inspection"],["成品拍照","Final photos"]],
+   gate:["签收","Sign-off"]}],
+ checklist:[
+  {zh:"需求",en:"Brief",items:[["比例","Scale"],["类型（白模/透明/营销）","Type"],["灯光冷暖 / 动态","Lighting tone / logic"],["亚克力罩 · 展台","Acrylic cover · stand"],["人物（彩/白/剪影）","Figurines"],["铭牌（logo/指北/免责）","Title plate"]]},
+  {zh:"建筑师",en:"Architect",items:[["最终 CAD + SKP","Final CAD + SKP"],["色号（油漆品牌）","Colour code (brand)"],["立面分区","Façade demarcation"],["单位号示意","Unit no. diagram"],["CAD 与 SKP 冲突以谁为准","CAD vs SKP priority"]]},
+  {zh:"景观",en:"Landscape",items:[["种植平面 + 参考","Planting + refs"],["铺装（色/尺寸/排布）","Hardscape pattern"],["灯光平面","Lighting plan"],["家私 / 设备","Furniture & equipment"],["水景泳池 · 标高 · 设施命名","Water · levels · labels"]]},
+  {zh:"区位模型",en:"Location model",items:[["周边地标 + 高度","Landmarks + heights"],["路名","Road names"],["红线","Site boundary"]]},
+  {zh:"单位模型",en:"Unit model",items:[["户型 + 天花 + 立面","Plan · RCP · elevation"],["瓷砖排布","Tiling schedule"],["材料表 · FF&E","Material · FF&E"],["木作详图","Carpentry details"]]},
+  {zh:"售楼处",en:"Sales gallery",items:[["门 宽×高","Door W×H"],["楼层","Floor level"],["展台尺寸 + 检修口 + 插座","Stand · access panel · power"]]}],
+ watch:[["只接受最终 BP 图，反复改会损坏模型","Final BP only"],["门尺寸决定模型能否进场","Door clearance"],["插头放底座内，和 ID 对展台","Plug inside stand"],["海外项目：打包前签收","Overseas: sign-off before packing"],["备件：阳台、立面、树、人","Spares: balcony · fins · trees"],["送到时机 = showflat 收尾","Deliver at showflat finishing"]]},
+
+{id:"digital",zh:"VR · 720 · 360 · AR",en:"Digital Tours",c:"#7A4FB5",teams:[3,1,2],
+ sub:[["720 全景链接（Krpano）","720 web link"],["360 模型","360 model"],["VR（UE4 + VIVE）","VR (UE4)"],["AR（Unity + MixGo）","AR (Unity)"],["航拍全景","Drone panorama"]],
+ phases:[
+  {zh:"资料 · 点位 · 建模",en:"Info · Points · Model",w:[2,2,2.5],ms:["E1"],me:["E3"],
+   steps:[["定产品 + 发布方式","Product + hosting"],["点位数量 + 视角","Points + views"],["木作 / 软装确认","Carpentry & loose FF&E"],["航拍：查禁飞 / 执照","Drone: no-fly / licence"]],
+   gate:["模型确认（≤3 轮）","Model OK (≤3 rounds)"]},
+  {zh:"灯光材质",en:"Material & Lighting",w:[2,2.5,2.5],me:["E4"],
+   steps:[["硬装材质（COH）","Hard finishes (COH)"],["色温 2700K / 3000K","Colour temp."],["窗外背景","Window view"],["记录资料收到日期","Log info dates"]],
+   gate:["材质灯光确认","M&L confirmed"]},
+  {zh:"高清 · 程序 · 发布",en:"Hi-res · Build · Publish",w:[2,2.5,3],me:["E7"],
+   steps:[["高清渲染","Hi-res render"],["仅 PS 级微调","PS touch-ups only"],["程序 / 链接","Programming / link"],["上服务器 / 商店（审核≈3 周）","Server / store (~3 wk)"]],
+   gate:["上线","Live"]}],
+ checklist:[
+  {zh:"建筑师",en:"Architect",items:[["户型平面","Unit floor plan"],["天花平面 RCP","Reflected ceiling plan"],["非 ID 木作 / 洁具","Non-ID carpentry"],["材料表（高清 JPEG）","Material schedule (JPEG)"],["地面铺装方向","Floor finish plan"],["立面（窗外可见部分）","Façade info"]]},
+  {zh:"室内设计",en:"ID",items:[["ID 处理 + FF&E","ID treatment + FF&E"],["样板房立面","Showflat elevations"],["跟样板房 or 新风格","Follow showflat?"]]},
+  {zh:"项目",en:"Project",items:[["日景 / 夜景","Day / night"],["航拍","Drone footage"],["服务器域名 + 账号","Hosting server"],["App Store 账号","Store account"],["VR 电脑 + VIVE","VR hardware"]]}],
+ watch:[["硬装 100% 准确（COH 验房）","Hard finishes 100% (COH)"],["点位数 = 工作量 = 报价","Points drive cost"],["多顾问：客户先内部汇总意见","Consolidated comments only"],["高清阶段只做 PS 修改，重渲先找业务","Re-render → sales first"],["服务器账号不要存在共享文件里","No credentials in shared files"]]},
+
+{id:"saleskit",zh:"Sales Kit APP",en:"Sales Kit App",c:"#0E8C8C",teams:[2],uiit:true,
+ phases:[
+  {zh:"资料 · 大纲",en:"Info · Outline",w:[1,1,1.5],ms:["E1"],
+   steps:[["定平台（线上/线下/iPad/网页）","Platform"],["内容大纲","Content outline"],["航拍/360/720 是否我们做","In-house media?"]],
+   gate:["大纲确认","Outline OK"]},
+  {zh:"UI 设计",en:"UI Design",w:[1.5,2,2],me:["E3"],
+   steps:[["布局","Layout"],["图标 + 菜单","Icons & menu"],["配色 + 字体","Colour & fonts"],["交互流程","Interaction flow"]],
+   gate:["UI 确认（含拼写）","UI OK (spelling)"]},
+  {zh:"切图 · 开发",en:"Slice · Build",w:[2,2.5,2.5],me:["E3"],
+   steps:[["先和 IT 对齐","Align with IT"],["切图规范 UI spec","UI spec"],["文件命名","File naming"],["IT 开发","Programming"]],
+   gate:["Demo 通过","Demo OK"]},
+  {zh:"微调 · 上线",en:"Fine-tune · Launch",w:[1.5,1.5,2],me:["E7"],
+   steps:[["对照 UI","Match UI"],["拼写 · 流畅度 · Bug","Spelling · flow · bugs"],["上架（2–4 周）","Store review"]],
+   gate:["上线","Launch"]}],
+ checklist:[
+  {zh:"整体",en:"Overall",items:[["Logo + 字体","Logo & fonts"],["Brochure（草稿即可）","Brochure (draft ok)"]]},
+  {zh:"区位",en:"Location",items:[["区位图工作文件","Location map working file"],["带标注航拍","Labelled drone shot"]]},
+  {zh:"总图",en:"Site plan",items:[["总图工作文件","Site plan working file"],["外景效果图 / 720","Exterior perspectives / 720"]]},
+  {zh:"户型",en:"Floor plan",items:[["立面表工作文件","Elevation chart file"],["户型图","Floor plans"],["360 单位","360 units"],["720 VR","720 VR"]]},
+  {zh:"图库 · 其他",en:"Gallery · Others",items:[["效果图","Perspectives"],["视频","Videos"],["项目 / 公司信息","Project / company info"],["免责声明","Disclaimer"]]}],
+ watch:[["区位图/总图/立面表必须要工作文件","Working files, not JPG"],["每个交互先问 IT 能否实现","Check feasibility with IT"],["图片 PC≈500KB · 手机≈100KB · ≤1MB","Image size limits"],["视频同时出 MP4 + webm","MP4 + webm"],["PNG 透明 · JPG 底色 · SVG 交互分组","PNG / JPG / SVG rules"]]},
+
+{id:"led",zh:"LED · 投影 · MAXHUB",en:"LED · Projection",c:"#B83B5E",teams:[4],site:true,
+ phases:[
+  {zh:"需求 · 图纸 · 下单",en:"Brief · Drawings · Order",w:[1.5,1.5,2],ms:["E1"],me:["D"],
+   steps:[["尺寸 / 型号（P2.5 · P3）","Size · pitch"],["屏 · DB 箱 · 电脑位置","Positions"],["线路图 + 铁架图","Wiring + bracket dwg"],["墙体四周留缝 3–5mm","3–5mm wall gap"]],
+   gate:["图纸签字","Drawings signed"]},
+  {zh:"生产 · 老化",en:"Production · Burn-in",w:[2,2.5,3],ms:["E6"],
+   steps:[["工厂生产","Factory build"],["老化测试","Burn-in test"],["跟进现场进度","Track site progress"],["买电脑 / 音响","Buy PC & audio"]],
+   gate:["出货","Ship-out"]},
+  {zh:"运输 · 铁架 · 布线",en:"Ship · Bracket · Cabling",w:[1.5,2,2],ms:["S"],
+   steps:[["海运 2–3 周","Sea freight 2–3 wk"],["铁架安装 1–2 天","Bracket 1–2 days"],["电 / 网 / 音响线","Power · LAN · audio"],["现场复查","Site check"]],
+   gate:["线路验收","Cabling checked"]},
+  {zh:"安装 · 调试 · 交接",en:"Install · Test · Handover",w:[1,1,1],me:["E7"],
+   steps:[["安装前 ≤1 周到场","Arrive ≤1 wk before"],["安装调试（须通电）","Install & test (power on)"],["用户手册","User manual"],["培训 + DO 签回","Training + DO"]],
+   gate:["交接","Handover"]}],
+ checklist:[
+  {zh:"项目",en:"Project",items:[["地址 + Main Con 联系人","Address + main con"],["屏幕尺寸 / 类型","Screen size / type"],["铁架 · 电脑 · 音响是否含","Scope: bracket · PC · audio"],["开盘时间","Launch date"]]},
+  {zh:"现场",en:"Site",items:[["客户提供 Isolator / Sub DB","Isolator / sub DB by client"],["用电：面积×500W 峰值","Power: area × 500W peak"],["网线：655,360 px/根 + 备用","LAN: 655,360 px each + spare"],["墙面饰面 / 包边","Wall finish / trim"],["用途 + 安装高度","Use + mounting height"]]},
+  {zh:"投影",en:"Projector",items:[["投屏尺寸","Image size"],["投射比 · 位移量","Throw ratio · lens shift"],["融合","Edge blending"],["雷达 / 红外","Radar / IR"],["中控","Control system"]]},
+  {zh:"MAXHUB",en:"MAXHUB",items:[["型号 · 尺寸 · 站架","Model · size · stand"],["SN 拍照","SN photos"],["固件升级 + Commissioning Form","Firmware + form"],["墙体类型 / 加固","Wall type / reinforcement"]]}],
+ watch:[["不要太早到场（防潮）","Not too early (humidity)"],["不正对空调","Not facing aircon"],["每批模组有色差，备品保管好","Keep spare modules"],["国内安装：提前办签证机票","Visas for installers"],["投影距离 = 屏宽 × 投射比","Throw = width × ratio"],["生产周期是硬约束：倒推下单日","Lead time is fixed"]]},
+
+{id:"control",zh:"中控",en:"Show Control",c:"#4E6A85",teams:[2,4],draft:true,
+ phases:[
+  {zh:"需求 · 设备清单",en:"Brief · Device list",w:[1,1.5,2],ms:["E1"],
+   steps:[["受控设备（LED/投影/模型灯/TV）","Devices"],["协议 RS232 / 485 / IR / IP","Protocols"],["有线 vs 无线","Wired vs wireless"],["内容清单","Content list"]],
+   gate:["设备 + 内容清单确认","Lists locked"]},
+  {zh:"UI 设计",en:"UI Design",w:[1.5,2,2],me:["E3"],
+   steps:[["三层：设备 → 内容 → 分区","3-level IA"],["品牌风格","Brand style"],["按钮状态","Button states"]],
+   gate:["UI 确认","UI OK"]},
+  {zh:"程序 · 指令对接",en:"Program · Commands",w:[2,2,2.5],
+   steps:[["填写设备 IP","Device IPs"],["视频名 ↔ 播放指令","Video ↔ command"],["按钮从模板复制","Buttons from template"],["模型灯光逻辑","Model lighting logic"]],
+   gate:["离线测试通过","Bench test OK"]},
+  {zh:"现场联调 · 交接",en:"On-site · Handover",w:[1.5,1.5,1.5],ms:["S"],me:["E7"],
+   steps:[["现场网络","Site network"],["逐个按钮联调","Test every button"],["手册 + 培训","Manual + training"],["程序备份 + IP 表","Backup + IP table"]],
+   gate:["交接","Handover"]}],
+ checklist:[
+  {zh:"设备",en:"Devices",items:[["型号 + 数量","Models + qty"],["控制协议","Protocols"],["IP 规划","IP plan"],["平板型号","Tablet model"]]},
+  {zh:"内容",en:"Content",items:[["视频文件名（定稿）","Final video file names"],["分区 / 楼栋命名","Zone / block names"],["灯光逻辑","Lighting logic"]]},
+  {zh:"现场",en:"Site",items:[["网络 / WiFi","Network / WiFi"],["电源","Power"],["机柜位置","Rack location"]]}],
+ watch:[["先锁设备清单，再做 UI","Lock devices before UI"],["视频文件名定稿后不要改（指令绑定）","Don't rename videos"],["无线易受干扰，关键场景用有线","Wired for critical"],["交接留程序备份 + IP 表","Leave backup + IPs"]],
+ refs:["095 GMC","115 21 Anderson","MY003 UEM Sunrise"]}
+];
+
+/* ============ EXTRA DATA (A–H) ============ */
+const HEADS=[{k:"JM",t:"PD · Visuals",zh:"项目管理 · 技术支持",en:"Project mgmt · Tech support",d:[0,1]},{k:"SC",t:"Sales + BD",zh:"业务 · 财务 / HR",en:"Sales · Finance / HR",d:[2,3]},{k:"FW",t:"Head of Production",zh:"制作 · 深圳团队",en:"Production · Shenzhen",d:[4]}];
+const DEPT=[
+ {zh:"项目管理",en:"Project Management",c:"#7A4FB5",m:[["Skye","Senior PM","Senior PM",""],["Ken","职级待确认","Level TBC","TBC"],["Alice","职级待确认","Level TBC","TBC"],["Jason","职级待确认","Level TBC","TBC"]]},
+ {zh:"技术支持",en:"Tech Support",c:"#B83B5E",m:[["Yang","LED / 投影 / 中控","LED / projection / control","TBC"],["Wang","安装","Installation","TBC"],["Shafa","MAXHUB","MAXHUB","TBC"]]},
+ {zh:"业务",en:"Sales",c:"#2F6FB0",m:[["Candy","销售 / BD","Sales / BD",""]]},
+ {zh:"财务 · HR",en:"Finance & HR",c:"#5A6B7B",m:[["Michelle","财务 / 行政","Finance / Admin",""],["Joan","HR","HR",""],["Jane","职责待确认","Role TBC","TBC"]]},
+ {zh:"制作（深圳）",en:"Production (Shenzhen)",c:"#2E8B57",m:[["赵平","模型组","Modelling","SZ"],["包姐","渲染 / 后期组","Render / Post","SZ"],["黄明","动画组","Animation","SZ"],["小赵","室内组（待定）","Interior (TBC)","SZ"],["CZT","中控 / 硬件组","Control / Hardware","SZ"]]}
+];
+const HANDOVER={
+ persp:{s:[["Job Order + 报价","Job order + quote"],["图量 · 效果 · 像素","Qty · mood · pixels"],["交图时间（钟点）","Deadline (hour)"]],p:[["查资料完整性","Check info"],["时间表 + E1","Schedule + E1"],["讨论组：地点+图量+时间+PM","Group chat setup"]],t:["深圳 模型组 → 渲染/后期","SZ model → render/post"],o:[["语聊交代 + 标注参考","Voice brief + marked refs"],["2 小时内转意见","Comments ≤2h"]]},
+ anim:{s:[["Job Order + 报价","Job order + quote"],["时长 · 分辨率","Length · resolution"],["音乐/配音是否含","Music / VO in scope"]],p:[["写预演脚本","Write script"],["时间表 + E1","Schedule + E1"],["讨论组 + 项目表","Group chat + sheet"]],t:["深圳 模型组 + 动画组","SZ model + animation"],o:[["脚本 + 重点区域","Script + key areas"],["预演意见语聊交代","Brief preview notes"]]},
+ model:{s:[["Job Order + 报价","Job order + quote"],["比例 · 底盘 · 罩 · 台 · 灯光","Scale · base · cover · stand · lights"],["交付地址 + 日期","Delivery address + date"]],p:[["资料 + 底盘尺寸图","Info + base drawing"],["时间表（从定稿图起算）","Schedule from final dwg"],["checklist 发客户","Send checklist"]],t:["模型工厂 · Batu Pahat","Model factory"],o:[["确认图纸版本","Confirmed drawing rev"],["每周进度照","Weekly photos"]]},
+ digital:{s:[["Job Order + 报价","Job order + quote"],["产品 · 户型数 · 点位数","Product · units · points"],["发布方式","Hosting"]],p:[["整理资料样本","Info pack"],["时间表 + E1","Schedule + E1"],["服务器 / 商店账号","Hosting access"]],t:["室内组 / 渲染组 / 程序","Interior / render / dev"],o:[["点位图 + 风格方向","Point plan + styling"],["硬装资料逐项核对","Hard-finish check"]]},
+ saleskit:{s:[["Job Order + 报价","Job order + quote"],["平台 · 内容 · 上线日","Platform · content · launch"],["是否上架商店","Store release"]],p:[["内容大纲","Content outline"],["Brochure + 工作文件","Brochure + working files"],["时间表 + E1","Schedule + E1"]],t:["UI 设计 → IT 开发","UI design → IT"],o:[["UI spec + 切图","UI spec + slices"],["交互需求清单","Interaction list"]]},
+ led:{s:[["报价截图（型号/尺寸/站架/PC）","Quote screenshot"],["开盘时间","Launch date"],["更新 Excel 项目表","Update project sheet"]],p:[["现场会：屏/DB/电脑位置","Site meeting"],["线路图 + 铁架图","Wiring + bracket dwg"],["倒推下单日","Back-plan order date"]],t:["CZT + 铁架商 + 安装组 + 电工","CZT · bracket · installers · electrician"],o:[["签字图纸","Signed drawings"],["进场时间表","Site schedule"]]},
+ control:{s:[["范围 + 设备清单","Scope + devices"],["开盘时间","Launch date"]],p:[["内容清单","Content list"],["UI 方向","UI direction"],["IP / 协议表","IP / protocol table"]],t:["CZT + 程序 + 动画组（内容）","CZT · dev · animation"],o:[["视频名 ↔ 指令表","Video ↔ command table"],["现场联调日","Integration date"]]}
+};
+/* per-phase prep: [client provides, PM prepares, output] */
+const PREP={
+ persp:[[[["CAD/3D + 周边","CAD/3D + context"]],[["时间表 · E1 · 讨论组","Schedule · E1 · chat"]],[["白模角度小样","White-model drafts"]]],
+        [[["材质 · 植物 · 家私 · 铺装","Materials · planting · furniture"],["每角度效果参考","Mood refs"]],[["U 汇总邮件","U summary email"],["标注参考给深圳","Marked refs to SZ"]],[["AI 效果小样","AI mood drafts"]]],
+        [[["户型平面（彩平）","Unit plans"]],[["E4 · Wenbing 内审","E4 · internal QC"]],[["成图 + 彩平","Final images + plans"]]]],
+ anim:[[[["时长 · logo · 音乐","Length · logo · music"],["CAD/3D","CAD/3D"]],[["预演脚本 · 时间表","Script · schedule"]],[["脚本 + 白模","Script + model"]]],
+       [[["预演意见（一次汇总）","Consolidated notes"]],[["新客户当面看","Meet new client"],["核对时长","Check length"]],[["预演锁定版","Locked preview"]]],
+       [[["景观 / 树种资料","Planting info"]],[["定分辨率 · E4","Fix res · E4"]],[["单帧 + 低像素样片","Stills + low-res cut"]]],
+       [[["字幕 / 文字终稿","Final captions"]],[["拼写 + logo 检查","Spelling + logo QC"]],[["MP4 成片","Final MP4"]]]],
+ model:[[[["最终 BP + SKP","Final BP + SKP"],["比例 · 灯光 · 铭牌","Scale · lights · plate"]],[["底盘图 · checklist","Base dwg · checklist"]],[["底盘确认","Base confirmed"]]],
+        [[["色号 · 玻璃 · 材料","Codes · glass · finishes"]],[["色板 · mock-up 局部","Board · mock-up"]],[["Mock-up + 书面确认","Mock-up + approval"]]],
+        [[["照片上标注意见","Mark-ups on photos"]],[["每周进度照 W","Weekly W"],["浪费拍照报业务","Wastage → sales"]],[["80% 模型","Model at 80%"]]],
+        [[["showflat 进度 · 展台","Showflat · stand"]],[["备件 · 送货文件 · S","Spares · docs · S"]],[["安装 + 签收","Install + sign-off"]]]],
+ digital:[[[["户型 · RCP · 木作","Plans · RCP · carpentry"]],[["点位 + 风格确认","Points + styling"]],[["模型小样","Model drafts"]]],
+          [[["材料 JPEG · 色温","Material JPEGs · CCT"]],[["记录资料日期 · E4","Log dates · E4"]],[["材质灯光小样","M&L drafts"]]],
+          [[["服务器 / 商店账号","Hosting access"]],[["手机 + PC 测试","Device test"]],[["上线链接","Live link"]]]],
+ saleskit:[[[["Brochure · logo","Brochure · logo"]],[["内容大纲","Outline"]],[["大纲确认","Outline OK"]]],
+           [[["工作文件（地图/总图/立面表）","Working files"]],[["UI 方向","UI direction"]],[["UI 初稿","UI draft"]]],
+           [[["终稿图片 / 视频","Final media"]],[["UI spec + 切图","UI spec + slices"]],[["Demo","Demo"]]],
+           [[["商店账号","Store account"]],[["拼写 · Bug 清单","Spelling · bug list"]],[["上线","Launch"]]]],
+ led:[[[["showflat 图纸","Showflat drawings"]],[["线路图 + 铁架图 · D","Drawings · D"]],[["签字图纸 + 下单","Signed + ordered"]]],
+      [[["现场进度","Site progress"]],[["买电脑音响 · E6","PC & audio · E6"]],[["出货","Shipped"]]],
+      [[["Isolator / Sub DB","Isolator / sub DB"]],[["S 现场就绪 · 复查","S · site check"]],[["铁架 + 线路","Bracket + cabling"]]],
+      [[["通电 · 进场","Power · access"]],[["手册模板","Manual template"]],[["交接 + DO","Handover + DO"]]]],
+ control:[[[["设备 + 范围","Devices + scope"]],[["IP / 协议表","IP / protocol table"]],[["清单锁定","Lists locked"]]],
+          [[["品牌风格","Brand style"]],[["三层 IA","3-level IA"]],[["UI 确认","UI OK"]]],
+          [[["视频终稿（定名）","Final videos"]],[["指令对应表","Command table"]],[["离线测试","Bench test"]]],
+          [[["网络 · 电源","Network · power"]],[["逐个按钮测试","Button tests"]],[["交接 + 备份","Handover + backup"]]]]
+};
+const STANDARDS=[
+ ["小样 1200–2000px，邮件注明小像素","Drafts 1200–2000px, say so"],["大图 ≥4000px；6000px = 2m 围板","Finals ≥4000px; 6000px = 2m"],
+ ["附件 >8MB 用链接；zip 压缩","> 8MB → link; zip"],["文件夹 / 文件按公司标准命名","Company folder & file naming"],
+ ["签名统一 10 号黑色字体","Signature: 10pt black"],["MAX / PSD 工作文件：业务 + 项目主管同意才给","Working files need 2 approvals"],
+ ["交图时间不能由业务直接答应","Sales never commits deadlines alone"],["意见 2 小时内交代深圳 + 语聊确认","Comments to SZ ≤2h + voice check"],
+ ["资料在讨论组收发并说明","All files via group chat"],["项目结束：Final 归档 → 退讨论组","Close: archive → leave chat"],
+ ["晚上来意见：考虑制作休息，协商交图","Late comments: renegotiate"],["发图前检查：比例 · 天空树色 · 意见","Pre-send QC"]
+];
+const REVIEW=[
+ ["每天","Daily",[["更新项目表","Update project sheet"],["客户意见 2 小时内转制作","Client comments to production ≤2h"]]],
+ ["每周","Weekly",[["周一 9am 项目会","Mon 9am project"],["周二 9am 技术会 · 看图","Tue 9am tech review"],["周三 / 五 10am PM 汇报","Wed/Fri 10am PM report"],["周四 主管 → CEO","Thu lead → CEO"]]],
+ ["每月","Monthly",[["29 号 内部复盘","29th internal review"],["30 号 与深圳复盘","30th review with SZ"]]],
+ ["触发","Triggered",[["修改 ≥3 次 → 原因会","≥3 revisions → root cause"],["重点 / 复杂项目 → 启动会","Complex job → kick-off"]]],
+ ["项目结束","Project close",[["沟通问题","Client communication"],["制作协调","Production coordination"],["质量经验","Quality lessons"]]]
+];
+const LEVELS=[["Project Coordinator","40–70",[["效果图 <10 张","Perspectives < 10"],["动画 <2 分钟","Animation < 2 min"],["实体模型（简单）","Simple models"],["Sales Kit / VR（简单）","Simple Kit / VR"]]],
+ ["PM","60–90",[["效果图 2–5 分：会上调相机 · 给角度建议","Camera on the spot"],["所有动画：沟通脚本 · 简单相机","All animation"],["所有实体模型","All models"],["全 3D Sales Kit · VR / AR","Full 3D Kit · VR / AR"],["完整硬件项目","Full hardware jobs"]]],
+ ["Senior PM","90–120",[["掌控会议节奏","Runs meetings"],["带新人","Mentors"],["全套项目","Full-package jobs"],["开发业务","Business development"]]],
+ ["PM Director","—",[["带团队","Leads team"],["开发业务","Business development"],["创新","Innovation"]]]];
+const CURR=[["3ds Max 相机","3ds Max camera",0,1.5,"3 课 + 考核"],["彩平制作","Colour plans",1.5,3,"4 课 + 考核"],["SU 建模 → Max","SketchUp → Max",3,4.5,"4 课 + 考核"],["实体模型独立跟项目","Run a scale model",2,6,"1 个项目"],["AI 效果 / mood 工具","AI mood tools",0.5,2.5,"新增 New"],["SOP Map + checklist","SOP onboarding",0,1,"新增 New"],["PS 后期基础","Photoshop basics",0,6,"长期 Ongoing"]];
+const TECH=[["AI 效果小样","AI mood drafts","已采用","Adopted"],["AI 动画 mood","AI animation mood","已采用","Adopted"],["互动雷达 / 红外","Interactive radar / IR","已采用","Adopted"],["Matterport / 实景扫描","Matterport / scanning","已采用","Adopted"],["UE 实时渲染 / VR","Unreal real-time","试点","Pilot"],["3D 高斯泼溅（实景重建）","Gaussian splatting","评估","Evaluate"],["透明屏 / COB LED","Transparent / COB LED","评估","Evaluate"]];
+
+/* ============ STATE ============ */
+const KEY="audax-sop-map-v1";
+let S={lang:"bi",size:{},ov:{},start:"2026-11-10",chk:{}};
+try{const s=JSON.parse(localStorage.getItem(KEY)||"null");if(s)S=Object.assign(S,s)}catch(e){}
+function save(){try{localStorage.setItem(KEY,JSON.stringify(S))}catch(e){}}
+const sz=b=>S.size[b.id]??1;
+const wk=(b,i)=>{const o=(S.ov[b.id]||{})[i];return o!=null?o:b.phases[i].w[sz(b)]};
+
+/* ============ HELPERS ============ */
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const L=(zh,en)=>S.lang==="zh"?[zh]:S.lang==="en"?[en]:[zh,en];
+const H=(zh,en)=>S.lang==="zh"?`<span class="zh">${esc(zh)}</span>`:S.lang==="en"?`<span>${esc(en)}</span>`:`<span class="zh">${esc(zh)}</span><span class="en">${esc(en)}</span>`;
+const Hi=(zh,en)=>S.lang==="en"?esc(en):S.lang==="zh"?esc(zh):`${esc(zh)} <span class="en">${esc(en)}</span>`;
+function addDays(iso,d){const t=new Date(iso+"T00:00:00");t.setDate(t.getDate()+Math.round(d));return t}
+const md=t=>`${t.getMonth()+1}/${t.getDate()}`;
+const fmtW=w=>(Number.isInteger(w)?w:w.toFixed(1))+"w";
+function txt(x,y,lines,o={}){const lh=o.lh||14;const cls=o.cls||"t";let s="";lines.forEach((l,i)=>{const sub=i>0&&lines.length>1;s+=`<text x="${x}" y="${y+i*lh}" class="${sub?"tm":cls} ${o.f||""}" font-size="${sub?(o.fs2||10.5):(o.fs||12.5)}" ${o.anchor?`text-anchor="${o.anchor}"`:""} ${o.w&&!sub?`font-weight="${o.w}"`:""}>${esc(l)}</text>`});return s}
+function mailChip(x,y,code){const w=code.length>1?24:18;return `<g><rect x="${x}" y="${y}" width="${w}" height="15" rx="3" class="mailchip"/><text x="${x+w/2}" y="${y+11}" text-anchor="middle" class="mailtxt f-m" font-size="9.5" font-weight="600">${code}</text></g>`}
+const diamond=(x,y,r,fill)=>`<polygon points="${x},${y-r} ${x+r},${y} ${x},${y+r} ${x-r},${y}" fill="${fill}" stroke="var(--surface)" stroke-width="1.5"/>`;
+const warnIcon=c=>`<svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true"><path d="M9 2 L17 16 H1 Z" fill="none" stroke="${c}" stroke-width="1.6" stroke-linejoin="round"/><rect x="8.2" y="7" width="1.6" height="4.6" fill="${c}"/><rect x="8.2" y="12.6" width="1.6" height="1.6" fill="${c}"/></svg>`;
+
+/* ============ GANTT ============ */
+function gantt(b){
+  const n=b.phases.length,ws=b.phases.map((_,i)=>wk(b,i));let acc=0;const st=ws.map(w=>{const s=acc;acc+=w;return s});const tot=acc;
+  const W=84,LB=S.lang==="bi"?178:150,TOP=50,RH=50,cols=Math.ceil(tot);const width=LB+cols*W+96,h=TOP+n*RH+34;
+  let g=`<svg width="${width}" height="${h}" viewBox="0 0 ${width} ${h}" role="img" aria-label="Gantt">`;
+  for(let k=0;k<=cols;k++){const x=LB+k*W;g+=`<line x1="${x}" y1="${TOP-12}" x2="${x}" y2="${h-22}" class="gl"/>`;
+    if(k<cols){g+=`<text x="${x+W/2}" y="${TOP-30}" text-anchor="middle" class="t f-m" font-size="11" font-weight="600">W${k+1}</text><text x="${x+W/2}" y="${TOP-17}" text-anchor="middle" class="tm f-m" font-size="10">${md(addDays(S.start,k*7))}</text>`}}
+  b.phases.forEach((p,i)=>{const y=TOP+i*RH,x=LB+st[i]*W,w=ws[i]*W;
+    g+=txt(8,y+18,L(`P${i+1} ${p.zh}`,p.en),{fs:12.5,w:500,lh:14});
+    g+=`<rect x="${x+1}" y="${y+6}" width="${Math.max(w-2,8)}" height="24" rx="5" fill="${b.c}" opacity="${0.55+0.15*(i%3)}"/>`;
+    g+=`<text x="${x+8}" y="${y+22}" class="tw f-m" font-size="11" font-weight="600">${fmtW(ws[i])}</text>`;
+    if(p.weekly){for(let k=1;k<ws[i];k++)g+=mailChip(x+k*W-12,y+33,p.weekly)}
+    (p.ms||[]).forEach((c,j)=>g+=mailChip(x+2+j*27,y-11,c));
+    (p.me||[]).forEach((c,j)=>g+=mailChip(x+w-26-j*27,y-11,c));
+    g+=diamond(x+w,y+18,8,"var(--ink)");
+  });
+  const ex=LB+tot*W;g+=`<line x1="${ex}" y1="${TOP-12}" x2="${ex}" y2="${h-18}" class="ink" stroke-dasharray="4 3"/>`;
+  g+=`<text x="${ex+6}" y="${h-8}" class="t f-m" font-size="11" font-weight="600">${md(addDays(S.start,tot*7))} · ${fmtW(tot)}</text>`;
+  return g+"</svg>";
+}
+
+/* ============ FLOW ============ */
+const tw=(t,fs)=>[...t].reduce((a,c)=>a+(/[　-鿿＀-￯]/.test(c)?fs:fs*0.56),0);
+function wrap(t,fs,max){if(tw(t,fs)<=max)return [t];const parts=t.split(/(?<=[·：:→+／/ ])/);const out=[];let cur="";parts.forEach(p=>{if(cur&&tw(cur+p,fs)>max){out.push(cur.trim());cur=p}else cur+=p});if(cur)out.push(cur.trim());
+  return out.flatMap(l=>{if(tw(l,fs)<=max)return [l];const r=[];let c="";[...l].forEach(ch=>{if(tw(c+ch,fs)>max){r.push(c);c=ch}else c+=ch});if(c)r.push(c);return r})}
+function flow(b){
+  const n=b.phases.length,CW=228,GX=36,P=12,HH=S.lang==="bi"?50:38,TXW=CW-16-23-10;
+  const cols=b.phases.map(p=>p.steps.map(s=>{const zh=S.lang==="en"?[]:wrap(s[0],12,TXW);const en=S.lang==="zh"?[]:wrap(s[1],10,TXW);const d=s[2]&&s[2]!=="—"?s[2]:"";const h=12+zh.length*15+en.length*12+(d?11:0)+2;return {zh,en,d,h:Math.max(h,28)}}));
+  const stepTop=P+HH+16;const colH=cols.map(c=>c.reduce((a,x)=>a+x.h+8,0));const gateY=stepTop+Math.max(...colH)+6;
+  const GH=S.lang==="bi"?40:28;const width=P*2+n*CW+(n-1)*GX,h=gateY+GH+18+28;
+  let g=`<svg width="${width}" height="${h}" viewBox="0 0 ${width} ${h}" role="img" aria-label="Flow">`;
+  g+=`<defs><marker id="ar-${b.id}" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="var(--muted)"/></marker></defs>`;
+  b.phases.forEach((p,i)=>{const x=P+i*(CW+GX),cx=x+CW/2;
+    g+=`<line x1="${cx}" y1="${P+HH}" x2="${cx}" y2="${gateY}" class="ln" stroke-width="1.5"/>`;
+    g+=`<rect x="${x}" y="${P}" width="${CW}" height="${HH}" rx="8" fill="${b.c}"/>`;
+    g+=`<text x="${x+10}" y="${P+19}" class="tw f-m" font-size="11" font-weight="600">P${i+1} · ${fmtW(wk(b,i))}</text>`;
+    const nm=L(p.zh,p.en);g+=`<text x="${x+10}" y="${P+35}" class="tw" font-size="12.5" font-weight="700">${esc(nm[0])}</text>`;
+    if(nm[1])g+=`<text x="${x+10}" y="${P+47}" class="tw" font-size="10" opacity=".85">${esc(nm[1])}</text>`;
+    let y=stepTop;cols[i].forEach(c=>{g+=`<rect x="${x+8}" y="${y}" width="${CW-16}" height="${c.h}" rx="6" class="box"/><circle cx="${x+20}" cy="${y+14}" r="3.5" fill="${b.c}"/>`;
+      let ty=y+18;c.zh.forEach(l=>{g+=`<text x="${x+31}" y="${ty}" class="t" font-size="12">${esc(l)}</text>`;ty+=15});
+      c.en.forEach(l=>{g+=`<text x="${x+31}" y="${ty-2}" class="tm" font-size="10">${esc(l)}</text>`;ty+=12});
+      if(c.d)g+=`<text x="${x+CW-14}" y="${y+c.h-5}" text-anchor="end" class="f-m" font-size="9.5" font-weight="600" fill="${b.c}">${esc(c.d)}</text>`;
+      y+=c.h+8});
+    const gy=gateY,bi=S.lang==="bi";g+=`<rect x="${x+8}" y="${gy}" width="${CW-16}" height="${GH}" rx="6" fill="var(--ink)"/>`;
+    g+=`<polygon points="${x+22},${gy+(bi?12:7)} ${x+29},${gy+(bi?20:14)} ${x+22},${gy+(bi?28:21)} ${x+15},${gy+(bi?20:14)}" fill="${b.c}"/>`;
+    const gl=L(p.gate[0],p.gate[1]);g+=`<text x="${x+36}" y="${gy+(bi?17:18)}" class="mailtxt" font-size="12" font-weight="700">${esc(gl[0])}</text>`;
+    if(gl[1])g+=`<text x="${x+36}" y="${gy+31}" class="mailtxt" font-size="10" opacity=".75">${esc(gl[1])}</text>`;
+    [...(p.ms||[]),...(p.me||[]),...(p.weekly?[p.weekly]:[])].forEach((c,j)=>{g+=mailChip(x+8+j*28,gy+GH+8,c)});
+    if(i<n-1)g+=`<line x1="${x+CW+4}" y1="${P+HH/2}" x2="${x+CW+GX-4}" y2="${P+HH/2}" stroke="var(--muted)" stroke-width="1.5" marker-end="url(#ar-${b.id})"/>`;
+  });
+  return g+"</svg>";
+}
+
+/* ============ OVERVIEW SVGs ============ */
+function lifecycle(){
+  const st=[["接单","Job order","—"],["启动","Kick-off","E1"],["会议","Meetings","E2"],["小样","Drafts","E3"],["确认闸门","Gate","E4"],["修改","Revisions","E5"],["生产","Production","E6 · W"],["交付","Delivery","E7"]];
+  const NW=118,G=22,P=12,y=26,bh=S.lang==="bi"?46:34,width=P*2+st.length*NW+(st.length-1)*G,h=y+bh+54;
+  let g=`<svg width="${width}" height="${h}" viewBox="0 0 ${width} ${h}" role="img" aria-label="Lifecycle"><defs><marker id="arl" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="var(--muted)"/></marker></defs>`;
+  st.forEach((s,i)=>{const x=P+i*(NW+G);const gate=i===4;
+    g+=`<rect x="${x}" y="${y}" width="${NW}" height="${bh}" rx="8" ${gate?'fill="var(--ink)"':'class="box"'}/>`;
+    const l=L(s[0],s[1]);g+=`<text x="${x+NW/2}" y="${y+(S.lang==="bi"?20:21)}" text-anchor="middle" class="${gate?"mailtxt":"t"}" font-size="13" font-weight="700">${esc(l[0])}</text>`;
+    if(l[1])g+=`<text x="${x+NW/2}" y="${y+35}" text-anchor="middle" class="${gate?"mailtxt":"tm"}" font-size="10.5" ${gate?'opacity=".75"':""}>${esc(l[1])}</text>`;
+    if(s[2]!=="—"){g+=`<line x1="${x+NW/2}" y1="${y+bh}" x2="${x+NW/2}" y2="${y+bh+14}" class="ln"/>`;s[2].split(" · ").forEach((c,j,a)=>{g+=mailChip(x+NW/2-(a.length*28-4)/2+j*28,y+bh+16,c)})}
+    if(i<st.length-1)g+=`<line x1="${x+NW+3}" y1="${y+bh/2}" x2="${x+NW+G-3}" y2="${y+bh/2}" stroke="var(--muted)" stroke-width="1.5" marker-end="url(#arl)"/>`;
+  });
+  g+=`<text x="${P}" y="14" class="tm" font-size="11">${esc(L("所有业务共用的项目生命周期","Shared project lifecycle").join(" · "))}</text>`;
+  return g+"</svg>";
+}
+function rules(){
+  const width=1000,h=150;let g=`<svg width="${width}" height="${h}" viewBox="0 0 ${width} ${h}" role="img" aria-label="Rules">`;
+  // revision rounds
+  g+=txt(10,18,L("修改轮数","Revision rounds"),{fs:13,w:700,lh:13});
+  for(let i=0;i<4;i++){const x=10+i*92,fee=i===3;g+=`<rect x="${x}" y="40" width="84" height="40" rx="6" ${fee?'fill="var(--warn)"':'class="box"'}/>`;
+    g+=`<text x="${x+42}" y="59" text-anchor="middle" class="${fee?"tw":"t"} f-m" font-size="13" font-weight="600">R${i+1}</text>`;
+    g+=`<text x="${x+42}" y="73" text-anchor="middle" class="${fee?"tw":"tm"}" font-size="10">${esc(fee?L("收费","Fee").join(" "):i===2?"E5":L("免费","Free").join(" "))}</text>`}
+  // resolution
+  const rx=420;g+=txt(rx,18,L("分辨率 → 打印尺寸","Resolution → print"),{fs:13,w:700,lh:13});
+  const rs=[[1600,"1200–2000","小样 Draft"],[4000,"4000","A0"],[6000,"6000","2 m"],[9000,"9000","10 m"],[12000,"12000","35 m"]];
+  const sx=v=>rx+(v/12000)*540;g+=`<line x1="${rx}" y1="70" x2="${rx+540}" y2="70" class="ink" stroke-width="2"/>`;
+  rs.forEach(r=>{const x=sx(r[0]);g+=`<circle cx="${x}" cy="70" r="6" fill="var(--ink)"/><text x="${x}" y="54" text-anchor="middle" class="t f-m" font-size="11" font-weight="600">${r[1]}px</text><text x="${x}" y="92" text-anchor="middle" class="tm" font-size="11">${r[2]}</text>`});
+  L("300dpi · 默认合同 = A0（开发商 4×A0 / 2m）· 更高需提前报价","300dpi · contract default A0 (developer 4×A0 / 2m) · higher = quote first").forEach((s,i)=>{g+=`<text x="${rx}" y="${122+i*15}" class="tm" font-size="11">${esc(s)}</text>`});
+  return g+"</svg>";
+}
+function org(){
+  const CW=196,G=16,P=8,width=P*2+TEAM.length*CW+(TEAM.length-1)*G,top=10,hh=40,lb=46,mh=34,mg=8;
+  const maxM=Math.max(...TEAM.map(t=>t.m.length));const h=top+hh+18+lb+14+maxM*(mh+mg)+10;
+  let g=`<svg width="${width}" height="${h}" viewBox="0 0 ${width} ${h}" role="img" aria-label="Shenzhen team">`;
+  TEAM.forEach((t,i)=>{const x=P+i*(CW+G);
+    g+=`<rect x="${x}" y="${top}" width="${CW}" height="${hh}" rx="8" fill="${t.c}"/><text x="${x+CW/2}" y="${top+26}" text-anchor="middle" class="tw" font-size="12" font-weight="700">${esc(L(t.zh,t.en).join("  "))}</text>`;
+    const ly=top+hh+18;g+=`<line x1="${x+CW/2}" y1="${top+hh}" x2="${x+CW/2}" y2="${ly}" stroke="${t.c}" stroke-width="2"/>`;
+    g+=`<rect x="${x}" y="${ly}" width="${CW}" height="${lb}" rx="7" class="sunk" stroke="${t.c}" stroke-width="1.5"/><text x="${x+12}" y="${ly+28}" class="t" font-size="14" font-weight="700">${esc(t.lead[0])}</text><text x="${x+12+t.lead[0].length*15+8}" y="${ly+28}" class="tm" font-size="12">${esc(t.lead[1])}</text><text x="${x+CW-10}" y="${ly+28}" text-anchor="end" class="tm f-m" font-size="10">${esc(L("组长","LEAD").join(" "))}</text>`;
+    const tx=x+18,my0=ly+lb+14;const lastY=my0+(t.m.length-1)*(mh+mg)+mh/2;g+=`<line x1="${tx}" y1="${ly+lb}" x2="${tx}" y2="${lastY}" stroke="${t.c}" stroke-width="2"/>`;
+    t.m.forEach((m,j)=>{const y=my0+j*(mh+mg);g+=`<line x1="${tx}" y1="${y+mh/2}" x2="${x+40}" y2="${y+mh/2}" stroke="${t.c}" stroke-width="2"/><rect x="${x+40}" y="${y}" width="${CW-40}" height="${mh}" rx="6" class="box" stroke="${t.c}"/><text x="${x+52}" y="${y+22}" class="t" font-size="13" font-weight="700">${esc(m[0])}</text>${m[1]?`<text x="${x+52+m[0].length*14+8}" y="${y+22}" class="tm" font-size="11.5">${esc(m[1])}</text>`:""}`});
+  });
+  return g+"</svg>";
+}
+
+/* ============ NEW SVGs ============ */
+function wl(t,fs,max){return wrap(t,fs,max)}
+function itemsBlock(x,y,items,maxW,color){let g="",yy=y;items.forEach(it=>{const zh=S.lang==="en"?[]:wl(it[0],11.5,maxW-14),en=S.lang==="zh"?[]:wl(it[1],9.5,maxW-14);
+  g+=`<circle cx="${x+4}" cy="${yy-4}" r="2.6" fill="${color}"/>`;zh.forEach(l=>{g+=`<text x="${x+12}" y="${yy}" class="t" font-size="11.5">${esc(l)}</text>`;yy+=14});en.forEach(l=>{g+=`<text x="${x+12}" y="${yy-2}" class="tm" font-size="9.5">${esc(l)}</text>`;yy+=11});yy+=6});return {g,h:yy-y}}
+function measure(items,maxW){return itemsBlock(0,0,items,maxW,"#000").h}
+
+function sgOrg(){
+  const P=8,DW=200,DG=12,width=P*2+5*DW+4*DG,top=8,WH=50,HH=54,IH=44;const dx=i=>P+i*(DW+DG);
+  const hy=top+WH+32,dy=hy+HH+30;const maxM=Math.max(...DEPT.map(d=>d.m.length));const h=dy+40+16+maxM*(IH+8)+6;
+  let g=`<svg width="${width}" height="${h}" viewBox="0 0 ${width} ${h}" role="img" aria-label="Org chart">`;
+  const WW=260,wx=width/2-WW/2;g+=`<rect x="${wx}" y="${top}" width="${WW}" height="${WH}" rx="8" fill="var(--ink)"/><text x="${wx+14}" y="${top+31}" class="mailtxt f-h" font-size="20" font-weight="700">WB</text><text x="${wx+62}" y="${top+22}" class="mailtxt" font-size="12" font-weight="700">Director</text><text x="${wx+62}" y="${top+38}" class="mailtxt" font-size="10.5" opacity=".8">${esc(S.lang==="en"?"Key client relationships":"客户关系 · 公司方向")}</text>`;
+  const hc=HEADS.map(H=>(dx(H.d[0])+dx(H.d[H.d.length-1])+DW)/2);const b1=top+WH+16;
+  g+=`<line x1="${width/2}" y1="${top+WH}" x2="${width/2}" y2="${b1}" class="ink" stroke-width="1.5"/><line x1="${hc[0]}" y1="${b1}" x2="${hc[2]}" y2="${b1}" class="ink" stroke-width="1.5"/>`;
+  HEADS.forEach((H,i)=>{const x0=dx(H.d[0]),x1=dx(H.d[H.d.length-1])+DW,hw=Math.min(x1-x0,300),hx=hc[i]-hw/2;
+    g+=`<line x1="${hc[i]}" y1="${b1}" x2="${hc[i]}" y2="${hy}" class="ink" stroke-width="1.5"/><rect x="${hx}" y="${hy}" width="${hw}" height="${HH}" rx="8" fill="var(--ink)"/>`;
+    g+=`<text x="${hx+12}" y="${hy+24}" class="mailtxt f-h" font-size="18" font-weight="700">${H.k}</text><text x="${hx+50}" y="${hy+23}" class="mailtxt" font-size="11" opacity=".8">${esc(H.t)}</text><text x="${hx+12}" y="${hy+43}" class="mailtxt" font-size="11">${esc(S.lang==="en"?H.en:H.zh)}</text>`;
+    const b2=hy+HH+14;g+=`<line x1="${hc[i]}" y1="${hy+HH}" x2="${hc[i]}" y2="${b2}" class="ink" stroke-width="1.5"/>`;
+    if(H.d.length>1)g+=`<line x1="${dx(H.d[0])+DW/2}" y1="${b2}" x2="${dx(H.d[H.d.length-1])+DW/2}" y2="${b2}" class="ink" stroke-width="1.5"/>`;
+    H.d.forEach(di=>{const d=DEPT[di],x=dx(di);g+=`<line x1="${x+DW/2}" y1="${b2}" x2="${x+DW/2}" y2="${dy}" stroke="${d.c}" stroke-width="2"/><rect x="${x}" y="${dy}" width="${DW}" height="40" rx="8" fill="${d.c}"/>`;
+      const nm=L(d.zh,d.en);g+=`<text x="${x+10}" y="${dy+(nm[1]?17:25)}" class="tw" font-size="13" font-weight="700">${esc(nm[0])}</text>`;if(nm[1])g+=`<text x="${x+10}" y="${dy+32}" class="tw" font-size="10" opacity=".85">${esc(nm[1])}</text>`;
+      g+=`<text x="${x+DW-10}" y="${dy+25}" text-anchor="end" class="tw f-m" font-size="11" font-weight="600">${H.k}</text>`;
+      const tx=x+12;d.m.forEach((m,j)=>{const y=dy+56+j*(IH+8),tbc=m[3]==="TBC";
+        g+=`<line x1="${tx}" y1="${y-8}" x2="${tx}" y2="${y+IH/2}" stroke="${d.c}" stroke-width="1.5"/><line x1="${tx}" y1="${y+IH/2}" x2="${x+24}" y2="${y+IH/2}" stroke="${d.c}" stroke-width="1.5"/><rect x="${x+24}" y="${y}" width="${DW-24}" height="${IH}" rx="6" class="box" stroke="${d.c}" ${tbc?'stroke-dasharray="4 3"':""}/>`;
+        g+=`<text x="${x+33}" y="${y+18}" class="t" font-size="13" font-weight="700">${esc(m[0])}</text><text x="${x+33}" y="${y+33}" font-size="10" fill="${tbc?"var(--warn)":"var(--muted)"}">${esc(S.lang==="en"?m[2]:S.lang==="zh"?m[1]:(m[1]===m[2]||tw(m[1]+" · "+m[2],10)>DW-40?m[1]:m[1]+" · "+m[2]))}</text>`;
+        if(m[3]==="SZ")g+=`<text x="${x+DW-8}" y="${y+18}" text-anchor="end" class="tm f-m" font-size="9">SZ</text>`})})});
+  return g+"</svg>";
+}
+/* ---- editable meetings ---- */
+const DAYS=[["一","Mon"],["二","Tue"],["三","Wed"],["四","Thu"],["五","Fri"]],SLOTS=[["上午","AM"],["下午","PM"],["晚上","Eve"]];
+const DEF_MEET=[{d:4,s:0,zh:"PM→主管 10am",en:"PM report"},{d:0,s:2,zh:"项目总结",en:"Project recap"},{d:4,s:2,zh:"项目总结",en:"Project recap"}];
+const MKEY="audax-sop-meet-v1";let MEET=DEF_MEET.slice(),MDOC=null,EDIT=null,MMSG="",MPEND=null;
+try{const m=JSON.parse(localStorage.getItem(MKEY)||"null");if(Array.isArray(m))MEET=m}catch(e){}
+function saveMeet(){try{localStorage.setItem(MKEY,JSON.stringify(MEET))}catch(e){}
+  if(MDOC)MDOC.set({items:MEET}).then(()=>{MMSG=""}).catch(()=>{MMSG=L("没有编辑权限，改动只保存在本浏览器","No edit access — saved in this browser only").join(" · ");if(cur()==="overview"&&!EDIT)render()})}
+function meetHTML(){
+  let h=`<div class="scroll"><div class="mtg"><div></div>${DAYS.map(d=>`<div class="mh">${esc(L("周"+d[0],d[1]).join(" "))}</div>`).join("")}`;
+  SLOTS.forEach((s,si)=>{h+=`<div class="ml">${H(s[0],s[1])}</div>`;DAYS.forEach((_,di)=>{h+=`<div class="mc">${MEET.map((m,i)=>m.d===di&&m.s===si?`<button class="mi" data-medit="${i}">${H(m.zh,m.en||m.zh)}</button>`:"").join("")}<button class="madd" data-madd="${di}-${si}" aria-label="add">+</button></div>`})});
+  h+=`</div></div>`;
+  if(EDIT){const m=EDIT.i!=null?MEET[EDIT.i]:{d:EDIT.d,s:EDIT.s,zh:"",en:""};
+    h+=`<div class="mform"><label for="m-zh">${esc(L("会议（含时间）","Meeting (with time)").join(" / "))}</label><input id="m-zh" type="text" value="${esc(m.zh)}" placeholder="项目会 9am"><label for="m-en">English</label><input id="m-en" type="text" value="${esc(m.en||"")}" placeholder="Project meeting">
+     <label for="m-d">${esc(L("星期","Day").join(" / "))}</label><select id="m-d">${DAYS.map((d,i)=>`<option value="${i}" ${i===m.d?"selected":""}>${esc("周"+d[0]+" "+d[1])}</option>`).join("")}</select>
+     <label for="m-s">${esc(L("时段","Slot").join(" / "))}</label><select id="m-s">${SLOTS.map((d,i)=>`<option value="${i}" ${i===m.s?"selected":""}>${esc(d[0]+" "+d[1])}</option>`).join("")}</select>
+     <button class="btn pri" data-msave="1">${esc(L("保存","Save").join(" / "))}</button>${EDIT.i!=null?`<button class="btn" data-mdel="1">${esc(L("删除","Delete").join(" / "))}</button>`:""}<button class="btn" data-mcancel="1">${esc(L("取消","Cancel").join(" / "))}</button></div>`}
+  h+=`<div class="note" style="margin-top:8px">${esc(MMSG||L("点会议可修改或删除，点 + 新增。每月 29 号内部总结 · 30 号与深圳总结 · 每天更新项目表","Click a meeting to edit or delete, + to add. Monthly: 29th internal review · 30th with SZ · project sheet daily").join("  |  "))}</div>`;
+  return h}
+const weeklyItems=()=>{const a=MEET.slice().sort((x,y)=>x.d-y.d||x.s-y.s).map(m=>["周"+DAYS[m.d][0]+" "+m.zh,DAYS[m.d][1]+" "+(m.en||m.zh)]);return a.length?a:[["—","—"]]};
+(async()=>{try{const db=window.claude&&window.claude.use?await window.claude.use("db"):null;if(!db)return;MDOC=db.doc("meetings/week");
+  MDOC.onSnapshot(s=>{if(!s.exists)return;const d=s.data();if(!d||!Array.isArray(d.items))return;if(EDIT){MPEND=d.items;return}MEET=d.items;if(cur()==="overview")render()},()=>{})}catch(e){}})();
+function genericHandover(){
+  const lanes=[["业务","Sales",["Job Order + 报价范围","Job order + scope"],["客户联系人","Client contacts"],["交付时间（不先答应）","Deadline (not promised)"]],
+    ["项目经理","PM",["查资料完整性","Check info completeness"],["时间表 + E1","Schedule + E1"],["讨论组 + 项目表","Group chat + project sheet"]],
+    ["制作 / 伙伴","Production / partners",["语聊交代组长","Voice brief to lead"],["标注参考 + 时间节点","Marked refs + dates"],["每天跟进","Daily follow-up"]],
+    ["客户","Client",["E3 小样","E3 drafts"],["E4 锁定前提醒","E4 pre-final"],["E7 交付","E7 delivery"]]];
+  return laneSVG(lanes.map(l=>({t:[l[0],l[1]],items:l.slice(2)})),[["Job Order","Job order"],["语聊 + 讨论组","Voice + chat"],["Wenbing 内审","Internal QC"]],"var(--ink)");
+}
+function laneSVG(lanes,arrows,color){
+  const CW=230,GX=86,P=10,HH=S.lang==="bi"?44:34;const mh=Math.max(...lanes.map(l=>measure(l.items,CW-20)));const h=P+HH+12+mh+14+P;const width=P*2+lanes.length*CW+(lanes.length-1)*GX;
+  let g=`<svg width="${width}" height="${h}" viewBox="0 0 ${width} ${h}" role="img" aria-label="Handover"><defs><marker id="arh" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="var(--muted)"/></marker></defs>`;
+  lanes.forEach((l,i)=>{const x=P+i*(CW+GX);g+=`<rect x="${x}" y="${P}" width="${CW}" height="${h-P*2}" rx="8" class="box"/>`;
+    g+=`<rect x="${x}" y="${P}" width="${CW}" height="${HH}" rx="8" fill="${i===2?color:"var(--ink)"}"/>`+(()=>{const t=L(l.t[0],l.t[1]);return `<text x="${x+12}" y="${P+(t[1]?19:22)}" class="mailtxt" font-size="13" font-weight="700">${esc(t[0])}</text>`+(t[1]?`<text x="${x+12}" y="${P+35}" class="mailtxt" font-size="10" opacity=".75">${esc(t[1])}</text>`:"")})();
+    g+=itemsBlock(x+12,P+HH+22,l.items,CW-20,i===2?color:"var(--ink)").g;
+    if(i<lanes.length-1&&arrows[i]){const ax=x+CW+4,ay=P+HH+44;g+=`<line x1="${ax}" y1="${ay}" x2="${ax+GX-8}" y2="${ay}" stroke="var(--muted)" stroke-width="1.5" marker-end="url(#arh)"/>`;
+      L(arrows[i][0],arrows[i][1]).forEach((t,k)=>g+=`<text x="${ax+(GX-8)/2}" y="${ay-8-((L(arrows[i][0],arrows[i][1]).length-1-k)*11)}" text-anchor="middle" class="${k?"tm":"t"}" font-size="${k?8.5:9.5}">${esc(t)}</text>`)}});
+  return g+"</svg>";
+}
+function bizHandover(b){const H=HANDOVER[b.id];
+  return laneSVG([{t:["业务交接","Sales hands over"],items:H.s},{t:["PM 准备","PM prepares"],items:H.p},{t:H.t,items:H.o}],[["Job Order","Job order"],["语聊 + 讨论组","Voice + chat"]],b.c)}
+function prepSVG(b){
+  const rows=[["客户提供","Client provides"],["PM 准备","PM prepares"],["交付物","Output"]];const pr=PREP[b.id];const n=b.phases.length;
+  const LW=S.lang==="bi"?118:96,CW=210,P=8,HH=40;const rh=rows.map((_,r)=>Math.max(36,...pr.map(c=>measure(c[r],CW-20)+10)));
+  const width=P*2+LW+n*CW,h=P+HH+rh.reduce((a,x)=>a+x,0)+P;
+  let g=`<svg width="${width}" height="${h}" viewBox="0 0 ${width} ${h}" role="img" aria-label="Stage prep">`;
+  b.phases.forEach((p,i)=>{const x=P+LW+i*CW;g+=`<rect x="${x+2}" y="${P}" width="${CW-4}" height="${HH-4}" rx="6" fill="${b.c}"/><text x="${x+12}" y="${P+16}" class="tw f-m" font-size="10.5" font-weight="600">P${i+1} · ${fmtW(wk(b,i))}</text><text x="${x+12}" y="${P+30}" class="tw" font-size="11.5" font-weight="700">${esc(S.lang==="en"?p.en:p.zh)}</text>`});
+  let y=P+HH;rows.forEach((r,ri)=>{g+=txt(P+2,y+20,L(r[0],r[1]),{fs:12,w:700,lh:13});
+    pr.forEach((c,i)=>{const x=P+LW+i*CW;g+=`<rect x="${x+2}" y="${y+2}" width="${CW-4}" height="${rh[ri]-4}" rx="6" class="${ri===2?"sunk":"box"}"/>`;g+=itemsBlock(x+12,y+20,c[ri],CW-20,ri===2?"var(--ink)":b.c).g});y+=rh[ri]});
+  return g+"</svg>";
+}
+function milestoneMatrix(){
+  const LW=S.lang==="bi"?150:120,CW=232,P=8,RH=S.lang==="bi"?56:44,n=4;const width=P*2+LW+n*CW,h=P+24+B.length*RH+P;
+  let g=`<svg width="${width}" height="${h}" viewBox="0 0 ${width} ${h}" role="img" aria-label="Milestones">`;
+  for(let i=0;i<n;i++)g+=`<text x="${P+LW+i*CW+10}" y="${P+14}" class="tm f-m" font-size="11" font-weight="600">P${i+1}</text>`;
+  B.forEach((b,r)=>{const y=P+24+r*RH;g+=`<line x1="${P}" y1="${y}" x2="${width-P}" y2="${y}" class="gl"/>`;
+    g+=`<rect x="${P}" y="${y+10}" width="4" height="${RH-20}" rx="2" fill="${b.c}"/>`;g+=txt(P+12,y+24,L(b.zh,b.en),{fs:12,w:700,lh:13});
+    b.phases.forEach((p,i)=>{const x=P+LW+i*CW;g+=diamond(x+12,y+20,7,b.c);g+=txt(x+26,y+24,L(p.gate[0],p.gate[1]),{fs:11.5,fs2:9.5,lh:13});
+      const m=[...(p.ms||[]),...(p.me||[]),...(p.weekly?[p.weekly]:[])];m.forEach((c,j)=>g+=mailChip(x+CW-14-(m.length-j)*27,y+12,c));
+      if(i<b.phases.length-1)g+=`<line x1="${x+CW-6}" y1="${y+20}" x2="${x+CW+4}" y2="${y+20}" class="ln" stroke-width="1.5"/>`});});
+  return g+"</svg>";
+}
+function reviewSVG(){
+  const RV=REVIEW.map(r=>r[1]==="Weekly"?[r[0],r[1],weeklyItems()]:r);const CW=200,G=12,P=8,HH=34;const mh=Math.max(...RV.map(r=>measure(r[2],CW-20)));const h=P+HH+14+mh+10+P,width=P*2+RV.length*CW+(RV.length-1)*G;
+  const cs=["#5A6B7B","#2F6FB0","#2E8B57","#B4531A","#7A4FB5"];let g=`<svg width="${width}" height="${h}" viewBox="0 0 ${width} ${h}" role="img" aria-label="Review cycle">`;
+  RV.forEach((r,i)=>{const x=P+i*(CW+G);g+=`<rect x="${x}" y="${P}" width="${CW}" height="${h-2*P}" rx="8" class="box"/><rect x="${x}" y="${P}" width="${CW}" height="${HH}" rx="8" fill="${cs[i]}"/><text x="${x+12}" y="${P+22}" class="tw" font-size="13" font-weight="700">${esc(L(r[0],r[1]).join("  "))}</text>`;
+    g+=itemsBlock(x+12,P+HH+20,r[2],CW-20,cs[i]).g});
+  return g+"</svg>";
+}
+function ladderSVG(){
+  const CW=250,G=14,P=8,cs=["#8FA3B5","#2F6FB0","#1F4E79","#15202B"];const mh=Math.max(...LEVELS.map(l=>measure(l[2],CW-20)));const step=26;
+  const width=P*2+4*CW+3*G,h=P+3*step+60+mh+P;let g=`<svg width="${width}" height="${h}" viewBox="0 0 ${width} ${h}" role="img" aria-label="PM levels">`;
+  LEVELS.forEach((l,i)=>{const x=P+i*(CW+G),y=P+(3-i)*step;g+=`<rect x="${x}" y="${y}" width="${CW}" height="${h-y-P}" rx="8" class="box"/><rect x="${x}" y="${y}" width="${CW}" height="48" rx="8" fill="${cs[i]}"/>`;
+    g+=`<text x="${x+12}" y="${y+22}" class="tw f-h" font-size="15" font-weight="700">${l[0]}</text><text x="${x+12}" y="${y+39}" class="tw f-m" font-size="10.5">${esc(L("项目分值 ","Score ").join("")+l[1])}</text>`;
+    g+=itemsBlock(x+12,y+68,l[2],CW-20,cs[i]).g});
+  return g+"</svg>";
+}
+function currSVG(){
+  const LW=S.lang==="bi"?190:150,MW=120,P=8,RH=34,width=P*2+LW+6*MW+90,h=P+26+CURR.length*RH+P;
+  let g=`<svg width="${width}" height="${h}" viewBox="0 0 ${width} ${h}" role="img" aria-label="Curriculum">`;
+  for(let m=0;m<=6;m++){const x=P+LW+m*MW;g+=`<line x1="${x}" y1="${P+18}" x2="${x}" y2="${h-P}" class="gl"/>`;if(m<6)g+=`<text x="${x+MW/2}" y="${P+12}" text-anchor="middle" class="t f-m" font-size="11" font-weight="600">M${m+1}</text>`}
+  CURR.forEach((c,i)=>{const y=P+26+i*RH;g+=txt(P,y+14,L(c[0],c[1]),{fs:12,w:600,fs2:9.5,lh:12});const nw=/New/.test(c[4]);
+    const x=P+LW+c[2]*MW,w=(c[3]-c[2])*MW;g+=`<rect x="${x+2}" y="${y+4}" width="${w-4}" height="22" rx="5" fill="${nw?"var(--warn)":"#2F6FB0"}" opacity="${/Ongoing/.test(c[4])?.45:.85}"/><text x="${x+10}" y="${y+19}" class="tw" font-size="10.5" font-weight="600">${esc(c[4])}</text>`});
+  return g+"</svg>";
+}
+function pipelineSVG(){
+  const st=[["收集","Scout","每 2 个月：开发商新盘效果图 · 展会 · 供应商","Every 2 months: new launches · fairs · suppliers"],["评估","Evaluate","周二技术会演示 · 成本 / 交付风险","Tue tech demo · cost / risk"],["试点","Pilot","选 1 个真实项目试用","Trial on one live job"],["纳入 SOP","Adopt","更新 SOP Map + 培训","Update SOP + training"]];
+  const CW=240,G=10,P=8,h=96,width=P*2+st.length*CW+(st.length-1)*G;let g=`<svg width="${width}" height="${h}" viewBox="0 0 ${width} ${h}" role="img" aria-label="Pipeline">`;
+  st.forEach((s,i)=>{const x=P+i*(CW+G);g+=`<polygon points="${x},${P} ${x+CW-16},${P} ${x+CW},${P+40} ${x+CW-16},${P+80} ${x},${P+80} ${i?x+16:x},${P+40}" fill="${i===3?"var(--ok)":"var(--ink)"}" opacity="${0.6+i*0.13}"/>`;
+    g+=`<text x="${x+(i?26:12)}" y="${P+24}" class="tw" font-size="13.5" font-weight="700">${esc(L(s[0],s[1]).join("  "))}</text>`;
+    wl(S.lang==="en"?s[3]:s[2],10.5,CW-50).slice(0,3).forEach((t,k)=>g+=`<text x="${x+(i?26:12)}" y="${P+42+k*13}" class="tw" font-size="10.5" opacity=".9">${esc(t)}</text>`)});
+  return g+"</svg>";
+}
+
+const IMPROVE=[
+ {n:1,ph:0,o:"SC + JM",zh:"业务 → PM 交接门槛",en:"Sales → PM handover gate",f:[["Job Order 必填：图量 · 像素 · 时长 · 含几轮 · 交付钟点 · 联系人","Mandatory fields on the job order"],["PM 24 小时内回签才算接单","PM countersigns within 24h"],["缺项退回业务，不开工","Incomplete → back to sales"]],d:["Job Order 表 v2","Job order form v2"]},
+ {n:2,ph:0,o:"JM + SC",zh:"修改费变更单",en:"Change-order for revision fees",f:[["超出范围即开变更单：内容 · 要求人 · 是否收费","Change order: what · who · chargeable"],["业务 48 小时内出 revised quotation","Sales issues revised quote in 48h"],["每周五对一次账","Reconcile every Friday"]],d:["变更单 + 周对账表","Change order + weekly log"]},
+ {n:3,ph:0,o:"FW + JM",zh:"AI 小样阶段规则",en:"Rules for the AI draft stage",f:[["AI 阶段的修改计入 3 轮","AI-stage revisions count toward 3 rounds"],["E3 加一句：AI 小样仅示意氛围，细节以成图为准","E3 line: AI drafts show mood only"],["FW 定稿高像素出图路径","FW fixes the hi-res output path"]],d:["AI 阶段规则（1 页）","One-page AI stage rules"]},
+ {n:4,ph:1,o:"Skye",zh:"资料版本记录",en:"Information version log",f:[["所有业务用 checklist 的「收到日期」栏","Use the date-received column everywhere"],["每个闸门邮件写明「以 X 月 X 日版为准」","Each gate email names the version"],["来新版资料 = 重新评估时间","New version → re-check schedule"]],d:["闸门邮件加版本行","Version line in gate emails"]},
+ {n:7,ph:1,o:"JM",zh:"去掉单点",en:"Remove single points of failure",f:[["每个项目指定后备 PM","Backup PM on every project"],["意见用编号清单，不只靠语聊","Numbered comment list, not voice only"],["内审两人轮值","Two people rotate internal QC"]],d:["项目表加「后备 PM」栏 + 意见清单","Backup-PM column + comment list"]},
+ {n:5,ph:2,o:"JM + Yang",zh:"硬件倒推排期 + 验收",en:"Hardware back-planning + acceptance",f:[["从开盘日倒推：生产 4–8w · 老化 1–2w · 海运 2–3w","Back-plan from launch date"],["现场就绪（S）签字后才发货","Ship only after site-readiness sign-off"],["LED / 投影 / 中控统一验收表","One commissioning form for all"]],d:["倒排表 + 验收表","Back-plan sheet + commissioning form"]},
+ {n:6,ph:2,o:"JM + Skye",zh:"楼盘总排期",en:"Master schedule per development",f:[["一个楼盘一张总表","One master timeline per development"],["标出依赖：效果图 → Sales Kit · 视频 → 中控","Mark dependencies between businesses"],["每周 PM 会更新","Update at the weekly PM meeting"]],d:["总排期模板","Master schedule template"]}
+];
+const KPI=[["按时交付率","On-time delivery"],["平均修改轮数","Avg. revision rounds"],["修改费回收率","Revision fees recovered"]];
+function improveSVG(){
+  const PH=[["30 天","30 days","#B4531A"],["60 天","60 days","#2F6FB0"],["90 天","90 days","#2E8B57"]];const CW=356,G=12,P=8,HH=34,bi=S.lang==="bi";
+  const cards=IMPROVE.map(c=>{const bh=measure(c.f,CW-36);const dl=wrap(S.lang==="en"?c.d[1]:c.d[0],10.5,CW-60);const th=bi?36:22;return {...c,bh,dl,th,h:14+th+10+bh+dl.length*13+16}});
+  const colH=PH.map((_,i)=>cards.filter(c=>c.ph===i).reduce((a,c)=>a+c.h+10,0));const h=P+HH+12+Math.max(...colH)+P,width=P*2+3*CW+2*G;
+  let g=`<svg width="${width}" height="${h}" viewBox="0 0 ${width} ${h}" role="img" aria-label="Improvement plan">`;
+  PH.forEach((p,i)=>{const x=P+i*(CW+G);g+=`<rect x="${x}" y="${P}" width="${CW}" height="${h-2*P}" rx="8" class="sunk"/><rect x="${x}" y="${P}" width="${CW}" height="${HH}" rx="8" fill="${p[2]}"/><text x="${x+12}" y="${P+22}" class="tw" font-size="13" font-weight="700">${esc(L(p[0],p[1]).join("  "))}</text>`;
+    let y=P+HH+12;cards.filter(c=>c.ph===i).forEach(c=>{g+=`<rect x="${x+8}" y="${y}" width="${CW-16}" height="${c.h}" rx="7" class="box"/>`;
+      g+=`<rect x="${x+18}" y="${y+12}" width="22" height="22" rx="5" fill="${p[2]}"/><text x="${x+29}" y="${y+28}" text-anchor="middle" class="tw f-m" font-size="12" font-weight="600">${c.n}</text>`;
+      const t=L(c.zh,c.en);g+=`<text x="${x+48}" y="${y+(bi?24:28)}" class="t" font-size="13" font-weight="700">${esc(t[0])}</text>`;if(t[1])g+=`<text x="${x+48}" y="${y+38}" class="tm" font-size="10">${esc(t[1])}</text>`;
+      g+=`<text x="${x+CW-18}" y="${y+24}" text-anchor="end" class="tm f-m" font-size="10" font-weight="600">${esc(c.o)}</text>`;
+      g+=itemsBlock(x+20,y+14+c.th+18,c.f,CW-36,p[2]).g;
+      let dy=y+14+c.th+10+c.bh+12;c.dl.forEach((l,k)=>{g+=`<text x="${x+20}" y="${dy+k*13}" font-size="10.5" font-weight="700" fill="${p[2]}">${k?"":"▸ "}${esc(l)}</text>`});
+      y+=c.h+10})});
+  return g+"</svg>";
+}
+
+/* ============ PAGES ============ */
+const SEC=[["A","成员架构","Team structure"],["B","交接 + 制作流程","Handover + production flow"],["C","清单 · 排期 · 阶段准备","Checklist · schedule · stage prep"],["D","关键节点 + 总结邮件","Milestones + summary emails"],["E","会议 + 项目复盘","Meetings + reviews"],["F","邮件模板 + 项目规范","Email templates + standards"],["G","员工培训","Staff training"],["H","新技术 / 信息收集","New tech + info scouting"],["I","改进方案","Improvement plan"]];
+const secH=(k,extra="")=>{const s=SEC.find(x=>x[0]===k);return `<div class="ph" id="sec-${k}"><span class="sk">${k}</span>${H(s[1],s[2])}${extra}</div>`};
+function overview(){
+  const mx=TEAM.map((t,ti)=>`<tr><td><span class="mxd" style="background:${t.c}"></span> ${Hi(t.zh,t.en)}</td>${B.map(b=>`<td>${b.teams.includes(ti)?`<span class="mxd" style="background:${t.c}"></span>`:""}</td>`).join("")}</tr>`).join("")
+   +[["外包模型工厂","Model factory",b=>b.factory],["UI / IT","UI / IT",b=>b.uiit||b.id==="control"],["新加坡技术支持","SG tech support",b=>b.site||b.id==="control"]].map(r=>`<tr><td>${Hi(r[0],r[1])}</td>${B.map(b=>`<td>${r[2](b)?'<span class="mxd" style="background:var(--muted)"></span>':""}</td>`).join("")}</tr>`).join("");
+  return `
+  <h1>${Hi("总览","Overview")}</h1>
+  <div class="secnav">${SEC.map(s=>`<button class="btn" data-jump="${s[0]}"><b>${s[0]}</b> ${esc(S.lang==="en"?s[2]:s[1])}</button>`).join("")}</div>
+  <section class="panel">${secH("A",`<span class="note">${esc(L("虚线 = 待确认","Dashed = to confirm").join(" · "))}</span>`)}
+   <div class="sub">${H("公司架构","Company structure")}</div><div class="scroll">${sgOrg()}</div>
+   <div class="sub">${H("FW ▸ 深圳制作团队","FW ▸ Shenzhen production team")}</div><div class="scroll">${org()}</div>
+   <div class="sub">${H("团队 × 业务","Team × business")}</div><div class="scroll"><table class="mx"><thead><tr><th></th>${B.map(b=>`<th><span class="mxd" style="background:${b.c};width:8px;height:8px"></span><br>${Hi(b.zh,b.en)}</th>`).join("")}</tr></thead><tbody>${mx}</tbody></table></div></section>
+  <section class="panel">${secH("B")}<div class="sub">${H("通用交接","Generic handover")}</div><div class="scroll">${genericHandover()}</div>
+   <div class="sub">${H("各业务制作流程","Production flow by business")}</div><div class="bizlinks">${B.map(b=>`<a href="#${b.id}" style="border-color:${b.c}"><span class="dot" style="background:${b.c}"></span>${Hi(b.zh,b.en)}<small>${b.phases.length} ${esc(L("阶段","stages").join(" "))} · ${fmtW(b.phases.reduce((a,_,i)=>a+wk(b,i),0))}</small></a>`).join("")}</div></section>
+  <section class="panel">${secH("C")}<div class="scroll">${lifecycle()}</div>
+   <div class="note" style="margin-top:8px">${esc(L("每个业务页有：排期（可调）· 每阶段准备 · 资料清单。综合清单 Word 文件在 PM file › Checklists_v1","Each business page: adjustable schedule · stage prep · checklist. Word checklists: PM file › Checklists_v1").join("  |  "))}</div>
+   <div class="docs">${B.map(b=>`<span><i style="background:${b.c}"></i>Audax_Checklist_${b.id==="persp"?"01":b.id==="anim"?"02":b.id==="model"?"03":b.id==="digital"?"04":b.id==="saleskit"?"05":b.id==="led"?"06":"07"}_….docx</span>`).join("")}</div></section>
+  <section class="panel">${secH("D")}<div class="sub">${H("所有业务的确认闸门 + 邮件","Gates + emails across businesses")}</div><div class="scroll">${milestoneMatrix()}</div>
+   <div class="sub">${H("必须写总结的节点","When a written summary is required")}</div>
+   <div class="sumgrid">${[["E2","每次会议后","After every meeting","意见 · 时间 · 资料负责人","Comments · dates · owners"],["U","AI / 调材质前","Before AI / M&L","已确认角度 + 资料 + 待补","Confirmed angles + info + gaps"],["W","生产期每周","Weekly in production","进度 % + 照片","Progress % + photos"],["E5","第 3 轮修改","3rd revision","请客户一次汇总意见","Ask for one consolidated set"],["Close","项目结束","Project close","沟通 · 协调 · 质量经验","Comms · coordination · quality"]].map(x=>`<div class="sum"><span class="code">${x[0]}</span><b>${Hi(x[1],x[2])}</b><span class="note">${esc(S.lang==="en"?x[4]:x[3])}</span></div>`).join("")}</div></section>
+  <section class="panel">${secH("E",`<span class="tag" style="color:var(--ok)">${esc(L("可编辑","EDITABLE").join(" / "))}</span>`)}<div class="sub">${H("每周会议","Weekly meetings")}</div>${meetHTML()}
+   <div class="sub">${H("复盘节奏","Review cadence")}</div><div class="scroll">${reviewSVG()}</div>
+   <div class="sub">${H("复盘模板","Review template")}</div><div class="tpl4">${[["做得好","What went well"],["问题","Issues"],["原因：客户 / 制作 / 沟通","Cause: client / production / comms"],["改进 + 负责人","Fix + owner"]].map((x,i)=>`<div><span class="code">${i+1}</span><span>${H(x[0],x[1])}</span></div>`).join("")}</div></section>
+  <section class="panel">${secH("F",`<span class="note">${esc(L("点开查看英文模板 + 复制","Open for template + copy").join(" · "))}</span>`)}
+   <div class="mails">${Object.entries(MAIL).map(([k,m])=>`<details class="mail"><summary><span class="code">${k}</span><span>${Hi(m.zh,m.en)}</span><span class="trig">${Hi(m.tz,m.te)}</span></summary>
+     <div class="note" style="margin-top:6px">${esc(m.gist)}</div><pre class="tpl" id="tpl-${k}">${esc(m.tpl)}</pre><button class="btn" data-copy="${k}">${esc(L("复制模板","Copy").join(" / "))}</button></details>`).join("")}</div>
+   <div class="sub">${H("硬规则","House rules")}</div><div class="scroll">${rules()}</div>
+   <div class="sub">${H("常用项目规范","Project standards")}</div><div class="stds">${STANDARDS.map((s,i)=>`<div><span class="n">${String(i+1).padStart(2,"0")}</span><span>${H(s[0],s[1])}</span></div>`).join("")}</div></section>
+  <section class="panel">${secH("G")}<div class="sub">${H("项目经理分级","PM levels")}</div><div class="scroll">${ladderSVG()}</div>
+   <div class="sub">${H("6 个月课程（每两周 1 次培训 + 1 次检查，周二 3–4pm）","6-month curriculum (fortnightly, Tue 3–4pm)")}</div><div class="scroll">${currSVG()}</div>
+   <div class="sub">${H("新人第一个月","New-hire first month")}</div><div class="tpl4">${[["W1 读 SOP Map + 跟会","W1 read SOP + shadow"],["W2 跑一份 checklist","W2 run a checklist"],["W3 独立发小样 + 转意见","W3 send drafts + brief SZ"],["W4 带一个 Coordinator 级项目","W4 own a Coordinator-level job"]].map((x,i)=>`<div><span class="code">${i+1}</span><span>${H(x[0],x[1])}</span></div>`).join("")}</div></section>
+  <section class="panel">${secH("H",`<span class="tag" style="color:var(--warn)">${esc(L("建议","PROPOSED").join(" / "))}</span>`)}<div class="scroll">${pipelineSVG()}</div>
+   <div class="sub">${H("技术雷达","Tech radar")}</div><div class="radar">${TECH.map(t=>`<div><span class="st st-${t[3].toLowerCase()}">${esc(S.lang==="en"?t[3]:t[2])}</span><span>${H(t[0],t[1])}</span></div>`).join("")}</div>
+   <div class="sub">${H("素材库收集","Asset library")}</div><div class="tpl4">${[["3D 模型 ×5 组 / 月","3D models ×5 sets"],["后期素材 ×10 组","Post assets ×10 sets"],["开盘效果图 + 动画 ×5 组","Launch CGI + films ×5"],["新加坡新盘效果图（每 2 月）","SG launches (bi-monthly)"]].map((x,i)=>`<div><span class="code">${i+1}</span><span>${H(x[0],x[1])}</span></div>`).join("")}</div></section>
+  <section class="panel">${secH("I",`<span class="tag" style="color:var(--warn)">${esc(L("建议","PROPOSED").join(" / "))}</span><span class="note">${esc(L("右上角 = 建议负责人 · ▸ = 要产出的表单","Top right = suggested owner · ▸ = deliverable").join("  |  "))}</span>`)}<div class="scroll">${improveSVG()}</div>
+   <div class="sub">${H("每月看 3 个数","Three numbers to review monthly")}</div><div class="tpl4">${KPI.map((x,i)=>`<div><span class="code">${i+1}</span><span>${H(x[0],x[1])}</span></div>`).join("")}</div></section>`;
+}
+function bizPage(b){
+  const tot=b.phases.reduce((a,_,i)=>a+wk(b,i),0);const chk=S.chk[b.id]||{};
+  return `
+  <h1><span style="color:${b.c}">■</span> ${Hi(b.zh,b.en)}${b.draft?` <span class="tag" style="color:var(--warn)">${esc(L("草案","DRAFT").join(" / "))}</span>`:""}</h1>
+  ${b.sub?`<div class="subchips">${b.sub.map(s=>`<span>${Hi(s[0],s[1])}</span>`).join("")}</div>`:""}
+  ${b.refs?`<div class="note">${esc(L("参考项目","Based on").join(" / "))}: ${b.refs.join(" · ")}</div>`:""}
+  <section class="panel">${secH("B")}<div class="sub">${H("交接","Handover")}</div><div class="scroll">${bizHandover(b)}</div>
+   <div class="sub">${H("制作流程 + 闸门","Production flow + gates")}</div><div class="scroll">${flow(b)}</div></section>
+  <section class="panel">${secH("C")}
+   <div class="sub">${H("排期","Schedule")}</div>
+   <div class="controls">
+    <div class="seg" role="group" aria-label="size">${SIZE_LABEL.map((s,i)=>`<button data-size="${i}" aria-pressed="${sz(b)===i&&!S.ov[b.id]}">${esc(L(s[0]+"项目",s[1]).join(" "))} · ${fmtW(b.phases.reduce((a,p)=>a+p.w[i],0))}</button>`).join("")}</div>
+    <label for="sd-${b.id}">${esc(L("开始日期","Start").join(" / "))}</label><input type="date" id="sd-${b.id}" value="${S.start}">
+    <span class="total">${esc(L("合计","Total").join(" / "))} ${fmtW(tot)} → ${md(addDays(S.start,tot*7))}</span>
+    ${S.ov[b.id]?`<button class="btn" data-reset="1">${esc(L("恢复默认","Reset").join(" / "))}</button>`:""}
+   </div>
+   <div class="scroll">${gantt(b)}</div>
+   <div class="steppers">${b.phases.map((p,i)=>`<div class="stp"><span class="nm">P${i+1} ${esc(S.lang==="en"?p.en:p.zh)}</span><button data-step="${i}" data-d="-0.5" aria-label="minus">−</button><span class="v">${fmtW(wk(b,i))}</span><button data-step="${i}" data-d="0.5" aria-label="plus">+</button></div>`).join("")}</div>
+   <div class="legend"><span><svg width="14" height="14"><polygon points="7,1 13,7 7,13 1,7" fill="var(--ink)"/></svg>${esc(L("确认闸门","Gate").join(" / "))}</span><span><span class="code">E4</span>${esc(L("邮件节点（总览 F）","Email node (Overview F)").join(" / "))}</span>${b.phases.some(p=>p.weekly)?`<span><span class="code">W</span>${esc(L("每周进度","Weekly").join(" / "))}</span>`:""}</div>
+   <div class="sub">${H("每阶段准备","Stage prep")}</div><div class="scroll">${prepSVG(b)}</div>
+   <div class="sub">${H("资料清单","Info checklist")}<span class="note">${esc(L("完整版：PM file › Checklists_v1 · 勾选只保存在本浏览器","Full Word version in Checklists_v1 · ticks stay in this browser").join("  |  "))}</span></div>
+   <div class="cl">${b.checklist.map((g,gi)=>{const done=g.items.filter((_,ii)=>chk[gi+"-"+ii]).length;return `<div class="grp"><h4><span>${Hi(g.zh,g.en)}</span><span class="cnt">${done}/${g.items.length}</span></h4><div class="bar"><i style="width:${done/g.items.length*100}%;background:${b.c}"></i></div>
+     ${g.items.map((it,ii)=>`<label class="it" for="c-${b.id}-${gi}-${ii}"><input type="checkbox" id="c-${b.id}-${gi}-${ii}" data-chk="${gi}-${ii}" ${chk[gi+"-"+ii]?"checked":""}><span>${H(it[0],it[1])}</span></label>`).join("")}</div>`}).join("")}</div></section>
+  <section class="panel">${secH("D")}<div class="two"><div class="scroll">${milestoneOne(b)}</div><div class="watch">${b.watch.map(w=>`<div class="w">${warnIcon(b.c)}<span>${H(w[0],w[1])}</span></div>`).join("")}</div></div></section>`;
+}
+function milestoneOne(b){
+  const P=8,RH=S.lang==="bi"?48:36,width=420,h=P*2+b.phases.length*RH;let g=`<svg width="${width}" height="${h}" viewBox="0 0 ${width} ${h}" role="img" aria-label="Milestones">`;
+  g+=`<line x1="${P+14}" y1="${P+RH/2}" x2="${P+14}" y2="${h-P-RH/2}" stroke="${b.c}" stroke-width="2"/>`;
+  b.phases.forEach((p,i)=>{const y=P+i*RH;g+=diamond(P+14,y+RH/2,9,b.c);g+=`<text x="${P+32}" y="${y+RH/2-(S.lang==="bi"?4:-4)}" class="tm f-m" font-size="10">P${i+1}</text>`;
+    g+=txt(P+58,y+RH/2-(S.lang==="bi"?3:-4),L(p.gate[0],p.gate[1]),{fs:12.5,w:700,fs2:10,lh:14});
+    {const m=[...(p.ms||[]),...(p.me||[]),...(p.weekly?[p.weekly]:[])];m.forEach((c,j)=>g+=mailChip(width-P-(m.length-j)*28,y+RH/2-8,c))}});
+  return g+"</svg>";
+}
+
+/* ============ ROUTER ============ */
+function cur(){const h=location.hash.slice(1);return B.find(b=>b.id===h)?h:"overview"}
+function render(){
+  const id=cur();
+  document.querySelectorAll(".seg [data-lang]").forEach(x=>x.setAttribute("aria-pressed",x.dataset.lang===S.lang));
+  document.getElementById("tabs").innerHTML=`<a href="#overview" ${id==="overview"?'aria-current="page"':""}><span class="dot" style="background:var(--ink)"></span>${esc(L("总览","Overview").join(" "))}</a>`+B.map(b=>`<a href="#${b.id}" ${id===b.id?'aria-current="page"':""}><span class="dot" style="background:${b.c}"></span>${esc(S.lang==="en"?b.en:b.zh)}</a>`).join("");
+  const m=document.getElementById("main");m.innerHTML=id==="overview"?overview():bizPage(B.find(b=>b.id===id));
+}
+document.addEventListener("click",e=>{
+  const t=e.target.closest("button");if(!t)return;const b=B.find(x=>x.id===cur());
+  if(t.dataset.medit){EDIT={i:+t.dataset.medit};render();document.getElementById("m-zh")?.focus();return}
+  if(t.dataset.madd){const [d,sl]=t.dataset.madd.split("-").map(Number);EDIT={i:null,d,s:sl};render();document.getElementById("m-zh")?.focus();return}
+  if(t.dataset.msave||t.dataset.mdel||t.dataset.mcancel){
+    if(t.dataset.msave){const zh=document.getElementById("m-zh").value.trim(),en=document.getElementById("m-en").value.trim();if(!zh&&!en)return;const m={d:+document.getElementById("m-d").value,s:+document.getElementById("m-s").value,zh:zh||en,en};MEET=MEET.slice();if(EDIT.i!=null)MEET[EDIT.i]=m;else MEET.push(m);MPEND=null;saveMeet()}
+    else if(t.dataset.mdel){MEET=MEET.filter((_,i)=>i!==EDIT.i);MPEND=null;saveMeet()}
+    else if(MPEND){MEET=MPEND;MPEND=null}
+    EDIT=null;render();return}
+  if(t.dataset.jump){document.getElementById("sec-"+t.dataset.jump)?.scrollIntoView({behavior:"smooth",block:"start"});return}
+  if(t.dataset.lang){S.lang=t.dataset.lang;save();render();return}
+  if(t.dataset.copy){const s=MAIL[t.dataset.copy].tpl;const done=()=>{t.textContent="✓ Copied"};navigator.clipboard?.writeText(s).then(done).catch(()=>{const r=document.createRange();r.selectNodeContents(document.getElementById("tpl-"+t.dataset.copy));const sel=getSelection();sel.removeAllRanges();sel.addRange(r)});return}
+  if(!b)return;
+  if(t.dataset.size){S.size[b.id]=+t.dataset.size;delete S.ov[b.id];save();render();return}
+  if(t.dataset.reset){delete S.ov[b.id];save();render();return}
+  if(t.dataset.step){const i=+t.dataset.step;const o=S.ov[b.id]||(S.ov[b.id]={});o[i]=Math.max(0.5,Math.min(8,wk(b,i)+parseFloat(t.dataset.d)));save();render()}
+});
+document.addEventListener("change",e=>{const t=e.target;const b=B.find(x=>x.id===cur());
+  if(t.closest('.mform'))return;
+  if(t.type==="date"&&t.value){S.start=t.value;save();render();return}
+  if(t.dataset.chk&&b){const c=S.chk[b.id]||(S.chk[b.id]={});if(t.checked)c[t.dataset.chk]=1;else delete c[t.dataset.chk];save();render();document.getElementById(t.id)?.focus()}
+});
+addEventListener("hashchange",()=>{render();scrollTo(0,0)});
+render();
+</script>
+
+</body></html>
