@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>知识库在线预览 · 原型 v1</title>
+<style>
+:root{--bg:#f5f2ec;--line:#e6e0d6;--line2:#efebe4;--text:#1f2430;--text2:#6b6558;--navy:#15203a;--green:#2f7a5b;--amber:#b85c1e;--abg:#fdf1e6;--red:#b91c1c;--blue:#2c5aa0}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:13px/1.55 -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
+header{padding:12px 24px;background:#fff;border-bottom:1px solid var(--line)}header h1{margin:0;font-size:18px}.sub{color:var(--text2);font-size:12px}
+.content{padding:16px 24px 60px;max-width:1180px;margin:0 auto}
+.note{background:#fffaf2;border:1px dashed #d9a57a;border-radius:8px;padding:8px 12px;margin-bottom:12px;color:#7c3a10;font-size:12.5px}
+.card{background:#fff;border:1px solid var(--line);border-radius:12px;margin-bottom:14px}
+.bar{display:flex;gap:8px;align-items:center;padding:10px 16px;flex-wrap:wrap}
+.btn{border:1px solid var(--line);background:#fff;padding:5px 12px;border-radius:7px;cursor:pointer;font-size:12.5px;color:var(--text)}
+.btn:hover{background:#f6f3ee}.btn-navy{background:var(--navy);color:#fff;border-color:var(--navy)}
+.sp{flex:1}
+.new{background:#fff3e8;color:#c2410c;border-radius:4px;font-size:10.5px;padding:0 5px;font-weight:700;margin-left:4px}
+.tag{display:inline-block;padding:1px 8px;border-radius:10px;font-size:11.5px;background:#f1eee8;color:var(--text2)}
+.att{display:flex;align-items:center;gap:10px;padding:9px 16px;border-top:1px solid var(--line2)}
+.att .nm{color:var(--blue);cursor:pointer;font-weight:600}.att .nm:hover{text-decoration:underline}
+.ico{width:30px;height:36px;border-radius:4px;color:#fff;font-size:9.5px;font-weight:700;display:flex;align-items:flex-end;justify-content:center;padding-bottom:4px;flex-shrink:0}
+.i-pdf{background:#c0392b}.i-img{background:#2f7a5b}.i-doc{background:#2c5aa0}.i-xls{background:#1e7a45}.i-ppt{background:#c2410c}.i-zip{background:#8a8478}
+.st{font-size:11.5px;color:var(--text2)}.st.warn{color:var(--amber)}.st.bad{color:var(--red)}
+/* reader */
+.rd{position:fixed;inset:0;background:#2b2d33;z-index:50;display:none;flex-direction:column}
+.rd.on{display:flex}
+.rd-top{background:#1c1e23;color:#fff;display:flex;align-items:center;gap:10px;padding:8px 14px;flex-wrap:wrap}
+.rd-top .t{font-weight:600;max-width:42vw;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rb{background:#34373f;border:none;color:#fff;border-radius:6px;padding:5px 10px;cursor:pointer;font-size:12.5px}
+.rb:hover{background:#474b55}.rb[disabled]{opacity:.35;cursor:default}
+.rb.pri{background:#fff;color:#1c1e23;font-weight:600}
+.rd-body{flex:1;display:flex;min-height:0}
+.thumbs{width:132px;background:#23252b;overflow:auto;padding:10px;flex-shrink:0}
+.th{background:#fff;border-radius:3px;margin-bottom:10px;cursor:pointer;opacity:.6;border:2px solid transparent;position:relative;overflow:hidden}
+.th.on{opacity:1;border-color:#6aa3ff}.th span{position:absolute;bottom:2px;right:5px;font-size:10px;color:#666}
+.stage{flex:1;overflow:auto;padding:22px;text-align:center}
+.page{background:#fff;display:inline-block;box-shadow:0 4px 18px rgba(0,0,0,.4);margin-bottom:18px;text-align:left;position:relative;transform-origin:top center}
+.pgno{position:absolute;bottom:8px;right:14px;font-size:10px;color:#aaa}
+.demo{position:absolute;top:8px;right:12px;font-size:10px;color:#c2410c;border:1px solid #f0b37e;border-radius:4px;padding:0 5px;background:#fff7ef}
+.rd-foot{background:#1c1e23;color:#9aa0ab;font-size:11.5px;padding:5px 14px;display:flex;gap:14px;flex-wrap:wrap}
+.msg{color:#d5d8de;margin-top:18vh;font-size:14px;line-height:2}
+/* fake content */
+.org{padding:30px 34px}.org h2{margin:0 0 4px;font-size:20px}.box{border:1.5px solid #15203a;border-radius:6px;padding:6px 10px;text-align:center;font-size:12px;background:#fff;min-width:110px}
+.box b{display:block}.box.h{background:#15203a;color:#fff}.rowx{display:flex;justify-content:center;gap:18px;margin-top:22px;flex-wrap:wrap}
+.ln{width:1.5px;height:20px;background:#15203a;margin:0 auto}
+table.x{border-collapse:collapse;font-size:11.5px;margin:10px 0}table.x td,table.x th{border:1px solid #c9c9c9;padding:4px 10px}table.x th{background:#eef3ee}
+@media (max-width:800px){.thumbs{display:none}.content{padding:12px}.rd-top .t{max-width:60vw}}
+</style>
+</head>
+<body>
+<header><h1>知识库 · 在线预览 原型 v1</h1><span class="sub">2026-11-11 · JM:「整个知识库不要下载的效果,需要直接展示,可以在线浏览、预览」。选定:默认在线看 + 保留下载按钮;PDF / 图片 / Word / Excel / PPT 都能预览;点附件名弹出全屏阅读器</span></header>
+<div class="content">
+  <div class="note"><b>改动</b>:现在点附件名 = 直接下载文件。改成 <b>点附件名 = 弹出全屏阅读器在线看</b>(翻页、缩放、缩略图、上一个 / 下一个附件);下载变成旁边一个小按钮。Word / Excel / PPT 上传后由服务器自动转成 PDF 来预览,原文件不变。<br>下面是知识库文档页,<b>点任意附件名试试</b>(键盘 ← → 翻页,Esc 关闭)。预览里的内容是示意。</div>
+
+  <div class="card"><div class="bar"><button class="btn">← 返回</button><span class="sub">v1 · 最后修改 总监 PD 2026/11/10 12:41:00</span><span class="sp"></span><button class="btn">版本历史 (1)</button><button class="btn">⤓ Word</button><button class="btn">⤓ Markdown</button><button class="btn">⎙ 打印 / PDF</button><button class="btn btn-navy">✎ 编辑</button><button class="btn" style="color:var(--red)">✕ 删除</button></div></div>
+
+  <div class="card"><div style="padding:18px 20px 6px"><h2 style="margin:0 0 8px;font-size:22px">Audax - SZ 团队人员架构</h2><span class="tag">其他</span>
+    <p class="sub" style="margin:14px 0 6px">这篇还没有正文 —— 点右上角「编辑」开始写;或者直接点下面的附件在线阅读。</p></div>
+    <div class="bar" style="border-top:1px solid var(--line2);padding-bottom:8px"><b style="color:var(--text2);font-size:12.5px">附件 (<span id="cnt"></span>)</b><span class="sp"></span><button class="btn">＋ 添加附件</button></div>
+    <div id="atts"></div>
+  </div>
+
+  <div class="card" style="padding:12px 16px"><b>知识库列表页</b><span class="new">新</span>
+    <div class="sub" style="margin:4px 0 8px">文档行上,有附件的显示回形针和数量;「只有附件、没有正文」的文档,点标题直接打开阅读器看第一个附件(少点一步)。</div>
+    <div class="att" style="border:1px solid var(--line2);border-radius:8px"><span class="ico i-pdf">PDF</span><span class="nm" onclick="openR(0)">Audax - SZ 团队人员架构</span><span class="tag">其他</span><span class="sub">📎 7 · 只有附件</span><span class="sp"></span><span class="sub">总监 PD · 11-10</span></div>
+  </div>
+</div>
+
+<div class="rd" id="rd">
+  <div class="rd-top">
+    <button class="rb" onclick="closeR()" title="Esc">✕ 关闭</button>
+    <span class="t" id="rt"></span><span id="rconv" style="font-size:11.5px;color:#9aa0ab"></span>
+    <span class="sp"></span>
+    <button class="rb" id="pprev" onclick="pg(-1)">‹</button><span id="rpg" style="min-width:64px;text-align:center"></span><button class="rb" id="pnext" onclick="pg(1)">›</button>
+    <button class="rb" onclick="zm(-.15)">－</button><span id="rz" style="min-width:44px;text-align:center"></span><button class="rb" onclick="zm(.15)">＋</button><button class="rb" onclick="zoom=1;draw()">适应宽度</button>
+    <button class="rb" id="fprev" onclick="fl(-1)">上一个附件</button><button class="rb" id="fnext" onclick="fl(1)">下一个附件</button>
+    <button class="rb pri" onclick="toast('下载原文件:'+F[cur].nm)">⤓ 下载</button>
+  </div>
+  <div class="rd-body"><div class="thumbs" id="ths"></div><div class="stage" id="stage"></div></div>
+  <div class="rd-foot"><span id="rinfo"></span><span>← → 翻页 · Esc 关闭 · 手机上双指缩放</span></div>
+</div>
+<div id="toast" style="position:fixed;bottom:22px;left:50%;transform:translateX(-50%);background:#fff;color:#1c1e23;padding:8px 16px;border-radius:8px;z-index:60;opacity:0;transition:.3s;pointer-events:none;box-shadow:0 4px 14px rgba(0,0,0,.3)"></div>
+
+<script>
+const $=s=>document.querySelector(s);
+const toast=m=>{const t=$('#toast');t.textContent=m;t.style.opacity=1;clearTimeout(t._t);t._t=setTimeout(()=>t.style.opacity=0,1800)};
+const org=`<div class="org"><h2>Audax · SZ Team Structure</h2><div class="sub">深圳团队人员架构</div>
+ <div class="rowx"><div class="box h"><b>Production Director</b>总监</div></div><div class="ln"></div>
+ <div class="rowx"><div class="box"><b>CGI Lead</b>效果图组</div><div class="box"><b>Animation Lead</b>动画组</div><div class="box"><b>Model Lead</b>模型组</div><div class="box"><b>AV / LED</b>硬件组</div></div>
+ <div class="rowx"><div class="box">3D Artist × 4</div><div class="box">Animator × 3</div><div class="box">Model Maker × 6</div><div class="box">Engineer × 2</div></div></div>`;
+const txt=(h,n)=>`<div style="padding:34px 40px"><h2 style="margin:0 0 10px">${h}</h2>${Array.from({length:n},(_,i)=>`<p style="margin:0 0 9px;color:#333">${i+1}. 示例段落:岗位职责、汇报关系与交接流程说明。Sample paragraph describing responsibilities and the hand-over flow.</p>`).join('')}</div>`;
+const sheet=(nm)=>`<div style="padding:26px 30px"><b>${nm}</b><table class="x"><tr><th>Name</th><th>Role</th><th>Team</th><th>Since</th></tr>${['A','B','C','D','E','F'].map((x,i)=>`<tr><td>Staff ${x}</td><td>${['3D Artist','Animator','Model Maker'][i%3]}</td><td>SZ</td><td>20${20+i}</td></tr>`).join('')}</table></div>`;
+const slide=(t,c)=>`<div style="height:100%;background:${c};color:#fff;display:flex;flex-direction:column;justify-content:center;padding:0 60px"><div style="font-size:30px;font-weight:700">${t}</div><div style="opacity:.8;margin-top:8px">Audax Visuals · Onboarding</div></div>`;
+/* kind: pdf / img / office(转成 PDF 预览) / none;w,h = 页面比例 */
+const F=[
+ {nm:'Audax - SZ 团队人员架构.pdf',ic:'pdf',size:'109 KB',kind:'pdf',w:842,h:595,pages:[org,txt('岗位说明 Roles',7),txt('汇报关系 Reporting lines',5)]},
+ {nm:'办公室座位图.png',ic:'img',size:'412 KB',kind:'img',w:900,h:600,pages:[`<div style="height:100%;background:linear-gradient(135deg,#dfe7ef,#f3efe6);display:flex;align-items:center;justify-content:center;color:#55606e;font-size:20px">🖼 图片原样显示(示意)</div>`]},
+ {nm:'新人入职手册.docx',ic:'doc',size:'286 KB',kind:'office',w:595,h:842,pages:[txt('新人入职手册 Onboarding handbook',9),txt('第 2 章 · 工作流程',10),txt('第 3 章 · 文件命名规则',8),txt('附录',4)]},
+ {nm:'SZ 团队通讯录.xlsx',ic:'xls',size:'38 KB',kind:'office',w:842,h:595,pages:[sheet('Sheet1 · Staff list'),sheet('Sheet2 · Vendors')]},
+ {nm:'公司介绍 2026.pptx',ic:'ppt',size:'5.2 MB',kind:'office',w:960,h:540,pages:[slide('Audax Visuals','#15203a'),slide('Our services','#2c5aa0'),slide('Selected projects','#2f7a5b'),slide('Workflow','#6B4E9E'),slide('Thank you','#15203a')]},
+ {nm:'旧版报价模板.docx',ic:'doc',size:'96 KB',kind:'conv',w:595,h:842,pages:[]},
+ {nm:'模型素材包.zip',ic:'zip',size:'7.4 MB',kind:'none',w:595,h:842,pages:[]},
+];
+const LBL={pdf:'PDF',img:'IMG',doc:'DOC',xls:'XLS',ppt:'PPT',zip:'ZIP'};
+$('#cnt').textContent=F.length;
+$('#atts').innerHTML=F.map((f,i)=>`<div class="att"><span class="ico i-${f.ic}">${LBL[f.ic]}</span><span class="nm" onclick="openR(${i})">${f.nm}</span>
+ ${f.kind==='office'?'<span class="st">已转成预览</span>':f.kind==='conv'?'<span class="st warn">⏳ 正在生成预览…</span>':f.kind==='none'?'<span class="st">这种格式不能预览</span>':''}
+ <span class="sp"></span><span class="sub">${f.size}</span><button class="btn" onclick="openR(${i})" ${f.kind==='none'?'disabled style="opacity:.4"':''}>👁 预览</button><button class="btn" onclick="toast('下载原文件:${f.nm}')">⤓ 下载</button><button class="btn" style="color:var(--red)">✕</button></div>`).join('');
+let cur=0,page=0,zoom=1;
+function openR(i){cur=i;page=0;zoom=1;$('#rd').classList.add('on');draw()}
+function closeR(){$('#rd').classList.remove('on')}
+function pg(d){const n=F[cur].pages.length;page=Math.max(0,Math.min(n-1,page+d));draw();const el=document.getElementById('p'+page);if(el)el.scrollIntoView({behavior:'smooth',block:'start'})}
+function zm(d){zoom=Math.max(.4,Math.min(2.5,+(zoom+d).toFixed(2)));draw()}
+function fl(d){let i=cur+d;if(i<0||i>=F.length)return;openR(i)}
+function draw(){
+  const f=F[cur],n=f.pages.length,st=$('#stage');
+  $('#rt').textContent=f.nm;
+  $('#rconv').textContent=f.kind==='office'?'· 由 '+f.nm.split('.').pop().toUpperCase()+' 转成 PDF 预览,下载的是原文件':'';
+  $('#rpg').textContent=n?`${page+1} / ${n}`:'—';$('#rz').textContent=Math.round(zoom*100)+'%';
+  $('#pprev').disabled=page<=0;$('#pnext').disabled=page>=n-1;$('#fprev').disabled=cur<=0;$('#fnext').disabled=cur>=F.length-1;
+  $('#rinfo').textContent=`${f.size} · 附件 ${cur+1} / ${F.length}`;
+  if(f.kind==='none'){st.innerHTML=`<div class="msg">这种格式(.${f.nm.split('.').pop()})不能在线预览。<br><button class="rb pri" onclick="toast('下载原文件')">⤓ 下载文件</button></div>`;$('#ths').innerHTML='';return}
+  if(f.kind==='conv'){st.innerHTML=`<div class="msg">⏳ 正在生成预览(一般 10 – 30 秒)…<br><span style="font-size:12px;color:#9aa0ab">生成好会自动显示;等不及可以先下载原文件。转换失败时这里会写「预览生成失败」并提供「重试」。</span><br><button class="rb" onclick="toast('重新生成预览')">重试</button> <button class="rb pri" onclick="toast('下载原文件')">⤓ 下载文件</button></div>`;$('#ths').innerHTML='';return}
+  const avail=Math.min(st.clientWidth-44,1100), base=Math.min(avail/f.w,1.25), s=base*zoom;
+  st.innerHTML=f.pages.map((p,i)=>`<div><div class="page" id="p${i}" style="width:${f.w*s}px;height:${f.h*s}px"><div style="width:${f.w}px;height:${f.h}px;transform:scale(${s});transform-origin:top left;position:relative">${p}<span class="demo">示意内容</span><span class="pgno">${i+1}</span></div></div></div>`).join('');
+  $('#ths').innerHTML=n>1?f.pages.map((p,i)=>{const ts=108/f.w;return `<div class="th ${i===page?'on':''}" style="height:${f.h*ts}px" onclick="page=${i};draw();document.getElementById('p${i}').scrollIntoView({block:'start'})"><div style="width:${f.w}px;height:${f.h}px;transform:scale(${ts});transform-origin:top left">${p}</div><span>${i+1}</span></div>`}).join(''):'';
+}
+document.addEventListener('keydown',e=>{if(!$('#rd').classList.contains('on'))return;if(e.key==='Escape')closeR();if(e.key==='ArrowRight')pg(1);if(e.key==='ArrowLeft')pg(-1)});
+window.addEventListener('resize',()=>{if($('#rd').classList.contains('on'))draw()});
+</script>
+</body>
+</html>
