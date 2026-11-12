@@ -6,6 +6,7 @@
    Viewer   — read-only */
 
 import type { Project, Role, ScheduleRow, User } from './types';
+import type { Revision } from './revisions';
 import { ROLE_TERMS } from './terms';
 import { permAllows, type PermModule } from './permTable';
 import { isApproach, isClosedApproach } from './approach';
@@ -98,6 +99,18 @@ export const canRowEdit = (u: Identity, p: Project, row?: ScheduleRow) =>
   && (canEdit(u, p) || (u.role === 'member' && !!row && row.assignee === u.name));
 
 export const canDecide = (u: Identity) => isFull(u);
+
+/* ===== REQ-063:项目修改记录 =====
+   看:能看这个项目的人都能看。记一轮:PD / BD、项目负责 PM。
+   改 / 删:PD / BD 任何一轮;负责 PM 只能改自己记的、而且收费状态还是「免费 / 待 Sales 报价」(内部的没有收费状态,随时可改)。
+   已出报价 / 客户已确认:Sales、PD / BD。免收:只有 PD / BD(要写原因)。
+   REQ-057 进了开票 / 收尾,PM 端只读(pmLocked);REQ-051 走「项目列表」模块的编辑权限。 */
+export const canRecordRev = (u: Identity, p: Project) => !isClosedApproach(p) && !pmLocked(u, p)
+  && (isFull(u) || (p.owners || []).includes(u.name)) && canEditModule(u, 'projects');
+export const canEditRev = (u: Identity, p: Project, r: Pick<Revision, 'by' | 'fee'>) => canRecordRev(u, p)
+  && (isFull(u) || (r.by === u.name && (!r.fee || r.fee === 'free' || r.fee === 'due')));
+export const canQuoteRev = (u: Identity, p?: Project) => (isFull(u) || u.role === 'sales') && canEditModule(u, 'projects') && !(p && isClosedApproach(p));
+export const canWaiveRev = (u: Identity, p?: Project) => isFull(u) && !(p && isClosedApproach(p));
 
 export const canCreate = (u: Identity) => (isFull(u) || u.role === 'sales') && canEditModule(u, 'projects');
 

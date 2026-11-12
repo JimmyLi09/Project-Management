@@ -23,6 +23,9 @@ import { bizOfSvc } from '@/lib/bizMap';
 import { grade, type QuizQuestion } from '@/lib/training';
 import { clean as cleanLegacy } from './training';
 import { isApproach } from '@/lib/approach';
+import { recentQuarterPoints } from '@/lib/kpi';
+import { localDay } from '@/lib/localDate';
+import { pointRulesFor } from './kpiRules';
 import type { Project, User } from '@/lib/types';
 
 export class TrainError extends Error { constructor(msg: string, public status = 400) { super(msg); } }
@@ -86,6 +89,10 @@ export function bundle(user: Pick<User, 'name' | 'role'>, now = Date.now()) {
   const visible = new Set(visibleNames(me, people));
   const projects = listProjects();
   const view = (n: string) => viewOf(d, n, now, cfg);
+  /* REQ-063:季度项目分值要积分规则,用到才读一次 */
+  const today = localDay(new Date(now));
+  let ptsCache: ReturnType<typeof pointRulesFor> | null = null;
+  const ptsFor = () => (ptsCache ||= pointRulesFor());
   const meRow = users.find((u) => u.name === me.name);
   const myView = view(me.name);
   const mine = myView.stages.length ? myView : null;
@@ -137,7 +144,12 @@ export function bundle(user: Pick<User, 'name' | 'role'>, now = Date.now()) {
       levels: lv, selected: v.selected, noviceDone: v.noviceDone, assistCount: v.assistCount, independentCount: v.independentCount,
       overdueDays: Math.max(0, ...v.stages.map((s) => s.overdueDays)),
       teachHint: TRAIN_BIZ_KEYS.filter((b) => lv[b] === INDEPENDENT && (lc[u.name]?.[b] || 0) >= 3),
-      promo: promo ? { id: promo.id, from: promo.from, to: promo.to, items: promoChecklist(promo, { levels: lv, menteesDone, manual: Object.fromEntries(Object.entries(promoChecks(d, u.name)).filter(([k]) => k.startsWith(`${promo.id}.`)).map(([k, x]) => [k.slice(promo.id.length + 1), x])) }) } : null,
+      /* REQ-063:晋级条件里的「连续 N 个季度项目分值」用 KPI 的季度积分(最近 N 个已结束的季度,现算不落库) */
+      promo: promo ? { id: promo.id, from: promo.from, to: promo.to, items: promoChecklist(promo, {
+        levels: lv, menteesDone,
+        manual: Object.fromEntries(Object.entries(promoChecks(d, u.name)).filter(([k]) => k.startsWith(`${promo.id}.`)).map(([k, x]) => [k.slice(promo.id.length + 1), x])),
+        quarters: promo.kpi ? recentQuarterPoints(projects, u.name, promo.kpi.quarters, today, ptsFor()) : undefined,
+      }) } : null,
     };
   }) : null;
   const log = matrix ? skillLog(d).filter((r) => visible.has(r.user)).slice(0, 1000) : [];

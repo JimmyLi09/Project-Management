@@ -83,7 +83,7 @@ const PAGE_META: Record<string, { title: [string, string]; sub: [string, string]
   users: { title: ['用户与权限', 'Users & permissions'], sub: ['账号、角色与访问权限 · 只有 PD / BD 可以修改', 'Accounts, roles and access · PD / BD only'] },
   knowledge: { title: ['运营中心 · 知识库', 'Knowledge Base'], sub: ['公司制度 / SOP / 培训资料 —— 可编辑、留版本、可导入导出', 'Company policies, SOPs and training material — versioned, importable and exportable'] },
   training: { title: ['新人培训', 'Training'], sub: ['分阶段过关 · 带教人评估 · 能力矩阵(教材来自知识库)', 'Staged induction · mentor assessments · competency matrix — material lives in the knowledge base'] },
-  kpi: { title: ['KPI 看板', 'KPI Board'], sub: ['四维加权 · 数据全部来自平台已有机制,可点开看每一分怎么来的', 'Four weighted dimensions, all computed from existing data — click through to see how each score is derived'] },
+  kpi: { title: ['KPI 看板', 'KPI Board'], sub: ['每月看 3 个数 · PM 级别与季度项目分值 · 多维加权,可点开看每一分怎么来的', 'Three monthly numbers · PM levels and quarterly project scores · weighted dimensions — click through to see how each score is derived'] },
   rules: { title: ['规则设置', 'Rules'], sub: ['积分规则:按业务分档、可改、留版本(来源《项目积分算法》)', 'Points rules: tiers per service, editable, versioned'] },
   templates: { title: ['模板管理', 'Templates'], sub: ['编辑生产排期与信息清单模板(仅影响之后新建的项目)', 'Edit schedule & checklist templates (affects new projects only)'] },
 };

@@ -71,6 +71,11 @@ const AP_FIELD: Record<string, [string, string]> = {
 };
 const JOB_FMT: Record<string, [string, string]> = { hw: ['硬件 · 登记表', 'hardware · register'], sw: ['软件 · 4 栏', 'software · 4 columns'] };
 
+/* REQ-063 修改记录的收费状态 */
+const REV_FEE: Record<string, [string, string]> = {
+  free: ['免费', 'free'], due: ['应收费 · 待 Sales 报价', 'chargeable · awaiting Sales quote'],
+  quoted: ['已出 revised quotation', 'revised quotation sent'], confirmed: ['客户已确认收费', 'client confirmed the charge'], waived: ['PD 批准免收', 'waived by PD'],
+};
 const enumTerm = (map: Record<string, [string, string]>, v: string, lang: Lang) =>
   (map[v] ? map[v][lang === 'zh' ? 0 : 1] : v);
 
@@ -123,6 +128,7 @@ const TRANSLATED: Record<string, (v: string, lang: Lang) => string> = {
   mod: (v, l) => { const m = PERM_MODULES.find((x) => x.key === v); return m ? (l === 'zh' ? m.zh : m.en) : v; },
   lvFrom: (v, l) => enumTerm(PERM_LEVEL, v, l),
   lvTo: (v, l) => enumTerm(PERM_LEVEL, v, l),
+  revFee: (v, l) => enumTerm(REV_FEE, v, l),   // REQ-063
 };
 
 /* ---- 词条表 ---- */
@@ -322,6 +328,15 @@ export const LOG_MSG: Record<string, [string, string]> = {
     'Past case "{screen}": {cf} {fv} → {tv}, and {more} more (synced from another screen of the project)'],
 
   /* 风险 */
+  /* REQ-063 修改记录 */
+  'rev.add': ['{svc} 记第 {n} 轮客户修改({revFee})', '{svc}: recorded client revision round {n} ({revFee})'],
+  'rev.addInternal': ['{svc} 记一条内部修改(不算轮次)', '{svc}: recorded an internal revision (not a round)'],
+  'rev.edit': ['{svc} 改了第 {n} 轮客户修改', '{svc}: edited client revision round {n}'],
+  'rev.editInternal': ['{svc} 改了一条内部修改', '{svc}: edited an internal revision'],
+  'rev.remove': ['{svc} 删除第 {n} 轮客户修改:{note}(后面的轮次前移)', '{svc}: deleted client revision round {n}: {note} (later rounds renumbered)'],
+  'rev.removeInternal': ['{svc} 删除一条内部修改:{note}', '{svc}: deleted an internal revision: {note}'],
+  'rev.fee': ['{svc} 第 {n} 轮修改:{revFee}', '{svc} revision round {n}: {revFee}'],
+  'rev.meeting': ['{svc} 修改已 {n} 轮,已开原因会', '{svc}: {n} revision rounds — review meeting held'],
   'risk.dismiss': ['标记风险已处理:{key}', 'Risk dismissed: {key}'],
   'risk.restore': ['恢复风险:{key}', 'Risk restored: {key}'],
 

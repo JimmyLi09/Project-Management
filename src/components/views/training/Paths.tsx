@@ -312,7 +312,7 @@ function PromoCard({ b, admin, save }: { b: Bundle; admin: boolean; save: (part:
           {(p.kpi || edit) && (
             <div style={{ marginTop: 4 }}>· {t('季度项目分值', 'Quarterly project score')} ≥ {edit
               ? <><input className="in sm" type="number" style={{ width: 60 }} value={p.kpi?.min ?? ''} onChange={(e) => up(i, { ...p, kpi: e.target.value === '' ? null : { min: Number(e.target.value), quarters: p.kpi?.quarters || 2 } })} /> × <input className="in sm" type="number" style={{ width: 50 }} value={p.kpi?.quarters ?? 2} onChange={(e) => up(i, { ...p, kpi: { min: p.kpi?.min ?? 60, quarters: Number(e.target.value) || 2 } })} /> {t('个季度', 'quarters')}</>
-              : <>{p.kpi?.min} · {t(`连续 ${p.kpi?.quarters} 个季度(REQ-063 上线前显示「待 KPI 接入」)`, `${p.kpi?.quarters} quarters in a row (shows “waiting for KPI” until REQ-063)`)}</>}
+              : <>{p.kpi?.min} · {t(`连续 ${p.kpi?.quarters} 个季度(KPI 看板的季度项目分值,看最近已结束的季度)`, `${p.kpi?.quarters} quarters in a row (KPI board quarterly project score, latest finished quarters)`)}</>}
             </div>
           )}
           {p.manual.map((m, j) => (

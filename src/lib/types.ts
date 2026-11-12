@@ -1,5 +1,7 @@
 /* ===== Shared domain types (mirrors validated prototype v9 data model) ===== */
 
+import type { ReasonMeeting, Revision } from './revisions';
+
 export type Role = 'director' | 'bd' | 'sales' | 'pm' | 'member' | 'viewer' | 'finance';
 
 /* ===== Post-sales workflow (v2.2 Version 1A) ===== */
@@ -297,6 +299,9 @@ export interface ServicePackage {
      rowsFromCal = 原来只在日历上排、阶段行还是模板原样,用日历重写了阶段行(原行在 prevRows);
      conflict = 两边都有内容,以阶段行为准重建日历,原日历在 prevCalendar(也进了存档) */
   mig048?: { at: number; kind: 'fromRows' | 'rowsFromCal' | 'conflict'; calVersion?: number; prevRows?: ScheduleRow[]; prevCalendar?: CalendarSchedule };
+  /* REQ-063:修改记录(客户 / 内部,一轮一条)和「已开原因会」。老数据没有,按空处理(lib/revisions.ts) */
+  revisions?: Revision[];
+  reasonMeeting?: ReasonMeeting;
 }
 
 /* business record attached to a service package (Job Record / Project Registers).

@@ -6,7 +6,9 @@ import type { Identity } from '@/lib/permissions';
 import type { GateCtx } from './assignGate';
 import { canRemovePkg, PKG_LAST_MSG, PKG_STARTED_MSG } from '@/lib/pkgRemove';
 import {
-  canAssign, canCommercial, canDecide, canEdit, canEditFinance, canEditModule, canRowEdit, isFull, canMeta, canMarkInvoice, pmLocked } from '@/lib/permissions';
+  canAssign, canCommercial, canDecide, canEdit, canEditFinance, canEditModule, canRowEdit, isFull, canMeta, canMarkInvoice, pmLocked,
+  canEditRev, canQuoteRev, canRecordRev, canWaiveRev } from '@/lib/permissions';
+import { DEFAULT_REV_RULES, SETTLED, clientRounds, recompute, revsOf, roundMap, type RevRules, type RevSrc } from '@/lib/revisions';
 import { PM_CLOSED_MSG } from '@/lib/closeout';
 import { ACTION_MODULE, PERM_MODULES, type PermModule } from '@/lib/permTable';
 import { buildPackage, deriveStatuses, fitWindow, newId, parseISO, isoDate, totalDays } from '@/lib/project';
@@ -37,6 +39,8 @@ export interface ActionCtx {
   gate?: GateCtx;
   /* 只提醒、不拦的话放这里,接口原样带回页面 */
   warns?: string[];
+  /* REQ-063:修改记录的轮次规则(今天生效的 KPI 规则里那份)。不传用出厂值 */
+  rev?: RevRules;
 }
 
 export type ProjectAction =
@@ -117,6 +121,12 @@ export type ProjectAction =
   | { type: 'removeScopeItem'; pkg: number; idx: number }
   | { type: 'setArchived'; value: boolean }
   | { type: 'dismissRisk'; key: string }
+  /* REQ-063 修改记录 */
+  | { type: 'addRevision'; pkg: number; src: RevSrc; date: string; note: string }
+  | { type: 'editRevision'; pkg: number; id: string; src?: RevSrc; date?: string; note?: string }
+  | { type: 'deleteRevision'; pkg: number; id: string }
+  | { type: 'setRevFee'; pkg: number; id: string; fee: 'quoted' | 'confirmed' | 'waived'; reason?: string }
+  | { type: 'reasonMeeting'; pkg: number; note: string }
   | { type: 'restoreRisk'; key: string }
   | { type: 'editUpdate'; field: 'done' | 'nextNodes' | 'risks' | 'needDirector' | 'clientPending' | 'budget'; value: string }
   | { type: 'setDecision'; field: 'dDecision' | 'dStatus'; value: string }
@@ -279,6 +289,35 @@ function gateOwnerIn(ctx: ActionCtx, p: Project, name: string) {
   if (r.warns.length) (ctx.warns ||= []).push(...r.warns);
   p.capCheckAt = Date.now();   // 上线后有过新指派:之后在项目上提醒「某业务还没有到可协助的负责 PM」
 }
+
+/* ---- REQ-063 修改记录 ---- */
+const MAX_REVS = 300;
+function revPkg(p: Project, pkg: unknown) {
+  const pk = typeof pkg === 'number' ? p.packages[pkg] : undefined;
+  if (!pk) throw new ValidationError('无效的服务包 / Invalid service package');
+  return pk;
+}
+function getRev(p: Project, pkg: unknown, id: unknown) {
+  const pk = revPkg(p, pkg);
+  const r = revsOf(pk).find((x) => x.id === id);
+  if (!r) throw new ValidationError('找不到这一轮修改(可能刚被别人删了),请刷新 / Revision not found — refresh the page');
+  return { pk, r };
+}
+const revSrcOf = (v: unknown): RevSrc => {
+  if (v === 'client' || v === 'internal') return v;
+  throw new ValidationError('来源只能是「客户」或「内部」 / Source must be client or internal');
+};
+const revDateOf = (v: unknown): string => {
+  const s = String(v ?? '').trim();
+  if (!validDay(s)) throw new ValidationError('日期格式不对(要 YYYY-MM-DD) / Date must be YYYY-MM-DD');
+  return s;
+};
+const revTextOf = (v: unknown, what: [string, string], max: number): string => {
+  const s = String(v ?? '').trim();
+  if (!s) throw new ValidationError(`${what[0]}不能为空 / ${what[1]} is required`);
+  return s.slice(0, max);
+};
+const REV_DENY = '只有 PD / BD 和项目负责 PM 能记修改 / Only PD / BD and the project PM can record revisions';
 
 /* REQ-051:权限表里这个模块的编辑权限 */
 function needModule(u: Identity, mod: PermModule) {
@@ -1528,6 +1567,83 @@ export function applyAction(u: Identity, p: Project, a: ProjectAction, ctx: Acti
       if (p.archived) { p.archivedAt = Date.now(); p.archivedBy = u.name; p.archiveReason = 'manual'; }
       else { delete p.archivedAt; delete p.archivedBy; delete p.archiveReason; }
       logIt(p, u.name, p.archived ? 'proj.archive' : 'proj.unarchive');
+      break;
+    }
+    /* ===== REQ-063 修改记录 =====
+       记 / 改 / 删之后按规则重排收费状态(只动免费 / 待报价的;已出报价 / 已确认 / 免收的不动)。
+       不碰完工审批、Variation、报价、Finance 的任何字段。 */
+    case 'addRevision': {
+      const pk = revPkg(p, a.pkg);
+      if (!canRecordRev(u, p)) throw new PermissionError(REV_DENY);
+      if (revsOf(pk).length >= MAX_REVS) throw new ValidationError(`一个服务包最多记 ${MAX_REVS} 条 / At most ${MAX_REVS} entries per service`);
+      const now = Date.now();
+      const r = { id: newId(), src: revSrcOf(a.src), date: revDateOf(a.date), note: revTextOf(a.note, ['修改内容', 'What changed'], 2000), by: u.name, at: now };
+      pk.revisions = [...revsOf(pk), r];
+      recompute(pk, ctx.rev || DEFAULT_REV_RULES, now);
+      const saved = pk.revisions[pk.revisions.length - 1];
+      logIt(p, u.name, r.src === 'client' ? 'rev.add' : 'rev.addInternal', { svc: pk.svc, n: roundMap(pk).get(r.id) ?? '', revFee: saved.fee || '' });
+      break;
+    }
+    case 'editRevision': {
+      const { pk, r } = getRev(p, a.pkg, a.id);
+      if (!canEditRev(u, p, r)) throw new PermissionError(canRecordRev(u, p)
+        ? '只能改自己记的、还没出报价的那一轮 / You can only edit your own entries that are not yet quoted'
+        : REV_DENY);
+      /* 先全部校验,再一起改 */
+      const src = a.src !== undefined ? revSrcOf(a.src) : r.src;
+      if (src !== r.src && r.fee && SETTLED.includes(r.fee)) throw new ValidationError('已出报价 / 已确认 / 免收的轮不能改来源 / A quoted, confirmed or waived round cannot change source');
+      const date = a.date !== undefined ? revDateOf(a.date) : r.date;
+      const note = a.note !== undefined ? revTextOf(a.note, ['修改内容', 'What changed'], 2000) : r.note;
+      r.src = src; r.date = date; r.note = note;
+      r.editedBy = u.name; r.editedAt = Date.now();
+      recompute(pk, ctx.rev || DEFAULT_REV_RULES, r.editedAt);
+      const n = roundMap(pk).get(r.id);
+      logIt(p, u.name, n ? 'rev.edit' : 'rev.editInternal', { svc: pk.svc, n: n ?? '' });
+      break;
+    }
+    case 'deleteRevision': {
+      const { pk, r } = getRev(p, a.pkg, a.id);
+      if (!canEditRev(u, p, r)) throw new PermissionError(canRecordRev(u, p)
+        ? '只能删自己记的、还没出报价的那一轮 / You can only delete your own entries that are not yet quoted'
+        : REV_DENY);
+      const n = roundMap(pk).get(r.id);
+      pk.revisions = revsOf(pk).filter((x) => x.id !== r.id);
+      recompute(pk, ctx.rev || DEFAULT_REV_RULES, Date.now());   // 后面的轮次自动前移,收费状态按新轮次重算
+      logIt(p, u.name, n ? 'rev.remove' : 'rev.removeInternal', { svc: pk.svc, n: n ?? '', note: r.note.slice(0, 60) });
+      break;
+    }
+    case 'setRevFee': {
+      const { pk, r } = getRev(p, a.pkg, a.id);
+      if (r.src !== 'client' || !r.fee || r.fee === 'free') throw new ValidationError('这一轮不收费 / This round is not chargeable');
+      const now = Date.now();
+      if (a.fee === 'quoted' || a.fee === 'confirmed') {
+        if (!canQuoteRev(u, p)) throw new PermissionError('只有 Sales、PD / BD 能改报价状态 / Only Sales and PD / BD can update the quote status');
+        if (a.fee === 'quoted') {
+          if (r.fee !== 'due') throw new ValidationError('只有「待 Sales 报价」的轮能标「已出报价」 / Only a round awaiting a quote can be marked quoted');
+          r.fee = 'quoted'; r.quotedAt = now; r.quotedBy = u.name;
+        } else {
+          if (r.fee !== 'quoted') throw new ValidationError('先标「已出报价」,客户确认后再点「客户已确认」 / Mark it quoted first');
+          r.fee = 'confirmed'; r.confirmedAt = now; r.confirmedBy = u.name;
+        }
+      } else if (a.fee === 'waived') {
+        if (!canWaiveRev(u, p)) throw new PermissionError('只有 PD / BD 能批准免收 / Only PD / BD can waive a charge');
+        if (r.fee === 'waived') throw new ValidationError('这一轮已经免收了 / Already waived');
+        const why = revTextOf(a.reason, ['免收原因', 'Reason for waiving'], 500);   // 先校验,再改
+        r.fee = 'waived'; r.waivedAt = now; r.waivedBy = u.name; r.waiveReason = why;
+      } else throw new ValidationError('无效的收费状态 / Invalid status');
+      delete r.dueAt;
+      logIt(p, u.name, 'rev.fee', { svc: pk.svc, n: roundMap(pk).get(r.id) ?? '', revFee: r.fee });
+      break;
+    }
+    case 'reasonMeeting': {
+      const pk = revPkg(p, a.pkg);
+      if (!canRecordRev(u, p)) throw new PermissionError('只有 PD / BD 和项目负责 PM 能登记原因会 / Only PD / BD and the project PM can log the review meeting');
+      if (pk.reasonMeeting) throw new ValidationError('这个服务包已经登记过原因会了 / Already logged for this service');
+      const rules = ctx.rev || DEFAULT_REV_RULES;
+      const n = clientRounds(pk);
+      if (n < rules.reasonAt) throw new ValidationError(`客户修改还没到 ${rules.reasonAt} 轮 / Fewer than ${rules.reasonAt} client rounds`);
+      pk.reasonMeeting = { at: Date.now(), by: u.name, note: revTextOf(a.note, ['原因会结论', 'Meeting conclusion'], 500), rounds: n };
+      logIt(p, u.name, 'rev.meeting', { svc: pk.svc, n });
       break;
     }
     case 'dismissRisk': {
