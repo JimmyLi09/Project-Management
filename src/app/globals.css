@@ -1,5 +1,6 @@
 /* ===== Audax Project Platform — global styles (from Audax Platform design file) ===== */
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;700&display=swap');
+/* 字体(Inter、Noto Sans SC)改成本地打包:在 app/layout.tsx 里从 @fontsource 引入,服务器自己出字体文件,
+   不再连 fonts.googleapis.com(局域网里连不上外网时也是同一套字体)。 */
 
 :root {
   --navy900: #0B2341;

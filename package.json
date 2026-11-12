@@ -11,6 +11,8 @@
     "led:drawing": "node --import ./scripts/ts-register.mjs scripts/led-drawing.ts"
   },
   "dependencies": {
+    "@fontsource/inter": "5.3.0",
+    "@fontsource/noto-sans-sc": "5.3.1",
     "better-sqlite3": "^11.10.0",
     "exceljs": "4.4.0",
     "next": "^15.3.4",
