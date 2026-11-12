@@ -2,10 +2,11 @@ import { NextRequest, NextResponse } from 'next/server';
 import { currentUser } from '@/server/session';
 import { canDeleteKb, canEditKbDoc, identityOf } from '@/lib/permissions';
 import { oneDoc, oneDocWithPreviews, saveDoc, versionsOf } from '@/server/kb';
-import { deleteKbDoc } from '@/server/db';
+import { deleteKbDoc, getDb } from '@/server/db';
+import { markRead } from '@/server/trainStore';
 import { resumePending } from '@/server/kbPreview';
 
-/* GET 单篇(带版本历史、附件预览状态) / PUT 保存(版本 +1) / DELETE 删除(仅总监 / BD)。
+/* GET 单篇(带版本历史、附件预览状态;REQ-062 顺带记「打开过」) / PUT 保存(版本 +1) / DELETE 删除(仅总监 / BD)。
    REQ-061:PM 只能改自己建的文档(含归类);首页流程地图那一篇不能删。 */
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const user = await currentUser();
@@ -14,6 +15,8 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   resumePending();
   const doc = oneDocWithPreviews(id);
   if (!doc) return NextResponse.json({ error: '文档不存在' }, { status: 404 });
+  /* REQ-062:记下「谁打开过这篇」—— 培训的板块阅读要文档都打开过才能勾 */
+  try { markRead(getDb(), user.name, id, Date.now()); } catch { /* 记不上不影响看文档 */ }
   return NextResponse.json({ doc, versions: versionsOf(id) });
 }
 

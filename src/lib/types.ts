@@ -397,6 +397,13 @@ export interface Project {
      可选 —— 老项目没有这个字段,读出来是 undefined,不迁移。 */
   engineer?: string;
   perm: string[]; // extra names with production edit permission
+  /* REQ-062:跟项目 / 协助成员(新人实战)。不算负责 PM,不计 KPI / 积分。
+     shadow = 只读;assist = 和编辑授权(perm)一样能改。 */
+  trainees?: { name: string; mode: 'shadow' | 'assist'; at?: number; by?: string }[];
+  /* REQ-062:上线后有过新指派 / 改派负责 PM 的时间 —— 只对这些项目提醒「某业务还没有到可协助的负责 PM」(不追溯) */
+  capCheckAt?: number;
+  /* 服务端读项目列表时现算的(不存库):哪些业务还没有到「可协助」的负责 PM */
+  capGaps?: string[];
   start: string;
   delivery: string;
   buffer: number;

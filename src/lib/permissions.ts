@@ -34,7 +34,8 @@ export const isFull = (u: Identity) => u.role === 'director' || u.role === 'bd';
    老项目没有 engineer 字段,这一条对它们恒为假,行为一个字没变。 */
 export const canEdit = (u: Identity, p: Project) => !isClosedApproach(p) &&   // REQ-054:已关闭的售前记录只读
   !pmLocked(u, p) &&                                                              // REQ-057:进了开票 / 收尾,PM / Engineer 只读
-  (isFull(u) || (p.owners || []).includes(u.name) || (p.perm || []).includes(u.name) || p.engineer === u.name);
+  (isFull(u) || (p.owners || []).includes(u.name) || (p.perm || []).includes(u.name) || p.engineer === u.name
+    || (p.trainees || []).some((t) => t.name === u.name && t.mode === 'assist'));   // REQ-062:协助成员和编辑授权一样能改
 
 export const canCommercial = (u: Identity, _p?: Project) => isFull(u) || u.role === 'sales';
 
@@ -63,6 +64,7 @@ export const isOnProject = (u: Identity, p: Project) =>
   (p.owners || []).includes(u.name)
   || p.engineer === u.name
   || (p.perm || []).includes(u.name)
+  || (p.trainees || []).some((t) => t.name === u.name)   // REQ-062:跟项目(只读)/ 协助成员
   || (p.packages || []).some((pk) => (pk.schedule || []).some((r) => r.assignee === u.name));
 
 /* REQ-054:售前记录(还没转正式的)只给看得到「AV 方案成本」模块的人;REQ-043 的范围照旧 ——
@@ -221,11 +223,14 @@ export const canRevertKb = (u: Identity) => isFull(u);
 export const canUpdateKbMap = (u: Identity) => isFull(u);
 export const canManageKbPreviews = (u: Identity) => isFull(u);   // 「生成全部预览」、失败重试
 
-/* REQ-036: 新人培训 —— 路径与题库由 总监 / BD / PM 维护;
-   学员进度所有人都能看自己的,管理视图另判。
-   REQ-061 起和知识库的编辑权限拆开(以前直接等于 canEditKb),口径不变,REQ-062 再定。 */
-export const canEditTraining = (u: Identity) => isFull(u) || u.role === 'pm';
-export const canSeeAllTraining = (u: Identity) => isFull(u) || u.role === 'pm';
+/* REQ-036: 新人培训 —— 学员进度所有人都能看自己的,管理视图另判。
+   REQ-062 起统一按新规则(JM 1112 确认):建 / 改 / 删路径只有 PD / BD;
+   题库(老路径的考核题)由 PD / BD 和能当带教人的(Senior PM / PM Director)维护 —— 见 canEditQuizOnly;
+   看全部人的进度只有 PD / BD,带教人看自己带的人(接口里另判)。 */
+export const canEditTraining = (u: Identity) => isFull(u);
+export const canSeeAllTraining = (u: Identity) => isFull(u);
+/* 只改题目(不动标题、步骤、指派、及格线):能当带教人的 PM。pmLevel 由服务端查好传进来 */
+export const canEditQuizOnly = (u: Identity & { pmLevel?: string }) => u.role === 'pm' && (u.pmLevel === 'senior' || u.pmLevel === 'director');
 /* 具体到某一条路径:勾了「仅总监维护」的,PM 就碰不了了。
    题库和学员在同一批人里(全体 PM)的时候,这是唯一能真正把答案挡住的办法。 */
 export const canEditPath = (u: Identity, adminOnly: boolean) =>

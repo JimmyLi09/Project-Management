@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { checkOwner, withCapGaps } from '@/server/assignGate';
 import { appendAudit, getProject, insertProject, nextProjectSerial } from '@/server/db';
 import { currentUser } from '@/server/session';
 import { canCreate, canSeeProject, identityOf } from '@/lib/permissions';
@@ -67,11 +68,17 @@ export async function POST(req: NextRequest) {
   delete copy.jobRecordLegacy053;   // REQ-053
   delete copy.mig053;
   delete copy.approach;   // REQ-054:复制出来的一律是正式项目(有编号),复制售前记录也一样
+  delete copy.trainees;   // REQ-062:跟项目 / 协助成员是原项目的实战记录,不跟着复制
+  delete copy.capGaps;
   delete copy.checklistRemoved;
   if (mode !== 'entire') copy.schedStyle = src.schedStyle; // template style still travels
 
+  /* REQ-062:复制项目只提醒、不拦 —— 带过来的负责 PM 在这个项目的业务上还没到「可协助」的列出来 */
+  const warns: string[] = [];
+  for (const o of copy.owners || []) warns.push(...checkOwner(copy, o, false).warns);
+  if ((copy.owners || []).length) copy.capCheckAt = now; else delete copy.capCheckAt;
   const fresh = migrate(copy); // re-derive statuses / fill any defaults
   insertProject(fresh);
   appendAudit(fresh.id, [{ at: now, by: user.name, text: logZh('proj.copy', copyP), k: 'proj.copy', p: copyP }]);
-  return NextResponse.json({ project: redactProject(identityOf(user), fresh) });
+  return NextResponse.json({ project: redactProject(identityOf(user), withCapGaps([fresh])[0]), warns });
 }

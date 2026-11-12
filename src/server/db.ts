@@ -18,6 +18,7 @@ import { migrateProject050, report050, type Mig050Entry } from '@/lib/mig050';
 import { hw053, migrateProject053, report053, type Mig053Entry } from '@/lib/mig053';
 import { closeUserSessions, ensureUsageTables, pruneUsage } from './usageStore';
 import { ensureKb061, importMapIfMissing } from './kbStore';
+import { ensure062, prefillPmLevels, seed062 } from './trainStore';
 import { APPROVE_058, apply058, LEGACY_058, MIG_058, plan058, report058, SYN_KEY as SYN_KEY_058 } from '@/lib/mig058';
 import { isApproach } from '@/lib/approach';
 import { applyMig054, approachFails, MIG054_DEFAULT_IDS, planMig054, report054 } from '@/lib/mig054';
@@ -128,6 +129,7 @@ function setupDb(db: Database.Database): Database.Database {
   backfillSerials(db);
   migrateInvoiceArchive(db);
   migrateContactRoles(db);
+  setup062(db);
   scheduleBackups(db);
   scheduleUsagePrune(db);
   return db;
@@ -237,6 +239,34 @@ function migrateInvoiceArchive(d: Database.Database) {
     d.prepare('INSERT INTO meta (key, value) VALUES (?, ?)').run(MIG_045, JSON.stringify({ at: now, archived: done.length }));
   })();
   if (done.length) console.log(`[REQ-045] 已开 Invoice 的项目自动归档 ${done.length} 个:${done.join('、')}`);
+}
+
+/* ===== REQ-062 上线:预置培训内容 + 按「职位」预填 PM 级别(各只做一次) =====
+   预置:新人主线、7 条业务路径、评分表、及格线、6 个月课程、晋级条件 —— tr_config 里已有的部分不重复建。
+   PM 级别:只给 PM 角色、只填空的,认不出来的留空;填了谁写到 data/migrations/062-pm-level-<时间>.md。
+   出错不影响启动(培训页会用默认值)。 */
+function setup062(d: Database.Database) {
+  const now = Date.now();
+  try {
+    const added = seed062(d, now);
+    if (added.length) console.log(`[REQ-062] 预置培训内容:${added.join(', ')}`);
+  } catch (e) { console.warn('[REQ-062] 预置培训内容失败:', e); }
+  let filled: ReturnType<typeof prefillPmLevels> = null;
+  try { filled = prefillPmLevels(d, now); } catch (e) { console.warn('[REQ-062] 预填 PM 级别失败:', e); }
+  if (!filled || !filled.length) return;
+  try {
+    const dir = path.join(DATA_DIR, 'migrations');
+    fs.mkdirSync(dir, { recursive: true });
+    const t = new Date(now), pad = (n: number) => String(n).padStart(2, '0');
+    const stamp = `${t.getFullYear()}${pad(t.getMonth() + 1)}${pad(t.getDate())}-${pad(t.getHours())}${pad(t.getMinutes())}${pad(t.getSeconds())}`;
+    const file = path.join(dir, `062-pm-level-${stamp}.md`);
+    const lines = ['# REQ-062 按「职位」预填 PM 级别 · 上线报告', '', `时间:${t.toLocaleString('zh-CN')}`, '',
+      `PM 角色共 ${filled.length} 人:预填 ${filled.filter((x) => x.level).length} 人,认不出来留空 ${filled.filter((x) => !x.level).length} 人。只写了新加的 pm_level 列,「职位」原样不动。`,
+      '请 PD / BD 在「新人培训 → 能力矩阵」里逐个核对、补上留空的。', '', '| 姓名 | 职位 | 预填的 PM 级别 |', '|---|---|---|',
+      ...filled.map((x) => `| ${x.name} | ${x.position || '(空)'} | ${x.level ? ({ coord: 'Project Coordinator', pm: 'PM', senior: 'Senior PM', director: 'PM Director' } as Record<string, string>)[x.level] : '(留空)'} |`)];
+    fs.writeFileSync(file, lines.join('\n') + '\n', 'utf8');
+    console.log(`[REQ-062] 按职位预填 PM 级别:${filled.filter((x) => x.level).length} / ${filled.length} 人,报告 ${file}`);
+  } catch (e) { console.warn('[REQ-062] 预填报告没写成(数据已写,不影响使用):', e); }
 }
 
 /* ===== REQ-052 联系人角色改存键 =====
@@ -969,6 +999,8 @@ function migrateSchema(d: Database.Database) {
     passed INTEGER NOT NULL DEFAULT 0,
     at INTEGER NOT NULL
   )`);
+  /* REQ-062: 新人培训改版 —— users 加 pm_level / mentor / novice_start 三列,新表见 trainStore.ts;老的三张表不动 */
+  ensure062(d);
   /* REQ-037: KPI 规则。和积分规则同一套做法 —— 只增不改,带生效日。 */
   d.exec(`CREATE TABLE IF NOT EXISTS kpi_rules (
     version INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1629,6 +1661,21 @@ function propagateRename(oldName: string, newName: string) {
     /* 进度按 (path_id, user_name) 唯一:新名字万一已经有一行(同名的人?)就别覆盖 */
     d.prepare('UPDATE OR IGNORE training_progress SET user_name = ? WHERE user_name = ?').run(newName, oldName);
     d.prepare('UPDATE training_attempts SET user_name = ? WHERE user_name = ?').run(newName, oldName);
+    /* REQ-062:新培训的记录、能力矩阵、带教关系、课程名单 */
+    for (const t of ['tr_tracks', 'tr_placement', 'tr_marks', 'tr_passes', 'skill_levels', 'tr_attend', 'tr_promo', 'kb_reads']) {
+      d.prepare(`UPDATE OR IGNORE ${t} SET user = ? WHERE user = ?`).run(newName, oldName);
+    }
+    d.prepare('UPDATE tr_assess SET user = ? WHERE user = ?').run(newName, oldName);
+    d.prepare('UPDATE skill_log SET user = ? WHERE user = ?').run(newName, oldName);
+    d.prepare('UPDATE users SET mentor = ? WHERE mentor = ?').run(newName, oldName);
+    const cr = d.prepare("SELECT value FROM tr_config WHERE key = 'courses'").get() as { value: string } | undefined;
+    if (cr && cr.value.includes(JSON.stringify(oldName))) {
+      try {
+        const cs = JSON.parse(cr.value) as { participants?: string[] }[];
+        for (const c of cs) if (Array.isArray(c.participants)) c.participants = [...new Set(c.participants.map((n) => (n === oldName ? newName : n)))];
+        d.prepare("UPDATE tr_config SET value = ? WHERE key = 'courses'").run(JSON.stringify(cs));
+      } catch { /* 课程名单坏了就不动 */ }
+    }
   })();
 }
 

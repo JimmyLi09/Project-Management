@@ -115,9 +115,10 @@ test('权限矩阵:PD / BD 全能;PM 能加、只能改自己建的、删自己�
   }
 });
 
-test('培训权限口径不变(和改版前的 canEditKb 一样:PD / BD / PM)', () => {
-  for (const u of [PD, BD, PM]) assert.ok(canEditTraining(u) && canSeeAllTraining(u));
-  for (const u of [SALES, ENG, VIEWER, FIN]) assert.ok(!canEditTraining(u) && !canSeeAllTraining(u));
+test('培训权限:REQ-061 只是和知识库拆开;REQ-062 起统一按新规则(JM 1112)—— 建 / 改路径只有 PD / BD', () => {
+  for (const u of [PD, BD]) assert.ok(canEditTraining(u) && canSeeAllTraining(u));
+  for (const u of [PM, SALES, ENG, VIEWER, FIN]) assert.ok(!canEditTraining(u) && !canSeeAllTraining(u));
+  assert.ok(canEditKb(PM), '知识库这边 PM 照样能新建 / 加附件,和培训无关');
 });
 
 test('预览类型:只有 PDF 和 4 种图片 inline;HTML / SVG 不 inline;Office 转 PDF;文本纯文本', () => {

@@ -5,6 +5,7 @@
 import React, { useState } from 'react';
 import { useStore } from './store';
 import { useLang } from '@/lib/i18n';
+import { GateNote, useAssignCheck } from './AssignHint';
 
 export default function TransferModal({ from, pid, onClose }: {
   from: string;
@@ -21,6 +22,9 @@ export default function TransferModal({ from, pid, onClose }: {
   const candidates = users
     .map((u) => u.name)
     .filter((n) => n !== from);
+  /* REQ-062:单个项目转交按派项目限制拦(开关开着);批量转交只提醒,转完列出来 */
+  const chk = useAssignCheck({ pid }, pid && to.trim() ? [to.trim()] : []);
+  const blocked = !!pid && !!chk.results[to.trim()]?.blocked;
 
   async function submit() {
     const target = to.trim();
@@ -39,9 +43,10 @@ export default function TransferModal({ from, pid, onClose }: {
       });
       setBusy(false);
       if (res.ok) {
-        const { transferred } = await res.json();
+        const { transferred, warns } = await res.json();
         await refresh();
-        alert(t(`已转交 ${transferred} 个项目:${from} → ${target}`, `Transferred ${transferred} project(s): ${from} → ${target}`));
+        const extra = Array.isArray(warns) && warns.length ? `\n\n⚠ ${warns.join('\n⚠ ')}` : '';
+        alert(t(`已转交 ${transferred} 个项目:${from} → ${target}`, `Transferred ${transferred} project(s): ${from} → ${target}`) + extra);
         onClose();
       } else {
         const body = await res.json().catch(() => ({}));
@@ -68,6 +73,7 @@ export default function TransferModal({ from, pid, onClose }: {
           <label>{t('接收人 To', 'To')}</label>
           <input list="transfer-names" value={to} onChange={(e) => setTo(e.target.value)} placeholder={candidates.slice(0, 3).join(' / ')} autoFocus />
           <datalist id="transfer-names">{candidates.map((n) => <option key={n} value={n} />)}</datalist>
+          {pid && to.trim() && <GateNote name={to.trim()} r={chk.results[to.trim()]} gate={chk.gate} testid="transfer-gate" />}
         </div>
         <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, marginBottom: 14, cursor: 'pointer' }}>
           <input type="checkbox" checked={includeTasks} onChange={(e) => setIncludeTasks(e.target.checked)} />
@@ -75,7 +81,7 @@ export default function TransferModal({ from, pid, onClose }: {
         </label>
         <div className="modal-actions">
           <button className="btn-line" onClick={onClose}>{t('取消', 'Cancel')}</button>
-          <button className="btn-navy" onClick={submit} disabled={busy}>{busy ? t('转交中…', 'Transferring…') : t('确认转交', 'Transfer')}</button>
+          <button className="btn-navy" onClick={submit} disabled={busy || blocked} data-testid="transfer-ok">{busy ? t('转交中…', 'Transferring…') : t('确认转交', 'Transfer')}</button>
         </div>
       </div>
     </div>

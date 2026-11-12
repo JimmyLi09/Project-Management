@@ -63,6 +63,8 @@ export function renameInProject(p: Project, from: string, to: string): number {
   for (const k of lists) { const next = swapList(p[k], from, to); if (next !== p[k]) { p[k] = next as string[]; n++; } }
   if (p.engineer === from) { p.engineer = to; n++; }
   if (p.handover && p.handover.assignedPmId === from) { p.handover.assignedPmId = to; n++; }
+  /* REQ-062:跟项目 / 协助成员 */
+  (p.trainees || []).forEach((t) => { if (t.name === from) { t.name = to; n++; } });
   (p.packages || []).forEach((pk) => {
     if (pk.owner === from) { pk.owner = to; n++; }
     (pk.schedule || []).forEach((r) => { if (r.assignee === from) { r.assignee = to; n++; } });

@@ -3,6 +3,7 @@
    checked here against the authenticated user (never trusted from client). */
 
 import type { Identity } from '@/lib/permissions';
+import type { GateCtx } from './assignGate';
 import { canRemovePkg, PKG_LAST_MSG, PKG_STARTED_MSG } from '@/lib/pkgRemove';
 import {
   canAssign, canCommercial, canDecide, canEdit, canEditFinance, canEditModule, canRowEdit, isFull, canMeta, canMarkInvoice, pmLocked } from '@/lib/permissions';
@@ -32,6 +33,10 @@ import { logZh, type LogParams } from '@/lib/logmsg';
    without importing the DB layer here (keeps this file client-safe for types). */
 export interface ActionCtx {
   tplForSvc?: (svc: string) => Template;
+  /* REQ-062:派项目限制 + 跟项目 / 协助成员。路由里传 server/assignGate 的 gateCtx;单元测试不传就不查 */
+  gate?: GateCtx;
+  /* 只提醒、不拦的话放这里,接口原样带回页面 */
+  warns?: string[];
 }
 
 export type ProjectAction =
@@ -88,6 +93,8 @@ export type ProjectAction =
   | { type: 'calendarFlow'; pkg: number; choice: 'switch' | 'keep' | 'undo' }
   | { type: 'saveCalendarArchives'; pkg: number; archives: NonNullable<CalendarSchedule['archives']> }
   | { type: 'addOwner'; name: string }
+  | { type: 'addTrainee'; name: string; mode: 'shadow' | 'assist' }
+  | { type: 'removeTrainee'; name: string }
   | { type: 'removeOwner'; name: string }
   | { type: 'setEngineer'; name: string }   // REQ-043: 指派 / 换掉 / 清空项目工程师
   | { type: 'transferProject'; from: string; to: string; includeTasks: boolean }
@@ -264,6 +271,15 @@ function pickSvcs(p: Project, list: unknown, fallback: string[]): string[] {
 }
 const svcsText = (svcs: string[]) => svcs.map((s) => SVC[s]?.label || s).join('、');
 
+/* REQ-062:派项目限制。拦就抛错(带原因);只提醒的话收进 ctx.warns,接口带回页面 */
+function gateOwnerIn(ctx: ActionCtx, p: Project, name: string) {
+  if (!ctx.gate) return;
+  const r = ctx.gate.checkOwner(p, name);
+  if (r.block) throw new ValidationError(r.block);
+  if (r.warns.length) (ctx.warns ||= []).push(...r.warns);
+  p.capCheckAt = Date.now();   // 上线后有过新指派:之后在项目上提醒「某业务还没有到可协助的负责 PM」
+}
+
 /* REQ-051:权限表里这个模块的编辑权限 */
 function needModule(u: Identity, mod: PermModule) {
   if (canEditModule(u, mod)) return;
@@ -274,7 +290,7 @@ function needModule(u: Identity, mod: PermModule) {
 /* Mutates p in place. Throws PermissionError / ValidationError. */
 /* REQ-054:售前记录上不能做的动作(按钮也藏起来,这里是后端那一道) */
 const APPROACH_BLOCKED = new Set<string>([
-  'addOwner', 'setEngineer', 'transferProject',
+  'addOwner', 'setEngineer', 'transferProject', 'addTrainee',
   'submitHandover', 'editHandover', 'acceptHandover', 'submitCompletion', 'decideCompletion', 'salesVerify', 'raiseVariation',
   'toggleInvoiced', 'markInvoiced', 'undoInvoice', 'editFinance', 'setInvoiceStatus', 'setPaymentStatus', 'setPaymentRisk',
   'setArchived',
@@ -679,6 +695,12 @@ export function applyAction(u: Identity, p: Project, a: ProjectAction, ctx: Acti
       if (a.field === 'resourceLinks') needModule(u, 'record');   // 资料链接属于项目档案
       const pk = p.packages[a.pkg];
       if (!pk) throw new ValidationError('无效的服务包');
+      /* REQ-062:服务包负责人是 PM 时,这个服务包的业务要到「可协助」 */
+      if (a.field === 'owner' && ctx.gate && String(a.value || '').trim() && String(a.value).trim() !== (pk.owner || '')) {
+        const r = ctx.gate.checkPkgOwner(pk.svc, String(a.value).trim());
+        if (r.block) throw new ValidationError(r.block);
+        if (r.warns.length) (ctx.warns ||= []).push(...r.warns);
+      }
       pk[a.field] = a.value;
       logIt(p, u.name, 'pkg.field', { svc: pk.svc, field: a.field, value: a.value });
       break;
@@ -895,8 +917,34 @@ export function applyAction(u: Identity, p: Project, a: ProjectAction, ctx: Acti
       const nm = (a.name || '').trim();
       if (!nm) throw new ValidationError('名字不能为空');
       p.owners = p.owners || [];
-      if (!p.owners.includes(nm)) p.owners.push(nm);
+      if (!p.owners.includes(nm)) { gateOwnerIn(ctx, p, nm); p.owners.push(nm); }
       logIt(p, u.name, 'owner.add', { name: nm });
+      break;
+    }
+    /* REQ-062:跟项目 / 协助成员。PD / BD,或这个学员的带教人(要有这个项目的编辑权)可以加、可以移除。
+       不算负责 PM:不计 KPI、不计积分。shadow 只读,assist 和编辑授权一样能改。 */
+    case 'addTrainee':
+    case 'removeTrainee': {
+      const nm = String(a.name || '').trim();
+      if (!nm) throw new ValidationError('名字不能为空 / Name is required');
+      const mentor = ctx.gate ? ctx.gate.mentorOf(nm) : '';
+      if (!isFull(u) && !(canEdit(u, p) && mentor && mentor === u.name)) {
+        throw new PermissionError('只有 PD / BD 或这个人的带教人(要能编辑这个项目)可以调整跟项目 / 协助成员 / Only PD / BD or this person\'s mentor (with edit rights on the project) can change shadow / assist members');
+      }
+      p.trainees = p.trainees || [];
+      if (a.type === 'removeTrainee') {
+        const was = p.trainees.find((t) => t.name === nm);
+        if (!was) break;
+        p.trainees = p.trainees.filter((t) => t.name !== nm);
+        logIt(p, u.name, 'trainee.remove', { name: nm });
+        break;
+      }
+      const mode = a.mode === 'assist' ? 'assist' : 'shadow';
+      if ((p.owners || []).includes(nm)) throw new ValidationError('这个人已经是负责 PM / Already a lead PM on this project');
+      const cur = p.trainees.find((t) => t.name === nm);
+      if (cur) { if (cur.mode === mode) break; cur.mode = mode; cur.at = Date.now(); cur.by = u.name; }
+      else p.trainees.push({ name: nm, mode, at: Date.now(), by: u.name });
+      logIt(p, u.name, mode === 'assist' ? 'trainee.assist' : 'trainee.shadow', { name: nm });
       break;
     }
     case 'removeOwner': {
@@ -920,6 +968,7 @@ export function applyAction(u: Identity, p: Project, a: ProjectAction, ctx: Acti
       const from = (a.from || '').trim(), to = (a.to || '').trim();
       if (!from || !to) throw new ValidationError('转出人与接收人不能为空');
       if (from === to) throw new ValidationError('转出人与接收人相同');
+      if ((p.owners || []).includes(from) && !(p.owners || []).includes(to)) gateOwnerIn(ctx, p, to);   // REQ-062:转给的人要当负责 PM
       transferInProject(p, u.name, from, to, a.includeTasks);
       break;
     }
@@ -1002,6 +1051,7 @@ export function applyAction(u: Identity, p: Project, a: ProjectAction, ctx: Acti
       if (!pm) throw new ValidationError('请指定接单 PM');
       const h = p.handover!;
       if (h.status === 'accepted') throw new ValidationError('该项目已被 PM 接单,无法重复交接');
+      if (!(p.owners || []).includes(pm)) gateOwnerIn(ctx, p, pm);   // REQ-062:接单 PM 会成为负责 PM
       h.status = 'submitted';
       h.salesBrief = String(a.salesBrief || '');
       h.assignedPmId = pm;
@@ -1026,6 +1076,7 @@ export function applyAction(u: Identity, p: Project, a: ProjectAction, ctx: Acti
       const pm = String(a.assignedPmId || '').trim();
       if (!pm) throw new ValidationError('请指定接单 PM');
       const was = h.assignedPmId;
+      if (!(p.owners || []).includes(pm)) gateOwnerIn(ctx, p, pm);   // REQ-062
       h.salesBrief = String(a.salesBrief || '');
       h.assignedPmId = pm;
       /* 新 PM 要能在「我的待办」里看到项目;原 PM 留在成员里不动 ——

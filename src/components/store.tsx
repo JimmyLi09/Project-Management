@@ -324,9 +324,10 @@ export function StoreProvider({ user, permTable: initialPerm, children }: { user
         body: JSON.stringify({ ...action, baseVersion: base }),
       });
       if (res.ok) {
-        const { project } = await res.json();
+        const { project, warns } = await res.json();
         if (typeof project.version === 'number') versionsRef.current[pid] = project.version;
         setProjects((list) => list.map((p) => (p.id === pid ? project : p)));
+        if (Array.isArray(warns) && warns.length) setToast(`⚠ ${warns.join(' · ')}`);   // REQ-062:派项目只提醒的话
         return true;
       }
       /* REQ-051: 账号被停用 / 删除后会话立即失效 —— 下一次操作就回登录页 */
@@ -358,9 +359,10 @@ export function StoreProvider({ user, permTable: initialPerm, children }: { user
       body: JSON.stringify(input),
     });
     if (res.ok) {
-      const { project } = await res.json();
+      const { project, warns } = await res.json();
       if (typeof project.version === 'number') versionsRef.current[project.id] = project.version;
       setProjects((list) => [project, ...list]);
+      if (Array.isArray(warns) && warns.length) setToast(`⚠ ${warns.join(' · ')}`);   // REQ-062
       return project as Project;
     }
     const body = await res.json().catch(() => ({}));
