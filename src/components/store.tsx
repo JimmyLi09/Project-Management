@@ -19,7 +19,7 @@ import { useLang } from '@/lib/i18n';
 export interface View {
   name: 'overview' | 'projects' | 'team' | 'mytasks' | 'dupdate' | 'stats' | 'contacts' | 'finance' | 'registers' | 'avhome' | 'avconfig' | 'avcostquote' | 'avlibrary' | 'avinquiry' | 'ledingest' | 'ledstudio' | 'prjstudio' | 'elvstudio' | 'pvstudio' | 'avcost' | 'avquote' | 'avcases' | 'avprices' | 'users' | 'templates' | 'rules' | 'knowledge' | 'training' | 'kpi' | 'project';
   pid?: string;
-  tab?: 'overview' | 'schedule' | 'checklist' | 'jobrecord';
+  tab?: 'overview' | 'schedule' | 'checklist' | 'jobrecord' | 'revisions';   // REQ-063:修改记录
   pkg?: number;
   /* 0922 变更单:从统计 / 汇报上的某个数字点进来时,带上「那个数字数的是
      哪一组项目」—— 项目列表照它过滤,并在顶上标出来、可一键清除。 */
@@ -80,7 +80,7 @@ export function queryToView(search: string): { view: View; p: string } | null {
   if (q.get('line')) v.line = q.get('line')!;
   if (q.get('pid')) v.pid = q.get('pid')!;
   const tab = q.get('tab');
-  if (tab === 'overview' || tab === 'schedule' || tab === 'checklist' || tab === 'jobrecord') v.tab = tab;
+  if (tab === 'overview' || tab === 'schedule' || tab === 'checklist' || tab === 'jobrecord' || tab === 'revisions') v.tab = tab;
   if (q.get('pkg')) v.pkg = Number(q.get('pkg')) || 0;
   if (v.name === 'project' && v.pkg === undefined) v.pkg = 0;
   try { if (q.get('f')) v.focus = JSON.parse(q.get('f')!) as Focus; } catch { /* 坏了就不带 */ }
@@ -151,6 +151,8 @@ interface Store {
   kpiRuleVersions: KpiRuleVersion[];
   kpiRules: KpiRules;
   refreshKpiRules: () => Promise<void>;
+  /* REQ-063:修改记录的上线日(YYYY-MM-DD,空 = 还没取到) */
+  since063: string;
 }
 
 const Ctx = createContext<Store | null>(null);
@@ -186,6 +188,7 @@ export function StoreProvider({ user, permTable: initialPerm, children }: { user
   const [avDerived, setAvDerived] = useState<Record<string, AvDerived>>({});
   const [pointRuleVersions, setPointRuleVersions] = useState<PointRuleVersion[]>([]);
   const [kpiRuleVersions, setKpiRuleVersions] = useState<KpiRuleVersion[]>([]);
+  const [since063, setSince063] = useState('');
   const [view, setViewState] = useState<View>({ name: 'overview' });
   /* history.state.i:这是平台里第几页(0 = 进平台的第一页),「‹ 后退」据此判断 */
   const [histIdx, setHistIdx] = useState(0);
@@ -296,7 +299,10 @@ export function StoreProvider({ user, permTable: initialPerm, children }: { user
 
   const refreshKpiRules = useCallback(async () => {
     const res = await fetch('/api/kpi-rules');
-    if (res.ok) setKpiRuleVersions(((await res.json()).versions || []) as KpiRuleVersion[]);
+    if (!res.ok) return;
+    const j = await res.json();
+    setKpiRuleVersions((j.versions || []) as KpiRuleVersion[]);
+    setSince063(typeof j.since063 === 'string' ? j.since063 : '');
   }, []);
 
   useEffect(() => {
@@ -438,7 +444,8 @@ export function StoreProvider({ user, permTable: initialPerm, children }: { user
     kpiRuleVersions,
     kpiRules: kpiRuleVersions.length ? kpiRulesAt(kpiRuleVersions, Date.now()) : DEFAULT_KPI_RULES,
     refreshKpiRules,
-  }), [user, projects, formal, avProjects, approachOp, users, allUsers, permTable, setPermTable, view, histIdx, setView, setLedProjectId, toast, dispatch, createProject, removeProject, refresh, refreshUsers, recordFields, refreshRecordFields, jobFormats, refreshJobFormats, avDerived, refreshAvDerived, pointRuleVersions, refreshPointRules, kpiRuleVersions, refreshKpiRules, ledProjectId, ledIngest, ledHandoff]);
+    since063,
+  }), [user, projects, formal, avProjects, approachOp, users, allUsers, permTable, setPermTable, view, histIdx, setView, setLedProjectId, toast, dispatch, createProject, removeProject, refresh, refreshUsers, recordFields, refreshRecordFields, jobFormats, refreshJobFormats, avDerived, refreshAvDerived, pointRuleVersions, refreshPointRules, kpiRuleVersions, refreshKpiRules, since063, ledProjectId, ledIngest, ledHandoff]);
 
   return <Ctx.Provider value={store}>{children}</Ctx.Provider>;
 }

@@ -8,6 +8,7 @@ import { canDelete, canSeeProject, identityOf, isFull } from '@/lib/permissions'
 import { applyAction, PermissionError, ValidationError, type ProjectAction } from '@/server/actions';
 import { redactProject } from '@/lib/permRedact';
 import { gateCtx, withCapGaps } from '@/server/assignGate';
+import { currentKpiRules } from '@/server/kpiRules';
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -64,7 +65,11 @@ export async function PATCH(req: NextRequest, { params }: Params) {
 
   const wfVersionForKey = p.workflowVersion || 1; // capture before the action may bump it (§10 rollback)
   const logLenBefore = (p.log || []).length;
-  const ctx = { tplForSvc: getEffectiveTemplate, gate: gateCtx, warns: [] as string[] };   // REQ-062:派项目限制 + 只提醒的话
+  /* REQ-062:派项目限制 + 只提醒的话;REQ-063:修改记录按今天生效的 KPI 规则里的轮次规则算收费 */
+  const ctx = {
+    tplForSvc: getEffectiveTemplate, gate: gateCtx, warns: [] as string[],
+    ...(/Revision$|^setRevFee$|^reasonMeeting$/.test(String(body.type)) ? { rev: currentKpiRules().rev } : {}),
+  };
   try {
     applyAction(identityOf(user), p, body, ctx);
   } catch (e) {

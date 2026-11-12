@@ -134,6 +134,8 @@ export const ACTION_MODULE: Record<string, PermModule> = {
   // 项目本身的风险 / 向上汇报;交接、核对、Variation(Sales / PM 的项目流程)
   editUpdate: 'projects', dismissRisk: 'projects', restoreRisk: 'projects',
   submitHandover: 'projects', editHandover: 'projects', acceptHandover: 'projects', salesVerify: 'projects', raiseVariation: 'projects',
+  // REQ-063 修改记录(项目本身的记录;谁能做什么另有规则,见 permissions.ts canRecordRev 等)
+  addRevision: 'projects', editRevision: 'projects', deleteRevision: 'projects', setRevFee: 'projects', reasonMeeting: 'projects',
   /* 没列的(指派 PM / 工程师、转交、归档、难度积分、决策、审批完成包)本来就只有 PD / BD 能做,
      PD / BD 两列锁定可编辑,不用过表 */
 };

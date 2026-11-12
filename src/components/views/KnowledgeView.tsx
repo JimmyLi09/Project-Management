@@ -31,7 +31,7 @@ type Tab = 'map' | 'docs' | 'secs';
 type BizFilter = '' | KbBiz | 'none';
 
 export default function KnowledgeView() {
-  const { me, setToast } = useStore();
+  const { me, setToast, view } = useStore();
   const { t } = useLang();
   const canAdd = canEditKb(me);
 
@@ -42,7 +42,10 @@ export default function KnowledgeView() {
   const [sec, setSec] = useState<'' | KbSec>('');
   const [cat, setCat] = useState<string>('');
   const [q, setQ] = useState('');
-  const [openId, setOpenId] = useState<string | null>(null);
+  /* REQ-063:别的页面(修改记录的 E5 模板链接)带 sub = 'doc:<id>' 进来,直接打开那篇 */
+  const linked = view.sub?.startsWith('doc:') ? view.sub.slice(4) : null;
+  const [openId, setOpenId] = useState<string | null>(linked);
+  useEffect(() => { if (linked) setOpenId(linked); }, [linked]);
 
   const load = React.useCallback(async () => {
     invalidateKbCache();   // 文档变了,资料卡 / 工作流那边的「相关文档」要跟着更新

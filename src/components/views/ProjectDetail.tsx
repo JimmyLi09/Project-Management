@@ -23,6 +23,8 @@ import { Avatar, Ell, HM, Icon, Pill, ProgressBar, TM } from '../ui';
 import ScheduleTab from './ScheduleTab';
 import ChecklistTab from './ChecklistTab';
 import JobRecordTab from './JobRecordTab';
+import RevisionsTab, { ReasonMeeting } from './RevisionsTab';
+import { clientRounds, needsReasonMeeting } from '@/lib/revisions';
 import ExportOverlay from './ExportOverlay';
 import TransferModal from '../TransferModal';
 import { GateNote, gateText, useAssignCheck } from '../AssignHint';
@@ -65,11 +67,13 @@ export default function ProjectDetail() {
   const daysLeft = del ? Math.round((del.getTime() - t0.getTime()) / 86400000) : null;
 
   /* REQ-048:从标签点进排期先看总览(多个业务时);从概览点某个业务进来的直接到那个业务(onSchedule) */
-  const setTab = (tb: 'overview' | 'schedule' | 'checklist' | 'jobrecord') =>
+  const setTab = (tb: 'overview' | 'schedule' | 'checklist' | 'jobrecord' | 'revisions') =>
     setView({ ...view, tab: tb, ...(tb === 'schedule' && tab !== 'schedule' ? { pkg: p.packages.length > 1 ? -1 : 0 } : {}) });
   /* REQ-051: 权限表里「不可见」的标签不出现;直接打网址进来的落回概览 */
-  const seeTab = { overview: true, schedule: canSeeModule(me, 'schedule'), checklist: canSeeModule(me, 'checklist'), jobrecord: canSeeModule(me, 'record') };
+  const seeTab = { overview: true, schedule: canSeeModule(me, 'schedule'), checklist: canSeeModule(me, 'checklist'), jobrecord: canSeeModule(me, 'record'),
+    revisions: !isApproach(p) };   // REQ-063:修改记录 —— 能看这个项目的人都能看;售前记录还没有客户修改,不显示
   const tab = seeTab[rawTab] ? rawTab : 'overview';
+  const revTotal = p.packages.reduce((a, pk) => a + clientRounds(pk), 0);
 
   return (
     <>
@@ -235,6 +239,12 @@ export default function ProjectDetail() {
           {seeTab.schedule && <button className={`detail-tab ${tab === 'schedule' ? 'active' : ''}`} onClick={() => setTab('schedule')} data-testid="tab-schedule">{t('排期', 'Schedule')}</button>}
           {seeTab.checklist && <button className={`detail-tab ${tab === 'checklist' ? 'active' : ''}`} onClick={() => setTab('checklist')} data-testid="tab-checklist">{t('信息清单', 'Checklist')}</button>}
           {seeTab.jobrecord && <button className={`detail-tab ${tab === 'jobrecord' ? 'active' : ''}`} onClick={() => setTab('jobrecord')} data-testid="tab-jobrecord">{t('Job Record', 'Job Record')}</button>}
+          {seeTab.revisions && (
+            <button className={`detail-tab ${tab === 'revisions' ? 'active' : ''}`} onClick={() => setTab('revisions')} data-testid="tab-revisions">
+              {t('修改记录', 'Revisions')}
+              {revTotal > 0 && <span className="badge tnum" style={{ marginLeft: 6, background: 'var(--hover-bg)', color: 'var(--text2)', padding: '1px 7px', fontSize: 11 }}>{revTotal}</span>}
+            </button>
+          )}
         </div>
       </div>
 
@@ -355,6 +365,7 @@ export default function ProjectDetail() {
         />
       )}
       {tab === 'jobrecord' && <JobRecordTab key={p.id} p={p} />}
+      {tab === 'revisions' && <RevisionsTab key={p.id} p={p} />}
       {exportScope && <ExportOverlay p={p} scope={exportScope} clScope={exportScope === 'checklist' ? clScope : 'all'} onClose={() => setExportScope(null)} />}
       {transferFrom && (
         <TransferModal from={transferFrom} pid={p.id} onClose={() => setTransferFrom(null)} />
@@ -700,8 +711,10 @@ function PointsPanel({ p, canEd }: { p: Project; canEd: boolean }) {
 function OverviewTab({ p, onSchedule }: { p: Project; onSchedule: (pkg: number) => void }) {
   const { lang, t } = useLang();
   const who = useWho();   // REQ-051: 已删除的人显示「(已删除)」
-  const { dispatch, me, users, rulesFor } = useStore();
+  const { dispatch, me, users, rulesFor, kpiRules } = useStore();
   const canEd = canEdit(me, p);
+  /* REQ-063:同一个服务包客户修改累计 ≥ N 轮(规则里的数,默认 3)→ 开原因会。登记过就不再出现 */
+  const meetPks = p.packages.map((pk, pi) => ({ pk, pi })).filter((x) => needsReasonMeeting(x.pk, kpiRules.rev));
   /* REQ-051: 概览里各块分属不同模块 —— 风险 = 项目,交付日 / Buffer = 排期,联系人 = 通讯录 */
   const edRisk = canEditIn(me, p, 'projects');
   const edSched = canEditIn(me, p, 'schedule');
@@ -742,7 +755,7 @@ function OverviewTab({ p, onSchedule }: { p: Project; onSchedule: (pkg: number) 
   });
 
   const team = [...new Set(p.packages.flatMap((pk) => pk.schedule.map((r) => r.assignee)).filter(Boolean))];
-  const openRiskCount = risks.filter((r) => r.key).length;
+  const openRiskCount = risks.filter((r) => r.key).length + meetPks.length;
   const dismissedKeys = p.dismissedRisks || [];
 
   return (
@@ -797,7 +810,21 @@ function OverviewTab({ p, onSchedule }: { p: Project; onSchedule: (pkg: number) 
             <span className="panel-title" style={{ fontSize: 15 }}>{t('风险与受阻', 'Risks & Blockers')}</span>
             <span style={{ fontSize: 12, color: 'var(--text2)' }}>{openRiskCount} {t('项', 'open')}</span>
           </div>
-          {risks.length === 0 && <div style={{ padding: 22, textAlign: 'center', fontSize: 13, color: 'var(--text2)' }}>{t('无逾期与受阻 — 按计划进行。', 'No open risks — on track.')}</div>}
+          {meetPks.map(({ pk, pi }) => (
+            <div key={`meet-${pi}`} data-testid="risk-reason-meeting" style={{ display: 'flex', gap: 12, padding: '15px 22px', borderBottom: '1px solid var(--row-line)', alignItems: 'flex-start' }}>
+              <span style={{ color: 'var(--warning)', flexShrink: 0, marginTop: 1, display: 'flex' }}><Icon name="alert" size={16} /></span>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 13.5, fontWeight: 600 }}>
+                  {t(`${p.name} · ${svcName(pk.svc, 'zh')}修改已 ${clientRounds(pk)} 轮 → 开原因会`, `${p.name} · ${svcName(pk.svc, 'en')}: ${clientRounds(pk)} revision rounds → hold a review meeting`)}
+                </div>
+                <div style={{ fontSize: 12, color: 'var(--text2)', marginTop: 2, marginBottom: 6 }}>
+                  {t('找出客户反复修改的原因;开完写一句结论,这条就消失(同一个服务包只提醒一次)。', 'Find out why the client keeps revising; log a one-line conclusion to clear this (shown once per service).')}
+                </div>
+                <ReasonMeeting p={p} pi={pi} pk={pk} rules={kpiRules.rev} compact />
+              </div>
+            </div>
+          ))}
+          {risks.length === 0 && meetPks.length === 0 && <div style={{ padding: 22, textAlign: 'center', fontSize: 13, color: 'var(--text2)' }}>{t('无逾期与受阻 — 按计划进行。', 'No open risks — on track.')}</div>}
           {risks.slice(0, 8).map((r, i) => (
             <div key={i} style={{ display: 'flex', gap: 12, padding: '15px 22px', borderBottom: '1px solid var(--row-line)', alignItems: 'flex-start' }}>
               <span style={{ color: r.color, flexShrink: 0, marginTop: 1, display: 'flex' }}><Icon name={r.icon} size={16} /></span>

@@ -13,6 +13,7 @@ import { svcColor, svcName } from '@/lib/templates';
 import { useLang } from '@/lib/i18n';
 import { Avatar, Ell, healthColor, HM, Icon, Pill, ProgressBar } from '../ui';
 import type { Project } from '@/lib/types';
+import RevQuoteList from '../RevQuoteList';
 
 export default function OverviewView() {
   const { projects, users, me, setView, go, openProject, rulesFor } = useStore();
@@ -180,6 +181,9 @@ export default function OverviewView() {
           {workflowTodos.length > 8 && <div style={{ padding: '10px 22px', fontSize: 12, color: 'var(--text2)', borderTop: '1px solid var(--row-line)' }}>{t(`还有 ${workflowTodos.length - 8} 项…`, `+${workflowTodos.length - 8} more…`)}</div>}
         </div>
       )}
+
+      {/* REQ-063:超过 48 小时还没出 revised quotation 的修改轮(只 PD / BD 看) */}
+      {isFull(me) && <RevQuoteList mode="overdue" />}
 
       {/* REQ-062:上线后新指派过负责 PM、但某个业务还没有到「可协助」的负责 PM 的项目(只 PD / BD 看,提醒不拦) */}
       {isFull(me) && capGapProjects.length > 0 && (

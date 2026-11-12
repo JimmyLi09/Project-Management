@@ -14,6 +14,7 @@ import { STAGES, stageColor, stageIdx, svcName } from '@/lib/templates';
 import { useLang } from '@/lib/i18n';
 import { Avatar, Ell, HM, Icon, Pill, TM } from '../ui';
 import type { Project } from '@/lib/types';
+import RevQuoteList from '../RevQuoteList';
 
 const GRID = '24px 1fr 104px 92px 32px';
 
@@ -121,6 +122,9 @@ export default function MyTasksView() {
           ))}
         </div>
       )}
+
+      {/* REQ-063:修改轮标成应收费 → 这个项目的 Sales(没记 Sales 时所有 Sales)48 小时内出 revised quotation */}
+      {me.role === 'sales' && <RevQuoteList mode="sales" />}
 
       {(expiring.length > 0 || contacted.length > 0) && (
         <div className="panel clip" style={{ marginBottom: 18, borderColor: 'var(--warning)' }} data-testid="warranty-remind">

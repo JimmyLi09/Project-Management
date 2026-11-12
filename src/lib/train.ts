@@ -426,7 +426,8 @@ export function coverageGaps(svcs: string[], owners: { name: string; role: strin
 
 /* ── 晋级条件清单 ── */
 export interface PromoItem { id: string; zh: string; en: string; met: boolean | null; auto: boolean }
-export function promoChecklist(p: Promo, o: { levels: Record<string, number>; menteesDone: number; manual: Record<string, boolean> }): PromoItem[] {
+/* quarters:REQ-063 接上的季度项目分值(最近的在前,只算已结束的季度)。不传 = 还没接上,显示「待 KPI 接入」 */
+export function promoChecklist(p: Promo, o: { levels: Record<string, number>; menteesDone: number; manual: Record<string, boolean>; quarters?: { label: string; points: number }[] }): PromoItem[] {
   const items: PromoItem[] = [];
   p.matrix.forEach((r, i) => {
     const names = r.bizs.map((b) => bizLabel(b, 'zh')).join(' / '), namesEn = r.bizs.map((b) => bizLabel(b, 'en')).join(' / ');
@@ -438,7 +439,14 @@ export function promoChecklist(p: Promo, o: { levels: Record<string, number>; me
   });
   if (p.mentees > 0) items.push({ id: 'mentees', auto: true, met: o.menteesDone >= p.mentees, zh: `带教 ${p.mentees} 名新人走完新人期`, en: `Mentored ${p.mentees} new joiner(s) through the induction` });
   for (const m of p.manual) items.push({ id: `x.${m.id}`, auto: false, met: !!o.manual[m.id], zh: m.zh, en: m.en });
-  if (p.kpi) items.push({ id: 'kpi', auto: true, met: null, zh: `连续 ${p.kpi.quarters} 个季度项目分值 ≥ ${p.kpi.min}(待 KPI 接入)`, en: `Project score ≥ ${p.kpi.min} for ${p.kpi.quarters} quarters in a row (waiting for KPI)` });
+  if (p.kpi && !o.quarters) items.push({ id: 'kpi', auto: true, met: null, zh: `连续 ${p.kpi.quarters} 个季度项目分值 ≥ ${p.kpi.min}(待 KPI 接入)`, en: `Project score ≥ ${p.kpi.min} for ${p.kpi.quarters} quarters in a row (waiting for KPI)` });
+  if (p.kpi && o.quarters) {
+    const qs = o.quarters.slice(0, p.kpi.quarters);
+    const got = qs.map((q) => `${q.label} ${q.points}`).join(' / ');
+    items.push({ id: 'kpi', auto: true, met: qs.length >= p.kpi.quarters && qs.every((q) => q.points >= p.kpi!.min),
+      zh: `连续 ${p.kpi.quarters} 个季度项目分值 ≥ ${p.kpi.min}(最近:${got || '无'})`,
+      en: `Project score ≥ ${p.kpi.min} for ${p.kpi.quarters} quarters in a row (latest: ${got || 'none'})` });
+  }
   return items;
 }
 export const promoFor = (cfg: TrainConfig, pmLevel: string) => cfg.promo.find((p) => p.from === (pmLevel || 'coord')) || null;

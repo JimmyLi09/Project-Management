@@ -126,6 +126,9 @@ export function trimPackage(pkg: ServicePackage, mode: 'entire' | 'schedule' | '
   delete out.scheduleLegacy;
   delete out.mig048;
   delete out.noCategories;
+  /* REQ-063:修改记录是原项目和客户之间的事,不跟着复制 */
+  delete out.revisions;
+  delete out.reasonMeeting;
   if (mode === 'checklist') out.schedule = [];
   /* Job Record never rides along: its fields (尺寸/链接/安装日期/保修) belong to
      one physical job and would show up as stale rows in Project Registers. */

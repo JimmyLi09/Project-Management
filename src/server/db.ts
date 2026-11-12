@@ -28,6 +28,7 @@ import { baseDefOf, fieldsOf, type FieldDef, type FieldOverrides } from '@/lib/r
 import { isLegacyFlow } from '@/lib/legacyStages';
 import { TPL } from '@/lib/templates';
 import { localDay } from '@/lib/localDate';
+import { SINCE_KEY_063 } from '@/lib/revisions';
 
 /* On serverless platforms (Vercel) the project directory is read-only and
    ephemeral — keep the demo database in /tmp there. */
@@ -130,6 +131,7 @@ function setupDb(db: Database.Database): Database.Database {
   migrateInvoiceArchive(db);
   migrateContactRoles(db);
   setup062(db);
+  setup063(db);
   scheduleBackups(db);
   scheduleUsagePrune(db);
   return db;
@@ -267,6 +269,20 @@ function setup062(d: Database.Database) {
     fs.writeFileSync(file, lines.join('\n') + '\n', 'utf8');
     console.log(`[REQ-062] 按职位预填 PM 级别:${filled.filter((x) => x.level).length} / ${filled.length} 人,报告 ${file}`);
   } catch (e) { console.warn('[REQ-062] 预填报告没写成(数据已写,不影响使用):', e); }
+}
+
+/* ===== REQ-063 修改记录:记下上线日 =====
+   「平均修改轮数」只把上线日(含)之后交接的项目 0 轮按 0 算;上线前交接的老项目要记过至少一轮才算进来。
+   第一次启动新版本时把当天写进 app_settings(只写一次,已有就不动);PD / BD 可在「规则设置 · KPI 规则」里改。
+   只加一行设置,不碰任何旧数据。 */
+function setup063(d: Database.Database) {
+  try {
+    const row = d.prepare('SELECT value FROM app_settings WHERE key = ?').get(SINCE_KEY_063) as { value: string } | undefined;
+    if (row?.value) return;
+    const day = localDay();
+    d.prepare('INSERT INTO app_settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value').run(SINCE_KEY_063, day);
+    console.log(`[REQ-063] 记下修改记录的上线日:${day}`);
+  } catch (e) { console.warn('[REQ-063] 记上线日失败(KPI 看板按「全是老项目」算平均修改轮数):', e); }
 }
 
 /* ===== REQ-052 联系人角色改存键 =====
